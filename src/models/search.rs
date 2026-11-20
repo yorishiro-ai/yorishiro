@@ -21,6 +21,7 @@
 use sea_orm::sea_query::{
     Alias, Expr, ExprTrait, Func, JoinType, Order, Query, SelectStatement,
     extension::postgres::{PgBinOper, PgExpr},
+    extension::sqlite::SqliteBinOper,
 };
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement, TransactionSession, TransactionTrait};
 use serde::Serialize;
@@ -28,9 +29,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::entity_embeddings::{
-    PGVECTOR_HNSW_HALFVEC_MAX_DIMS, PGVECTOR_HNSW_VECTOR_MAX_DIMS,
-};
+use crate::models::entity_embeddings::{PGVECTOR_HNSW_VECTOR_MAX_DIMS, hnsw_halfvec_dimensions};
 use crate::models::entity_entities::EntityRecord;
 
 const DEFAULT_SEARCH_LIMIT: i64 = 10;
@@ -137,7 +136,7 @@ pub struct SearchHit {
     /// Cosine distance (PostgreSQL `<=>` or sqlite-vec cosine distance).
     /// Closer to 0 means more similar.
     /// `None` when the entity has no embedding and was only surfaced through the
-    /// pg_trgm / FTS fallback on `query_text`.
+    /// `pg_trgm` / FTS fallback on `query_text`.
     pub distance: Option<f64>,
 }
 
@@ -345,14 +344,13 @@ async fn search_vectors(
             .collect();
 
     // Vector hits outrank every text-only match.
-    if (hits.len() as i64) < limit
-        && !terms.is_empty()
-        && terms.iter().all(|term| term.chars().count() >= 3)
-    {
+    let remaining = limit
+        .cast_unsigned()
+        .saturating_sub(u64::try_from(hits.len()).internal()?);
+    if remaining > 0 && !terms.is_empty() && terms.iter().all(|term| term.chars().count() >= 3) {
         let mut fallback = scoped_search(workspace_id, &query);
         join_embedding(&mut fallback, embed_table, JoinType::LeftJoin);
         fallback.expr_as(Expr::val(None::<f64>), "distance");
-        use sea_orm::sea_query::extension::sqlite::SqliteBinOper;
         fallback
             .join(
                 JoinType::InnerJoin,
@@ -372,7 +370,7 @@ async fn search_vectors(
                     .into(),
                 Order::Asc,
             )
-            .limit((limit - hits.len() as i64) as u64);
+            .limit(remaining);
         hits.extend(
             SearchRow::find_by_statement(conn.get_database_backend().build(&fallback))
                 .all(conn)
@@ -399,15 +397,14 @@ fn original_distance(embedding: Expr, dimensions: usize, query: Expr) -> Expr {
 /// and cosine ranking is invariant under it. Above the half-precision limit, the first
 /// 4,000 dimensions carry the index and the search reranks in original coordinates.
 fn hnsw_distance(embedding: Expr, query: Expr, dimensions: usize) -> Expr {
-    if dimensions <= PGVECTOR_HNSW_VECTOR_MAX_DIMS {
+    let Some(index_dims) = hnsw_halfvec_dimensions(dimensions) else {
         return original_distance(embedding, dimensions, query);
-    }
-    let index_dims = dimensions.min(PGVECTOR_HNSW_HALFVEC_MAX_DIMS);
-    let truncated = dimensions > PGVECTOR_HNSW_HALFVEC_MAX_DIMS;
+    };
+    let truncated = dimensions > index_dims;
     let truncated_side = |side: Expr| {
         if truncated {
             Func::cust(Alias::new("subvector"))
-                .args([side, Expr::val(1), Expr::val(index_dims as i32)])
+                .args([side, Expr::val(1), Expr::cust(index_dims.to_string())])
                 .into()
         } else {
             side
@@ -420,51 +417,11 @@ fn hnsw_distance(embedding: Expr, query: Expr, dimensions: usize) -> Expr {
     normalized_side(embedding).binary(PgBinOper::CosineDistance, normalized_side(query))
 }
 
-/// Builds the production PostgreSQL gated RRF query.
-/// Input text must already be NFKC-normalized and trimmed.
-///
-/// # Errors
-/// Returns an error when the query vector is invalid.
-pub fn postgres_rrf_query(
+fn postgres_text_candidates(
     workspace_id: Uuid,
-    vector: Vec<f32>,
     text: &str,
     query: &SearchQuery,
 ) -> Result<SelectStatement, YorishiroError> {
-    use sea_orm::sea_query::{Asterisk, CommonTableExpression, UnionType, WithClause};
-    let limit = query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
-    let mut candidates = query.clone();
-    candidates.limit = std::cmp::max(limit, RRF_VECTOR_CANDIDATE_MIN);
-    let dimensions = vector.len();
-    let mut vectors = vector_candidates_query(
-        sea_orm::DatabaseBackend::Postgres,
-        workspace_id,
-        vector.clone(),
-        &candidates,
-    )?;
-    // Rank IDs and distances only; entity payloads are fetched after rank fusion.
-    vectors
-        .clear_selects()
-        .column((Alias::new("e"), Alias::new("id")));
-    let embedding = Expr::col((Alias::new("ee"), Alias::new("embedding")));
-    let distance = original_distance(
-        embedding,
-        dimensions,
-        Expr::val(sea_orm::entity::prelude::PgVector::from(vector)),
-    );
-    vectors.expr_as(distance, "distance");
-    // Every band up to the application maximum has a partial HNSW index, so the candidate
-    // set is always the index output: materialize it, then rerank by original coordinates
-    // (relaxed HNSW can emit closer rows after the initial result batch).
-    vectors.limit(ANN_CANDIDATE_LIMIT as u64);
-    let ann_candidates = vectors;
-    let vectors = Query::select()
-        .column(Asterisk)
-        .from(Alias::new("ann_candidates"))
-        .order_by_expr(Expr::cust("distance + 0"), Order::Asc)
-        .order_by(Alias::new("id"), Order::Asc)
-        .limit(candidates.limit as u64)
-        .to_owned();
     let mut texts = scoped_search(workspace_id, query);
     texts
         .clear_selects()
@@ -496,6 +453,12 @@ pub fn postgres_rrf_query(
         .and_where(normalized.ilike(pattern))
         .and_where(Expr::val(!text.is_empty()))
         .limit(RRF_TEXT_FETCH_LIMIT);
+    Ok(texts)
+}
+
+fn postgres_rrf_ranks() -> SelectStatement {
+    use sea_orm::sea_query::UnionType;
+
     let ranked_vectors = Query::select()
         .column(Alias::new("id"))
         .expr_as(
@@ -525,6 +488,55 @@ pub fn postgres_rrf_query(
             .and_where(Expr::SubQuery(None, Box::new(count.into())).lte(RRF_TEXT_GATE_LIMIT))
             .to_owned(),
     );
+    ranks
+}
+
+/// Builds the production PostgreSQL gated RRF query.
+/// Input text must already be NFKC-normalized and trimmed.
+///
+/// # Errors
+/// Returns an error when the query vector is invalid.
+pub fn postgres_rrf_query(
+    workspace_id: Uuid,
+    vector: Vec<f32>,
+    text: &str,
+    query: &SearchQuery,
+) -> Result<SelectStatement, YorishiroError> {
+    use sea_orm::sea_query::{Asterisk, CommonTableExpression, WithClause};
+    let limit = query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
+    let mut candidates = query.clone();
+    candidates.limit = std::cmp::max(limit, RRF_VECTOR_CANDIDATE_MIN);
+    let dimensions = vector.len();
+    let mut vectors = vector_candidates_query(
+        sea_orm::DatabaseBackend::Postgres,
+        workspace_id,
+        vector.clone(),
+        &candidates,
+    )?;
+    // Rank IDs and distances only; entity payloads are fetched after rank fusion.
+    vectors
+        .clear_selects()
+        .column((Alias::new("e"), Alias::new("id")));
+    let embedding = Expr::col((Alias::new("ee"), Alias::new("embedding")));
+    let distance = original_distance(
+        embedding,
+        dimensions,
+        Expr::val(sea_orm::entity::prelude::PgVector::from(vector)),
+    );
+    vectors.expr_as(distance, "distance");
+    // Every band up to the application maximum has a partial HNSW index, so the candidate
+    // set is always the index output: materialize it, then rerank by original coordinates
+    // (relaxed HNSW can emit closer rows after the initial result batch).
+    vectors.limit(ANN_CANDIDATE_LIMIT as u64);
+    let ann_candidates = vectors;
+    let vectors = Query::select()
+        .column(Asterisk)
+        .from(Alias::new("ann_candidates"))
+        .order_by_expr(Expr::cust("distance + 0"), Order::Asc)
+        .order_by(Alias::new("id"), Order::Asc)
+        .limit(candidates.limit.cast_unsigned())
+        .to_owned();
+    let texts = postgres_text_candidates(workspace_id, text, query)?;
     let scores = Query::select()
         .column(Alias::new("id"))
         .expr_as(Expr::col(Alias::new("score")).sum(), "score")
@@ -542,7 +554,7 @@ pub fn postgres_rrf_query(
     for (name, statement) in [
         ("vectors", vectors),
         ("texts", texts),
-        ("ranks", ranks),
+        ("ranks", postgres_rrf_ranks()),
         ("scores", scores),
     ] {
         with.cte(
@@ -572,7 +584,7 @@ pub fn postgres_rrf_query(
         )
         .order_by((Alias::new("scores"), Alias::new("score")), Order::Desc)
         .order_by((Alias::new("e"), Alias::new("id")), Order::Asc)
-        .limit(limit as u64)
+        .limit(limit.cast_unsigned())
         .with_cte(with);
     Ok(merged)
 }
@@ -614,7 +626,7 @@ pub fn vector_candidates_query(
     } else {
         hnsw_distance(
             embedding.clone(),
-            Expr::val(sea_orm::entity::prelude::PgVector::from(vector.clone())),
+            Expr::val(sea_orm::entity::prelude::PgVector::from(vector)),
             dimensions,
         )
     };
@@ -630,9 +642,9 @@ pub fn vector_candidates_query(
         );
     }
     knn.expr_as(distance, "distance")
-        .and_where(embedding.clone().is_not_null())
+        .and_where(embedding.is_not_null())
         .order_by_expr(order, Order::Asc)
-        .limit(limit as u64);
+        .limit(limit.cast_unsigned());
     // Unpromoted workspaces fall back to exact search over the (below-threshold) workspace rows.
     Ok(knn)
 }

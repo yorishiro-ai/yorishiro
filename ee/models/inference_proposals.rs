@@ -264,7 +264,7 @@ async fn transition_pending(
         .exec(conn)
         .await
         .internal()?;
-    Ok(result.rows_affected as i64)
+    i64::try_from(result.rows_affected).internal()
 }
 
 ///
@@ -310,58 +310,32 @@ pub async fn confirm(
 ) -> Result<ConfirmReport, YorishiroError> {
     lock_job_for_action(conn, job_id).await?;
     require_completed_job(conn, workspace_id, job_id).await?;
-    let pending: Vec<ProposalRecord> = for_job(conn, workspace_id, job_id)
-        .await?
-        .into_iter()
-        .filter(|row| row.status == ProposalStatus::Pending)
-        .collect();
-    if pending.is_empty() {
-        return Err(YorishiroError::Conflict {
-            message: format!("inference job '{job_id}' has no pending proposals"),
-        });
-    }
-
-    let mut by_entity: BTreeMap<Uuid, Vec<ProposalRecord>> = BTreeMap::new();
-    for proposal in pending {
-        by_entity
-            .entry(proposal.entity_id)
-            .or_default()
-            .push(proposal);
-    }
+    let by_entity = pending_by_entity(conn, workspace_id, job_id).await?;
     let mut confirmed = 0;
     let mut stale = 0;
     let mut invalid = 0;
 
     for (entity_id, proposals) in by_entity {
+        let proposal_count = i64::try_from(proposals.len()).internal()?;
         lock_entity_for_confirmation(conn, workspace_id, entity_id).await?;
         let target = schema_schemas::get_by_id(conn, workspace_id, proposals[0].schema_id).await?;
         let active = schema_schemas::get_active_schema(conn, workspace_id, &target.name).await?;
         let existing = match entity_entities::get(conn, workspace_id, entity_id).await {
-            Ok(value) => value,
-            Err(YorishiroError::NotFound { .. }) => {
-                ensure_entity_marked(
-                    conn,
-                    workspace_id,
-                    job_id,
-                    entity_id,
-                    ProposalStatus::Stale.as_db_str(),
-                    proposals.len(),
-                )
-                .await?;
-                stale += proposals.len() as i64;
-                continue;
-            }
+            Ok(value) => Some(value),
+            Err(YorishiroError::NotFound { .. }) => None,
             Err(err) => return Err(err),
         };
-        let stale_entity = target.status != SchemaStatus::Active
-            || active.id != target.id
-            || proposals.iter().any(|proposal| {
-                existing
-                    .data
-                    .as_object()
-                    .is_none_or(|object| object.contains_key(&proposal.source_field))
-            });
-        if stale_entity {
+        let existing = existing.filter(|existing| {
+            target.status == SchemaStatus::Active
+                && active.id == target.id
+                && !proposals.iter().any(|proposal| {
+                    existing
+                        .data
+                        .as_object()
+                        .is_none_or(|object| object.contains_key(&proposal.source_field))
+                })
+        });
+        let Some(existing) = existing else {
             ensure_entity_marked(
                 conn,
                 workspace_id,
@@ -371,11 +345,11 @@ pub async fn confirm(
                 proposals.len(),
             )
             .await?;
-            stale += proposals.len() as i64;
+            stale += proposal_count;
             continue;
-        }
+        };
 
-        let Some(object) = existing.data.as_object() else {
+        let Some(data) = confirmed_data(&existing, &target, &proposals)? else {
             ensure_entity_marked(
                 conn,
                 workspace_id,
@@ -385,50 +359,16 @@ pub async fn confirm(
                 proposals.len(),
             )
             .await?;
-            invalid += proposals.len() as i64;
+            invalid += proposal_count;
             continue;
         };
-        let mut data = object.clone();
-        for proposal in &proposals {
-            data.insert(proposal.source_field.clone(), proposal.proposed.clone());
-        }
-        let Some(type_def) = target.definition.entity_types.get(&existing.entity_type) else {
-            ensure_entity_marked(
-                conn,
-                workspace_id,
-                job_id,
-                entity_id,
-                ProposalStatus::Invalid.as_db_str(),
-                proposals.len(),
-            )
-            .await?;
-            invalid += proposals.len() as i64;
-            continue;
-        };
-        match entity_entities::validate_data(type_def, &Value::Object(data.clone())) {
-            Ok(()) => {}
-            Err(YorishiroError::ValidationFailed { .. }) => {
-                ensure_entity_marked(
-                    conn,
-                    workspace_id,
-                    job_id,
-                    entity_id,
-                    ProposalStatus::Invalid.as_db_str(),
-                    proposals.len(),
-                )
-                .await?;
-                invalid += proposals.len() as i64;
-                continue;
-            }
-            Err(err) => return Err(err),
-        }
 
         entity_entities::snapshot(conn, workspace_id, entity_id, job_id).await?;
         if !crate::edition::ee::models::entity_entities::update_if_unchanged(
             conn,
             workspace_id,
             &existing,
-            Value::Object(data),
+            data,
             target.id,
             target.version,
             updated_by,
@@ -445,7 +385,7 @@ pub async fn confirm(
                 proposals.len(),
             )
             .await?;
-            stale += proposals.len() as i64;
+            stale += proposal_count;
             continue;
         }
         ensure_entity_marked(
@@ -457,7 +397,7 @@ pub async fn confirm(
             proposals.len(),
         )
         .await?;
-        confirmed += proposals.len() as i64;
+        confirmed += proposal_count;
     }
 
     Ok(ConfirmReport {
@@ -466,6 +406,53 @@ pub async fn confirm(
         stale,
         invalid,
     })
+}
+
+async fn pending_by_entity(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    job_id: Uuid,
+) -> Result<BTreeMap<Uuid, Vec<ProposalRecord>>, YorishiroError> {
+    let mut by_entity: BTreeMap<Uuid, Vec<ProposalRecord>> = BTreeMap::new();
+    for proposal in for_job(conn, workspace_id, job_id)
+        .await?
+        .into_iter()
+        .filter(|row| row.status == ProposalStatus::Pending)
+    {
+        by_entity
+            .entry(proposal.entity_id)
+            .or_default()
+            .push(proposal);
+    }
+    if by_entity.is_empty() {
+        return Err(YorishiroError::Conflict {
+            message: format!("inference job '{job_id}' has no pending proposals"),
+        });
+    }
+    Ok(by_entity)
+}
+
+fn confirmed_data(
+    existing: &entity_entities::EntityRecord,
+    target: &schema_schemas::SchemaRecord,
+    proposals: &[ProposalRecord],
+) -> Result<Option<Value>, YorishiroError> {
+    let (Some(object), Some(type_def)) = (
+        existing.data.as_object(),
+        target.definition.entity_types.get(&existing.entity_type),
+    ) else {
+        return Ok(None);
+    };
+    let mut data = object.clone();
+    for proposal in proposals {
+        data.insert(proposal.source_field.clone(), proposal.proposed.clone());
+    }
+    let data = Value::Object(data);
+    match entity_entities::validate_data(type_def, &data) {
+        Ok(()) => Ok(Some(data)),
+        Err(YorishiroError::ValidationFailed { .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 async fn lock_job_for_action(
@@ -513,7 +500,7 @@ async fn ensure_entity_marked(
         .exec(conn)
         .await
         .internal()?;
-    if result.rows_affected as usize != expected {
+    if result.rows_affected != u64::try_from(expected).internal()? {
         return Err(YorishiroError::Conflict {
             message: format!("inference job '{job_id}' changed while confirming its proposals"),
         });

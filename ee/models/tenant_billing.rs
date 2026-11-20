@@ -20,7 +20,7 @@ pub struct TenantBillingRecord {
 
 impl From<crate::models::_entities::tenant_billing::Model> for TenantBillingRecord {
     fn from(model: crate::models::_entities::tenant_billing::Model) -> Self {
-        TenantBillingRecord {
+        Self {
             tenant_id: model.tenant_id,
             plan: model.plan,
             stripe_customer_id: model.stripe_customer_id,
@@ -60,6 +60,7 @@ pub(crate) async fn get_by_stripe_customer(
 }
 
 /// Records the Stripe customer id created for a tenant at checkout, so later webhook events can be routed back to it via `get_by_stripe_customer`.
+///
 /// Upserts, because checkout can be completed for a tenant that already has a billing row (a resubscribe after cancellation).
 ///
 /// # Errors

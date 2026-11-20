@@ -5,7 +5,7 @@ use sea_orm::{
 use uuid::Uuid;
 
 /// Inserts a snapshot from the current entity row in one statement.
-/// SeaQuery keeps the read and insert atomic on both supported backends.
+/// `SeaQuery` keeps the read and insert atomic on both supported backends.
 pub(super) async fn insert_snapshot(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

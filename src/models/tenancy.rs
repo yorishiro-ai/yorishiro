@@ -398,7 +398,7 @@ pub(crate) async fn create_workspace_with_quota(
             .count(conn)
             .await
             .internal()?;
-        if count >= max.max(0) as u64 {
+        if count >= u64::from(max.max(0).cast_unsigned()) {
             return Err(YorishiroError::Conflict {
                 message: format!(
                     "tenant '{tenant_id}' has reached its workspace limit ({max}); \
@@ -445,7 +445,7 @@ pub(crate) async fn create_workspace_in_context(
         },
     )
     .await?;
-    let quota = crate::quotas(ctx, actor.tenant_id).await?;
+    let quota = crate::data::quotas::for_tenant(ctx, actor.tenant_id).await?;
     let workspace = create_workspace_with_quota(
         &txn,
         actor.tenant_id,

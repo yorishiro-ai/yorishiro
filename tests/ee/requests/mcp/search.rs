@@ -9,6 +9,10 @@ use super::*;
 
 /// High-dimensional HNSW retains the nearest original cosine through both transports.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one indexed corpus compares concurrent REST and MCP ranking before and after the nearest vector changes"
+)]
 async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery() {
     use crate::requests::query_worker::boot_with_query_worker;
     use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
@@ -80,7 +84,9 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
                 embedding: Set(Some(sea_orm::entity::prelude::PgVector::from(
                     (0..4000_usize)
                         .map(|axis| {
-                            ((i + 1) * (axis + 11) * 7919 % 104_729) as f32 / 104_729.0 - 0.5
+                            #[expect(clippy::cast_precision_loss, reason = "the remainder is below 104729 and exactly representable as f32")]
+                            let coordinate = ((i + 1) * (axis + 11) * 7919 % 104_729) as f32;
+                            coordinate / 104_729.0 - 0.5
                         })
                         .collect::<Vec<_>>(),
                 ))),
@@ -140,6 +146,10 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
 
 /// The MCP search tool takes the same path as `GET /api/search`: the server queues the query and a worker holding the model embeds it.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one worker-backed search scenario compares transports and filtering across reindex failure, recovery, and provider failure"
+)]
 async fn mcp_search_asks_a_worker_to_embed_the_query() {
     use crate::http_stub::{keyword_provider, unavailable_provider};
     use crate::requests::query_worker::boot_with_query_worker;

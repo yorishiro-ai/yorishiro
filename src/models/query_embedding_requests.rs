@@ -98,7 +98,7 @@ impl Entity {
         workspace_id: Uuid,
         id: Uuid,
     ) -> Result<Option<Model>, DbErr> {
-        Entity::find_by_id(id)
+        Self::find_by_id(id)
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Status.eq(QueryEmbeddingStatus::Pending.as_db_str()))
             .filter(Column::ExpiresAt.gt(crate::data::time::now()))
@@ -119,9 +119,10 @@ impl Entity {
         vector: &[f32],
         model: &str,
     ) -> Result<bool, DbErr> {
+        use crate::models::_entities::{tenant_tenants, workspace_workspaces};
+
         let dimensions = i32::try_from(vector.len())
             .map_err(|_| DbErr::Custom("query vector is too wide to store".into()))?;
-        use crate::models::_entities::{tenant_tenants, workspace_workspaces};
         let active_tenants = tenant_tenants::Entity::find()
             .select_only()
             .column(tenant_tenants::Column::Id)
@@ -133,7 +134,7 @@ impl Entity {
                 workspace_workspaces::Column::TenantId.in_subquery(active_tenants.into_query()),
             );
         let now = crate::data::time::now();
-        let result = Entity::update_many()
+        let result = Self::update_many()
             .col_expr(
                 Column::Status,
                 Expr::value(QueryEmbeddingStatus::Succeeded.as_db_str()),
@@ -164,7 +165,7 @@ impl Entity {
         error: &str,
     ) -> Result<bool, DbErr> {
         let now = crate::data::time::now();
-        let result = Entity::update_many()
+        let result = Self::update_many()
             .col_expr(
                 Column::Status,
                 Expr::value(QueryEmbeddingStatus::Failed.as_db_str()),
@@ -190,7 +191,7 @@ impl Entity {
         workspace_id: Uuid,
         id: Uuid,
     ) -> Result<bool, DbErr> {
-        let result = Entity::update_many()
+        let result = Self::update_many()
             .col_expr(
                 Column::Status,
                 Expr::value(QueryEmbeddingStatus::Expired.as_db_str()),
@@ -216,7 +217,7 @@ impl Entity {
         workspace_id: Uuid,
         id: Uuid,
     ) -> Result<Option<QueryOutcome>, YorishiroError> {
-        let finished = Entity::delete_many()
+        let finished = Self::delete_many()
             .filter(Column::Id.eq(id))
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Status.ne(QueryEmbeddingStatus::Pending.as_db_str()))
@@ -226,7 +227,7 @@ impl Entity {
         if let Some(row) = finished.into_iter().next() {
             return Ok(Some(outcome(row)?));
         }
-        let waiting = Entity::find_by_id(id)
+        let waiting = Self::find_by_id(id)
             .filter(Column::WorkspaceId.eq(workspace_id))
             .one(db)
             .await
@@ -239,7 +240,7 @@ impl Entity {
     /// # Errors
     /// Returns an error if the delete fails.
     pub async fn purge_expired(db: &impl ConnectionTrait) -> Result<u64, DbErr> {
-        let result = Entity::delete_many()
+        let result = Self::delete_many()
             .filter(Column::ExpiresAt.lt(crate::data::time::now()))
             .exec(db)
             .await?;

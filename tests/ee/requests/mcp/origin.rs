@@ -93,6 +93,10 @@ async fn mcp_origin_tools_match_ungated_rest_when_same_session_licence_state_is_
 /// Origin tools read templates through the control-plane connection, keep schema work on an
 /// RLS-scoped transaction, enforce read/schema scopes, and explicitly commit a successful merge.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the same schema and MCP session verify scope restrictions before previewing and committing the upstream merge"
+)]
 async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
@@ -103,7 +107,6 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             workspace_id,
             owner_id,
             api_key: schema_key,
-            ..
         } = TestTenant::create(
             &request,
             &ctx,

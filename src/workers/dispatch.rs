@@ -48,7 +48,10 @@ pub async fn recover_pending(ctx: &AppContext) {
     recover_pending_while(ctx, || true).await;
 }
 
-pub(crate) async fn recover_pending_while(ctx: &AppContext, keep_running: impl Fn() -> bool) {
+pub(crate) async fn recover_pending_while(
+    ctx: &AppContext,
+    keep_running: impl Fn() -> bool + Send + Sync,
+) {
     let db_handle = ctx.shared_store.get::<crate::db::DbHandle>();
     let db = db_handle
         .as_ref()
@@ -59,7 +62,7 @@ pub(crate) async fn recover_pending_while(ctx: &AppContext, keep_running: impl F
 async fn recover_pending_on_while(
     ctx: &AppContext,
     db: &sea_orm::DatabaseConnection,
-    keep_running: impl Fn() -> bool,
+    keep_running: impl Fn() -> bool + Send + Sync,
 ) {
     let timing = match crate::data::settings::configured(ctx) {
         Ok(settings) => settings.dispatch,

@@ -5,7 +5,7 @@ use yorishiro::models::schema_schemas::metaschema::MetaSchemaDefinition;
 use yorishiro::edition::ee::models::schema_schemas::merge::*;
 
 /// Builds a definition with one entity type whose fields are given as JSON.
-fn def(fields: serde_json::Value) -> MetaSchemaDefinition {
+fn def(fields: &serde_json::Value) -> MetaSchemaDefinition {
     serde_json::from_value(json!({
         "name": "task-management",
         "entity_types": { "task": { "fields": fields } }
@@ -24,8 +24,8 @@ fn verdict_for(plan: &MergePlan, field: &str) -> Option<MergeVerdict> {
 /// Taking it adds structure without touching anything stored.
 #[test]
 fn a_field_only_upstream_added_is_taken() {
-    let base = def(json!({ "title": { "type": "string" } }));
-    let upstream = def(json!({
+    let base = def(&json!({ "title": { "type": "string" } }));
+    let upstream = def(&json!({
         "title": { "type": "string" },
         "category": { "type": "string" }
     }));
@@ -45,9 +45,9 @@ fn a_field_only_upstream_added_is_taken() {
 /// Following the template must not delete it: "absent upstream" and "removed upstream" must not be treated the same.
 #[test]
 fn a_field_only_the_workspace_added_is_kept() {
-    let base = def(json!({ "title": { "type": "string" } }));
+    let base = def(&json!({ "title": { "type": "string" } }));
     let upstream = base.clone();
-    let local = def(json!({
+    let local = def(&json!({
         "title": { "type": "string" },
         "internal_ref": { "type": "string" }
     }));
@@ -64,8 +64,8 @@ fn a_field_only_the_workspace_added_is_kept() {
 /// No local work to lose.
 #[test]
 fn an_upstream_change_to_an_untouched_field_is_taken() {
-    let base = def(json!({ "title": { "type": "string" } }));
-    let upstream = def(json!({ "title": { "type": "string", "maxLength": 200 } }));
+    let base = def(&json!({ "title": { "type": "string" } }));
+    let upstream = def(&json!({ "title": { "type": "string", "maxLength": 200 } }));
     let local = base.clone();
 
     let plan = three_way(&base, &upstream, &local);
@@ -77,9 +77,9 @@ fn an_upstream_change_to_an_untouched_field_is_taken() {
 /// Nothing here picks a side: whichever lost would leave the entities written against it failing validation.
 #[test]
 fn a_field_both_sides_changed_is_a_conflict() {
-    let base = def(json!({ "priority": { "type": "string" } }));
-    let upstream = def(json!({ "priority": { "type": "integer" } }));
-    let local = def(json!({ "priority": { "type": "boolean" } }));
+    let base = def(&json!({ "priority": { "type": "string" } }));
+    let upstream = def(&json!({ "priority": { "type": "integer" } }));
+    let local = def(&json!({ "priority": { "type": "boolean" } }));
 
     let plan = three_way(&base, &upstream, &local);
 
@@ -97,8 +97,8 @@ fn a_field_both_sides_changed_is_a_conflict() {
 /// That is agreement, not a conflict: reporting it would make an operator adjudicate a decision already shared.
 #[test]
 fn the_same_change_on_both_sides_is_not_a_conflict() {
-    let base = def(json!({ "title": { "type": "string" } }));
-    let added = def(json!({
+    let base = def(&json!({ "title": { "type": "string" } }));
+    let added = def(&json!({
         "title": { "type": "string" },
         "due": { "type": "string", "format": "date" }
     }));
@@ -112,7 +112,7 @@ fn the_same_change_on_both_sides_is_not_a_conflict() {
 /// An entity type present only upstream is as much a difference as a field, and each of its fields is reported.
 #[test]
 fn a_new_entity_type_upstream_is_reported_field_by_field() {
-    let base = def(json!({ "title": { "type": "string" } }));
+    let base = def(&json!({ "title": { "type": "string" } }));
     let upstream: MetaSchemaDefinition = serde_json::from_value(json!({
         "name": "task-management",
         "entity_types": {
@@ -137,8 +137,8 @@ fn a_new_entity_type_upstream_is_reported_field_by_field() {
 /// `FieldDef` keeps those in a flattened map, so a comparison over the named fields alone would call these equal.
 #[test]
 fn an_extension_attribute_is_part_of_the_comparison() {
-    let base = def(json!({ "title": { "type": "string" } }));
-    let upstream = def(json!({ "title": { "type": "string", "x-ui": { "widget": "textarea" } } }));
+    let base = def(&json!({ "title": { "type": "string" } }));
+    let upstream = def(&json!({ "title": { "type": "string", "x-ui": { "widget": "textarea" } } }));
     let local = base.clone();
 
     let plan = three_way(&base, &upstream, &local);
@@ -149,7 +149,7 @@ fn an_extension_attribute_is_part_of_the_comparison() {
 /// A plan with nothing to decide is empty rather than a list of agreements.
 #[test]
 fn identical_definitions_produce_an_empty_plan() {
-    let d = def(json!({ "title": { "type": "string" } }));
+    let d = def(&json!({ "title": { "type": "string" } }));
     let plan = three_way(&d, &d, &d);
     assert!(plan.fields.is_empty());
     assert!(!plan.has_conflicts());
@@ -158,12 +158,12 @@ fn identical_definitions_produce_an_empty_plan() {
 /// Upstream's addition arrives and the workspace's own survives, in the same merge.
 #[test]
 fn applying_takes_upstream_additions_and_keeps_local_ones() {
-    let base = def(json!({ "title": { "type": "string" } }));
-    let upstream = def(json!({
+    let base = def(&json!({ "title": { "type": "string" } }));
+    let upstream = def(&json!({
         "title": { "type": "string" },
         "category": { "type": "string" }
     }));
-    let local = def(json!({
+    let local = def(&json!({
         "title": { "type": "string" },
         "internal_ref": { "type": "string" }
     }));
@@ -186,8 +186,8 @@ fn applying_takes_upstream_additions_and_keeps_local_ones() {
 /// An upstream change to an untouched field is taken.
 #[test]
 fn applying_takes_an_upstream_change_to_an_untouched_field() {
-    let base = def(json!({ "title": { "type": "string" } }));
-    let upstream = def(json!({ "title": { "type": "string", "maxLength": 200 } }));
+    let base = def(&json!({ "title": { "type": "string" } }));
+    let upstream = def(&json!({ "title": { "type": "string", "maxLength": 200 } }));
     let local = base.clone();
 
     let plan = three_way(&base, &upstream, &local);
@@ -203,12 +203,12 @@ fn applying_takes_an_upstream_change_to_an_untouched_field() {
 /// Applying the rest would leave a definition neither side asked for, with nothing recording which fields were skipped.
 #[test]
 fn applying_refuses_a_plan_with_conflicts() {
-    let base = def(json!({ "priority": { "type": "string" } }));
-    let upstream = def(json!({
+    let base = def(&json!({ "priority": { "type": "string" } }));
+    let upstream = def(&json!({
         "priority": { "type": "integer" },
         "category": { "type": "string" }
     }));
-    let local = def(json!({ "priority": { "type": "boolean" } }));
+    let local = def(&json!({ "priority": { "type": "boolean" } }));
 
     let plan = three_way(&base, &upstream, &local);
     let err = apply_plan(&plan, &upstream, &local).unwrap_err();
@@ -227,7 +227,7 @@ fn applying_refuses_a_plan_with_conflicts() {
 /// A whole entity type added upstream arrives, even though the workspace has no such type to merge into.
 #[test]
 fn applying_adds_an_entity_type_the_workspace_does_not_have() {
-    let base = def(json!({ "title": { "type": "string" } }));
+    let base = def(&json!({ "title": { "type": "string" } }));
     let upstream: MetaSchemaDefinition = serde_json::from_value(json!({
         "name": "task-management",
         "entity_types": {
@@ -251,7 +251,7 @@ fn applying_adds_an_entity_type_the_workspace_does_not_have() {
 /// Nothing to merge produces the workspace's definition unchanged, rather than a rebuild of it.
 #[test]
 fn applying_an_empty_plan_changes_nothing() {
-    let d = def(json!({ "title": { "type": "string" } }));
+    let d = def(&json!({ "title": { "type": "string" } }));
     let plan = three_way(&d, &d, &d);
     let merged = apply_plan(&plan, &d, &d).unwrap();
     assert_eq!(

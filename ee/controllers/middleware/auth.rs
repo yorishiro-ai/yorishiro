@@ -1,9 +1,8 @@
-//! Enterprise authentication: role checks for enterprise routes.
+//! Authentication adapters for enterprise routes.
 //!
 //! Key resolution itself is edition-neutral and lives on the base `DefaultAuthenticator`, so a tenant-scoped key works identically on community and enterprise routes.
 
 use axum::http::HeaderMap;
-use axum::http::header::AUTHORIZATION;
 use loco_rs::app::AppContext;
 
 use crate::YorishiroError;
@@ -13,17 +12,11 @@ use crate::models::api_keys::AuthContext;
 /// The header naming which workspace a tenant-scoped API key should act on.
 pub use crate::models::api_keys::WORKSPACE_HEADER;
 
-/// The prefix-stripping and the empty-credential check both live in [`base_auth::bearer_credential`], so this path and the ones upstream cannot disagree about what `Authorization: Bearer ` means.
-fn bearer_token(headers: &HeaderMap) -> Result<&str, YorishiroError> {
-    base_auth::bearer_credential(headers.get(AUTHORIZATION).and_then(|v| v.to_str().ok()))
-        .ok_or(YorishiroError::Unauthenticated)
-}
-
 pub(crate) async fn authenticate(
     ctx: &AppContext,
     headers: &HeaderMap,
 ) -> Result<AuthContext, YorishiroError> {
-    let token = bearer_token(headers)?;
+    let token = base_auth::extract_bearer_key(headers).ok_or(YorishiroError::Unauthenticated)?;
     let forwarded = base_auth::header_pairs(headers)?;
     base_auth::RequestAuth::new(ctx)
         .resolve(token, &forwarded)

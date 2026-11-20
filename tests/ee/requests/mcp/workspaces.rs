@@ -1,4 +1,4 @@
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::App;
@@ -59,7 +59,6 @@ async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let session = initialize(&request).await;
-        use axum::http::HeaderValue;
         for header in ["x-tenant-id", "x-workspace-id"] {
             let invalid = HeaderValue::from_bytes(b"\xff").unwrap();
             let rest = request.get("/api/whoami")

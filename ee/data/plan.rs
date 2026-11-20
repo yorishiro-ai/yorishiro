@@ -107,11 +107,11 @@ impl Plan {
         }
     }
 
-    pub(crate) fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
-            Plan::Free => "free",
-            Plan::Pro => "pro",
-            Plan::Team => "team",
+            Self::Free => "free",
+            Self::Pro => "pro",
+            Self::Team => "team",
         }
     }
 
@@ -122,25 +122,25 @@ impl Plan {
         mapping: &StripePriceMapping,
     ) -> Option<Self> {
         if mapping.pro_price_id.as_deref() == Some(price_id) {
-            Some(Plan::Pro)
+            Some(Self::Pro)
         } else if mapping.team_price_id.as_deref() == Some(price_id) {
-            Some(Plan::Team)
+            Some(Self::Team)
         } else {
             None
         }
     }
 
-    pub(crate) fn caps(self) -> PlanCaps {
+    pub(crate) const fn caps(self) -> PlanCaps {
         match self {
-            Plan::Free => PlanCaps {
+            Self::Free => PlanCaps {
                 max_workspaces: Some(1),
                 default_max_entities: Some(500),
             },
-            Plan::Pro => PlanCaps {
+            Self::Pro => PlanCaps {
                 max_workspaces: Some(5),
                 default_max_entities: Some(50_000),
             },
-            Plan::Team => PlanCaps {
+            Self::Team => PlanCaps {
                 max_workspaces: None,
                 default_max_entities: None,
             },
@@ -149,7 +149,7 @@ impl Plan {
 
     /// Returns the bounded scheduling policy for this plan.
     #[must_use]
-    pub fn compute_policy(self) -> ComputePolicy {
+    pub const fn compute_policy(self) -> ComputePolicy {
         let (priority, queue_start_objective_seconds, base_official_concurrency) = match self {
             Self::Free => (PriorityTier::Low, None, 1),
             Self::Pro => (PriorityTier::Normal, Some(60), 4),
@@ -167,8 +167,7 @@ impl Plan {
         match value {
             "free" => Ok(Self::Free),
             "pro" => Ok(Self::Pro),
-            "team" => Ok(Self::Team),
-            "enterprise" => Ok(Self::Team),
+            "team" | "enterprise" => Ok(Self::Team),
             other => Err(crate::YorishiroError::Internal(
                 format!("unknown plan value: {other:?}").into(),
             )),

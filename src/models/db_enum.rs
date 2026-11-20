@@ -18,7 +18,7 @@
 /// }
 /// ```
 ///
-/// Generates `ALL`, `as_db_str`, `from_db_str` (`None` for anything undefined, which callers should treat as a corrupt row rather than a missing value), `Display`, `FromStr`, `Serialize`, `Deserialize`, and, with the `openapi` feature, the OpenAPI string-enum schema.
+/// Generates `ALL`, `as_db_str`, `from_db_str` (`None` for anything undefined, which callers should treat as a corrupt row rather than a missing value), `Display`, `FromStr`, `Serialize`, `Deserialize`, and, with the `openapi` feature, the `OpenAPI` string-enum schema.
 /// Serde derives and `#[serde(...)]` attributes must not be added: they would be a second copy of the table.
 macro_rules! db_enum {
     (
@@ -54,8 +54,7 @@ macro_rules! db_enum {
             }
         }
 
-        // The contract is derived from the same table as every other conversion, so the documented
-        // values cannot drift from the stored ones.
+        // Build the schema from the same literals as serde, not Rust variant names.
         #[cfg(feature = "openapi")]
         impl ::utoipa::PartialSchema for $name {
             fn schema() -> ::utoipa::openapi::RefOr<::utoipa::openapi::schema::Schema> {

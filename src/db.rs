@@ -1,6 +1,7 @@
-//! SeaORM creates both PostgreSQL pools with per-connection role, timezone,
-//! and release callbacks. The tenant and identity pools stay separate so RLS
-//! session state cannot cross control-plane and tenant operations.
+//! Separate identity and tenant pools isolate PostgreSQL session state.
+//!
+//! `SeaORM` installs per-connection role, timezone, and release callbacks.
+//! RLS session state cannot cross control-plane and tenant operations.
 //!
 //! Requests reach the database through `TenantDb::begin_for_workspace`, whose returned `DatabaseTransaction` carries both the entity API and raw SQL the entity layer can't express (JSONB containment, pgvector search, advisory locks).
 use sea_orm::sqlx::PgPool;
@@ -168,8 +169,6 @@ unsafe extern "C" fn sqlite_current_timestamp(
     _argument_count: std::ffi::c_int,
     _arguments: *mut *mut libsqlite3_sys::sqlite3_value,
 ) {
-    // SAFETY: SQLite provides a live function context whose user data is the owned timezone
-    // allocation. The pointer is read only and never retained beyond this callback.
     let result = std::panic::catch_unwind(|| {
         // SAFETY: the context is live for this callback, and its user data was installed above.
         let timezone = unsafe {
@@ -179,20 +178,21 @@ unsafe extern "C" fn sqlite_current_timestamp(
         }
         .copied()
         .unwrap_or(chrono_tz::UTC);
-        crate::data::time::sqlite_timestamp(crate::data::time::now(), timezone)
+        let timestamp = crate::data::time::sqlite_timestamp(&crate::data::time::now(), timezone);
+        std::ffi::c_int::try_from(timestamp.len()).map(|length| (timestamp, length))
     });
     match result {
         // SAFETY: `timestamp` remains live for the call and SQLITE_TRANSIENT copies it immediately.
-        Ok(timestamp) => unsafe {
+        Ok(Ok((timestamp, length))) => unsafe {
             libsqlite3_sys::sqlite3_result_text(
                 context,
                 timestamp.as_ptr().cast(),
-                timestamp.len() as std::ffi::c_int,
+                length,
                 libsqlite3_sys::SQLITE_TRANSIENT(),
             );
         },
         // SAFETY: the static error string is NUL-terminated and remains valid for the call.
-        Err(_) => unsafe {
+        Ok(Err(_)) | Err(_) => unsafe {
             libsqlite3_sys::sqlite3_result_error(
                 context,
                 c"timestamp conversion failed".as_ptr(),
@@ -269,7 +269,7 @@ fn postgres_session_options(
 }
 
 /// Reads PostgreSQL's process-level activity view for the load guard.
-/// The activity view is queried with SeaQuery rather than an application entity.
+/// The activity view is queried with `SeaQuery` rather than an application entity.
 pub(crate) async fn active_connections(pool: &PgPool) -> Result<i64, crate::YorishiroError> {
     use crate::error::ResultExt;
 
@@ -292,6 +292,7 @@ pub(crate) async fn active_connections(pool: &PgPool) -> Result<i64, crate::Yori
 /// A vector in the BLOB layout `sqlite-vec` reads: consecutive little-endian `f32` values.
 ///
 /// Written out value by value, so the bytes are little-endian on every host rather than whatever order the host happens to use.
+#[must_use]
 pub fn sqlite_vec_blob(vector: &[f32]) -> Vec<u8> {
     vector
         .iter()
@@ -306,9 +307,7 @@ pub fn sqlite_vec_blob(vector: &[f32]) -> Vec<u8> {
 pub fn register_sqlite_extensions() {
     use std::mem::transmute;
 
-    // `libsqlite3-sys` is a direct dependency (pinned to the same version that
-    // `sqlx-sqlite 0.9.0` resolves) so we can call `sqlite3_auto_extension`
-    // without fighting an E0432 FFI mismatch.
+    // A direct dependency on SQLx's SQLite library keeps extension registration on the same engine as application connections.
     use libsqlite3_sys::sqlite3_auto_extension;
 
     // The target type is `sqlite3_auto_extension_callback` — a C function pointer
@@ -320,6 +319,7 @@ pub fn register_sqlite_extensions() {
         clippy::missing_transmute_annotations,
         reason = "SQLite registers the destructor through a C function pointer type"
     )]
+    // SAFETY: sqlite-vec exports the SQLite extension entry-point ABI, and Once registers it before any application connection opens.
     REGISTER.call_once(|| unsafe {
         // `sqlite3_vec_init` is declared in `sqlite-vec` as a bare C function
         // pointer; `sqlite3_auto_extension` expects a function pointer matching
@@ -358,10 +358,11 @@ impl TenantDb {
             .map_err(|error| sea_orm::sqlx::Error::Protocol(error.to_string()))?;
         let pool = connection.get_postgres_connection_pool().clone();
         let orm = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(pool.clone());
-        Ok(TenantDb { pool, orm })
+        Ok(Self { pool, orm })
     }
 
-    pub fn pool(&self) -> &PgPool {
+    #[must_use]
+    pub const fn pool(&self) -> &PgPool {
         &self.pool
     }
 
@@ -499,7 +500,7 @@ impl DbHandle {
     }
 }
 
-/// A UUIDv7 for a primary key `before_save` hook to set on SQLite, or `ActiveValue::NotSet` to leave the column alone.
+/// A `UUIDv7` for a primary key `before_save` hook to set on SQLite, or `ActiveValue::NotSet` to leave the column alone.
 ///
 /// PostgreSQL's `id UUID PRIMARY KEY DEFAULT uuidv7()` (see `migration/src/helpers.rs::uuidv7_pk`) has no SQLite equivalent, so on that backend every insert must supply its own id or hit `NOT NULL constraint failed`.
 /// Every `ActiveModelBehavior::before_save` for a `uuidv7_pk`-keyed entity assigns the result to `self.id` unconditionally: `NotSet` means "leave what the caller put there", so a caller that set `id` explicitly is respected.
@@ -523,6 +524,7 @@ pub fn sqlite_generated_id(
 /// `insert` is a parameter because an insert normally takes the column's database default. `schema_schemas` is the exception and passes `false` on both paths, since SQLite refuses a non-constant default on a column added to an existing table.
 ///
 /// There is deliberately no counterpart for `created_at`: that column has `NOT NULL DEFAULT now()` on both backends, so nothing in application code should be able to move it.
+#[must_use]
 pub fn stamped_updated_at(
     insert: bool,
     current: sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>>,

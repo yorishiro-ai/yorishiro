@@ -1,4 +1,4 @@
-use crate::models::entity_entities::{self};
+use crate::models::entity_entities;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -24,13 +24,21 @@ fn tenant_reindex_scheduler_is_registered_in_enterprise() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one schedule crosses licensed and unlicensed ticks to verify advancement and reuse of an existing reindex without constructing a provider"
+)]
 async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
         let mut ctx = ctx;
         configure_deployment_metadata(&mut ctx);
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         set(&ctx.db, fixture.tenant_id, "PT6H", None).await.unwrap();
         let before = get(&ctx.db, fixture.tenant_id)
             .await
@@ -162,8 +170,12 @@ async fn metadata_scan_uses_workspace_provider_key_without_constructing_provider
         );
         let mut ctx = ctx;
         configure_deployment_metadata(&mut ctx);
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let txn = ctx.db.begin().await.unwrap();
         yorishiro::edition::ee::models::workspace_embedding_keys::set(
             &txn,

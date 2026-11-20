@@ -207,6 +207,10 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "a paused authenticator gates demotion and revocation races against the same administrator context and checks HTTP and model rejection"
+)]
 async fn workspace_mutations_recheck_stale_administrator_contexts() {
     use sea_orm::TransactionTrait;
     use std::sync::Arc;
@@ -388,6 +392,10 @@ async fn workspaces_endpoints_require_authentication() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one grant history checks credential binding and IAM through rejected, allowed, and revoked workspace access"
+)]
 async fn workspace_grant_management_requires_iam_and_respects_credential_binding() {
     use yorishiro::models::workspace_memberships::WorkspaceRole;
     boot_request::<App, _, _>(|request, ctx| async move {

@@ -40,11 +40,11 @@ pub mod edition {
 
     pub struct App;
 
-    pub(crate) async fn quotas(
+    pub(crate) async fn quota_override(
         ctx: &AppContext,
         tenant_id: uuid::Uuid,
-    ) -> std::result::Result<crate::data::quotas::Quotas, crate::YorishiroError> {
-        active::quotas(ctx, tenant_id).await
+    ) -> std::result::Result<Option<crate::data::quotas::Quotas>, crate::YorishiroError> {
+        active::quota_override(ctx, tenant_id).await
     }
 
     /// The worker registry composed for this build.
@@ -83,11 +83,11 @@ pub mod edition {
         active::workspace_embedding_metadata(conn, workspace_id).await
     }
 
-    pub(crate) async fn tenant_reindex_scheduler(
+    pub(crate) async fn run_reindex_schedule_override(
         ctx: &AppContext,
         tick: chrono::DateTime<chrono::Utc>,
-    ) -> Result<()> {
-        active::tenant_reindex_scheduler(ctx, tick).await
+    ) -> Result<bool> {
+        active::run_reindex_schedule_override(ctx, tick).await
     }
 
     #[async_trait]
@@ -101,7 +101,7 @@ pub mod edition {
         }
 
         async fn load_config(env: &Environment) -> Result<Config> {
-            base::load_config(env).await
+            base::load_config(env)
         }
 
         fn app_version() -> String {
@@ -113,7 +113,7 @@ pub mod edition {
             environment: &Environment,
             config: Config,
         ) -> Result<BootResult> {
-            base::boot::<Self>(mode, environment, config).await
+            Box::pin(base::boot::<Self>(mode, environment, config)).await
         }
 
         async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
@@ -182,13 +182,22 @@ pub mod edition {
         use crate::controllers::mcp::McpToolSet;
         use crate::workers::registry::WorkerRegistry;
 
-        pub(super) async fn quotas(
+        #[expect(
+            clippy::unused_async,
+            reason = "edition contributions share an async quota lookup contract"
+        )]
+        pub(super) async fn quota_override(
             _ctx: &AppContext,
             _tenant_id: uuid::Uuid,
-        ) -> std::result::Result<crate::data::quotas::Quotas, crate::YorishiroError> {
-            Ok(crate::data::quotas::Quotas::default())
+        ) -> std::result::Result<Option<crate::data::quotas::Quotas>, crate::YorishiroError>
+        {
+            Ok(None)
         }
 
+        #[expect(
+            clippy::unused_async,
+            reason = "edition contributions share an async workspace lookup contract"
+        )]
         pub(super) async fn workspace_worker_class(
             _conn: &sea_orm::DatabaseConnection,
             _workspace_id: uuid::Uuid,
@@ -199,6 +208,10 @@ pub mod edition {
             Ok(None)
         }
 
+        #[expect(
+            clippy::unused_async,
+            reason = "edition contributions share an async provider lookup contract"
+        )]
         pub(super) async fn workspace_embedding_provider(
             _conn: &sea_orm::DatabaseConnection,
             _workspace_id: uuid::Uuid,
@@ -209,6 +222,10 @@ pub mod edition {
             Ok(None)
         }
 
+        #[expect(
+            clippy::unused_async,
+            reason = "edition contributions share an async metadata lookup contract"
+        )]
         pub(super) async fn workspace_embedding_metadata(
             _conn: &sea_orm::DatabaseConnection,
             _workspace_id: uuid::Uuid,
@@ -219,14 +236,22 @@ pub mod edition {
             Ok(None)
         }
 
-        pub(super) async fn tenant_reindex_scheduler(
-            ctx: &AppContext,
+        #[expect(
+            clippy::unused_async,
+            reason = "edition contributions share an async schedule override contract"
+        )]
+        pub(super) async fn run_reindex_schedule_override(
+            _ctx: &AppContext,
             _tick: chrono::DateTime<chrono::Utc>,
-        ) -> Result<()> {
-            crate::workers::startup_reindex::run_metadata_scan(ctx).await
+        ) -> Result<bool> {
+            Ok(false)
         }
 
-        pub(super) fn compose_context(_ctx: &AppContext) -> Result<()> {
+        #[expect(
+            clippy::unnecessary_wraps,
+            reason = "edition context composition shares a fallible contract"
+        )]
+        pub(super) const fn compose_context(_ctx: &AppContext) -> Result<()> {
             Ok(())
         }
 
@@ -242,14 +267,14 @@ pub mod edition {
             || Some(1)
         }
 
-        pub(super) fn workers(registry: WorkerRegistry) -> WorkerRegistry {
+        pub(super) const fn workers(registry: WorkerRegistry) -> WorkerRegistry {
             registry
         }
-        pub(super) fn mount_routes(_mounts: &mut RouteMounts, _ctx: &AppContext) {}
-        pub(super) fn mcp_tools(tools: McpToolSet) -> McpToolSet {
+        pub(super) const fn mount_routes(_mounts: &mut RouteMounts, _ctx: &AppContext) {}
+        pub(super) const fn mcp_tools(tools: McpToolSet) -> McpToolSet {
             tools
         }
-        pub(super) fn register_tasks(_tasks: &mut Tasks) {}
+        pub(super) const fn register_tasks(_tasks: &mut Tasks) {}
 
         #[expect(clippy::unused_async, reason = "Loco declares this hook async")]
         pub(super) async fn seed(_ctx: &AppContext) -> Result<()> {
@@ -266,7 +291,7 @@ pub mod workers;
 
 pub use edition::App;
 pub(crate) use edition::{
-    quotas, tenant_reindex_scheduler, workspace_embedding_metadata, workspace_embedding_provider,
-    workspace_worker_class,
+    quota_override, run_reindex_schedule_override, workspace_embedding_metadata,
+    workspace_embedding_provider, workspace_worker_class,
 };
 pub use error::YorishiroError;

@@ -1,13 +1,14 @@
 //! Covers what is reachable without a live identity provider: the unconfigured/configured `status` shape, the `authorize`/`callback` unconfigured `404`, an unreachable issuer failing loudly rather than redirecting, `callback`'s rejection paths (provider error, missing `code`/`state`, a badly-signed `state`, an expired `state`), and `find_or_create`'s provisioning rules called directly against `ctx.db` (the tenant cap, matching how `tests/requests/stripe.rs` calls `tenant_billing::` functions directly alongside HTTP requests).
-//! The redirect `authorize` builds on a reachable issuer, the CSRF cookie it sets, and a full authorization-code round trip through `callback` all need a real or mocked IdP and are not covered here.
+//! The redirect `authorize` builds on a reachable issuer, the CSRF cookie it sets, and a full authorization-code round trip through `callback` all need a real or mocked `IdP` and are not covered here.
 
 use crate::requests::boot_request;
 use crate::requests::boot_request_with;
 use axum::http::StatusCode;
 use axum::http::header;
-use sea_orm::{EntityTrait, TransactionTrait};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 use yorishiro::App;
 use yorishiro::db::AppContextBackend;
+use yorishiro::models::_entities::tenant_memberships;
 
 /// A loopback address nothing listens on, so `authorize`'s discovery fetch fails fast with a connection refusal rather than depending on real DNS/network reachability in CI.
 /// Loopback, not a public hostname, so `discovery::require_https_or_loopback`'s `http://` exemption applies without needing a TLS-terminating stub server.
@@ -120,7 +121,7 @@ async fn authorize_and_callback_404_when_unconfigured() {
 }
 
 /// `authorize` reaches the identity provider to fetch its discovery document before it can redirect anywhere, so a configured but unreachable issuer fails loudly with an internal error rather than a redirect to nowhere.
-/// Exercising the redirect itself, and the CSRF cookie it sets, needs a live IdP and is out of scope here (see the module doc comment).
+/// Exercising the redirect itself, and the CSRF cookie it sets, needs a live `IdP` and is out of scope here (see the module doc comment).
 #[tokio::test]
 async fn authorize_fails_loudly_against_an_unreachable_issuer() {
     boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
@@ -245,9 +246,9 @@ async fn callback_rejects_an_expired_state() {
 }
 
 /// `find_or_create` must not be a backdoor around `YORISHIRO_MAX_TENANTS`: with the cap already met, a brand-new identity (one `find_by_oauth_identity` finds nothing for) is refused rather than silently given a fresh tenant.
-/// The migration's user_users_oauth_identity_idx is partial (oauth_provider IS NOT NULL).
-/// Fresh generation with the lockfile-pinned CLI omits this partial index entirely; no application/test path uses Schema::create_table_from_entity or other entity-based schema creation, so the migration is its only owner.
-/// Called directly against `ctx.db` rather than through `callback`, since driving this via HTTP would need a live IdP.
+/// The migration's `user_users_oauth_identity_idx` is partial (`oauth_provider` IS NOT NULL).
+/// Fresh generation with the lockfile-pinned CLI omits this partial index entirely; no application/test path uses `Schema::create_table_from_entity` or other entity-based schema creation, so the migration is its only owner.
+/// Called directly against `ctx.db` rather than through `callback`, since driving this via HTTP would need a live `IdP`.
 #[tokio::test]
 async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -344,8 +345,6 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         .expect("the linked schema must be active");
         assert_eq!(schema.id, schema_id);
         assert_eq!(schema.name, "general-notes");
-        use sea_orm::{ColumnTrait, QueryFilter};
-        use yorishiro::models::_entities::tenant_memberships;
         let memberships = tenant_memberships::Entity::find()
             .filter(tenant_memberships::Column::TenantId.eq(workspace.tenant_id))
             .all(&ctx.db)

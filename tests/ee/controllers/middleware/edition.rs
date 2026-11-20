@@ -5,12 +5,17 @@ use yorishiro::edition::ee::data::plan::Plan;
 
 #[tokio::test]
 #[serial_test::serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn resolved_licence_settings_fail_closed_without_blocking_startup() {
     use loco_rs::app::Hooks;
     use serde_json::json;
     use std::sync::Arc;
 
     let directory = tempfile::tempdir().unwrap();
+
     let guard = crate::EnvGuard::capture(&["YORISHIRO_LICENSE_KEY", "DATABASE_URL", "QUEUE_URL"]);
     guard.set("YORISHIRO_LICENSE_KEY", "invalid-key-from-config-load");
     guard.set(

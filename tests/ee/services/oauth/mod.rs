@@ -34,7 +34,8 @@ async fn json_server(
                 let mut body = body.clone();
                 body["issuer"] = serde_json::json!(observed.lock().unwrap().clone());
                 let response = body.clone();
-                if let Some(tx) = tx.lock().unwrap().take() {
+                let sender = tx.lock().unwrap().take();
+                if let Some(tx) = sender {
                     let _ = tx.send(
                         format!(
                             "{} {} {:?}",
@@ -76,7 +77,7 @@ async fn authorize_uses_production_discovery() {
         .query_pairs()
         .collect::<std::collections::HashMap<_, _>>();
     assert_eq!(pairs["nonce"], pairs["code_challenge"]);
-    assert!(!redirect.csrf_cookie_value.is_empty());
+    assert_ne!(redirect.csrf_cookie_value, "");
     let request = server.await.unwrap();
     assert!(
         String::from_utf8_lossy(&request).starts_with("GET /.well-known/openid-configuration ")
@@ -94,12 +95,12 @@ async fn callback_uses_production_discovery_exchange_and_jwks_before_verifying_t
         "jwks_uri": jwks_uri,
     }))
     .await;
-    let issued = state_token::issue(b"client-secret");
+    let login_state = state_token::issue(b"client-secret");
     let result = handle_callback(
         &config(issuer),
         "authorization-code",
-        &issued.state,
-        Some(&issued.csrf_cookie_value),
+        &login_state.state,
+        Some(&login_state.csrf_cookie_value),
     )
     .await;
     assert!(matches!(result, Err(YorishiroError::Unauthenticated)));

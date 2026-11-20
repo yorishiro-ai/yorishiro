@@ -21,6 +21,7 @@ pub struct Middleware {
 }
 
 impl Middleware {
+    #[must_use]
     pub fn new(config: &logger::Config, environment: &Environment) -> Self {
         Self {
             enable: config.enable,

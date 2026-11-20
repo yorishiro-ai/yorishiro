@@ -7,6 +7,10 @@ use yorishiro::App;
 use yorishiro::edition::ee::models::{inference_jobs, inference_proposals};
 use yorishiro::models::{entity_entities, schema_schemas};
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn prepare(
     request: &loco_rs::TestServer,
     ctx: &AppContext,

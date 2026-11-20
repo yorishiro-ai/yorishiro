@@ -1,10 +1,20 @@
 #![cfg(feature = "enterprise")]
 
+use axum::http::StatusCode;
 use loco_rs::task::Vars;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use serde_json::{Value, json};
 use yorishiro::App;
 use yorishiro::models::_entities::tenant_memberships::Column as MembershipColumn;
 use yorishiro::models::_entities::tenant_retirement_events::Column;
+use yorishiro::models::_entities::{
+    entity_entities, schema_schemas, template_templates, workspace_schema_fork_heads,
+    workspace_schema_forks,
+};
+use yorishiro::models::api_keys::ApiKeyScope;
+use yorishiro::models::{
+    tenant_memberships, tenant_tenants::retirement, user_users, workspace_workspaces,
+};
 use yorishiro::models::{tenant_retirement_events, tenant_tenants};
 
 use crate::requests::boot_request;
@@ -15,14 +25,6 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
     if !crate::require_postgres_backend() {
         return;
     }
-    use axum::http::StatusCode;
-    use serde_json::{Value, json};
-    use tenant_tenants::retirement;
-    use yorishiro::models::_entities::{
-        entity_entities, schema_schemas, template_templates, workspace_schema_fork_heads,
-        workspace_schema_forks,
-    };
-    use yorishiro::models::api_keys::ApiKeyScope;
 
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
@@ -77,9 +79,6 @@ async fn deletion_audit_failure_preserves_disabled_tenant_and_allows_retry() {
     if !crate::require_postgres_backend() {
         return;
     }
-    use sea_orm::ConnectionTrait;
-    use tenant_tenants::retirement;
-    use yorishiro::models::workspace_workspaces;
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -99,7 +98,7 @@ async fn deletion_audit_failure_preserves_disabled_tenant_and_allows_retry() {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].action, "disabled");
         request.get("/api/whoami").add_header("Authorization", format!("Bearer {}", target.api_key))
-            .await.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+            .await.assert_status(StatusCode::UNAUTHORIZED);
         ctx.db.execute_unprepared("ALTER TABLE tenant_retirement_events DROP CONSTRAINT reject_deleted_event")
             .await.unwrap();
         retirement::delete_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await.unwrap();
@@ -116,8 +115,6 @@ async fn irreversible_cleanup_requires_disablement_and_preserves_root_identities
     if !crate::require_postgres_backend() {
         return;
     }
-    use tenant_tenants::retirement;
-    use yorishiro::models::{tenant_memberships, user_users, workspace_workspaces};
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
             return;
@@ -194,7 +191,7 @@ async fn irreversible_cleanup_requires_disablement_and_preserves_root_identities
             .get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", other.api_key))
             .await
-            .assert_status(axum::http::StatusCode::OK);
+            .assert_status(StatusCode::OK);
         let missing = uuid::Uuid::new_v4();
         assert!(
             retirement::delete_by_operator(&ctx.db, missing, missing)
@@ -217,7 +214,7 @@ async fn operator_disablement_requires_confirmation_and_is_retry_safe() {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let task = Some("disable_tenant".to_owned());
-        let active = tenant_tenants::retirement::inventory(&ctx.db, target.tenant_id)
+        let active = retirement::inventory(&ctx.db, target.tenant_id)
             .await
             .unwrap();
         assert!(active.disabled_at.is_none());
@@ -272,7 +269,7 @@ async fn operator_disablement_requires_confirmation_and_is_retry_safe() {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].action, "disabled");
         assert_eq!(events[0].actor_user_id, None);
-        let inventory = tenant_tenants::retirement::inventory(&ctx.db, target.tenant_id)
+        let inventory = retirement::inventory(&ctx.db, target.tenant_id)
             .await
             .unwrap();
         assert_eq!(inventory.api_keys, 0);
@@ -283,12 +280,12 @@ async fn operator_disablement_requires_confirmation_and_is_retry_safe() {
             .get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", target.api_key))
             .await
-            .assert_status(axum::http::StatusCode::UNAUTHORIZED);
+            .assert_status(StatusCode::UNAUTHORIZED);
         request
             .get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", other.api_key))
             .await
-            .assert_status(axum::http::StatusCode::OK);
+            .assert_status(StatusCode::OK);
     })
     .await;
 }
@@ -298,9 +295,6 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
     if !crate::require_postgres_backend() {
         return;
     }
-    use yorishiro::models::api_keys::ApiKeyScope;
-    use yorishiro::models::tenant_memberships;
-    use yorishiro::models::{tenant_tenants::retirement, user_users};
 
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
@@ -328,8 +322,8 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
         let created = request.post("/api/members/users")
             .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"user_name":format!("retiring-user-{}", uuid::Uuid::new_v4()),"password":"tenant-user-password"})).await;
-        created.assert_status(axum::http::StatusCode::CREATED);
-        let tenant_user_id: uuid::Uuid = created.json::<serde_json::Value>()["user_id"].as_str().unwrap().parse().unwrap();
+        created.assert_status(StatusCode::CREATED);
+        let tenant_user_id: uuid::Uuid = created.json::<Value>()["user_id"].as_str().unwrap().parse().unwrap();
 
         retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
             .await

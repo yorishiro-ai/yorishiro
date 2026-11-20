@@ -1,4 +1,4 @@
-//! OpenAPI names refer to the actual serialized request and response types.
+//! `OpenAPI` names refer to the actual serialized request and response types.
 
 pub(crate) use crate::edition::ee::dtos::{
     embedding::SetEmbeddingKeyRequest as EmbeddingKeyRequest,

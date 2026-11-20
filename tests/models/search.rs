@@ -1,13 +1,19 @@
 use crate::requests::boot_request;
-use sea_orm::ConnectionTrait;
+use aws_lc_rs::digest::{SHA256, digest};
 use sea_orm::sea_query::ExprTrait;
+use sea_orm::sqlx::Connection as _;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, IntoActiveModel, TransactionTrait,
+};
 use sea_orm::{
     ColumnTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, QuerySelect, SelectExt,
     Statement,
 };
 use yorishiro::App;
 use yorishiro::error::YorishiroError;
-use yorishiro::models::_entities::workspace_workspaces;
+use yorishiro::models::_entities::{
+    entity_embeddings as vectors, entity_entities as entities, workspace_workspaces,
+};
 use yorishiro::models::entity_embeddings;
 use yorishiro::models::{entity_entities, schema_schemas, search};
 use yorishiro::services::embedding::{
@@ -24,11 +30,9 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        let fixture = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let fixture = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         schema_schemas::create_schema(&ctx.db, fixture.tenant_id, fixture.workspace_id,
             serde_json::from_value(note_definition()).unwrap(), None, None).await.unwrap();
-        use sea_orm::{ActiveModelTrait, ActiveValue::Set};
-        use yorishiro::models::_entities::entity_embeddings as vectors;
         let mut rare = None;
         for i in 0..60 {
             let entity = entity_entities::create(&ctx.db, fixture.workspace_id, entity_entities::CreateEntityInput {
@@ -36,7 +40,7 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
                 data:serde_json::json!({"title":if i==20 {"common ERR-4821x"} else {"common document"}})
             }, None).await.unwrap();
             vectors::ActiveModel { workspace_id:Set(fixture.workspace_id), entity_id:Set(entity.id),
-                tenant_id:Set(fixture.tenant_id), embedding:Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0, i as f32 / 60.0 + 0.01]))) }
+                tenant_id:Set(fixture.tenant_id), embedding:Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0, f32::from(i16::try_from(i).unwrap()) / 60.0 + 0.01]))) }
                 .insert(&ctx.db).await.unwrap();
             if i==20 { rare=Some(entity.id); }
         }
@@ -64,7 +68,7 @@ async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
         assert_eq!(rare_hits.iter().map(|h|h.entity.id).collect::<std::collections::HashSet<_>>().len(),10);
         // A second workspace of the same tenant isolates the corpus without exceeding the deployment's tenant cap.
         let text_workspace = {
-            let txn = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
+            let txn = TransactionTrait::begin(&ctx.db).await.unwrap();
             let workspace = yorishiro::models::tenancy::create_workspace(
                 &txn,
                 fixture.tenant_id,
@@ -116,20 +120,22 @@ async fn postgres_materialized_recall_1024() {
     .await;
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "corpus integrity, graph construction, exact baseline, and approximate recall share the same indexed vectors"
+)]
 async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]) {
     if !crate::require_postgres_backend() {
         return;
     }
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, IntoActiveModel};
-    use sha2::{Digest, Sha256};
-    use yorishiro::models::_entities::{entity_embeddings as vectors, entity_entities as entities};
 
     let metadata: serde_json::Value = serde_json::from_str(metadata).unwrap();
     assert_eq!(
-        Sha256::digest(bytes)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>(),
+        hex::encode(digest(&SHA256, bytes).as_ref()),
         metadata["sha256"].as_str().unwrap()
     );
     assert_eq!(bytes.len(), (2100 + 12) * dimensions * 4);
@@ -146,7 +152,7 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
     assert!(corpus.iter().flatten().all(|value| value.is_finite()));
     boot_request::<App, _, _>(|request, ctx| async move {
         let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         schema_schemas::create_schema(
             &ctx.db,
             fixture.tenant_id,
@@ -205,7 +211,7 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
             .unwrap()
             .unwrap()
             .into_active_model();
-        workspace.embedding_dimensions = Set(Some(dimensions as i32));
+        workspace.embedding_dimensions = Set(Some(i32::try_from(dimensions).unwrap()));
         workspace.embedding_model = Set(Some(metadata["model"].as_str().unwrap().into()));
         workspace.update(&ctx.db).await.unwrap();
         let index = format!("ysr_hnsw_{}_d{dimensions}", fixture.workspace_id.simple());
@@ -326,14 +332,16 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the same partition and workspace track maintenance locks, promotion, metadata changes, failure recovery, and graph retirement"
+)]
 async fn postgres_workspace_hnsw_promotion_and_cleanup() {
     if !crate::require_postgres_backend() {
         return;
     }
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set, IntoActiveModel};
-    use yorishiro::models::_entities::{entity_embeddings as vectors, entity_entities as entities};
     boot_request::<App, _, _>(|request, ctx| async move {
-        let fixture = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let fixture = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         schema_schemas::create_schema(&ctx.db, fixture.tenant_id, fixture.workspace_id,
             serde_json::from_value(note_definition()).unwrap(), None, None).await.unwrap();
         let entity = entity_entities::create(&ctx.db, fixture.workspace_id, entity_entities::CreateEntityInput {
@@ -346,7 +354,9 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         let rows = ids.iter().enumerate().map(|(i, id)| vectors::ActiveModel {
             workspace_id:Set(fixture.workspace_id), entity_id:Set(*id), tenant_id:Set(fixture.tenant_id),
             embedding:Set(Some(sea_orm::entity::prelude::PgVector::from((0..7).map(|axis| {
-                (((i + 1) * (axis + 11) * 7919 % 104729) as f32 / 104729.0) + 0.01
+                #[expect(clippy::cast_precision_loss, reason = "the remainder is below 104729 and exactly representable as f32")]
+                let coordinate = ((i + 1) * (axis + 11) * 7919 % 104_729) as f32;
+                coordinate / 104_729.0 + 0.01
             }).collect::<Vec<_>>())))
         });
         vectors::Entity::insert_many(rows).exec(&ctx.db).await.unwrap();
@@ -355,7 +365,6 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         workspace.update(&ctx.db).await.unwrap();
         let index = format!("ysr_hnsw_{}_d7", fixture.workspace_id.simple());
         // A second maintainer must skip while the real session lock is held.
-        use sea_orm::sqlx::Connection as _;
         let mut lock = ctx.db.get_postgres_connection_pool().acquire().await.unwrap().detach();
         sea_orm::sqlx::query("SELECT pg_advisory_lock(hashtextextended('embedding-index-maintenance',0))")
             .execute(&mut lock).await.unwrap();
@@ -368,7 +377,6 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
             sea_orm::DatabaseBackend::Postgres, "SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass($1)", [name.into()]));
         assert!(exists(index.clone()).await.unwrap().unwrap().try_get::<bool>("","indisvalid").unwrap());
         // Execute and EXPLAIN the same production candidate builder without forcing an ANN plan.
-        use sea_orm::{ConnectionTrait, TransactionTrait};
         let txn = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
         let role = txn.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
             "SELECT current_user AS role, rolsuper FROM pg_roles WHERE rolname=current_user")).await.unwrap().unwrap();
@@ -397,7 +405,7 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         let exact = txn.query_all_raw(statement).await.unwrap();
         assert_eq!(exact.len(), natural.len());
         let exact_ids: std::collections::HashSet<uuid::Uuid> = exact.iter().map(|row| row.try_get("", "id").unwrap()).collect();
-        let recall = hits.iter().filter(|hit| exact_ids.contains(&hit.entity.id)).count() as f64 / 200.0;
+        let recall = f64::from(u32::try_from(hits.iter().filter(|hit| exact_ids.contains(&hit.entity.id)).count()).unwrap()) / 200.0;
         assert!(recall >= 0.95, "production recall@200={recall}; plan={plan}");
         txn.rollback().await.unwrap();
         // Hold the actual partition lock until concurrent index construction is waiting.
@@ -431,7 +439,7 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         assert!(after.iter().all(|hit| hit.entity.workspace_id == fixture.workspace_id));
         let after_ids: std::collections::HashSet<_> = after.iter().map(|hit| hit.entity.id).collect();
         assert_eq!(after_ids, hits.iter().map(|hit| hit.entity.id).collect(), "neighbor vectors must not change the workspace graph results");
-        let after_recall = after_ids.intersection(&exact_ids).count() as f64 / 200.0;
+        let after_recall = f64::from(u32::try_from(after_ids.intersection(&exact_ids).count()).unwrap()) / 200.0;
         assert_eq!(after_recall, recall);
         scoped.rollback().await.unwrap();
         workspace_workspaces::Entity::delete_by_id(neighbor).exec(&ctx.db).await.unwrap();
@@ -473,7 +481,11 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         // Exercise the real high-dimensional index lifecycle, not only generated SQL.
         // Distinct zero-mean vectors: a corpus of identical vectors saturates every HNSW neighbour
         // list with zero-distance links, so a row written after the build would be unreachable.
-        let spread = |i: usize| (0..4000_usize).map(|axis| ((i + 1) * (axis + 11) * 7919 % 104_729) as f32 / 104_729.0 - 0.5).collect::<Vec<f32>>();
+        let spread = |i: usize| (0..4000_usize).map(|axis| {
+            #[expect(clippy::cast_precision_loss, reason = "the remainder is below 104729 and exactly representable as f32")]
+            let coordinate = ((i + 1) * (axis + 11) * 7919 % 104_729) as f32;
+            coordinate / 104_729.0 - 0.5
+        }).collect::<Vec<f32>>();
         vectors::Entity::delete_many().filter(vectors::Column::WorkspaceId.eq(fixture.workspace_id)).exec(&ctx.db).await.unwrap();
         vectors::Entity::insert_many(ids.iter().enumerate().map(|(i, id)| vectors::ActiveModel {
             workspace_id:Set(fixture.workspace_id), entity_id:Set(*id), tenant_id:Set(fixture.tenant_id),
@@ -605,10 +617,14 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
     }).await;
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn literal_search_corpus() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         let definition = serde_json::from_value(note_definition()).unwrap();
         schema_schemas::create_schema(
             &ctx.db,
@@ -718,7 +734,17 @@ async fn postgres_literal_search_shared_corpus() {
 
 /// Vector search must rank by cosine distance (closest first) and must not leak another workspace's entities into the results, even when that workspace's vector is a closer match.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one ranked result set verifies cosine ordering and excludes a closer vector belonging to another workspace"
+)]
 async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
+    fn unit_vector(axis: usize) -> Vec<f32> {
+        let mut vector = vec![0.0_f32; 768];
+        vector[axis] = 1.0;
+        vector
+    }
+
     if !crate::require_postgres_backend() {
         return;
     }
@@ -727,8 +753,13 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             tenant_id,
             workspace_id,
             ..
-        } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
-        let txn = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
+        } = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
+        let txn = TransactionTrait::begin(&ctx.db).await.unwrap();
         let other_workspace = yorishiro::models::tenancy::create_workspace(
             &txn,
             tenant_id,
@@ -756,48 +787,30 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
         .await
         .expect("create schema in other workspace");
 
-        let close = entity_entities::create(
-            &ctx.db,
-            workspace_id,
-            entity_entities::CreateEntityInput {
-                schema_name: "note".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({ "title": "close match" }),
-            },
-            None,
-        )
-        .await
-        .expect("create close entity");
-        let far = entity_entities::create(
-            &ctx.db,
-            workspace_id,
-            entity_entities::CreateEntityInput {
-                schema_name: "note".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({ "title": "far match" }),
-            },
-            None,
-        )
-        .await
-        .expect("create far entity");
-        let other_workspace_entity = entity_entities::create(
-            &ctx.db,
-            other_workspace.id,
-            entity_entities::CreateEntityInput {
-                schema_name: "note".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({ "title": "belongs to another workspace" }),
-            },
-            None,
-        )
-        .await
-        .expect("create entity in other workspace");
-
-        fn unit_vector(axis: usize) -> Vec<f32> {
-            let mut v = vec![0.0_f32; 768];
-            v[axis] = 1.0;
-            v
+        let mut created = Vec::new();
+        for (workspace, title) in [
+            (workspace_id, "close match"),
+            (workspace_id, "far match"),
+            (other_workspace.id, "belongs to another workspace"),
+        ] {
+            created.push(
+                entity_entities::create(
+                    &ctx.db,
+                    workspace,
+                    entity_entities::CreateEntityInput {
+                        schema_name: "note".into(),
+                        entity_type: "note".into(),
+                        data: serde_json::json!({ "title": title }),
+                    },
+                    None,
+                )
+                .await
+                .expect("create ranking entity"),
+            );
         }
+        let [close, far, other_workspace_entity] = created.as_slice() else {
+            panic!("expected three ranking entities");
+        };
 
         let query_vector = unit_vector(0);
         let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
@@ -890,7 +903,7 @@ async fn fixed_width_provider(
 fn model_vector(model: &str) -> Vec<f32> {
     let mut vector = vec![0.0; 768];
     for (value, byte) in vector.iter_mut().zip(model.bytes()) {
-        *value = byte as f32 / 255.0;
+        *value = f32::from(byte) / 255.0;
     }
     vector
 }
@@ -927,7 +940,12 @@ async fn sync_embedding_refuses_a_vector_that_does_not_match_the_workspace_stamp
             tenant_id,
             workspace_id,
             ..
-        } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        } = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let (stamp_provider, _stamp_server) = fixed_width_provider(768).await;
         entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &stamp_provider)
             .await
@@ -1035,7 +1053,12 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
             tenant_id,
             workspace_id,
             ..
-        } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        } = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let (stamp_provider, _stamp_server) =
             model_provider("nomic-ai/nomic-embed-text-v1.5").await;
         entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &stamp_provider)
@@ -1100,12 +1123,16 @@ async fn sync_embedding_refuses_a_vector_from_a_different_model_than_the_workspa
 /// Without the lock acquisition in `src/db.rs`, the two concurrent calls race and the final stamp does
 /// not match the vectors actually stored, causing this assertion to fail.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one gated race verifies the actual advisory lock wait and final vector provenance together"
+)]
 async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
     if !crate::require_postgres_backend() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        let crate::requests::fixtures::TestTenant { tenant_id, workspace_id, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let crate::requests::fixtures::TestTenant { tenant_id, workspace_id, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         let def = serde_json::from_value(note_definition()).expect("parse definition");
         schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
             .await
@@ -1276,6 +1303,10 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
 /// the old vector in place would still pass the `assert_eq!` on the existing data; without the
 /// `assert_eq!`, a corrupted or zeroed row would pass `assert_ne!` on its own.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one reindex history verifies partition ownership and compares persisted vectors before and after the model changes"
+)]
 async fn reindex_overwrites_existing_entity_embeddings() {
     if !crate::require_postgres_backend() {
         return;
@@ -1285,7 +1316,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
             tenant_id,
             workspace_id,
             ..
-        } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        } = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         let def = serde_json::from_value(note_definition()).expect("parse definition");
         schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
             .await
@@ -1354,24 +1385,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
                 .select_only().column(vectors::Column::TenantId)
                 .into_tuple::<uuid::Uuid>().one(&ctx.db).await.unwrap().unwrap();
             assert_eq!(owner, tenant_id);
-            let stored: Option<sea_orm::entity::prelude::PgVector> = {
-                #[derive(sea_orm::FromQueryResult)]
-                struct Row {
-                    embedding: Option<sea_orm::entity::prelude::PgVector>,
-                }
-                entity_embeddings::Entity::find()
-                    .filter(
-                        yorishiro::models::_entities::entity_embeddings::Column::EntityId
-                            .eq(entity_id),
-                    )
-                    .select_only()
-                    .column(yorishiro::models::_entities::entity_embeddings::Column::Embedding)
-                    .into_model::<Row>()
-                    .one(&ctx.db)
-                    .await
-                    .expect("query embedding")
-                    .and_then(|r| r.embedding)
-            };
+            let stored = stored_postgres_vector(&ctx.db, entity_id).await;
             assert_eq!(
                 stored.as_ref().map(sea_orm::prelude::PgVector::as_slice),
                 Some(old_v1.as_slice()),
@@ -1397,9 +1411,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         .await
         .expect("reindex");
 
-        if !outcome.failures.is_empty() {
-            panic!("reindex had {} failure(s)", outcome.failures.len());
-        }
+        assert!(outcome.failures.is_empty(), "reindex had {} failure(s)", outcome.failures.len());
         assert_eq!(outcome.reindexed, 2, "both entities must be reindexed");
 
         // Stamp and vectors must now agree on the new model.
@@ -1418,24 +1430,7 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         let new_v = model_vector(&new_provider.model_name());
 
         for entity_id in [e1.id, e2.id] {
-            let stored: Option<sea_orm::entity::prelude::PgVector> = {
-                #[derive(sea_orm::FromQueryResult)]
-                struct Row {
-                    embedding: Option<sea_orm::entity::prelude::PgVector>,
-                }
-                entity_embeddings::Entity::find()
-                    .filter(
-                        yorishiro::models::_entities::entity_embeddings::Column::EntityId
-                            .eq(entity_id),
-                    )
-                    .select_only()
-                    .column(yorishiro::models::_entities::entity_embeddings::Column::Embedding)
-                    .into_model::<Row>()
-                    .one(&ctx.db)
-                    .await
-                    .expect("query embedding")
-                    .and_then(|r| r.embedding)
-            };
+            let stored = stored_postgres_vector(&ctx.db, entity_id).await;
             assert_eq!(
                 stored.as_ref().map(sea_orm::prelude::PgVector::as_slice),
                 Some(new_v.as_slice()),
@@ -1457,7 +1452,12 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
             tenant_id,
             workspace_id,
             ..
-        } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        } = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let def = serde_json::from_value(note_definition()).expect("parse definition");
         schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
             .await
@@ -1513,7 +1513,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
 /// the entity has no embedding; an entity with neither an embedding nor a MATCH match must not
 /// appear.
 ///
-/// On SQLite, the search function's trigram half (pg_trgm on PostgreSQL) is replaced by an
+/// On SQLite, the search function's trigram half (`pg_trgm` on PostgreSQL) is replaced by an
 /// FTS5 query against `entity_fts` with `tokenize='trigram'`. This test boots
 /// against a SQLite file database to confirm the FTS5 path works end to end, including schema
 /// creation, entity insertion, and trigger-driven index updates.
@@ -1528,7 +1528,12 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
             tenant_id,
             workspace_id,
             ..
-        } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        } = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let def = serde_json::from_value(note_definition()).expect("parse definition");
         schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
             .await
@@ -1562,8 +1567,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
         .await
         .expect("create unrelated entity");
 
-        // Neither entity has an embedding (SQLite has no embedding column), so both rely on
-        // the FTS5 fallback path.
+        // Neither entity has a stored vector, so both rely on the FTS5 fallback path.
         let hits = search::search_by_vector(
             &ctx.db,
             workspace_id,
@@ -1580,15 +1584,11 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
 
         // Modify the entity's data so the old search phrase no longer matches, then
         // confirm a search for the new phrase finds it.
-        let rec = entity_entities::get(&ctx.db, workspace_id, matching.id)
-            .await
-            .expect("fetch entity for update");
-
         entity_entities::update(
             &ctx.db,
             workspace_id,
             entity_entities::UpdateEntityInput {
-                id: rec.id,
+                id: matching.id,
                 data: serde_json::json!({ "title": "quarterly board meeting notes" }),
                 updated_by: None,
                 expected_updated_at: None,
@@ -1647,123 +1647,187 @@ async fn sqlite_document_embed_persist_and_search() {
     }
 
     boot_request::<App, _, _>(|request, ctx| async move {
-            let crate::requests::fixtures::TestTenant { tenant_id, workspace_id, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let crate::requests::fixtures::TestTenant {
+            tenant_id,
+            workspace_id,
+            ..
+        } = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
 
-            let def = serde_json::from_value(note_definition()).expect("parse definition");
-            schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
-                .await
-                .expect("create schema");
-
-            // Create entity to embed.
-            let entity = entity_entities::create(
-                &ctx.db,
-                workspace_id,
-                entity_entities::CreateEntityInput {
-                    schema_name: "note".into(),
-                    entity_type: "note".into(),
-                    data: serde_json::json!({ "title": "quarterly roadmap review" }),
-                },
-                None,
-            )
+        let def = serde_json::from_value(note_definition()).expect("parse definition");
+        schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
             .await
-            .expect("create entity");
+            .expect("create schema");
 
-            // Exercise the production HTTP provider and persistence path.
-            let record = entity_entities::get(&ctx.db, workspace_id, entity.id)
-                .await
-                .expect("get entity record");
-            let (provider, _provider_server) = model_provider("test-model").await;
-            entity_embeddings::sync_embedding_for_record(
-                &ctx.db,
-                workspace_id,
-                &record,
-                &provider,
-            )
+        // Create entity to embed.
+        let entity = entity_entities::create(
+            &ctx.db,
+            workspace_id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({ "title": "quarterly roadmap review" }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity");
+
+        // Exercise the production HTTP provider and persistence path.
+        let record = entity_entities::get(&ctx.db, workspace_id, entity.id)
+            .await
+            .expect("get entity record");
+        let (provider, _provider_server) = model_provider("test-model").await;
+        entity_embeddings::sync_embedding_for_record(&ctx.db, workspace_id, &record, &provider)
             .await
             .expect("embed entity");
 
-            // Verify the embedding was written to the shared table.
-            let has_embedding = entity_embeddings::Entity::find().filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity.id))
-                .select_only()
-                .expr_as(
-                    sea_orm::sea_query::Expr::col(
-                        yorishiro::models::_entities::entity_embeddings::Column::Embedding,
-                    ).is_not_null(),
-                    "has_embedding",
+        // Verify the embedding was written to the shared table.
+        let has_embedding = entity_embeddings::Entity::find()
+            .filter(yorishiro::models::_entities::entity_embeddings::Column::EntityId.eq(entity.id))
+            .select_only()
+            .expr_as(
+                sea_orm::sea_query::Expr::col(
+                    yorishiro::models::_entities::entity_embeddings::Column::Embedding,
                 )
-                .into_tuple::<bool>()
-                .one(&ctx.db)
-                .await
-                .expect("query embedding");
-            assert_eq!(has_embedding, Some(true), "embedding must have been written");
-
-            // Search by vector should find the entity.
-            let hits = search::search_by_vector(
-                &ctx.db,
-                workspace_id,
-                model_vector(&provider.model_name()),
-                "quarterly roadmap",
-                search::SearchQuery::default(),
+                .is_not_null(),
+                "has_embedding",
             )
+            .into_tuple::<bool>()
+            .one(&ctx.db)
             .await
-            .expect("search_by_vector");
-            assert_eq!(hits.len(), 1, "vector search must find the embedded entity, hits: {hits:?}");
-            assert_eq!(hits[0].entity.id, entity.id);
-            assert!(
-                hits[0].distance.is_some(),
-                "vector hit must have a distance"
-            );
-            #[cfg(feature = "enterprise")]
-            {
-                use loco_rs::task::{Task, Vars};
-                use yorishiro::edition::ee::tasks::sqlite_ann_benchmark::SqliteAnnBenchmark;
-                SqliteAnnBenchmark.run(&ctx, &Vars::from_cli_args(vec![
-                    ("workspace_id".into(), workspace_id.to_string()),
-                ])).await.expect("benchmark stored embedding without a vec0 table");
-                ctx.db.execute_unprepared("CREATE VIRTUAL TABLE entity_embeddings_vec0 USING vec0(entity_id TEXT PRIMARY KEY, workspace_id TEXT PARTITION KEY, embedding FLOAT[768] distance_metric=cosine)")
-                    .await.unwrap();
-                let unrelated_workspace = uuid::Uuid::now_v7();
-                use sea_orm::sea_query::{Alias, Expr, Query};
-                // Fault injection populates the optional vec0 index, not application-owned rows.
-                for (id, workspace) in (0..11)
-                    .map(|_| (uuid::Uuid::now_v7(), unrelated_workspace))
-                    .chain(std::iter::once((entity.id, workspace_id)))
-                {
-                    let insert = Query::insert()
-                        .into_table(Alias::new("entity_embeddings_vec0"))
-                        .columns([Alias::new("entity_id"), Alias::new("workspace_id"), Alias::new("embedding")])
-                        .values_panic([
-                            id.to_string().into(), workspace.to_string().into(),
-                            yorishiro::db::sqlite_vec_blob(&model_vector(&provider.model_name())).into(),
-                        ]).to_owned();
-                    ctx.db.execute_raw(ctx.db.get_database_backend().build(&insert)).await.unwrap();
-                }
-                SqliteAnnBenchmark.run(&ctx, &Vars::from_cli_args(vec![
-                    ("workspace_id".into(), workspace_id.to_string()),
-                    ("min_entities".into(), "0".into()),
-                    ("max_latency_ms".into(), "0".into()),
-                ])).await.expect("benchmark real vec0 KNN with UUID keys and workspace partition");
-                let delete = Query::delete()
-                    .from_table(Alias::new("entity_embeddings_vec0"))
-                    .and_where(Expr::col(Alias::new("entity_id")).eq(entity.id.to_string()))
-                    .to_owned();
-                ctx.db.execute_raw(ctx.db.get_database_backend().build(&delete)).await.unwrap();
-                let error = SqliteAnnBenchmark.run(&ctx, &Vars::from_cli_args(vec![
-                    ("workspace_id".into(), workspace_id.to_string()),
-                    ("min_entities".into(), "0".into()),
-                    ("max_latency_ms".into(), "0".into()),
-                ])).await.expect_err("an unpopulated workspace partition must not look like a fast benchmark");
-                assert!(error.to_string().contains("returned no entities"), "{error}");
-            }
-    }).await;
+            .expect("query embedding");
+        assert_eq!(
+            has_embedding,
+            Some(true),
+            "embedding must have been written"
+        );
+
+        // Search by vector should find the entity.
+        let hits = search::search_by_vector(
+            &ctx.db,
+            workspace_id,
+            model_vector(&provider.model_name()),
+            "quarterly roadmap",
+            search::SearchQuery::default(),
+        )
+        .await
+        .expect("search_by_vector");
+        assert_eq!(
+            hits.len(),
+            1,
+            "vector search must find the embedded entity, hits: {hits:?}"
+        );
+        assert_eq!(hits[0].entity.id, entity.id);
+        assert!(
+            hits[0].distance.is_some(),
+            "vector hit must have a distance"
+        );
+        #[cfg(feature = "enterprise")]
+        assert_sqlite_ann_benchmark(&ctx, workspace_id, entity.id, &provider.model_name()).await;
+    })
+    .await;
+}
+
+#[cfg(feature = "enterprise")]
+async fn assert_sqlite_ann_benchmark(
+    ctx: &loco_rs::app::AppContext,
+    workspace_id: uuid::Uuid,
+    entity_id: uuid::Uuid,
+    model_name: &str,
+) {
+    use loco_rs::task::{Task, Vars};
+    use sea_orm::sea_query::{Alias, Expr, Query};
+    use yorishiro::edition::ee::tasks::sqlite_ann_benchmark::SqliteAnnBenchmark;
+    SqliteAnnBenchmark
+        .run(
+            ctx,
+            &Vars::from_cli_args(vec![("workspace_id".into(), workspace_id.to_string())]),
+        )
+        .await
+        .expect("benchmark stored embedding without a vec0 table");
+    ctx.db.execute_unprepared("CREATE VIRTUAL TABLE entity_embeddings_vec0 USING vec0(entity_id TEXT PRIMARY KEY, workspace_id TEXT PARTITION KEY, embedding FLOAT[768] distance_metric=cosine)")
+        .await.unwrap();
+    let unrelated_workspace = uuid::Uuid::now_v7();
+    // Fault injection populates the optional vec0 index, not application-owned rows.
+    for (id, workspace) in (0..11)
+        .map(|_| (uuid::Uuid::now_v7(), unrelated_workspace))
+        .chain(std::iter::once((entity_id, workspace_id)))
+    {
+        let insert = Query::insert()
+            .into_table(Alias::new("entity_embeddings_vec0"))
+            .columns([
+                Alias::new("entity_id"),
+                Alias::new("workspace_id"),
+                Alias::new("embedding"),
+            ])
+            .values_panic([
+                id.to_string().into(),
+                workspace.to_string().into(),
+                yorishiro::db::sqlite_vec_blob(&model_vector(model_name)).into(),
+            ])
+            .to_owned();
+        ctx.db
+            .execute_raw(ctx.db.get_database_backend().build(&insert))
+            .await
+            .unwrap();
+    }
+    SqliteAnnBenchmark
+        .run(
+            ctx,
+            &Vars::from_cli_args(vec![
+                ("workspace_id".into(), workspace_id.to_string()),
+                ("min_entities".into(), "0".into()),
+                ("max_latency_ms".into(), "0".into()),
+            ]),
+        )
+        .await
+        .expect("benchmark real vec0 KNN with UUID keys and workspace partition");
+    let delete = Query::delete()
+        .from_table(Alias::new("entity_embeddings_vec0"))
+        .and_where(Expr::col(Alias::new("entity_id")).eq(entity_id.to_string()))
+        .to_owned();
+    ctx.db
+        .execute_raw(ctx.db.get_database_backend().build(&delete))
+        .await
+        .unwrap();
+    let error = SqliteAnnBenchmark
+        .run(
+            ctx,
+            &Vars::from_cli_args(vec![
+                ("workspace_id".into(), workspace_id.to_string()),
+                ("min_entities".into(), "0".into()),
+                ("max_latency_ms".into(), "0".into()),
+            ]),
+        )
+        .await
+        .expect_err("an unpopulated workspace partition must not look like a fast benchmark");
+    assert!(
+        error.to_string().contains("returned no entities"),
+        "{error}"
+    );
 }
 
 /// Width switching uses the actual vectors rather than a fixed registry of storage tables.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "successive width changes share one workspace and verify stored dimensions, search results, and isolation from another workspace"
+)]
 async fn reindex_switches_between_arbitrary_widths() {
+    use yorishiro::models::_entities::entity_embeddings as embeddings;
+
     boot_request::<App, _, _>(|request, ctx| async move {
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         schema_schemas::create_schema(
             &ctx.db,
             fixture.tenant_id,
@@ -1786,7 +1850,7 @@ async fn reindex_switches_between_arbitrary_widths() {
         )
         .await
         .unwrap();
-        let transaction = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
+        let transaction = TransactionTrait::begin(&ctx.db).await.unwrap();
         let other_workspace = yorishiro::models::tenancy::create_workspace(
             &transaction,
             fixture.tenant_id,
@@ -1836,32 +1900,11 @@ async fn reindex_switches_between_arbitrary_widths() {
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(workspace.embedding_dimensions, Some(width as i32));
-            use sea_orm::sea_query::{Alias, Expr, Func};
-            use yorishiro::models::_entities::entity_embeddings as embeddings;
-            let length = Func::cust(Alias::new(
-                if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-                    "length"
-                } else {
-                    "vector_dims"
-                },
-            ))
-            .arg(Expr::col(embeddings::Column::Embedding));
-            let stored = embeddings::Entity::find()
-                .filter(embeddings::Column::EntityId.eq(entity.id))
-                .select_only()
-                .expr(length)
-                .into_tuple::<i32>()
-                .one(&ctx.db)
-                .await
-                .unwrap()
-                .unwrap();
-            let expected = if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-                width * size_of::<f32>()
-            } else {
-                width
-            };
-            assert_eq!(stored, expected as i32);
+            assert_eq!(
+                workspace.embedding_dimensions,
+                Some(i32::try_from(width).unwrap())
+            );
+            assert_stored_vector_width(&ctx.db, entity.id, width).await;
             assert_eq!(
                 embeddings::Entity::find()
                     .filter(embeddings::Column::EntityId.is_in([entity.id, other.id]))
@@ -1870,31 +1913,7 @@ async fn reindex_switches_between_arbitrary_widths() {
                     .unwrap(),
                 2
             );
-            let other_length = Func::cust(Alias::new(
-                if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-                    "length"
-                } else {
-                    "vector_dims"
-                },
-            ))
-            .arg(Expr::col(embeddings::Column::Embedding));
-            let retained = embeddings::Entity::find()
-                .filter(embeddings::Column::EntityId.eq(other.id))
-                .select_only()
-                .expr(other_length)
-                .into_tuple::<i32>()
-                .one(&ctx.db)
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(
-                retained,
-                if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-                    11 * size_of::<f32>() as i32
-                } else {
-                    11
-                }
-            );
+            assert_stored_vector_width(&ctx.db, other.id, 11).await;
             let hits = search::search_by_vector(
                 &ctx.db,
                 fixture.workspace_id,
@@ -1908,4 +1927,56 @@ async fn reindex_switches_between_arbitrary_widths() {
         }
     })
     .await;
+}
+
+async fn assert_stored_vector_width(
+    db: &sea_orm::DatabaseConnection,
+    entity_id: uuid::Uuid,
+    width: usize,
+) {
+    use sea_orm::sea_query::{Alias, Expr, Func};
+    use yorishiro::models::_entities::entity_embeddings as embeddings;
+
+    let sqlite = db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite;
+    let length = Func::cust(Alias::new(if sqlite { "length" } else { "vector_dims" }))
+        .arg(Expr::col(embeddings::Column::Embedding));
+    let stored = embeddings::Entity::find()
+        .filter(embeddings::Column::EntityId.eq(entity_id))
+        .select_only()
+        .expr(length)
+        .into_tuple::<i32>()
+        .one(db)
+        .await
+        .unwrap()
+        .unwrap();
+    let expected = if sqlite {
+        width * size_of::<f32>()
+    } else {
+        width
+    };
+    assert_eq!(
+        stored,
+        i32::try_from(expected).unwrap(),
+        "stored vector width for {entity_id}"
+    );
+}
+
+async fn stored_postgres_vector(
+    db: &sea_orm::DatabaseConnection,
+    entity_id: uuid::Uuid,
+) -> Option<sea_orm::prelude::PgVector> {
+    #[derive(FromQueryResult)]
+    struct VectorRow {
+        embedding: Option<sea_orm::prelude::PgVector>,
+    }
+
+    vectors::Entity::find()
+        .filter(vectors::Column::EntityId.eq(entity_id))
+        .select_only()
+        .column(vectors::Column::Embedding)
+        .into_model::<VectorRow>()
+        .one(db)
+        .await
+        .expect("query embedding")
+        .and_then(|row| row.embedding)
 }

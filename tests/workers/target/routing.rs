@@ -18,8 +18,12 @@ async fn production_dispatch_records_each_resolved_target() {
     use yorishiro::workers::reindex::{ReindexArgs, enqueue_for_class};
 
     crate::requests::boot_request::<App, _, _>(|request, ctx| async move {
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         for class in [
             WorkerClass::Shared,
             WorkerClass::Official,

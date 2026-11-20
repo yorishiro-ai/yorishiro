@@ -42,24 +42,22 @@ impl Task for ResyncEmbeddings {
 
         let candidates = entity_entities::missing_embeddings(&app_context.db, workspace_id).await?;
         let worker_class =
-            crate::controllers::extractors::resolve_worker_class(app_context, workspace_id)
-                .await
-                .map_err(|error| error.0)?;
+            crate::workers::target::resolve_worker_class(app_context, workspace_id).await?;
 
         let mut queued = 0;
         let mut failed = 0;
-        for candidate in &candidates {
+        for entity_id in &candidates {
             let job = EmbeddingSyncArgs {
                 lifecycle_id: None,
                 workspace_id,
-                entity_id: candidate.id,
+                entity_id: *entity_id,
                 worker_class,
             };
             match embedding_sync::enqueue_for_class(app_context, job).await {
                 Ok(()) => queued += 1,
                 Err(err) => {
                     failed += 1;
-                    tracing::error!(entity_id = %candidate.id, error = %err, "failed to queue entity");
+                    tracing::error!(entity_id = %entity_id, error = %err, "failed to queue entity");
                 }
             }
         }

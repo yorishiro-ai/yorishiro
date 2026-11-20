@@ -175,6 +175,10 @@ pub(crate) async fn clear(
 ///
 /// # Errors
 /// Returns database, ownership or dispatch failures.
+#[expect(
+    clippy::too_many_lines,
+    reason = "scheduler ownership, transaction rollback, and lock release stay visible on every failure path"
+)]
 pub(crate) async fn tick(
     app_context: &AppContext,
     tick: chrono::DateTime<chrono::Utc>,
@@ -297,7 +301,7 @@ pub(crate) async fn tick(
         };
 
         for ws in workspaces {
-            let worker_class = match crate::controllers::extractors::resolve_worker_class(
+            let worker_class = match crate::workers::target::resolve_worker_class(
                 app_context,
                 ws.id,
             )
@@ -309,7 +313,7 @@ pub(crate) async fn tick(
                     let release = release_scheduler_ownership(ownership).await;
                     return Err(Error::Message(format!(
                         "reindex scheduler: workspace {} target resolution failed: {}; ownership release: {release:?}",
-                        ws.id, err.0
+                        ws.id, err
                     )));
                 }
             };
@@ -362,6 +366,7 @@ pub(crate) async fn tick(
     Ok(())
 }
 
+#[must_use]
 pub fn scheduler_failure_message(
     dispatch_errors: &[String],
     release_error: Option<&str>,
@@ -377,7 +382,8 @@ pub fn scheduler_failure_message(
         dispatch_errors.join("; ")
     );
     if let Some(err) = release_error {
-        message.push_str(&format!("; scheduler ownership release also failed: {err}"));
+        message.push_str("; scheduler ownership release also failed: ");
+        message.push_str(err);
     }
     Some(message)
 }
@@ -431,6 +437,7 @@ async fn release_scheduler_ownership(
     }
 }
 
+#[must_use]
 pub fn is_due(
     scheduled_for: chrono::DateTime<chrono::Utc>,
     tick: chrono::DateTime<chrono::Utc>,

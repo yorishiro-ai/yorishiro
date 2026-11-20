@@ -146,7 +146,10 @@ fn topology_advisories_cover_contention_and_support_boundaries() {
     let sqlite = "sqlite://app.sqlite3?mode=rwc";
     let pg = "postgres://localhost/app";
 
-    assert!(topology_advisories(&topology(sqlite, 10, &sqlite_queue(1))).is_empty());
+    assert_eq!(
+        topology_advisories(&topology(sqlite, 10, &sqlite_queue(1))),
+        [] as [String; 0]
+    );
     assert_eq!(
         topology_advisories(&topology(sqlite, 10, &sqlite_queue(4))).len(),
         1
@@ -173,8 +176,14 @@ fn topology_advisories_cover_contention_and_support_boundaries() {
     assert_eq!(advisories.len(), 1);
     assert!(advisories[0].contains("supported"), "{advisories:?}");
     assert!(advisories[0].contains("database's host"), "{advisories:?}");
-    assert!(topology_advisories(&topology(pg, 100, &redis(8))).is_empty());
-    assert!(topology_advisories(&topology(pg, 100, &postgres(8))).is_empty());
+    assert_eq!(
+        topology_advisories(&topology(pg, 100, &redis(8))),
+        [] as [String; 0]
+    );
+    assert_eq!(
+        topology_advisories(&topology(pg, 100, &postgres(8))),
+        [] as [String; 0]
+    );
 }
 
 fn with_queue(num_workers: u32) -> loco_rs::config::Config {

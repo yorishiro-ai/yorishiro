@@ -14,7 +14,7 @@ pub(crate) fn now() -> DateTime<Utc> {
     Utc::now()
 }
 
-/// Adapts an instant to SeaORM's fixed-offset timestamp type without changing its epoch.
+/// Adapts an instant to `SeaORM`'s fixed-offset timestamp type without changing its epoch.
 #[must_use]
 pub(crate) fn database_instant(instant: DateTime<Utc>) -> DateTime<chrono::FixedOffset> {
     instant.into()
@@ -22,11 +22,10 @@ pub(crate) fn database_instant(instant: DateTime<Utc>) -> DateTime<chrono::Fixed
 
 /// Formats an instant in SQLite's offset-bearing timestamp text shape for the configured zone.
 #[must_use]
-pub(crate) fn sqlite_timestamp<T: chrono::TimeZone>(instant: DateTime<T>, timezone: Tz) -> String {
+pub(crate) fn sqlite_timestamp<T: chrono::TimeZone>(instant: &DateTime<T>, timezone: Tz) -> String {
     instant
         .with_timezone(&timezone)
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
-        .clone()
 }
 
 /// Parses a configured IANA timezone name.
@@ -38,7 +37,7 @@ pub fn parse_timezone(name: &str) -> Result<Tz, chrono_tz::ParseError> {
 }
 
 /// Renders an instant in the configured IANA timezone without changing the instant.
-pub fn in_timezone<T: chrono::TimeZone>(instant: DateTime<T>, timezone: Tz) -> DateTime<Tz> {
+pub fn in_timezone<T: chrono::TimeZone>(instant: &DateTime<T>, timezone: Tz) -> DateTime<Tz> {
     instant.with_timezone(&timezone)
 }
 
@@ -46,7 +45,7 @@ pub fn in_timezone<T: chrono::TimeZone>(instant: DateTime<T>, timezone: Tz) -> D
 #[must_use]
 pub(crate) fn render<T: chrono::TimeZone>(
     ctx: &loco_rs::app::AppContext,
-    instant: DateTime<T>,
+    instant: &DateTime<T>,
 ) -> DateTime<Tz> {
     in_timezone(instant, configured(ctx))
 }

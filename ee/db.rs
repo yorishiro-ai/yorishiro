@@ -204,6 +204,7 @@ pub fn sqlite_scheduler_lock_path(uri: &str) -> Result<PathBuf, String> {
     )))
 }
 
+#[must_use]
 pub fn sqlite_options_are_in_memory(options: &SqliteConnectOptions) -> bool {
     let filename = options.get_filename();
     if filename.as_os_str().is_empty() {

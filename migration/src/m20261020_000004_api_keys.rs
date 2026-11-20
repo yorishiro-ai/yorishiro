@@ -23,6 +23,10 @@ impl MigrationTrait for Migration {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered migration DDL keeps table definitions, constraints, and grants together"
+)]
 async fn up_api_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     manager
         .create_table(

@@ -61,6 +61,36 @@ pub struct PendingDispatch {
     pub priority: Option<i32>,
 }
 
+impl TryFrom<(Model, Option<lifecycle::Model>)> for PendingDispatch {
+    type Error = YorishiroError;
+
+    fn try_from((row, lifecycle): (Model, Option<lifecycle::Model>)) -> Result<Self, Self::Error> {
+        let tags = row
+            .tags
+            .map(serde_json::from_value)
+            .transpose()
+            .internal()?;
+        Ok(Self {
+            id: row.id,
+            lifecycle_id: row.lifecycle_id,
+            job_name: lifecycle
+                .as_ref()
+                .map_or_else(|| "query_embedding".to_owned(), |row| row.job_name.clone()),
+            worker_class: lifecycle
+                .as_ref()
+                .and_then(|row| WorkerClass::from_db_str(&row.worker_class))
+                .unwrap_or(WorkerClass::Shared),
+            payload: row.payload,
+            worker_name: row.worker_name,
+            queue_name: row.queue_name,
+            tags,
+            deadline_at: row.deadline_at,
+            workspace_id: row.workspace_id,
+            priority: row.priority,
+        })
+    }
+}
+
 fn payload_workspace_id(payload: &Value) -> Option<Uuid> {
     payload
         .get("workspace_id")
@@ -301,33 +331,7 @@ pub async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, Yori
         .all(db)
         .await
         .internal()?;
-    rows.into_iter()
-        .map(|(row, lifecycle)| {
-            let tags = row
-                .tags
-                .map(serde_json::from_value)
-                .transpose()
-                .internal()?;
-            Ok(PendingDispatch {
-                id: row.id,
-                lifecycle_id: row.lifecycle_id,
-                job_name: lifecycle
-                    .as_ref()
-                    .map_or_else(|| "query_embedding".to_owned(), |row| row.job_name.clone()),
-                worker_class: lifecycle
-                    .as_ref()
-                    .and_then(|row| WorkerClass::from_db_str(&row.worker_class))
-                    .unwrap_or(WorkerClass::Shared),
-                payload: row.payload,
-                worker_name: row.worker_name,
-                queue_name: row.queue_name,
-                tags,
-                deadline_at: row.deadline_at,
-                workspace_id: row.workspace_id,
-                priority: row.priority,
-            })
-        })
-        .collect()
+    rows.into_iter().map(PendingDispatch::try_from).collect()
 }
 
 /// Takes a lease on an unpublished dispatch so only one relay publishes it.

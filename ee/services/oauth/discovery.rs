@@ -23,8 +23,12 @@ fn is_https_or_loopback(url: &reqwest::Url) -> bool {
     url.scheme() == "https" || url.host_str().is_some_and(is_loopback_host)
 }
 
-/// Rejects a redirect whose target is not itself `https://`-or-loopback, regardless of the scheme the request that is being redirected started on: `reqwest`'s default policy follows redirects across schemes without restriction, which would let a compromised or misconfigured hop silently redirect an OIDC request to a plaintext target.
+/// Allows only HTTPS or loopback redirect targets.
+///
+/// `reqwest`'s default policy permits scheme changes, allowing a compromised or misconfigured hop to redirect an OIDC request to plaintext.
+///
 /// Delegates every accepted target to `Policy::default()`'s own `redirect`: a custom policy does not inherit the default policy's 10-hop limit and loop detection automatically.
+#[must_use]
 pub fn redirect_policy() -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(|attempt| {
         if !is_https_or_loopback(attempt.url()) {
@@ -87,7 +91,8 @@ impl ReqwestOAuthHttp {
     }
 
     /// Builds the adapter around a caller-supplied client, for callers that need their own timeouts or transport.
-    pub fn with_client(client: Client) -> Self {
+    #[must_use]
+    pub const fn with_client(client: Client) -> Self {
         Self { client }
     }
 

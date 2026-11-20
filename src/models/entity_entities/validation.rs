@@ -3,11 +3,6 @@ use serde_json::Value;
 use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::schema_schemas::metaschema;
 
-/// Escapes `~`/`/` per RFC 6901 before embedding a value as a JSON Pointer segment.
-fn escape_pointer_segment(segment: &str) -> String {
-    segment.replace('~', "~0").replace('/', "~1")
-}
-
 /// Represents where a validation error occurred as a JSON Pointer.
 /// For `required` violations, `instance_path()` alone only points at the containing object and doesn't say which property is missing, so the missing property name is appended.
 fn error_field_pointer(err: &jsonschema::ValidationError<'_>) -> String {
@@ -15,13 +10,14 @@ fn error_field_pointer(err: &jsonschema::ValidationError<'_>) -> String {
     if let jsonschema::error::ValidationErrorKind::Required { property } = err.kind()
         && let Some(name) = property.as_str()
     {
-        format!("{base}/{}", escape_pointer_segment(name))
+        err.instance_path().join(name).to_string()
     } else {
         base
     }
 }
 
-/// Validates `data` against the JSON Schema generated from the entity_type definition.
+/// Validates `data` against the JSON Schema generated from the `entity_type` definition.
+///
 /// Reuses `entity_type_to_json_schema`'s schema as-is so validation logic isn't duplicated between entities and the MCP inputSchema.
 ///
 /// # Errors

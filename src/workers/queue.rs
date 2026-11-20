@@ -52,6 +52,7 @@ impl QueuePolicy for CommunityQueuePolicy {
 }
 
 /// The policy a deployment gets when it does not choose one.
+#[must_use]
 pub fn default_queue_policy() -> Arc<dyn QueuePolicy> {
     Arc::new(CommunityQueuePolicy)
 }
@@ -77,6 +78,7 @@ const OFFICIAL_PRIORITY: i32 = 200;
 const SHARED_PRIORITY: i32 = 100;
 
 /// The provider priority band of each class: Loco dequeues larger values first, so the provider does the ordering.
+#[must_use]
 pub const fn priority(class: WorkerClass) -> i32 {
     match class {
         WorkerClass::TenantPrivate => TENANT_PRIVATE_PRIORITY,

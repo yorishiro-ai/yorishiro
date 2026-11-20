@@ -24,8 +24,12 @@ async fn community_task_scans_mismatch_without_constructing_a_provider() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let mut ctx = ctx;
         configure_deployment_metadata(&mut ctx);
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let settings = ctx
             .config
             .settings::<yorishiro::data::settings::Settings>()
@@ -56,87 +60,49 @@ async fn community_task_scans_mismatch_without_constructing_a_provider() {
                 .is_none(),
             "scheduler scan does not require a provider"
         );
-        task.run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
-            .await
-            .unwrap();
-        let lifecycle_count = yorishiro::models::queue_job_lifecycles::Entity::find()
-            .filter(
-                yorishiro::models::queue_job_lifecycles::Column::WorkspaceId
-                    .eq(fixture.workspace_id),
-            )
-            .filter(yorishiro::models::queue_job_lifecycles::Column::JobName.eq("startup_reindex"))
-            .count(&ctx.db)
-            .await
-            .unwrap();
-        assert_eq!(
-            lifecycle_count, 1,
-            "the metadata-only scan enqueued the mismatch without installing a provider"
-        );
-        let outbox_count = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
-            .filter(
-                yorishiro::models::_entities::queue_job_dispatch_outbox::Column::WorkspaceId
-                    .eq(fixture.workspace_id),
-            )
-            .filter(
-                yorishiro::models::_entities::queue_job_dispatch_outbox::Column::Id.in_subquery(
-                    yorishiro::models::queue_job_lifecycles::Entity::find()
-                        .select_only()
-                        .column(yorishiro::models::queue_job_lifecycles::Column::Id)
-                        .filter(
-                            yorishiro::models::queue_job_lifecycles::Column::JobName
-                                .eq("startup_reindex"),
-                        )
-                        .filter(
-                            yorishiro::models::queue_job_lifecycles::Column::WorkspaceId
-                                .eq(fixture.workspace_id),
-                        )
-                        .into_query(),
-                ),
-            )
-            .count(&ctx.db)
-            .await
-            .unwrap();
-        assert_eq!(outbox_count, 1);
-        task.run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
-            .await
-            .unwrap();
-        let repeated_lifecycle_count = yorishiro::models::queue_job_lifecycles::Entity::find()
-            .filter(
-                yorishiro::models::queue_job_lifecycles::Column::WorkspaceId
-                    .eq(fixture.workspace_id),
-            )
-            .filter(yorishiro::models::queue_job_lifecycles::Column::JobName.eq("startup_reindex"))
-            .count(&ctx.db)
-            .await
-            .unwrap();
-        let repeated_outbox_count =
-            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
+        for _ in 0..2 {
+            task.run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
+                .await
+                .unwrap();
+            let lifecycle_count = yorishiro::models::queue_job_lifecycles::Entity::find()
+                .filter(
+                    yorishiro::models::queue_job_lifecycles::Column::WorkspaceId
+                        .eq(fixture.workspace_id),
+                )
+                .filter(yorishiro::models::queue_job_lifecycles::Column::JobName.eq("startup_reindex"))
+                .count(&ctx.db)
+                .await
+                .unwrap();
+            assert_eq!(
+                lifecycle_count, 1,
+                "the metadata-only scan enqueued the mismatch without installing a provider"
+            );
+            let outbox_count = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find()
                 .filter(
                     yorishiro::models::_entities::queue_job_dispatch_outbox::Column::WorkspaceId
                         .eq(fixture.workspace_id),
                 )
                 .filter(
-                    yorishiro::models::_entities::queue_job_dispatch_outbox::Column::Id
-                        .in_subquery(
-                            yorishiro::models::queue_job_lifecycles::Entity::find()
-                                .select_only()
-                                .column(yorishiro::models::queue_job_lifecycles::Column::Id)
-                                .filter(
-                                    yorishiro::models::queue_job_lifecycles::Column::JobName
-                                        .eq("startup_reindex"),
-                                )
-                                .filter(
-                                    yorishiro::models::queue_job_lifecycles::Column::WorkspaceId
-                                        .eq(fixture.workspace_id),
-                                )
-                                .into_query(),
-                        ),
+                    yorishiro::models::_entities::queue_job_dispatch_outbox::Column::Id.in_subquery(
+                        yorishiro::models::queue_job_lifecycles::Entity::find()
+                            .select_only()
+                            .column(yorishiro::models::queue_job_lifecycles::Column::Id)
+                            .filter(
+                                yorishiro::models::queue_job_lifecycles::Column::JobName
+                                    .eq("startup_reindex"),
+                            )
+                            .filter(
+                                yorishiro::models::queue_job_lifecycles::Column::WorkspaceId
+                                    .eq(fixture.workspace_id),
+                            )
+                            .into_query(),
+                    ),
                 )
                 .count(&ctx.db)
                 .await
                 .unwrap();
-        assert_eq!(repeated_lifecycle_count, 1);
-        assert_eq!(repeated_outbox_count, 1);
+            assert_eq!(outbox_count, 1);
+        }
         assert!(
             crate::has_active_job(&ctx.db, "startup_reindex", fixture.workspace_id)
                 .await
@@ -188,7 +154,7 @@ async fn enqueue_rejection_is_workspace_scoped_and_scan_continues() {
             ),
             DbBackend::Sqlite => format!(
                 "CREATE TRIGGER reject_one_workspace BEFORE INSERT ON queue_job_dispatch_outbox WHEN hex(NEW.workspace_id) = '{}' BEGIN SELECT RAISE(ABORT, 'reject selected workspace'); END",
-                failed.as_bytes().iter().map(|byte| format!("{byte:02X}")).collect::<String>()
+                hex::encode_upper(failed.as_bytes())
             ),
             backend => panic!("unsupported test backend {backend:?}"),
         };
@@ -224,7 +190,7 @@ async fn all_enqueue_failures_are_aggregated_with_each_workspace_id() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let mut ctx = ctx;
         configure_deployment_metadata(&mut ctx);
-        let first = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let first = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         let transaction = ctx.db.begin().await.unwrap();
         let second_workspace = yorishiro::models::tenancy::create_workspace(
             &transaction,
@@ -268,8 +234,12 @@ async fn missing_lifecycle_table_returns_workspace_lookup_error() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let mut ctx = ctx;
         configure_deployment_metadata(&mut ctx);
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let settings = ctx
             .config
             .settings::<yorishiro::data::settings::Settings>()

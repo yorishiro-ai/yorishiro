@@ -25,7 +25,7 @@ pub(crate) async fn list_workspaces(
         .await?
         .into_iter()
         .map(|record| WorkspaceRecord {
-            created_at: crate::data::time::render(&ctx, record.created_at).fixed_offset(),
+            created_at: crate::data::time::render(&ctx, &record.created_at).fixed_offset(),
             ..record
         })
         .collect();

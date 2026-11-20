@@ -21,6 +21,10 @@ impl MigrationTrait for Migration {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered migration DDL keeps table definitions, constraints, and grants together"
+)]
 async fn up_workspace_schema_fork_heads(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let history = Table::create()
         .table(Alias::new("workspace_schema_fork_heads"))

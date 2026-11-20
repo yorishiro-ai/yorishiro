@@ -1,10 +1,11 @@
 //! Builds the text to embed from an entity and syncs its vector, checking the workspace's provider assignment and concurrency token.
 
-use sea_orm::{DatabaseConnection, DbErr};
+use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QuerySelect};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::YorishiroError;
+use crate::models::_entities::workspace_workspaces::{Column, Entity};
 use crate::models::entity_entities;
 use crate::models::entity_entities::EmbeddingSnapshot;
 use crate::models::entity_entities::EntityRecord;
@@ -64,8 +65,6 @@ async fn sync_embedding(
             message: "workspace reindex is in progress".into(),
         });
     }
-    use crate::models::_entities::workspace_workspaces::{Column, Entity};
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
     let stamp = Entity::find()
         .select_only()
         .columns([Column::EmbeddingModel, Column::EmbeddingDocumentPrefix])
@@ -85,11 +84,7 @@ async fn sync_embedding(
     let chain =
         super::resolution::resolve_embedding_chain(conn, workspace_id, provider.dimensions())
             .await?;
-    let expected_dimensions = chain.workspace_dimensions.unwrap_or(
-        i32::try_from(chain.deployment_dimensions)
-            .unwrap_or(crate::services::embedding::DEFAULT_EMBEDDING_DIMENSIONS as i32),
-    );
-    super::validate_vector(&vector, expected_dimensions as usize)?;
+    super::validate_vector(&vector, chain.dimensions()?)?;
 
     if let Some(expected) = chain.workspace_model.as_ref()
         && expected.as_str() != provider.model_name()

@@ -1,6 +1,10 @@
 //! The MCP server type, its tool dispatch and the scope metadata it advertises.
 
-use super::*;
+use super::{
+    ApiKeyScope, AppContext, Arc, CallToolRequestParams, CallToolResponse, ErrorData,
+    ListToolsResult, McpToolPolicy, PaginatedRequestParams, RequestContext, ResultType, RoleServer,
+    ServerCapabilities, ServerConfig, ServerHandler, ToolRouter, err_to_tool_result, tool_handler,
+};
 
 /// Yorishiro MCP server assembled from registered `#[tool_router]` implementations.
 #[derive(Clone)]
@@ -23,7 +27,7 @@ impl YorishiroMcpServer {
         }
     }
 
-    pub(crate) fn app_context(&self) -> &AppContext {
+    pub(crate) const fn app_context(&self) -> &AppContext {
         &self.ctx
     }
 
@@ -65,6 +69,7 @@ impl YorishiroMcpServer {
 }
 
 /// Declares the scope used by both tool authorization and capability discovery.
+#[must_use]
 pub fn scope_requirement(scope: ApiKeyScope) -> rmcp::model::MetaObject {
     let mut meta = rmcp::model::MetaObject::new();
     meta.0
@@ -94,24 +99,24 @@ impl ServerHandler for YorishiroMcpServer {
         self.tool_router.call(tcc).await
     }
 
-    async fn list_tools(
+    fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
-    ) -> Result<ListToolsResult, ErrorData> {
+    ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send {
         let supports_cache_hints = context
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
         let mut tools = self.tool_router.list_all();
         tools.retain(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()));
-        Ok(ListToolsResult {
+        std::future::ready(Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
             tools,
             meta: None,
             next_cursor: None,
             ttl_ms: supports_cache_hints.then_some(0),
             cache_scope: supports_cache_hints.then_some(rmcp::model::CacheScope::Public),
-        })
+        }))
     }
 
     fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {

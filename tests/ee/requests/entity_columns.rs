@@ -28,7 +28,10 @@ async fn set_get_and_reset_round_trip_in_display_order() {
             "response: {:?}",
             before.text()
         );
-        assert!(before.json::<Vec<serde_json::Value>>().is_empty());
+        assert_eq!(
+            before.json::<Vec<serde_json::Value>>(),
+            [] as [serde_json::Value; 0]
+        );
 
         let put = request
             .put("/api/workspace/entity-columns/task")
@@ -98,7 +101,10 @@ async fn set_get_and_reset_round_trip_in_display_order() {
             .get("/api/workspace/entity-columns")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
-        assert!(after_reset.json::<Vec<serde_json::Value>>().is_empty());
+        assert_eq!(
+            after_reset.json::<Vec<serde_json::Value>>(),
+            [] as [serde_json::Value; 0]
+        );
     })
     .await;
 }
@@ -131,7 +137,7 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
         );
 
         let over_limit: Vec<String> = (0
-            ..yorishiro::edition::ee::models::entity_column_preferences::MAX_VISIBLE_COLUMNS + 1)
+            ..=yorishiro::edition::ee::models::entity_column_preferences::MAX_VISIBLE_COLUMNS)
             .map(|i| format!("f{i}"))
             .collect();
         let too_many = request
@@ -194,7 +200,7 @@ async fn an_empty_selection_is_stored_as_a_choice() {
             1,
             "an empty choice must still be a row: {stored:?}"
         );
-        assert!(stored[0]["columns"].as_array().unwrap().is_empty());
+        assert_eq!(stored[0]["columns"], serde_json::json!([]));
     })
     .await;
 }

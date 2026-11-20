@@ -10,10 +10,14 @@ use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
 
 use super::*;
 
-/// The fill_defaults MCP path must be discoverable, execute with Migration scope, persist its
+/// The `fill_defaults` MCP path must be discoverable, execute with Migration scope, persist its
 /// writes and snapshot, and leave an audit record. A lower-scope key receives an isError result
 /// and cannot change the entity.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the same migration data checks MCP scope, queued policy changes, worker effects, and undo"
+)]
 async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
     use sea_orm::EntityTrait;
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -22,7 +26,6 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             workspace_id,
             owner_id,
             api_key: migration_key,
-            ..
         } = TestTenant::create(
             &request,
             &ctx,
@@ -154,7 +157,7 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
                 &request,
                 &session,
                 &read_key,
-                10 + index as i64,
+                10 + i64::try_from(index).unwrap(),
                 "tools/call",
                 json!({"name":name,"arguments":{"job_id":job_id}}),
             )

@@ -1,4 +1,6 @@
 use super::boot_request;
+#[cfg(feature = "enterprise")]
+use sea_orm::{ColumnTrait, QueryFilter};
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::{entity_entities, schema_schemas};
@@ -32,7 +34,6 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
         licence(chrono::Utc::now().timestamp() + 3600);
         request.post("/api/entities").add_header("Authorization", format!("Bearer {}",tenant.api_key))
             .json(&body).await.assert_status(StatusCode::CONFLICT);
-        use sea_orm::{ColumnTrait, QueryFilter};
         let seed = entity_entities::Entity::find()
             .filter(yorishiro::models::_entities::entity_entities::Column::WorkspaceId.eq(tenant.workspace_id))
             .one(&ctx.db).await.unwrap().unwrap();
@@ -60,6 +61,10 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
 
 /// The full shape a caller like `ee/`'s fill-proposal confirmation depends on: a job's snapshots restore the entities they cover, and one deleted since the snapshot is counted rather than failing the rest.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one undo job must cover both a surviving entity and a deleted entity while verifying queued and completed HTTP results"
+)]
 async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -352,7 +357,7 @@ async fn entity_update_refuses_a_stale_expected_updated_at() {
         };
         let (first, second) = tokio::join!(write("racer-one"), write("racer-two"));
         let mut statuses = [first.status_code().as_u16(), second.status_code().as_u16()];
-        statuses.sort();
+        statuses.sort_unstable();
         assert_eq!(statuses, [200, 409], "first: {}, second: {}", first.text(), second.text());
     })
     .await;

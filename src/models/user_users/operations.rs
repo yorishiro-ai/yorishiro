@@ -8,6 +8,7 @@ use sea_orm::{Condition, QuerySelect};
 
 use super::{ActiveModel, Entity, Model};
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::_entities::tenant_memberships as memberships;
 use crate::models::_entities::user_users::Column;
 
 /// # Errors
@@ -31,7 +32,6 @@ pub async fn reset_root_password_by_operator(
             ),
         });
     }
-    use crate::models::_entities::tenant_memberships as memberships;
     let txn = crate::db::begin_write(db).await.internal()?;
     let current = memberships::Entity::find()
         .filter(memberships::Column::UserId.eq(user_id))
@@ -116,7 +116,6 @@ pub async fn delete_by_operator(
         });
     }
     let txn = crate::db::begin_write(db).await.internal()?;
-    use crate::models::_entities::tenant_memberships as memberships;
     // Match login key issuance and membership mutation lock ordering: tenant fence, then user fence, before the row lock.
     let preliminary = memberships::Entity::find()
         .filter(memberships::Column::UserId.eq(user_id))

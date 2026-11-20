@@ -1,6 +1,6 @@
 use chrono::TimeZone;
 use chrono::Utc;
-use sea_orm::{Database, EntityTrait};
+use sea_orm::{ColumnTrait, Database, EntityTrait, QueryFilter};
 use yorishiro::models::_entities::queue_job_lifecycles::Entity;
 
 use yorishiro::models::queue_job_lifecycles::{
@@ -11,7 +11,6 @@ use yorishiro::models::queue_job_lifecycles::{
 async fn the_database_accepts_every_status_the_enum_defines() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
         let concurrency_key = uuid::Uuid::now_v7().to_string();
-        use sea_orm::{ColumnTrait, QueryFilter};
 
         let db = ctx.db.clone();
         let id = uuid::Uuid::now_v7();

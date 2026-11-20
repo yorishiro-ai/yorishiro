@@ -52,6 +52,7 @@ pub struct MaintenanceState {
 impl MaintenanceState {
     /// The error to refuse a request with, or `None` when it may proceed.
     /// `is_write` decides whether read-only applies; full lock refuses either way.
+    #[must_use]
     pub fn refusal(&self, is_write: bool) -> Option<YorishiroError> {
         let (refuse, read_only) = match self.mode {
             MaintenanceMode::Off => (false, false),
@@ -108,7 +109,7 @@ pub async fn get(conn: &impl ConnectionTrait) -> Result<MaintenanceState, Yorish
 
     Ok(MaintenanceState {
         mode,
-        retry_after: row.retry_after.max(1) as u32,
+        retry_after: row.retry_after.max(1).cast_unsigned(),
         reason: row.reason,
     })
 }

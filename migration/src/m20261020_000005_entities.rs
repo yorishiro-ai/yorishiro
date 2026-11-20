@@ -22,6 +22,10 @@ impl MigrationTrait for Migration {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered migration DDL keeps table definitions, constraints, and grants together"
+)]
 async fn up_entities(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let mut token = ColumnDef::new(Alias::new("embedding_sync_token"));
     token.text().not_null();
@@ -165,7 +169,7 @@ async fn up_entities(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
 
             // Raw strings: a `\` line continuation would join `BEGIN` and `IF` into one token.
             conn.execute_unprepared(
-                r#"CREATE OR REPLACE FUNCTION _set_embedding_sync_token_insert()
+                r"CREATE OR REPLACE FUNCTION _set_embedding_sync_token_insert()
 RETURNS trigger AS $func$
 BEGIN
     IF NEW.embedding_sync_token IS NULL THEN
@@ -173,7 +177,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$func$ LANGUAGE plpgsql;"#,
+$func$ LANGUAGE plpgsql;",
             )
             .await?;
             conn.execute_unprepared(
@@ -185,13 +189,13 @@ $func$ LANGUAGE plpgsql;"#,
             .await?;
 
             conn.execute_unprepared(
-                r#"CREATE OR REPLACE FUNCTION _set_embedding_sync_token_update()
+                r"CREATE OR REPLACE FUNCTION _set_embedding_sync_token_update()
 RETURNS trigger AS $func$
 BEGIN
     NEW.embedding_sync_token := uuidv7()::text;
     RETURN NEW;
 END;
-$func$ LANGUAGE plpgsql;"#,
+$func$ LANGUAGE plpgsql;",
             )
             .await?;
             conn.execute_unprepared(

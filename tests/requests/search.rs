@@ -472,7 +472,7 @@ async fn a_disabled_embedding_provider_is_reported_by_the_worker() {
             "local_model": "multilingual-e5-base", "local_max_sequence_length": 512
         },
         "rate_limit": {
-            "auth_max_requests": 10, "auth_window_seconds": 60, "search_tokens_per_minute": 100000
+            "auth_max_requests": 10, "auth_window_seconds": 60, "search_tokens_per_minute": 100_000
         },
         "db_load_guard": { "threshold": 0, "sustain_seconds": 30, "poll_seconds": 5 }
     }))

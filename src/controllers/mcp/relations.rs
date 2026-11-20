@@ -20,6 +20,7 @@ use crate::models::entity_relations::{self, SetRelationStatusInput};
 pub struct CreateRelationArgs {
     pub source_id: Uuid,
     pub target_id: Uuid,
+    #[expect(clippy::doc_markdown, reason = "MCP exposes this description verbatim")]
     /// relation_type name declared in the schema's `relation_types` definition.
     pub relation_type: String,
     /// Arbitrary properties attached to the relation (JSON object, defaults to an empty object if omitted).
@@ -190,7 +191,7 @@ impl YorishiroMcpServer {
         match entity_relations::delete(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        }
         authorized.commit().await?;
         ok_json(serde_json::json!({ "deleted": true }))
     }

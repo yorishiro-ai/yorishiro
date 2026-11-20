@@ -1,7 +1,9 @@
 use axum::http::StatusCode;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::App;
+use yorishiro::models::_entities::entity_entities::{Column, Entity};
 
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
@@ -40,8 +42,6 @@ async fn export_jsonl_tool_matches_the_rest_export() {
         let rest = request.get("/api/export.jsonl").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
         rest.assert_status(StatusCode::OK);
         assert_eq!(text, rest.text());
-        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-        use yorishiro::models::_entities::entity_entities::{Column, Entity};
         Entity::update_many()
             .col_expr(Column::Data, sea_orm::sea_query::Expr::value(json!({"title":"x".repeat(8 * 1024 * 1024)})))
             .filter(Column::Id.eq(entity_id.parse::<Uuid>().unwrap())).exec(&ctx.db).await.unwrap();

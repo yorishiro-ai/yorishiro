@@ -1,13 +1,17 @@
 //! Resolving a presented key to its workspace, tenant and scope, and recording its use.
 
-use super::*;
+use super::{
+    AppContextBackend, AuthContext, ColumnTrait, ConnectionTrait, DbHandle, Entity, EntityTrait,
+    Expr, FromQueryResult, Model, QueryFilter, ResultExt, Uuid, WORKSPACE_HEADER, YorishiroError,
+    hash_key, stored_scope,
+};
 
 impl Entity {
     /// Verifies a presented raw API key and resolves the workspace, tenant, and scope it belongs to.
     ///
     /// At this point neither the workspace nor the tenant is known yet, so RLS's `app.current_workspace`/`app.current_tenant` can't be set, which is why this takes the whole [`DbHandle`] rather than a scoped connection.
     ///
-    /// SeaQuery calls the `authenticate_api_key` SECURITY DEFINER function to read through RLS and projects only id/workspace_id/tenant_id/scope/user_id/audit, never key_hash itself.
+    /// `SeaQuery` calls the `authenticate_api_key` SECURITY DEFINER function to read through RLS and projects only `id/workspace_id/tenant_id/scope/user_id/audit`, never `key_hash` itself.
     ///
     /// A workspace-scoped key always resolves to the workspace recorded on it.
     /// A tenant-scoped key resolves `requested_workspace` when present, otherwise it has no workspace.
@@ -122,7 +126,7 @@ impl Entity {
 
     /// SQLite equivalent of [`Self::authenticate`], for a deployment with no `DbHandle` (see `Hooks::after_context`).
     ///
-    /// The Postgres path goes through the SECURITY DEFINER function specifically to read rows RLS would otherwise hide from an unauthenticated caller; SQLite has no RLS at all, so there is nothing to bypass, and this queries the tables directly with the SeaORM entity API.
+    /// The Postgres path goes through the SECURITY DEFINER function specifically to read rows RLS would otherwise hide from an unauthenticated caller; SQLite has no RLS at all, so there is nothing to bypass, and this queries the tables directly with the `SeaORM` entity API.
     /// Workspace resolution follows the same rules as the Postgres path, for both workspace-scoped and tenant-scoped keys.
     ///
     /// The default authenticator selects this implementation for SQLite.
@@ -200,7 +204,7 @@ impl Entity {
     /// Deliberately not run on the request's `DatabaseTransaction`: a read-only handler drops that transaction without committing, which would silently roll this update back along with it.
     /// Every caller uses a short-lived connection from `TenantDb::acquire_for_workspace` instead.
     ///
-    /// This call receives a bare RLS-scoped `PgConnection`, not a SeaORM `ConnectionTrait`, so the write must use `sqlx` on that connection.
+    /// This call receives a bare RLS-scoped `PgConnection`, not a `SeaORM` `ConnectionTrait`, so the write must use `sqlx` on that connection.
     pub(crate) async fn touch_last_used_on_connection(
         conn: &mut sea_orm::sqlx::PgConnection,
         api_key_id: Uuid,
@@ -208,7 +212,7 @@ impl Entity {
         use crate::models::_entities::api_keys::Column;
         use sea_orm::sea_query::{Expr, ExprTrait, Func, PostgresQueryBuilder, Query};
         let (sql, _) = Query::update()
-            .table(Entity)
+            .table(Self)
             .value(
                 Column::LastUsedAt,
                 Func::cust(sea_orm::sea_query::Alias::new("now")),
@@ -229,7 +233,7 @@ impl Entity {
     ) -> Result<Option<Model>, YorishiroError> {
         use crate::models::_entities::api_keys::Column;
 
-        let Some(key) = Entity::find()
+        let Some(key) = Self::find()
             .filter(Column::KeyHash.eq(key_hash))
             .one(conn)
             .await
@@ -257,7 +261,7 @@ impl Entity {
     pub(crate) async fn touch_last_used(conn: &impl ConnectionTrait, api_key_id: Uuid) {
         use crate::models::_entities::api_keys::Column;
 
-        if let Err(err) = Entity::update_many()
+        if let Err(err) = Self::update_many()
             .col_expr(Column::LastUsedAt, Expr::value(crate::data::time::now()))
             .filter(Column::Id.eq(api_key_id))
             .exec(conn)

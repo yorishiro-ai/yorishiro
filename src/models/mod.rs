@@ -4,6 +4,13 @@
 //! So a table gets its module here even when only an overlay's code reads and writes it: the schema is one set of migrations, one set of entities, and the behaviour that overlay owns stays in that overlay's own module for the table.
 
 // Shared plumbing: the generated entities, the `db_enum!` conversions and pagination.
+#[allow(
+    clippy::all,
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::restriction,
+    reason = "SeaORM-generated code is replaced by make entities"
+)]
 pub mod _entities;
 pub mod db_enum;
 pub mod pagination;

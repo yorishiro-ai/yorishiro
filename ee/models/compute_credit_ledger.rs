@@ -105,6 +105,7 @@ async fn insert_row(
 }
 
 /// Debits the positive actual cost after successful work without permitting an overdraft.
+///
 /// PostgreSQL serializes competing debits through the workspace lock; SQLite rejects a stale write transaction as a whole.
 ///
 /// # Errors

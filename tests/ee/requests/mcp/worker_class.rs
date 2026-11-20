@@ -32,12 +32,12 @@ async fn worker_class_tools_match_rest_and_enforce_schema_scope() {
             json!({"name":"get_worker_class","arguments":{}}),
         )
         .await;
-        let rest = request
+        let http_response = request
             .get("/api/workspace/worker-class")
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
             .await;
-        rest.assert_status_ok();
-        assert_eq!(tool_result_json(&current), rest.json::<Value>());
+        http_response.assert_status_ok();
+        assert_eq!(tool_result_json(&current), http_response.json::<Value>());
         assert_eq!(tool_result_json(&current)["worker_class"], "shared");
         let read_key = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,

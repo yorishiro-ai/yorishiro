@@ -1,6 +1,9 @@
 //! Authenticating a request's bearer key and authorizing each tool call against its scope and the active policy.
 
-use super::*;
+use super::{
+    ApiKeyScope, AppContext, AuthContext, CallToolResult, DatabaseTransaction, ErrorData, Parts,
+    YorishiroError, auth, err_to_tool_result,
+};
 
 /// Auth context plus a transaction with RLS already configured, held by calls that passed authentication and scope checks.
 pub(crate) struct Authorized {
@@ -13,7 +16,7 @@ pub(crate) struct Authorized {
 }
 
 impl Authorized {
-    pub(crate) fn txn(&self) -> &DatabaseTransaction {
+    pub(crate) const fn txn(&self) -> &DatabaseTransaction {
         &self.txn
     }
 
@@ -48,11 +51,11 @@ impl Authorized {
         Ok(())
     }
 
-    pub(crate) fn auth_context(&self) -> &AuthContext {
+    pub(crate) const fn auth_context(&self) -> &AuthContext {
         &self.ctx
     }
 
-    pub(crate) fn workspace_id(&self) -> uuid::Uuid {
+    pub(crate) const fn workspace_id(&self) -> uuid::Uuid {
         self.workspace_id
     }
 }
@@ -76,7 +79,7 @@ pub(crate) enum VerifyOutcome {
 
 /// Copies the request's headers into the shape `auth::Authenticator` takes: the same thing the REST adapter does, so a replaced authenticator sees an MCP call exactly as it sees a REST one.
 pub(super) fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
-    auth::extract_bearer_key(parts).ok_or_else(|| {
+    auth::extract_bearer_key(&parts.headers).ok_or_else(|| {
         ErrorData::invalid_request("missing or malformed Authorization header", None)
     })
 }

@@ -138,9 +138,13 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
 /// An entity referencing a schema that already exists in the destination workspace (created directly, not via this import) has to fall through to a lookup by id instead, and that lookup is memoized (`import::import_jsonl`'s `schema_name_by_id` cache) since a batch of entities sharing one pre-existing schema is the common case.
 ///
 /// Two entities against the same pre-existing schema exercises both the cache miss (first entity)
-/// and the cache hit (second entity), and asserts both actually land with the right entity_type
+/// and the cache hit (second entity), and asserts both actually land with the right `entity_type`
 /// rather than just checking the import didn't error.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one import checks cached schema resolution and replays committed effects to verify crash recovery does not duplicate entities"
+)]
 async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant { api_key: key, .. } = TestTenant::create(
@@ -165,39 +169,24 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             .expect("schema id")
             .to_string();
 
-        let body = format!(
-            "{}\n{}\n",
+        let [first, second] = ["first", "second"].map(|title| {
             serde_json::json!({
-                "kind": "entity",
-                "record": {
-                    "id": uuid::Uuid::new_v4(),
-                    "workspace_id": uuid::Uuid::new_v4(),
-                    "schema_id": schema_id,
-                    "schema_version": 1,
-                    "entity_type": "project",
-                    "data": { "title": "first", "status": "active" },
-                    "created_at": chrono::Utc::now(),
-                    "updated_at": chrono::Utc::now(),
-                    "created_by": null,
-                    "updated_by": null,
-                }
-            }),
-            serde_json::json!({
-                "kind": "entity",
-                "record": {
-                    "id": uuid::Uuid::new_v4(),
-                    "workspace_id": uuid::Uuid::new_v4(),
-                    "schema_id": schema_id,
-                    "schema_version": 1,
-                    "entity_type": "project",
-                    "data": { "title": "second", "status": "active" },
-                    "created_at": chrono::Utc::now(),
-                    "updated_at": chrono::Utc::now(),
-                    "created_by": null,
-                    "updated_by": null,
-                }
-            }),
-        );
+                        "kind": "entity",
+                        "record": {
+                            "id": uuid::Uuid::new_v4(),
+                            "workspace_id": uuid::Uuid::new_v4(),
+                            "schema_id": schema_id,
+                            "schema_version": 1,
+                            "entity_type": "project",
+                            "data": { "title": title, "status": "active" },
+                            "created_at": chrono::Utc::now(),
+                            "updated_at": chrono::Utc::now(),
+                            "created_by": null,
+                            "updated_by": null,
+                        }
+            })
+        });
+        let body = format!("{first}\n{second}\n");
 
         let import_response = request
             .post("/api/import.jsonl")
@@ -216,7 +205,10 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             .get("/api/entities?entity_type=project")
             .add_header("Authorization", auth.clone())
             .await;
-        assert!(before.json::<Vec<serde_json::Value>>().is_empty());
+        assert_eq!(
+            before.json::<Vec<serde_json::Value>>(),
+            [] as [serde_json::Value; 0]
+        );
         super::fill_defaults::finish_via_api(
             &request,
             &ctx,

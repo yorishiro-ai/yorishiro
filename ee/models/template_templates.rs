@@ -1,4 +1,5 @@
 //! Publishes the community edition's built-in templates as official marketplace listings.
+//!
 //! Bypasses `models::marketplace::publish_version`'s ownership check, since the seed has no authenticated tenant to check ownership against.
 //! Invoked from a Loco task (`register_tasks`), not a request path.
 
@@ -34,6 +35,7 @@ pub struct SeedOutcome {
 }
 
 /// Publishes every built-in template as an official, community-visible marketplace listing.
+///
 /// Idempotent: a new version is published only when the built-in definition differs from the latest one already published.
 /// Calls `ensure_official_tenant` itself, so this still works standalone.
 ///

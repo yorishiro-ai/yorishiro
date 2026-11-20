@@ -58,10 +58,11 @@ pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i6
         .count(conn)
         .await
         .internal()
-        .map(|n| n as i64)
+        .and_then(|count| i64::try_from(count).internal())
 }
 
-/// Creates a new entity: resolves the schema name to its currently active schema, checks that the entity_type exists in that version, validates `data`, and persists the result.
+/// Creates a new entity: resolves the schema name to its currently active schema, checks that the `entity_type` exists in that version, validates `data`, and persists the result.
+///
 /// `created_by` is the acting user's ID, or `None` for an unattributed service/automation API key.
 ///
 /// The quota check and insert are serialized with a workspace-scoped advisory lock: without it, concurrent creates could each read a count under `max_entities` and both insert, overshooting the cap.
@@ -146,6 +147,7 @@ pub async fn get(
 }
 
 /// Fully replaces an existing entity's `data`.
+///
 /// Validation is done against the schema version the entity was actually created with (the row's `schema_id`), so existing entities don't silently break compatibility even if the active version has since moved on.
 /// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation API key.
 ///
@@ -239,7 +241,10 @@ pub async fn delete(
     }
 }
 
-/// `query.filter` (JSONB containment, `data @> filter`) is the one condition here `ColumnTrait` can't express (`ColumnTrait::contains` builds a `LIKE '%...%'`, unrelated to Postgres's `@>` operator), so it's built with `sea_query::extension::postgres::PgExpr::contains`, the builder for `PgBinOper::Contains`, instead of a raw SQL string.
+/// Lists workspace entities with optional JSONB containment filtering.
+///
+/// `query.filter` uses `sea_query::extension::postgres::PgExpr::contains` to build `data @> filter` without raw SQL.
+/// `ColumnTrait::contains` instead builds a text `LIKE` expression.
 ///
 /// SQLite does not support this filter (`BackendUnsupported` is returned) because `data` is stored as `TEXT` and the JSONB containment operator is a PostgreSQL-specific feature.
 ///
@@ -272,8 +277,8 @@ pub async fn list(
 
     let select = select
         .order_by_desc(Column::CreatedAt)
-        .limit(query.page.limit() as u64)
-        .offset(query.page.offset() as u64);
+        .limit(query.page.limit())
+        .offset(query.page.offset());
 
     select
         .into_model::<EntityRecord>()

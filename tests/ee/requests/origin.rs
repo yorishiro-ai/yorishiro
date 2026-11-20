@@ -8,6 +8,10 @@ use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn create_template(
     request: &loco_rs::TestServer,
     key: &str,
@@ -164,6 +168,10 @@ async fn concurrent_rest_merges_commit_for_separate_workspaces() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one origin history tracks local edits across upstream publication, merge preview, merge, and acknowledgement"
+)]
 async fn upstream_changes_preview_and_merge_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs {
@@ -190,14 +198,11 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             .get("/api/schemas/upstream-changes")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
-        assert!(before.json::<Vec<serde_json::Value>>().is_empty());
+        assert_eq!(before.json::<Vec<serde_json::Value>>(), [] as [serde_json::Value; 0]);
 
         // Add a field to the workspace's own copy, so the merge has something local to keep.
         // This is a second version of the same name (create_schema archives the first and installs this as the new active row), so it has its own id: the origin/merge chain always acts on the currently active version, which is this one from here on.
-        let edit_local = request
-            .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
-            .json(&json!({
+        let local_definition = json!({
                 "name": "library-note",
                 "entity_types": {
                     "note": {
@@ -207,7 +212,11 @@ async fn upstream_changes_preview_and_merge_round_trip() {
                         }
                     }
                 }
-            }))
+            });
+        let edit_local = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&local_definition)
             .await;
         assert_eq!(
             edit_local.status_code(),
@@ -242,17 +251,7 @@ async fn upstream_changes_preview_and_merge_round_trip() {
         let local_after_publication = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
-            .json(&json!({
-                "name": "library-note",
-                "entity_types": {
-                    "note": {
-                        "fields": {
-                            "title": { "type": "string", "required": true },
-                            "internal_ref": { "type": "string" }
-                        }
-                    }
-                }
-            }))
+            .json(&local_definition)
             .await;
         assert_eq!(
             local_after_publication.status_code(),
@@ -338,13 +337,17 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             .get("/api/schemas/upstream-changes")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
-        assert!(acknowledged.json::<Vec<serde_json::Value>>().is_empty());
+        assert_eq!(acknowledged.json::<Vec<serde_json::Value>>(), [] as [serde_json::Value; 0]);
     })
     .await;
 }
 
 /// A publication racing with merge cannot be acknowledged by the merge that read the older revision.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "real advisory lock waits order a merge and competing publication before checking the newer upstream revision remains pending"
+)]
 async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
     // SQLite has no advisory lock to block publication behind the merge revision lock.
     if !crate::require_postgres_backend() {

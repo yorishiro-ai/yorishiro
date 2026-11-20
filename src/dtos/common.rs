@@ -5,7 +5,7 @@ use crate::error::YorishiroError;
 /// The `page`/`page_size` query-string pair every list endpoint accepts.
 /// `#[serde(flatten)]` this into a request's own `Params` struct alongside its filters.
 ///
-/// Wraps Loco's `query::PaginationQuery` (1-based page + page_size).  Loco's own
+/// Wraps Loco's `query::PaginationQuery` (1-based page + `page_size`).  Loco's own
 /// query-string deserializer maps `?page=&page_size=` into the struct fields, so
 /// all existing API callers work without changes.  The `TryFrom` impl converts to the
 /// internal 0-based offset/limit representation that every list function expects.

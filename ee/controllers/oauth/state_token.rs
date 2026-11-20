@@ -1,4 +1,4 @@
-//! The `state` parameter carried through the OAuth2 authorization-code round trip.
+//! The `state` parameter carried through the `OAuth2` authorization-code round trip.
 //!
 //! No server-side session store backs `/auth/oauth/authorize` and `/auth/oauth/callback`, so the PKCE code verifier is packed into the `state` value itself and HMAC-SHA256 signed via [`crate::edition::ee::data::hmac_sign`], rather than stored server-side and looked up by an opaque id.
 //!
@@ -6,9 +6,9 @@
 //! That is what the CSRF cookie is for: `authorize` sets a random, per-browser value as an `HttpOnly`/`Secure`/`SameSite=Lax` cookie and embeds `SHA256(cookie value)` in the signed `state` payload; `callback` recomputes that hash from whatever cookie the browser actually presents and rejects the request if it does not match [`verify`]'s `csrf_hash` output.
 //! An attacker who captures a victim's `code`/`state` pair cannot forge the victim's browser's cookie, so the double-submit check fails even though the `state` signature itself is valid.
 
+use aws_lc_rs::digest::{SHA256, digest};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use sha2::{Digest, Sha256};
 
 use crate::edition::ee::data::hmac_sign;
 
@@ -34,17 +34,19 @@ pub struct VerifiedState {
 }
 
 /// Generates a fresh CSRF cookie value and PKCE verifier, and packs the PKCE verifier plus the CSRF value's hash into a signed `state` value.
+#[must_use]
 pub fn issue(signing_key: &[u8]) -> IssuedState {
     issue_at(signing_key, crate::data::time::now().timestamp())
 }
 
+#[must_use]
 pub fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
     let csrf_cookie_value = loco_rs::hash::random_string(22);
-    let csrf_hash = crate::data::encoding::hex(Sha256::digest(csrf_cookie_value.as_bytes()));
+    let csrf_hash = hash_csrf_cookie(&csrf_cookie_value);
 
     // 43 alphanumeric characters provide over 256 bits and satisfy RFC 7636's verifier grammar.
     let pkce_verifier = loco_rs::hash::random_string(43);
-    let pkce_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pkce_verifier.as_bytes()));
+    let pkce_challenge = URL_SAFE_NO_PAD.encode(digest(&SHA256, pkce_verifier.as_bytes()).as_ref());
 
     let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
     let signature = hmac_sign::sign(signing_key, payload.as_bytes());
@@ -58,15 +60,18 @@ pub fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
 }
 
 /// Verifies a `state` value's signature and freshness, returning the PKCE verifier and expected CSRF hash it carries.
+///
 /// Rejects anything that does not parse, does not verify, or has aged past [`STATE_TTL_SECS`]: each is indistinguishable from the others to the caller, so a forged, expired or malformed `state` cannot be told apart by an attacker probing the endpoint.
 ///
 /// This alone does **not** prove the presenting browser is the one the flow was started for.
 /// See the module docs.
 /// Callers must separately check the returned `csrf_hash` against the SHA-256 hash of the browser's CSRF cookie.
+#[must_use]
 pub fn verify(signing_key: &[u8], state: &str) -> Option<VerifiedState> {
     verify_at(signing_key, state, crate::data::time::now().timestamp())
 }
 
+#[must_use]
 pub fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedState> {
     let mut parts = state.splitn(4, '.');
     let issued_at_str = parts.next()?;
@@ -97,6 +102,7 @@ pub fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedSt
 }
 
 /// Hashes a CSRF cookie value the same way [`issue`] does, for `callback` to compare against [`VerifiedState::csrf_hash`].
+#[must_use]
 pub fn hash_csrf_cookie(cookie_value: &str) -> String {
-    crate::data::encoding::hex(Sha256::digest(cookie_value.as_bytes()))
+    hex::encode(digest(&SHA256, cookie_value.as_bytes()).as_ref())
 }

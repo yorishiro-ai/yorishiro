@@ -55,6 +55,7 @@ pub struct MergePlan {
 impl MergePlan {
     /// Whether anything needs a person.
     /// A plan with no conflicts can be applied whole; one with any cannot be applied at all, since a partial merge would leave the schema in a state neither side asked for.
+    #[must_use]
     pub fn has_conflicts(&self) -> bool {
         self.fields
             .iter()
@@ -72,6 +73,7 @@ impl MergePlan {
 ///
 /// `base` is the template as copied, `upstream` the template now, `local` the workspace's own.
 /// Fields identical in all three are omitted: a plan lists what to decide, not what exists.
+#[must_use]
 pub fn three_way(
     base: &MetaSchemaDefinition,
     upstream: &MetaSchemaDefinition,
@@ -292,11 +294,11 @@ pub fn apply_plan(
                                 upstream.entity_types.get(&field.entity_type).map_or_else(
                                     || EntityTypeDef {
                                         description: None,
-                                        fields: Default::default(),
+                                        fields: std::collections::BTreeMap::default(),
                                     },
                                     |t| EntityTypeDef {
                                         description: t.description.clone(),
-                                        fields: Default::default(),
+                                        fields: std::collections::BTreeMap::default(),
                                     },
                                 )
                             })

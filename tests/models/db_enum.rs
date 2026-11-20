@@ -41,4 +41,7 @@ fn unknown_values_are_rejected_everywhere() {
         Err("unknown MaintenanceMode: on".to_string())
     );
     assert!(serde_json::from_value::<MaintenanceMode>("on".into()).is_err());
+    assert!(
+        serde_json::from_value::<MaintenanceMode>(serde_json::json!({"read_only": null})).is_err()
+    );
 }

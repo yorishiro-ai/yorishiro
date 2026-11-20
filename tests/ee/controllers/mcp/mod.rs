@@ -31,7 +31,7 @@ fn enterprise_inventory_contract_is_disjoint_and_contains_community() {
     let full_names: HashSet<_> = full.iter().map(|tool| &tool.name).collect();
     let names: Vec<_> = enterprise.iter().map(|tool| tool.name.as_ref()).collect();
     let mut sorted_names = names.clone();
-    sorted_names.sort();
+    sorted_names.sort_unstable();
     assert_eq!(
         names, sorted_names,
         "enterprise MCP tool names are not sorted"

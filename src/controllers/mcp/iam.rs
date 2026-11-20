@@ -740,7 +740,7 @@ impl YorishiroMcpServer {
         )
         .await
         {
-            Ok(_) => ok_json(serde_json::json!({"deleted": true})),
+            Ok(()) => ok_json(serde_json::json!({"deleted": true})),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
@@ -803,7 +803,7 @@ impl YorishiroMcpServer {
         )
         .await
         {
-            Ok(_) => ok_json(serde_json::json!({"attached": true})),
+            Ok(()) => ok_json(serde_json::json!({"attached": true})),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
@@ -832,7 +832,7 @@ impl YorishiroMcpServer {
         )
         .await
         {
-            Ok(_) => ok_json(serde_json::json!({"detached": true})),
+            Ok(()) => ok_json(serde_json::json!({"detached": true})),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }

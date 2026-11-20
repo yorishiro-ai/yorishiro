@@ -8,6 +8,10 @@ use super::EnvGuard;
 
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn deployment_worker_targets_default_to_shared_and_require_valid_tags() {
     let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_WORKER_TARGETS"]);
     guard.set(
@@ -19,7 +23,7 @@ async fn deployment_worker_targets_default_to_shared_and_require_valid_tags() {
         "sqlite:///tmp/worker-target-queue.sqlite3?mode=rwc",
     );
     guard.remove("YORISHIRO_WORKER_TARGETS");
-    let config = load(&Environment::Development).await.unwrap();
+    let config = load(&Environment::Development).unwrap();
     let settings = config
         .settings::<yorishiro::data::settings::Settings>()
         .unwrap();
@@ -28,16 +32,14 @@ async fn deployment_worker_targets_default_to_shared_and_require_valid_tags() {
         "YORISHIRO_WORKER_TARGETS",
         r#"["worker-target:shared","worker-target:official"]"#,
     );
-    assert!(load(&Environment::Development).await.is_ok());
+    assert!(load(&Environment::Development).is_ok());
     for value in [
         "[]",
         r#"["official"]"#,
         r#"["worker-target:tenant:not-a-uuid"]"#,
     ] {
         guard.set("YORISHIRO_WORKER_TARGETS", value);
-        let error = load(&Environment::Development)
-            .await
-            .expect_err("invalid target declaration");
+        let error = load(&Environment::Development).expect_err("invalid target declaration");
         assert!(
             error.to_string().contains("settings.worker_targets"),
             "{error}"
@@ -47,22 +49,26 @@ async fn deployment_worker_targets_default_to_shared_and_require_valid_tags() {
 
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn development_uses_loco_environment_config_and_typed_settings() {
-    let _guard = EnvGuard::capture(&[
+    let guard = EnvGuard::capture(&[
         "DATABASE_URL",
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
         "YORISHIRO_EMBEDDING_PROVIDER",
     ]);
-    _guard.set("DATABASE_URL", "sqlite:///tmp/config-load.sqlite3?mode=rwc");
-    _guard.set(
+    guard.set("DATABASE_URL", "sqlite:///tmp/config-load.sqlite3?mode=rwc");
+    guard.set(
         "QUEUE_URL",
         "sqlite:///tmp/config-load-queue.sqlite3?mode=rwc",
     );
-    _guard.remove("YORISHIRO_QUEUE_KIND");
-    _guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
+    guard.remove("YORISHIRO_QUEUE_KIND");
+    guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
 
-    let config = load(&Environment::Development).await.unwrap();
+    let config = load(&Environment::Development).unwrap();
     let settings = config.settings::<serde_json::Value>().unwrap();
 
     assert_eq!(
@@ -74,6 +80,10 @@ async fn development_uses_loco_environment_config_and_typed_settings() {
 
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn sqlite_test_config_preserves_loco_application_pragmas() {
     let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
     guard.set("DATABASE_URL", "sqlite:///tmp/config-load.sqlite3?mode=rwc");
@@ -82,7 +92,7 @@ async fn sqlite_test_config_preserves_loco_application_pragmas() {
         "sqlite:///tmp/config-load-queue.sqlite3?mode=rwc",
     );
     guard.remove("YORISHIRO_QUEUE_KIND");
-    let config = load(&Environment::Test).await.unwrap();
+    let config = load(&Environment::Test).unwrap();
     assert_eq!(
         config.database.run_on_start.as_deref(),
         Some(
@@ -94,6 +104,10 @@ async fn sqlite_test_config_preserves_loco_application_pragmas() {
 /// The test environment follows `DATABASE_URL`'s scheme, and the queue follows the database unless `YORISHIRO_QUEUE_KIND` names a provider.
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn the_test_environment_follows_the_database_and_queue_kind() {
     let guard = EnvGuard::capture(&[
         "DATABASE_URL",
@@ -124,7 +138,7 @@ async fn the_test_environment_follows_the_database_and_queue_kind() {
         }
         guard.set("DATABASE_URL", database);
         guard.set("QUEUE_URL", queue);
-        let config = load(&Environment::Test).await.unwrap();
+        let config = load(&Environment::Test).unwrap();
         assert_eq!(config.database.uri, database);
         assert_eq!(config.server.port, 5151);
         match config.queue.unwrap() {
@@ -150,12 +164,16 @@ async fn the_test_environment_follows_the_database_and_queue_kind() {
 /// With no queue URL set, the queue shares the database URL.
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn a_postgres_test_queue_defaults_to_the_database() {
     let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
     guard.remove("YORISHIRO_QUEUE_KIND");
     guard.remove("QUEUE_URL");
     guard.set("DATABASE_URL", "postgres://db/app");
-    let config = load(&Environment::Test).await.unwrap();
+    let config = load(&Environment::Test).unwrap();
     assert!(matches!(
         config.queue,
         Some(QueueConfig::Postgres(ref queue)) if queue.uri == "postgres://db/app"
@@ -164,13 +182,17 @@ async fn a_postgres_test_queue_defaults_to_the_database() {
 
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn test_configs_disable_external_embedding_downloads_by_default() {
-    let _guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_EMBEDDING_PROVIDER"]);
-    _guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
-    _guard.set("QUEUE_URL", "sqlite:///tmp/test-queue.sqlite3?mode=rwc");
-    _guard.remove("YORISHIRO_EMBEDDING_PROVIDER");
+    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_EMBEDDING_PROVIDER"]);
+    guard.set("DATABASE_URL", "sqlite:///tmp/test.sqlite3?mode=rwc");
+    guard.set("QUEUE_URL", "sqlite:///tmp/test-queue.sqlite3?mode=rwc");
+    guard.remove("YORISHIRO_EMBEDDING_PROVIDER");
 
-    let config = load(&Environment::Test).await.unwrap();
+    let config = load(&Environment::Test).unwrap();
     let settings = config.settings::<serde_json::Value>().unwrap();
 
     assert_eq!(settings["embedding"]["provider"], "none");
@@ -178,19 +200,23 @@ async fn test_configs_disable_external_embedding_downloads_by_default() {
 
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn production_config_is_the_packaged_loco_config() {
-    let _guard = EnvGuard::capture(&[
+    let guard = EnvGuard::capture(&[
         "DATABASE_URL",
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
         "YORISHIRO_EMBEDDING_PROVIDER",
     ]);
-    _guard.remove("DATABASE_URL");
-    _guard.remove("QUEUE_URL");
-    _guard.remove("YORISHIRO_QUEUE_KIND");
-    _guard.remove("YORISHIRO_EMBEDDING_PROVIDER");
+    guard.remove("DATABASE_URL");
+    guard.remove("QUEUE_URL");
+    guard.remove("YORISHIRO_QUEUE_KIND");
+    guard.remove("YORISHIRO_EMBEDDING_PROVIDER");
 
-    let config = load(&Environment::Production).await.unwrap();
+    let config = load(&Environment::Production).unwrap();
     let settings = config.settings::<serde_json::Value>().unwrap();
 
     assert_eq!(
@@ -202,6 +228,10 @@ async fn production_config_is_the_packaged_loco_config() {
 
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn production_example_is_used_when_local_config_is_absent() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::copy(
@@ -209,6 +239,7 @@ async fn production_example_is_used_when_local_config_is_absent() {
         directory.path().join("production.yaml.example"),
     )
     .unwrap();
+
     let guard = EnvGuard::capture(&[
         "LOCO_CONFIG_FOLDER",
         "DATABASE_URL",
@@ -226,7 +257,7 @@ async fn production_example_is_used_when_local_config_is_absent() {
     );
     guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
 
-    let config = load(&Environment::Production).await.unwrap();
+    let config = load(&Environment::Production).unwrap();
     assert_eq!(
         config.database.uri,
         "sqlite:///tmp/packaged-fallback.sqlite3?mode=rwc"
@@ -256,6 +287,10 @@ async fn production_example_is_used_when_local_config_is_absent() {
 #[cfg(unix)]
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn config_folder_preserves_non_utf8_paths() {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
@@ -268,6 +303,7 @@ async fn config_folder_preserves_non_utf8_paths() {
         folder.join("production.yaml"),
     )
     .unwrap();
+
     let guard = EnvGuard::capture(&[
         "LOCO_CONFIG_FOLDER",
         "DATABASE_URL",
@@ -284,25 +320,29 @@ async fn config_folder_preserves_non_utf8_paths() {
     guard.set("YORISHIRO_QUEUE_KIND", "Sqlite");
     guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
 
-    let config = load(&Environment::Production).await.unwrap();
+    let config = load(&Environment::Production).unwrap();
     assert_eq!(config.database.uri, "sqlite::memory:");
 }
 
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn production_selects_queue_provider_independently_from_database() {
-    let _guard = EnvGuard::capture(&[
+    let guard = EnvGuard::capture(&[
         "DATABASE_URL",
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
         "YORISHIRO_EMBEDDING_PROVIDER",
     ]);
-    _guard.set("DATABASE_URL", "postgres://db/yorishiro");
-    _guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
-    _guard.remove("YORISHIRO_QUEUE_KIND");
-    _guard.remove("QUEUE_URL");
+    guard.set("DATABASE_URL", "postgres://db/yorishiro");
+    guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
+    guard.remove("YORISHIRO_QUEUE_KIND");
+    guard.remove("QUEUE_URL");
 
-    let postgres_queue = load(&Environment::Production).await.unwrap();
+    let postgres_queue = load(&Environment::Production).unwrap();
 
     assert_eq!(postgres_queue.database.uri, "postgres://db/yorishiro");
     assert!(matches!(
@@ -310,10 +350,10 @@ async fn production_selects_queue_provider_independently_from_database() {
         Some(QueueConfig::Postgres(queue)) if queue.uri == "postgres://db/yorishiro"
     ));
 
-    _guard.set("YORISHIRO_QUEUE_KIND", "Redis");
-    _guard.set("QUEUE_URL", "redis://queue.example.com:6379");
+    guard.set("YORISHIRO_QUEUE_KIND", "Redis");
+    guard.set("QUEUE_URL", "redis://queue.example.com:6379");
 
-    let redis_queue = load(&Environment::Production).await.unwrap();
+    let redis_queue = load(&Environment::Production).unwrap();
 
     assert_eq!(redis_queue.database.uri, "postgres://db/yorishiro");
     assert!(matches!(
@@ -325,6 +365,10 @@ async fn production_selects_queue_provider_independently_from_database() {
 /// Production defaults follow the database and queue pair: a SQLite writer or queue gains nothing from a wide pool or several workers, while PostgreSQL and Redis-compatible queues do.
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn production_defaults_follow_the_database_and_queue_topology() {
     let guard = EnvGuard::capture(&[
         "DATABASE_URL",
@@ -366,7 +410,7 @@ async fn production_defaults_follow_the_database_and_queue_topology() {
             Some(queue) => guard.set("QUEUE_URL", queue),
             None => guard.remove("QUEUE_URL"),
         }
-        let config = load(&Environment::Production).await.unwrap();
+        let config = load(&Environment::Production).unwrap();
         assert_eq!(config.database.max_connections, pool, "{database} pool");
         let actual = match config.queue.unwrap() {
             QueueConfig::Sqlite(queue) => queue.num_workers,
@@ -381,6 +425,10 @@ async fn production_defaults_follow_the_database_and_queue_topology() {
 /// Invalid SQL pairs fail during config loading, before any database or queue connection is opened.
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn production_refuses_crossed_sql_queue_backends() {
     let guard = EnvGuard::capture(&[
         "DATABASE_URL",
@@ -404,9 +452,8 @@ async fn production_refuses_crossed_sql_queue_backends() {
         guard.set("DATABASE_URL", database);
         guard.set("YORISHIRO_QUEUE_KIND", kind);
         guard.set("QUEUE_URL", queue);
-        let loco_rs::Error::CustomError(_, detail) = load(&Environment::Production)
-            .await
-            .expect_err("invalid pair must not boot")
+        let loco_rs::Error::CustomError(_, detail) =
+            load(&Environment::Production).expect_err("invalid pair must not boot")
         else {
             panic!("expected ValidationFailed");
         };
@@ -417,6 +464,10 @@ async fn production_refuses_crossed_sql_queue_backends() {
 /// Each bad value is reported by name, so an operator is not left guessing which setting a failed boot objected to.
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn query_embedding_settings_are_validated() {
     let guard = EnvGuard::capture(&[
         "DATABASE_URL",
@@ -432,7 +483,7 @@ async fn query_embedding_settings_are_validated() {
     );
     let environment = Environment::Test;
 
-    let defaults = load(&environment).await.unwrap();
+    let defaults = load(&environment).unwrap();
     let settings = defaults
         .settings::<yorishiro::data::settings::Settings>()
         .unwrap();
@@ -448,7 +499,7 @@ async fn query_embedding_settings_are_validated() {
         guard.set("YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", timeout);
         guard.set("YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", poll);
         guard.set("YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", retention);
-        let error = load(&environment).await.unwrap_err().to_string();
+        let error = load(&environment).unwrap_err().to_string();
         assert!(
             error.contains(expected),
             "{timeout}/{poll}/{retention}: {error}"
@@ -458,6 +509,10 @@ async fn query_embedding_settings_are_validated() {
 
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn mcp_allowed_hosts_load_and_reject_wildcards() {
     let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_MCP_ALLOWED_HOSTS"]);
     guard.set("DATABASE_URL", "sqlite:///tmp/mcp-config.sqlite3?mode=rwc");
@@ -469,7 +524,7 @@ async fn mcp_allowed_hosts_load_and_reject_wildcards() {
         "YORISHIRO_MCP_ALLOWED_HOSTS",
         "mcp.example.com,10.0.0.4:5150",
     );
-    let config = load(&Environment::Test).await.unwrap();
+    let config = load(&Environment::Test).unwrap();
     let settings = config.settings::<serde_json::Value>().unwrap();
     assert_eq!(
         settings["mcp"]["allowed_hosts"],
@@ -477,9 +532,7 @@ async fn mcp_allowed_hosts_load_and_reject_wildcards() {
     );
 
     guard.set("YORISHIRO_MCP_ALLOWED_HOSTS", "*");
-    let error = load(&Environment::Test)
-        .await
-        .expect_err("wildcard MCP hosts must be rejected");
+    let error = load(&Environment::Test).expect_err("wildcard MCP hosts must be rejected");
     assert!(
         error.to_string().contains("wildcard hosts")
             || error.to_string().contains("wildcard MCP hosts"),
@@ -489,6 +542,10 @@ async fn mcp_allowed_hosts_load_and_reject_wildcards() {
 
 #[tokio::test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 async fn mcp_network_policy_follows_binding_and_validates_origins() {
     use axum::http::StatusCode;
     use rmcp::transport::streamable_http_server::{
@@ -514,9 +571,9 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
     guard.remove("BINDING");
     guard.remove("YORISHIRO_MCP_ALLOWED_HOSTS");
     guard.remove("YORISHIRO_ALLOWED_ORIGINS");
-    let mut config = load(&Environment::Test).await.unwrap();
+    let mut config = load(&Environment::Test).unwrap();
     assert_eq!(config.server.binding, "localhost");
-    let production = load(&Environment::Production).await.unwrap();
+    let production = load(&Environment::Production).unwrap();
     assert_eq!(production.server.binding, "localhost");
 
     for (binding, host, origin, expected) in [
@@ -587,7 +644,7 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
     }
 
     guard.set("YORISHIRO_ALLOWED_ORIGINS", r#"["https://example.com"]"#);
-    config = load(&Environment::Test).await.unwrap();
+    config = load(&Environment::Test).unwrap();
     let service = StreamableHttpService::new(
         || Ok(EmptyServer),
         LocalSessionManager::default().into(),
@@ -657,6 +714,6 @@ async fn mcp_network_policy_follows_binding_and_validates_origins() {
             "YORISHIRO_ALLOWED_ORIGINS",
             serde_json::to_string(&[origin]).unwrap(),
         );
-        assert!(load(&Environment::Test).await.is_err(), "{origin}");
+        assert!(load(&Environment::Test).is_err(), "{origin}");
     }
 }

@@ -73,8 +73,8 @@ pub(crate) async fn list_with_upstream_changes(
         .filter(schema::Column::OriginStatus.eq(SchemaOriginStatus::Linked.as_db_str()))
         .filter(schema::Column::OriginUpdatedAt.is_null())
         .order_by_desc(template::Column::UpdatedAt)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
+        .limit(page.limit())
+        .offset(page.offset())
         .into_model::<Row>()
         .all(conn)
         .await

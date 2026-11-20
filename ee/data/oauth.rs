@@ -1,4 +1,5 @@
 //! Configuration for OAuth2/OIDC login from resolved Loco initializer settings.
+//!
 //! A bad config reports `YorishiroError::Internal` rather than panicking, since a panic here would crash the task handling whichever request triggered it.
 //!
 //! `Ok(None)` (via `OAuthConfig::from_config`) means OAuth is disabled.
@@ -85,17 +86,22 @@ impl OAuthConfig {
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub fn require_non_empty(key: &str, raw: Option<&str>) -> Result<String, YorishiroError> {
-    match raw.filter(|s| !s.is_empty()) {
-        Some(value) => Ok(value.to_string()),
-        None => Err(YorishiroError::Internal(
-            format!("{key} must be set to a non-empty value when YORISHIRO_OAUTH_ISSUER_URL is")
+    raw.filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            YorishiroError::Internal(
+                format!(
+                    "{key} must be set to a non-empty value when YORISHIRO_OAUTH_ISSUER_URL is"
+                )
                 .into(),
-        )),
-    }
+            )
+        })
 }
 
 /// `http://{host}/auth/oauth/callback`, using the server's actual binding and port using the resolved listener.
+///
 /// This default only covers local testing; a real deployment sets `YORISHIRO_OAUTH_REDIRECT_URI` explicitly.
+#[must_use]
 pub fn default_redirect_uri(server: &Server) -> String {
     let binding = &server.binding;
     let binding = if binding.parse::<std::net::Ipv6Addr>().is_ok() {
@@ -111,8 +117,10 @@ pub fn default_redirect_uri(server: &Server) -> String {
 }
 
 /// Rewrites `host:port` to `localhost:port` when the host is an all-interfaces bind address (`0.0.0.0` or `::`), leaving everything else as given.
+///
 /// Parses the whole string as a [`std::net::SocketAddr`] rather than doing a substring replace, which would corrupt an address like `10.0.0.0:8081` into `1localhost:8081`.
 /// A `bind` that is not a valid `SocketAddr` at all passes through unchanged.
+#[must_use]
 pub fn rewrite_unspecified_host(bind: &str) -> String {
     match bind.parse::<std::net::SocketAddr>() {
         Ok(addr) if addr.ip().is_unspecified() => format!("localhost:{}", addr.port()),

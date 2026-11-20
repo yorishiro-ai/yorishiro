@@ -130,8 +130,8 @@ pub async fn list_templates(
     let rows = Entity::find()
         .filter(visible_to(tenant_id))
         .order_by_asc(Column::CreatedAt)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
+        .limit(page.limit())
+        .offset(page.offset())
         .all(conn)
         .await
         .internal()?;
@@ -155,12 +155,8 @@ pub async fn get_template(
         .await
         .internal()?;
 
-    match row {
-        Some(row) => row.try_into(),
-        None => Err(YorishiroError::not_found(format!(
-            "template '{template_id}' was not found"
-        ))),
-    }
+    row.ok_or_else(|| YorishiroError::not_found(format!("template '{template_id}' was not found")))?
+        .try_into()
 }
 
 /// Resolves a `template_id` as either a library template or a built-in, and says which.

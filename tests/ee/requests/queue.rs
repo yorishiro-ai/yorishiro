@@ -25,6 +25,10 @@ use yorishiro::workers::reindex::{self, ReindexArgs};
 use crate::requests::close_app_pools_sqlite;
 
 /// Boots a permitted SQLite/SQLite pair with separate temporary files and returns a pool onto the queue file.
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn with_sqlite_queue<F, Fut>(test: F)
 where
     F: FnOnce(AppContext, sea_orm::sqlx::SqlitePool, Uuid) -> Fut,
@@ -361,6 +365,10 @@ async fn each_reindex_worker_class_is_sent_to_its_own_target() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one queue consumer verifies competing delivery priorities and drains owned workers even when an assertion fails"
+)]
 async fn configured_queue_orders_competing_jobs_by_priority() {
     use loco_rs::bgworker::JobStatus;
     use yorishiro::models::query_embedding_requests::Entity as Requests;
@@ -389,9 +397,12 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
     crate::requests::boot_request_with::<App, _, _>(
         &[("queue.num_workers", 1.into())],
         |request, ctx| async move {
-            let tenant =
-                crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default())
-                    .await;
+            let tenant = crate::requests::fixtures::TestTenant::create(
+                &request,
+                &ctx,
+                crate::requests::fixtures::TenantArgs::default(),
+            )
+            .await;
             let provider = Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
                 base_url: server.url.clone(),
                 api_key: "priority-test".into(),

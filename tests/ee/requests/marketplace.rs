@@ -11,6 +11,10 @@ fn note_definition() -> serde_json::Value {
     crate::requests::fixtures::note_schema("crm-starter", false)
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn listings(request: &loco_rs::TestServer, key: &str) -> Vec<serde_json::Value> {
     let mut templates = Vec::new();
     for page in 1.. {
@@ -137,6 +141,10 @@ async fn the_marketplace_answers_501_on_sqlite() {
 
 /// The full publish -> list -> fork -> review round trip, and the decisions along the way: a draft never appears in the public listing, version numbers are assigned server-side, and a fork is a private ('tenant') copy of a forker's own, distinct from the original.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one publication history follows the same listing across draft, public, forked, reviewed, and withdrawn states with two tenants"
+)]
 async fn publish_list_fork_and_review_round_trip() {
     // The marketplace spans tenants, so its listing and publishing queries are PostgreSQL-only.
     if !crate::require_postgres_backend() {
@@ -312,7 +320,7 @@ async fn publish_list_fork_and_review_round_trip() {
                     &request,
                     &session,
                     &delegated_key,
-                    index as i64 + 10,
+                    i64::try_from(index).unwrap() + 10,
                     "tools/call",
                     json!({"name":name,"arguments":arguments}),
                 )
@@ -410,7 +418,7 @@ async fn publish_list_fork_and_review_round_trip() {
             .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .await
             .json();
-        assert!(versions_after_invalid.is_empty());
+        assert_eq!(versions_after_invalid, [] as [serde_json::Value; 0]);
 
         let publish_draft = request
             .post(&format!("/api/marketplace/{template_id}/versions"))
@@ -499,7 +507,7 @@ async fn publish_list_fork_and_review_round_trip() {
                 &request,
                 &session,
                 &owner.api_key,
-                index as i64 + 30,
+                i64::try_from(index).unwrap() + 30,
                 "tools/call",
                 json!({"name":name,"arguments":arguments}),
             )

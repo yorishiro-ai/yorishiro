@@ -93,7 +93,7 @@ impl ImportWorker {
                 },
             )
             .await?;
-            let quotas = crate::quotas(&self.ctx, args.tenant_id).await?;
+            let quotas = crate::data::quotas::for_tenant(&self.ctx, args.tenant_id).await?;
             let result = crate::models::transfer::import::import_with_quota(
                 &txn,
                 args.tenant_id,
@@ -144,9 +144,7 @@ pub(crate) async fn enqueue(
     )
     .await?;
     let worker_class =
-        crate::controllers::extractors::resolve_worker_class(ctx, auth.require_workspace()?)
-            .await
-            .map_err(|error| error.0)?;
+        crate::workers::target::resolve_worker_class(ctx, auth.require_workspace()?).await?;
     let args = ImportArgs {
         lifecycle_id: None,
         tenant_id: auth.tenant_id,

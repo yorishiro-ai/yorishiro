@@ -4,8 +4,12 @@ use yorishiro::edition::ee::models::inference_jobs::*;
 #[tokio::test]
 async fn reconcile_recovers_after_failure_before_retry() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let db = ctx.db.clone();
         let id = Uuid::now_v7();
         create(&db, id, fixture.workspace_id, "notes")

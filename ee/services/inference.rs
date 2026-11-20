@@ -1,4 +1,5 @@
 //! Calling an LLM to propose values for fields an entity is missing.
+//!
 //! Errors use `ProviderUnreachable`/`ProviderBusy` (`crate::services::embedding::openai`), since a request that never reached the provider or one that answered "come back later" are both operator-actionable, not internal server errors.
 //!
 //! The one place this crate makes an outbound LLM call.
@@ -36,6 +37,7 @@ impl InferenceClient {
     ///
     /// # Panics
     /// Panics if the reqwest client cannot be built from the static configuration.
+    #[must_use]
     pub fn new(config: InferenceConfig) -> Self {
         Self::with_timeouts(config, crate::data::settings::HttpTimeouts::default())
     }
@@ -62,6 +64,7 @@ impl InferenceClient {
         Self::with_client(config, client)
     }
 
+    #[must_use]
     pub fn with_client(config: InferenceConfig, client: reqwest::Client) -> Self {
         Self {
             client,
@@ -110,22 +113,17 @@ impl InferenceClient {
             },
         };
 
-        let request = self
+        let response = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
             .bearer_auth(&self.api_key)
             .json(&request)
-            .build()
+            .send()
+            .await
             .map_err(|err| YorishiroError::ProviderUnreachable {
                 url: self.base_url.clone(),
                 message: redact(&err.to_string(), &self.api_key),
             })?;
-        let response = self.client.execute(request).await.map_err(|err| {
-            YorishiroError::ProviderUnreachable {
-                url: self.base_url.clone(),
-                message: redact(&err.to_string(), &self.api_key),
-            }
-        })?;
 
         let status = response.status();
         if !status.is_success() {

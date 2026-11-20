@@ -67,15 +67,10 @@ pub(crate) async fn apply_stripe_event(
             | "customer.subscription.updated"
             | "customer.subscription.deleted"
     )
-    .then(|| {
-        event
-            .data
-            .object
-            .get("customer")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned)
-    })
-    .flatten();
+    .then_some(&event.data.object)
+    .and_then(|object| object.get("customer"))
+    .and_then(|value| value.as_str())
+    .map(str::to_owned);
 
     // Serializes concurrent deliveries for the same customer: the second caller's `is_stale_for_customer` re-read sees the first caller's write only after it commits.
     if let Some(customer_id) = customer_id.as_deref() {
@@ -120,11 +115,7 @@ pub(crate) async fn apply_stripe_event(
                 return Err(unlinked_customer());
             };
             let price_id = object
-                .get("items")
-                .and_then(|v| v.get("data"))
-                .and_then(|v| v.get(0))
-                .and_then(|v| v.get("price"))
-                .and_then(|v| v.get("id"))
+                .pointer("/items/data/0/price/id")
                 .and_then(|v| v.as_str());
             let Some(plan) =
                 price_id.and_then(|id| Plan::from_stripe_price_id(id, &config.price_mapping))

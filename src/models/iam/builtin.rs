@@ -32,7 +32,7 @@ fn is_read_action(action: Action) -> bool {
         || matches!(name, "search" | "recall" | "export" | "migration_dry_run")
 }
 
-fn is_admin_only_action(action: Action) -> bool {
+const fn is_admin_only_action(action: Action) -> bool {
     matches!(
         action,
         Action::TenantUpdate
@@ -85,8 +85,8 @@ fn action_values(actions: impl IntoIterator<Item = Action>) -> Vec<serde_json::V
 
 fn statements(
     effect: &str,
-    actions: Vec<serde_json::Value>,
-    resources: serde_json::Value,
+    actions: &[serde_json::Value],
+    resources: &serde_json::Value,
 ) -> Vec<serde_json::Value> {
     actions
         .chunks(crate::models::iam::policy::MAX_ACTIONS)
@@ -127,22 +127,21 @@ pub(crate) fn policy_documents(tenant_id: Uuid) -> Vec<(String, serde_json::Valu
         .filter(|action| is_admin_only_action(*action))
         .collect::<Vec<_>>();
 
-    let writer_statements = [json!(
+    let writer_statements = std::iter::once(json!(
         {"effect": "allow", "actions": wildcard, "resources": both_resources}
-    )]
-    .into_iter()
+    ))
     .chain(statements(
         "deny",
-        action_values(admin_only),
-        tenant_resources.clone(),
+        &action_values(admin_only),
+        &tenant_resources,
     ))
     .collect::<Vec<_>>();
-    let reader_statements = statements("allow", action_values(tenant_reads), tenant_resources)
+    let reader_statements = statements("allow", &action_values(tenant_reads), &tenant_resources)
         .into_iter()
         .chain(statements(
             "allow",
-            action_values(workspace_reads),
-            json!([all_workspaces]),
+            &action_values(workspace_reads),
+            &json!([all_workspaces]),
         ))
         .collect::<Vec<_>>();
 

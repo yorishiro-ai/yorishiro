@@ -11,6 +11,7 @@ mod openapi;
 mod origin;
 mod queue;
 mod schema_forks;
+#[cfg(feature = "stripe-tests")]
 mod stripe;
 mod tenant_auth;
 mod worker_class;

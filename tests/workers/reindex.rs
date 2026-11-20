@@ -4,7 +4,7 @@ use yorishiro::workers::reindex::ReindexWorker;
 /// The worker declares neither tags nor a queue: a job's target is chosen when the job is enqueued.
 #[test]
 fn the_reindex_worker_keeps_its_loco_registration_contract() {
-    assert!(ReindexWorker::tags().is_empty());
+    assert_eq!(ReindexWorker::tags(), [] as [String; 0]);
     assert!(ReindexWorker::queue().is_none());
     assert_eq!(ReindexWorker::class_name(), "ReindexWorker");
 }

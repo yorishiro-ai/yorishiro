@@ -30,6 +30,7 @@ impl Default for ListParams {
 impl ListParams {
     /// Builds directly from a caller's optional `limit`/`offset` (e.g. an Axum `Query` extractor),
     /// applying `Default`'s values where the caller passed neither.
+    #[must_use]
     pub fn new(limit: Option<i64>, offset: Option<i64>) -> Self {
         Self {
             limit: limit.unwrap_or(DEFAULT_LIST_LIMIT),
@@ -38,16 +39,18 @@ impl ListParams {
     }
 
     /// `limit` clamped to `[1, MAX_LIST_LIMIT]`.
-    pub fn limit(&self) -> i64 {
-        self.limit.clamp(1, MAX_LIST_LIMIT)
+    #[must_use]
+    pub fn limit(&self) -> u64 {
+        self.limit.clamp(1, MAX_LIST_LIMIT).cast_unsigned()
     }
 
     /// `offset` clamped to `[0, ∞)`.
-    pub fn offset(&self) -> i64 {
-        self.offset.max(0)
+    #[must_use]
+    pub fn offset(&self) -> u64 {
+        self.offset.max(0).cast_unsigned()
     }
 
-    /// Builds from Loco's `PaginationQuery` (1-based page + page_size), converting
+    /// Builds from Loco's `PaginationQuery` (1-based page + `page_size`), converting
     /// to the internal 0-based offset/limit representation.
     ///
     /// `page` is clamped to `>= 1` (no page 0), and `page_size` to `[1, MAX_LIST_LIMIT]`.
@@ -55,7 +58,9 @@ impl ListParams {
         page: u64,
         page_size: u64,
     ) -> Result<Self, crate::YorishiroError> {
-        let page_size = page_size.clamp(1, MAX_LIST_LIMIT as u64) as i64;
+        let page_size = page_size
+            .clamp(1, MAX_LIST_LIMIT.cast_unsigned())
+            .cast_signed();
         let offset = i64::try_from(page.max(1) - 1)
             .ok()
             .and_then(|page| page.checked_mul(page_size))

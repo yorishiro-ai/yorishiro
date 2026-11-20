@@ -139,7 +139,7 @@ pub(crate) async fn set_visibility(
 
 /// Rejects any operation on a template the caller's tenant does not own.
 ///
-/// Reported as NotFound rather than Forbidden: a caller that cannot act on a template should not learn it exists from the difference between the two.
+/// Reported as `NotFound` rather than Forbidden: a caller that cannot act on a template should not learn it exists from the difference between the two.
 async fn require_ownership(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,

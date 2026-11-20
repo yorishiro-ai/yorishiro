@@ -9,6 +9,10 @@ use yorishiro::models::query_embedding_requests::{
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn workspace(request: &loco_rs::TestServer, ctx: &AppContext, name: &str) -> (Uuid, Uuid) {
     let fixture = TestTenant::create(
         request,
@@ -232,12 +236,12 @@ async fn concurrent_consumers_share_one_result() {
                 .unwrap()
         );
 
-        let reads = (0..8).map(|_| {
+        let consumers = (0..8).map(|_| {
             let db = ctx.db.clone();
             tokio::spawn(async move { Entity::take(&db, ws, id).await })
         });
         let mut ready = 0;
-        for read in reads {
+        for read in consumers {
             match read.await.expect("join") {
                 Ok(Some(QueryOutcome::Ready { .. })) => ready += 1,
                 Ok(None) => {}
@@ -478,7 +482,7 @@ async fn postgres_row_level_security_scopes_requests_to_the_current_workspace() 
         assert!(Entity::find_by_id(a_id).one(&txn).await.unwrap().is_none());
         assert!(
             Entity::find_by_id(b_id).one(&txn).await.unwrap().is_some(),
-            "workspace B reads its own request"
+            "workspace B consumers its own request"
         );
         assert!(!Entity::expire(&txn, ws_a, b_id).await.unwrap());
         txn.rollback().await.unwrap();

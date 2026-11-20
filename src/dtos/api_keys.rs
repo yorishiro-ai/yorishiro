@@ -13,6 +13,7 @@ pub(crate) struct CreateApiKeyRequest {
     pub(crate) expires_at: Option<DateTime<chrono::FixedOffset>>,
     #[serde(default)]
     pub(crate) audit: bool,
+    #[expect(clippy::doc_markdown, reason = "MCP exposes this description verbatim")]
     /// Issue a tenant-scoped key (no workspace binding, `X-Workspace-Id` for workspace operations) instead of a workspace-bound one.
     /// Requires CredentialCreate IAM permission and a tenant-scoped issuing credential.
     #[serde(default)]

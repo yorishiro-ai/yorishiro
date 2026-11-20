@@ -1,4 +1,4 @@
-//! Contract-only OpenAPI shapes and metadata for the community controllers.
+//! Contract-only `OpenAPI` shapes and metadata for the community controllers.
 //!
 //! These types intentionally mirror the serialized HTTP wire format rather than domain models.
 

@@ -102,8 +102,7 @@ jobs:
 
       - name: Clippy
         # Keep CI aligned with rust-analyzer: every target and public API documentation.
-        # Complexity debt is report-only; all other existing strict lints remain errors.
-        run: cargo clippy --locked --workspace --all-targets --features enterprise -- -D warnings
+        run: make clippy-ee
 
   schema-generation:
     name: Schema generation (PostgreSQL)

@@ -19,6 +19,7 @@ pub(crate) async fn count_tenants(conn: &impl ConnectionTrait) -> Result<u64, Yo
 }
 
 /// Creates a tenant, enforcing a tenant cap against `count_tenants`.
+///
 /// The transaction keeps the count and insert under the same lock until commit.
 /// Backend isolation constraints and deployment quotas are resolved together by `TenantLimit`.
 ///

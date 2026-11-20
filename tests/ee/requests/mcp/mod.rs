@@ -29,6 +29,10 @@ use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 
 /// One provider kind's MCP tools: the secret never comes back, REST agrees with MCP, a read key cannot write, and an invalid input leaves the saved value untouched.
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 pub(super) async fn provider_tools_keep_secrets_private_and_match_rest(
     kind: &str,
     rest_path: &str,
@@ -75,12 +79,12 @@ pub(super) async fn provider_tools_keep_secrets_private_and_match_rest(
         assert!(metadata.get("api_key").is_none());
         assert!(!current.to_string().contains(secret));
         assert_eq!(metadata[shown.0], shown.1);
-        let rest = request
+        let http_response = request
             .get(rest_path)
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
             .await;
-        rest.assert_status_ok();
-        assert_eq!(metadata, rest.json::<Value>());
+        http_response.assert_status_ok();
+        assert_eq!(metadata, http_response.json::<Value>());
         for (id, name, arguments) in [
             (4, tool("set"), input.clone()),
             (5, tool("reset"), json!({})),
@@ -142,10 +146,14 @@ pub(crate) fn rpc_body(text: &str) -> Value {
         .lines()
         .filter_map(|line| line.strip_prefix("data:").map(str::trim))
         .find(|line| !line.is_empty())
-        .unwrap_or(text.trim());
+        .unwrap_or_else(|| text.trim());
     serde_json::from_str(payload).unwrap_or_else(|err| panic!("invalid MCP response {err}: {text}"))
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 pub(crate) async fn initialize(request: &TestServer) -> String {
     let response = request
         .post("/mcp")
@@ -192,6 +200,10 @@ pub(crate) async fn initialize(request: &TestServer) -> String {
     session
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 pub(crate) async fn mcp_call(
     request: &TestServer,
     session: &str,

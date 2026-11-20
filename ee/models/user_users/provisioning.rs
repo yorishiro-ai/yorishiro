@@ -15,6 +15,7 @@ use uuid::Uuid;
 use super::{CreateOauthUserError, create_oauth_user, find_by_oauth_identity};
 
 /// Finds the user for `(provider, subject_id)`, creating both the user and a fresh tenant/workspace/membership if this is the identity's first login.
+///
 /// `email` is required (the design's whole point is looking users up by the ID token's `email` claim); a provider that omits it fails with `ValidationFailed` rather than silently provisioning an unusable account.
 ///
 /// New tenants/workspaces are named after the email's local part (e.g. `alice` from `alice@example.com`) since there is no signup form here to ask for a name.

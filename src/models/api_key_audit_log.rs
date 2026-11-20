@@ -89,6 +89,10 @@ db_enum! {
 /// The acting key, for [`record`]: what an audited operation attributes itself to.
 /// A thin, owned copy of the fields of `api_keys::AuthContext`/`api_keys::CreatedApiKey` that `record` actually needs, so this module doesn't have to depend on the guard for a handful of UUIDs.
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "serialized audit identifiers must remain distinct from the records they identify"
+)]
 pub(crate) struct AuditActor {
     pub workspace_id: Uuid,
     pub tenant_id: Uuid,
@@ -128,6 +132,7 @@ pub(crate) async fn record(
 }
 
 /// The workspace's audit trail, most recent first, for an `audit`-permission key to review.
+///
 /// Same 200-row page cap `entity_entities::list`/`entity_relations::list` use, for the same reason: an unbounded read against a table that only grows is a query nobody meant to run.
 ///
 /// # Errors
@@ -142,8 +147,8 @@ pub async fn list_for_workspace(
     Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .order_by_desc(Column::CreatedAt)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
+        .limit(page.limit())
+        .offset(page.offset())
         .all(conn)
         .await
         .internal()

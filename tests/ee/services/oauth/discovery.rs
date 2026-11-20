@@ -110,7 +110,7 @@ async fn production_transport_fetches_discovery_and_jwks_and_exchanges_code() {
         .await
         .expect("JWKS response must parse");
     jwks_task.await.expect("JWKS server must finish");
-    assert!(jwks.keys.is_empty());
+    assert_eq!(jwks.keys, [] as [jsonwebtoken::jwk::Jwk; 0]);
 }
 
 #[tokio::test]

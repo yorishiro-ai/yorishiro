@@ -4,6 +4,10 @@ use yorishiro::App;
 use yorishiro::models::{entity_entities, schema_schemas};
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one schema history compares missing fields, legacy nulls, escaped nested paths, and aggregate migration diagnostics"
+)]
 async fn migration_diagnostics_inspect_each_stored_body_and_nested_required_fields() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let fixture = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

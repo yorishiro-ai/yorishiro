@@ -17,10 +17,18 @@ use yorishiro::workers::target::WorkerTarget;
 
 use crate::requests::boot_request;
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn workspace(request: &loco_rs::TestServer, ctx: &AppContext) -> Uuid {
-    crate::requests::fixtures::TestTenant::create(request, ctx, Default::default())
-        .await
-        .workspace_id
+    crate::requests::fixtures::TestTenant::create(
+        request,
+        ctx,
+        crate::requests::fixtures::TenantArgs::default(),
+    )
+    .await
+    .workspace_id
 }
 
 async fn provider() -> (
@@ -118,7 +126,7 @@ async fn deliver_stale_request(ctx: &AppContext, workspace_id: Uuid, request_id:
 /// Search jobs travel to the shared target when they are enqueued, so the worker declares no tag or queue of its own.
 #[test]
 fn the_query_worker_declares_no_routing_of_its_own() {
-    assert!(QueryEmbeddingWorker::tags().is_empty());
+    assert_eq!(QueryEmbeddingWorker::tags(), [] as [String; 0]);
     assert!(QueryEmbeddingWorker::queue().is_none());
 }
 
@@ -138,8 +146,12 @@ fn the_job_payload_carries_ids_only() {
 #[tokio::test]
 async fn tenant_disabled_while_query_waits_for_capacity_makes_no_provider_call() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let tenant = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let (provider, _server, calls) = provider().await;
         ctx.shared_store.insert(provider);
         let capacity = Arc::new(tokio::sync::Semaphore::new(0));

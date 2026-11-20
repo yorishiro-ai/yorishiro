@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 
 /// Whether `event_id` has already been applied.
+///
 /// Stripe retries a webhook delivery on a slow or failed response, so the same event can arrive more than once; `event_id` is the primary key of `stripe_events`, so this is a plain existence check.
 ///
 /// # Errors
@@ -27,6 +28,7 @@ pub async fn is_event_processed(
 }
 
 /// Whether `created` is older than the most recently applied event's `created` for the same `customer_id`.
+///
 /// Stripe does not guarantee delivery order, so a delayed/retried delivery of a stale event must not be allowed to undo a newer one that already landed for that customer.
 ///
 /// # Errors

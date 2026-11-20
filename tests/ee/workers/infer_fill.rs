@@ -1,5 +1,6 @@
 use loco_rs::bgworker::BackgroundWorker;
 use loco_rs::prelude::*;
+use sea_orm::sqlx::{Connection, sqlite::SqliteConnection};
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -8,10 +9,13 @@ use yorishiro::edition::ee::workers::infer_fill::*;
 
 #[tokio::test]
 async fn rejects_a_missing_queue_before_creating_a_job() {
-    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, mut ctx| async move {
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&_request, &ctx, Default::default())
-                .await;
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, mut ctx| async move {
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         ctx.queue_provider = None;
 
         let error = enqueue_infer_fill(&ctx, &actor(&ctx, &fixture.api_key).await, "note".into())
@@ -30,7 +34,7 @@ async fn rejects_a_missing_queue_before_creating_a_job() {
 /// Loco stores the class name on every queued job and finds the handler by it, so renaming the worker strands whatever is already queued.
 #[test]
 fn infer_fill_worker_declares_no_routing_and_keeps_its_class_name() {
-    assert!(InferFillWorker::tags().is_empty());
+    assert_eq!(InferFillWorker::tags(), [] as [String; 0]);
     assert!(InferFillWorker::queue().is_none());
     assert_eq!(InferFillWorker::class_name(), "InferFillWorker");
 }
@@ -43,7 +47,7 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
 
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         request.put("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
             .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
@@ -139,12 +143,11 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
             return;
         };
         let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         request.put("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
             .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
-        use sea_orm::sqlx::{Connection, sqlite::SqliteConnection};
         let mut blocker = SqliteConnection::connect(&config.uri).await.unwrap();
         sea_orm::sqlx::query("BEGIN IMMEDIATE")
             .execute(&mut blocker)
@@ -338,6 +341,10 @@ async fn gated_llm() -> (
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "gated LLM replies verify that schema replacement and attempt reclamation cannot publish stale proposals"
+)]
 async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
     use yorishiro::edition::ee::models::{inference_jobs, inference_proposals};
 
@@ -514,6 +521,10 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
 /// Two jobs for one workspace never run together, whichever backend: PostgreSQL holds an advisory lock, and SQLite, whose lock is a no-op, relies on the one-running-job-per-workspace index.
 /// The job refused while the other runs makes no LLM call and succeeds once redelivered.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "two real consumers verify workspace serialization and deferred redelivery while releasing the LLM gate and draining workers on every outcome"
+)]
 async fn two_jobs_for_one_workspace_never_run_together() {
     use futures::FutureExt;
     use loco_rs::{app::Hooks, bgworker::JobStatus};
@@ -662,7 +673,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
 async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+            crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         request.put("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
             .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
@@ -766,12 +777,16 @@ enum PermissionChange {
     DenyPolicy,
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn permission_change_during_llm_call(change: PermissionChange) {
     use yorishiro::edition::ee::models::{inference_jobs, inference_proposals};
 
     let (llm, entered, release) = gated_llm().await;
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let setup = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let setup = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         let entity_id = crate::ee::requests::inference::create_entity(&request, &setup).await;
         let response = request.post("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))

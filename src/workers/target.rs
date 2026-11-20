@@ -106,14 +106,13 @@ impl WorkerTarget {
     /// # Errors
     /// Returns an error for an unknown target or noncanonical tenant ID.
     pub fn parse_job_tag(tag: &str) -> Result<Self, InvalidWorkerTarget> {
-        if let Some(name) = tag.strip_prefix("job-target:") {
-            Self::parse_tag(&format!("worker-target:{name}"))
-        } else {
-            Err(InvalidWorkerTarget {
+        let name = tag
+            .strip_prefix("job-target:")
+            .ok_or_else(|| InvalidWorkerTarget {
                 tag: tag.into(),
                 reason: "a job tag must start with `job-target:`",
-            })
-        }
+            })?;
+        Self::parse_tag(&format!("worker-target:{name}"))
     }
 
     /// The key the concurrency limit counts running jobs under.
@@ -199,4 +198,14 @@ pub fn targets_for_start(tags: &[String]) -> Result<Vec<WorkerTarget>, InvalidWo
         }
     }
     Ok(targets)
+}
+
+/// Resolves the workspace assignment, using shared compute when none is stored.
+pub(crate) async fn resolve_worker_class(
+    ctx: &loco_rs::app::AppContext,
+    workspace_id: Uuid,
+) -> Result<WorkerClass, YorishiroError> {
+    Ok(crate::workspace_worker_class(&ctx.db, workspace_id)
+        .await?
+        .unwrap_or(WorkerClass::Shared))
 }

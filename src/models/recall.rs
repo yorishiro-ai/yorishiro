@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use crate::error::YorishiroError;
+use crate::error::{ResultExt, YorishiroError};
 use crate::models::entity_entities::{self, EntityRecord};
 use crate::models::entity_relations::{self, DEFAULT_NEIGHBORS_LIMIT};
 use crate::models::schema_schemas::{self, SchemaRecord};
@@ -36,7 +36,7 @@ pub struct RecallContext {
     /// The requested entity, always with its full `data`.
     pub entity: EntityRecord,
     /// Flat list of every neighbor found within `depth` hops, each tagged with its `hop_distance`.
-    /// A neighbor reachable via more than one path is only reported once, at the shortest hop_distance it was found at.
+    /// A neighbor reachable via more than one path is only reported once, at the shortest `hop_distance` it was found at.
     pub relations: Vec<RecallRelation>,
     /// `true` when more neighbors exist at some hop than `limit` allowed to be included there.
     pub(crate) truncated: bool,
@@ -64,8 +64,8 @@ impl Default for RecallQuery {
     }
 }
 
-/// Reduces `entity.data` down to only the fields marked `x-embed` in its entity_type definition.
-/// Falls back to an empty body if the entity's schema version no longer defines that entity_type at all, rather than failing the whole recall for one neighbor.
+/// Reduces `entity.data` down to only the fields marked `x-embed` in its `entity_type` definition.
+/// Falls back to an empty body if the entity's schema version no longer defines that `entity_type` at all, rather than failing the whole recall for one neighbor.
 fn shallow_copy(schema: &SchemaRecord, mut entity: EntityRecord) -> EntityRecord {
     let fields = schema
         .definition
@@ -105,6 +105,7 @@ pub async fn recall_context(
         entity_relations::MAX_NEIGHBORS_LIMIT,
     );
     let depth = query.depth.clamp(1, MAX_RECALL_DEPTH);
+    let neighbor_limit = usize::try_from(limit).internal()?;
     let full = query.full;
 
     let entity = entity_entities::get(conn, workspace_id, entity_id).await?;
@@ -126,10 +127,10 @@ pub async fn recall_context(
             let Some(mut node_neighbors) = by_pivot.remove(&source_id) else {
                 continue;
             };
-            if node_neighbors.len() as i64 > limit {
+            if node_neighbors.len() > neighbor_limit {
                 truncated = true;
             }
-            node_neighbors.truncate(limit as usize);
+            node_neighbors.truncate(neighbor_limit);
 
             for neighbor in node_neighbors {
                 if !visited.insert(neighbor.entity.id) {
@@ -141,13 +142,12 @@ pub async fn recall_context(
                     neighbor.entity
                 } else {
                     let schema_id = neighbor.entity.schema_id;
-                    let schema = match schema_cache.get(&schema_id) {
-                        Some(schema) => schema,
-                        None => {
-                            let schema =
-                                schema_schemas::get_by_id(conn, workspace_id, schema_id).await?;
-                            schema_cache.entry(schema_id).or_insert(schema)
-                        }
+                    let schema = if let Some(schema) = schema_cache.get(&schema_id) {
+                        schema
+                    } else {
+                        let schema =
+                            schema_schemas::get_by_id(conn, workspace_id, schema_id).await?;
+                        schema_cache.entry(schema_id).or_insert(schema)
                     };
                     shallow_copy(schema, neighbor.entity)
                 };
@@ -155,7 +155,7 @@ pub async fn recall_context(
                     relation_type: neighbor.relation_type,
                     direction: neighbor.direction,
                     neighbor: neighbor_entity,
-                    hop_distance: hop as i32,
+                    hop_distance: i32::try_from(hop).internal()?,
                 });
             }
         }

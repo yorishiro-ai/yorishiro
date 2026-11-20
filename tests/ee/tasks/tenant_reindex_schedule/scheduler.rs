@@ -15,8 +15,12 @@ async fn operator_cli_can_configure_replace_inspect_and_disable_a_tenant_schedul
     use std::time::{Duration, Instant};
 
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let tenant =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let tenant = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let config_dir = tempfile::tempdir().unwrap();
         let mut config = ctx.config.clone();
         config.database.auto_migrate = false;
@@ -111,8 +115,12 @@ async fn schedules_validate_timezones_with_the_application_parser() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
-        let tenant =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let tenant = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         for invalid in ["", "Not/AZone"] {
             assert!(
                 set(&ctx.db, tenant.tenant_id, "P1D", Some(invalid))
@@ -158,14 +166,18 @@ async fn disabled_tenant_retains_schedule_and_history_without_new_dispatches() {
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
         install_active_licence(&ctx);
-        let tenant =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let tenant = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         set(&ctx.db, tenant.tenant_id, "PT6H", None).await.unwrap();
         let first = get(&ctx.db, tenant.tenant_id).await.unwrap().unwrap();
         TenantReindexScheduler
             .run_at(
                 &ctx,
-                &Default::default(),
+                &loco_rs::task::Vars::default(),
                 first.scheduled_for.unwrap().to_utc(),
             )
             .await
@@ -190,7 +202,7 @@ async fn disabled_tenant_retains_schedule_and_history_without_new_dispatches() {
         TenantReindexScheduler
             .run_at(
                 &ctx,
-                &Default::default(),
+                &loco_rs::task::Vars::default(),
                 schedule.scheduled_for.unwrap().to_utc(),
             )
             .await
@@ -217,8 +229,12 @@ async fn postgres_tick_waits_for_disable_and_rechecks_tenant_activity() {
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
         install_active_licence(&ctx);
-        let tenant =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let tenant = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         set(&ctx.db, tenant.tenant_id, "PT6H", None).await.unwrap();
         let schedule = get(&ctx.db, tenant.tenant_id).await.unwrap().unwrap();
         let before = workspace_dispatch_ids(&ctx.db, tenant.workspace_id).await;
@@ -238,7 +254,7 @@ async fn postgres_tick_waits_for_disable_and_rechecks_tenant_activity() {
         let tick_after_disable_locks = async {
             // Disable owns the membership fence but cannot update its tenant until we release the row.
             wait_for_membership_lock(&ctx.db, &fence, true).await;
-            let vars = Default::default();
+            let vars = loco_rs::task::Vars::default();
             let tick = TenantReindexScheduler.run_at(
                 &ctx,
                 &vars,
@@ -389,14 +405,15 @@ fn dispatch_failure_remains_primary_when_release_also_fails() {
 
 #[tokio::test]
 async fn sqlite_task_rolls_back_schedule_when_dispatch_fails() {
+    use sea_orm::{ConnectionTrait, TransactionTrait};
+    use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
+
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
     install_active_licence(&ctx);
     if !crate::require_sqlite_backend() { return; }
 
-    use sea_orm::{ConnectionTrait, TransactionTrait};
-    use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
-    let crate::requests::fixtures::TestTenant { tenant_id, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+    let crate::requests::fixtures::TestTenant { tenant_id, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
     let transaction = ctx.db.begin().await.unwrap();
     for name in ["second"] {
         yorishiro::models::tenancy::create_workspace(&transaction, tenant_id, name, None, None)
@@ -457,7 +474,12 @@ async fn intervals_that_cannot_be_scheduled_are_refused() {
         use yorishiro::edition::ee::models::tenant_reindex_schedules::set;
 
         let crate::requests::fixtures::TestTenant { tenant_id, .. } =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+            crate::requests::fixtures::TestTenant::create(
+                &request,
+                &ctx,
+                crate::requests::fixtures::TenantArgs::default(),
+            )
+            .await;
         for bad in [
             "",
             "abc",
@@ -491,12 +513,17 @@ async fn intervals_that_cannot_be_scheduled_are_refused() {
 /// The first run is one interval after the schedule is set, and every tick schedules the next run one interval after itself.
 #[tokio::test]
 async fn a_schedule_advances_by_its_own_interval() {
+    use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         install_active_licence(&ctx);
-        use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
         let crate::requests::fixtures::TestTenant { tenant_id, .. } =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+            crate::requests::fixtures::TestTenant::create(
+                &request,
+                &ctx,
+                crate::requests::fixtures::TenantArgs::default(),
+            )
+            .await;
         let before = Utc::now();
         set(&ctx.db, tenant_id, "PT6H", None).await.unwrap();
         let first = get(&ctx.db, tenant_id)
@@ -543,7 +570,12 @@ async fn licensed_task_ticks_schedule_while_unlicensed_task_only_scans_mismatche
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         install_active_licence(&ctx);
         let crate::requests::fixtures::TestTenant { tenant_id, .. } =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+            crate::requests::fixtures::TestTenant::create(
+                &request,
+                &ctx,
+                crate::requests::fixtures::TenantArgs::default(),
+            )
+            .await;
         set(&ctx.db, tenant_id, "PT6H", None).await.unwrap();
         let before = get(&ctx.db, tenant_id)
             .await
@@ -592,13 +624,18 @@ async fn licensed_task_ticks_schedule_while_unlicensed_task_only_scans_mismatche
 /// Invalid stored intervals fail without advancing the schedule.
 #[tokio::test]
 async fn invalid_stored_intervals_are_rejected_without_advancement() {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         install_active_licence(&ctx);
-        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-        use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
         let crate::requests::fixtures::TestTenant { tenant_id, .. } =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+            crate::requests::fixtures::TestTenant::create(
+                &request,
+                &ctx,
+                crate::requests::fixtures::TenantArgs::default(),
+            )
+            .await;
         for interval in ["PT1S", "P1D1D", "PT9223372036854775S"] {
             set(&ctx.db, tenant_id, "P1D", None).await.unwrap();
             // Direct write (c): bypasses input validation to exercise detection of corrupt stored data.

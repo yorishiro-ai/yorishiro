@@ -6,6 +6,10 @@ use yorishiro::models::_entities::entity_entities::Column;
 use yorishiro::models::entity_entities::{self, CreateEntityInput, ListEntitiesQuery};
 use yorishiro::models::schema_schemas;
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn seed_schema(request: &loco_rs::TestServer, ctx: &loco_rs::app::AppContext) -> uuid::Uuid {
     let tenant = TestTenant::create(request, ctx, TenantArgs::default()).await;
     let definition = serde_json::json!({

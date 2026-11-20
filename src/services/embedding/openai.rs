@@ -42,6 +42,7 @@ impl OpenAiCompatibleProvider {
     ///
     /// # Panics
     /// Panics if the reqwest client cannot be built from the static configuration.
+    #[must_use]
     pub fn new(config: OpenAiCompatibleConfig) -> Self {
         Self::with_timeouts(config, crate::data::settings::HttpTimeouts::default())
     }
@@ -65,6 +66,7 @@ impl OpenAiCompatibleProvider {
         Self::with_client(config, client)
     }
 
+    #[must_use]
     pub fn with_client(config: OpenAiCompatibleConfig, client: reqwest::Client) -> Self {
         Self {
             client,
@@ -125,7 +127,7 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
             return Ok(Vec::new());
         }
 
-        let request = self
+        let response = self
             .client
             .post(format!("{}/embeddings", self.base_url))
             .bearer_auth(&self.api_key)
@@ -134,17 +136,12 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
                 input: texts,
                 dimensions: self.send_dimensions_param.then_some(self.dimensions),
             })
-            .build()
+            .send()
+            .await
             .map_err(|err| YorishiroError::ProviderUnreachable {
                 url: self.base_url.clone(),
                 message: redact(&err.to_string(), &self.api_key),
             })?;
-        let response = self.client.execute(request).await.map_err(|err| {
-            YorishiroError::ProviderUnreachable {
-                url: self.base_url.clone(),
-                message: redact(&err.to_string(), &self.api_key),
-            }
-        })?;
 
         let status = response.status();
         if !status.is_success() {

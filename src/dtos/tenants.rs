@@ -38,7 +38,7 @@ impl TenantRecord {
             id: tenant.id,
             name: tenant.name,
             max_workspaces: tenant.max_workspaces,
-            created_at: crate::data::time::render(ctx, tenant.created_at),
+            created_at: crate::data::time::render(ctx, &tenant.created_at),
         }
     }
 }

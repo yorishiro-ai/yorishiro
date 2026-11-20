@@ -36,7 +36,7 @@ pub(crate) async fn configure(
         old.base_url == request.base_url.trim_end_matches('/')
             && old.model == request.model
             && old.api_key == request.api_key
-            && old.dimensions == request.dimensions
+            && i32::try_from(old.dimensions).ok() == Some(request.dimensions)
             && old.send_dimensions_param == request.send_dimensions_param
             && old.document_prefix == request.document_prefix
     });
@@ -85,17 +85,7 @@ pub(crate) async fn resolve(
     let Some(config) = get(conn, workspace_id).await? else {
         return Ok(None);
     };
-    Ok(Some(Arc::new(OpenAiCompatibleProvider::new(
-        OpenAiCompatibleConfig {
-            base_url: config.base_url,
-            api_key: config.api_key,
-            model: config.model,
-            dimensions: config.dimensions as usize,
-            send_dimensions_param: config.send_dimensions_param,
-            query_instruction: config.query_instruction,
-            document_prefix: config.document_prefix,
-        },
-    ))))
+    Ok(Some(Arc::new(OpenAiCompatibleProvider::new(config))))
 }
 
 /// What a workspace has configured, without the key itself.
@@ -113,17 +103,6 @@ pub(crate) struct EmbeddingKeyDescription {
     /// Always true when present: the row cannot exist without a key.
     /// Callers use the absence of the whole description to mean "not configured".
     pub(crate) configured: bool,
-}
-
-/// A workspace's own embedding credentials and model, as the provider lookup reads them to build a provider.
-pub(crate) struct EmbeddingKeyConfig {
-    pub(crate) query_instruction: String,
-    pub(crate) document_prefix: String,
-    pub(crate) base_url: String,
-    pub(crate) api_key: String,
-    pub(crate) model: String,
-    pub(crate) dimensions: i32,
-    pub(crate) send_dimensions_param: bool,
 }
 
 /// Stores a provider assignment and invalidates the workspace embedding generation.
@@ -287,13 +266,16 @@ pub(crate) async fn metadata(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<Option<crate::services::embedding::EmbeddingMetadata>, YorishiroError> {
-    Ok(describe(conn, workspace_id).await?.map(|description| {
-        crate::services::embedding::EmbeddingMetadata {
-            model: description.model,
-            dimensions: description.dimensions as usize,
-            document_prefix: description.document_prefix,
-        }
-    }))
+    describe(conn, workspace_id)
+        .await?
+        .map(|description| {
+            Ok(crate::services::embedding::EmbeddingMetadata {
+                model: description.model,
+                dimensions: usize::try_from(description.dimensions).internal()?,
+                document_prefix: description.document_prefix,
+            })
+        })
+        .transpose()
 }
 
 /// The credentials themselves, for building a provider.
@@ -301,20 +283,23 @@ pub(crate) async fn metadata(
 pub(crate) async fn get(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-) -> Result<Option<EmbeddingKeyConfig>, YorishiroError> {
+) -> Result<Option<OpenAiCompatibleConfig>, YorishiroError> {
     let row = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .one(conn)
         .await
         .internal()?;
 
-    Ok(row.map(|row| EmbeddingKeyConfig {
-        base_url: row.base_url,
-        api_key: row.api_key,
-        model: row.model,
-        dimensions: row.dimensions,
-        send_dimensions_param: row.send_dimensions_param,
-        query_instruction: row.query_instruction,
-        document_prefix: row.document_prefix,
-    }))
+    row.map(|row| {
+        Ok(OpenAiCompatibleConfig {
+            base_url: row.base_url,
+            api_key: row.api_key,
+            model: row.model,
+            dimensions: usize::try_from(row.dimensions).internal()?,
+            send_dimensions_param: row.send_dimensions_param,
+            query_instruction: row.query_instruction,
+            document_prefix: row.document_prefix,
+        })
+    })
+    .transpose()
 }

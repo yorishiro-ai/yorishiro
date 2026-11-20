@@ -51,8 +51,7 @@ services:
       POSTGRES_DB: yorishiro
     volumes:
       - pgdata:/var/lib/postgresql
-      # Runs once, only against an empty data directory.
-      # pgvector isn't part of contrib, so a non-superuser (the migrating role) can't CREATE EXTENSION it later, and a fresh volume needs it before the migrator's content_entities.embedding column can be created.
+      # Installs the required extensions on first initialization.
       - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "yorishiro"]
@@ -71,8 +70,7 @@ services:
       POSTGRES_DB: yorishiro
     volumes:
       - test_pgdata:/var/lib/postgresql
-      # Runs once, only against an empty data directory.
-      # pgvector isn't part of contrib, so a non-superuser (the migrating role) can't CREATE EXTENSION it later, and a fresh volume needs it before the migrator's content_entities.embedding column can be created.
+      # Installs the extensions in template1 for disposable test databases.
       - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "yorishiro"]

@@ -1,5 +1,6 @@
 //! Inventory of every mounted route, built while the route tree is composed.
-//! It checks that each public route has OpenAPI documentation and that anything left undocumented is an explicitly allowed exclusion.
+//!
+//! It checks that each public route has `OpenAPI` documentation and that anything left undocumented is an explicitly allowed exclusion.
 
 #[cfg(feature = "openapi")]
 use super::swagger::implementation::openapi_method;
@@ -37,7 +38,7 @@ pub struct RouteInventory {
     pub(crate) docs: Vec<RouteDoc>,
 }
 
-/// OpenAPI metadata emitted next to the handler that serves an operation.
+/// `OpenAPI` metadata emitted next to the handler that serves an operation.
 #[cfg(feature = "openapi")]
 #[derive(Clone)]
 pub struct RouteDoc {
@@ -197,6 +198,7 @@ impl RouteInventory {
     }
 }
 
+#[must_use]
 pub fn operation_id(method: &Method, path: &str) -> String {
     let suffix = path
         .trim_matches('/')

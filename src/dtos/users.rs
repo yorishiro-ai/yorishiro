@@ -23,7 +23,7 @@ impl UserRecord {
             tenant_id: user.tenant_id,
             user_name: user.user_name,
             display_name: user.display_name,
-            created_at: crate::data::time::render(ctx, user.created_at).to_rfc3339(),
+            created_at: crate::data::time::render(ctx, &user.created_at).to_rfc3339(),
         }
     }
 }

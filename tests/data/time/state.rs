@@ -15,7 +15,10 @@ async fn postgres_app_pool_uses_configured_timezone_on_new_and_released_connecti
             let pool = ctx.db.get_postgres_connection_pool();
             let mut first = pool.acquire().await.unwrap();
             let mut second = pool.acquire().await.unwrap();
-            assert_ne!(first.as_mut() as *mut _, second.as_mut() as *mut _);
+            assert_ne!(
+                std::ptr::from_mut(first.as_mut()),
+                std::ptr::from_mut(second.as_mut())
+            );
             for connection in [&mut first, &mut second] {
                 let zone: String = sea_orm::sqlx::query_scalar("SHOW TIME ZONE")
                     .fetch_one(&mut **connection)
@@ -122,6 +125,10 @@ async fn postgres_pool_replacement_keeps_uri_settings_without_replaying_startup(
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one database is reopened across timezones to verify pooled defaults and unchanged legacy timestamps together"
+)]
 async fn sqlite_current_timestamp_default_uses_configured_zone_on_each_boot() {
     let _environment = crate::EnvironmentRead::enter();
     if !crate::require_sqlite_backend() {
@@ -160,7 +167,10 @@ async fn sqlite_current_timestamp_default_uses_configured_zone_on_each_boot() {
         let pool = ctx.db.get_sqlite_connection_pool();
         let mut first = pool.acquire().await.unwrap();
         let mut second = pool.acquire().await.unwrap();
-        assert_ne!(first.as_mut() as *mut _, second.as_mut() as *mut _);
+        assert_ne!(
+            std::ptr::from_mut(first.as_mut()),
+            std::ptr::from_mut(second.as_mut())
+        );
         for connection in [&mut first, &mut second] {
             let foreign_keys: i64 = sea_orm::sqlx::query_scalar("PRAGMA foreign_keys")
                 .fetch_one(&mut **connection)
@@ -272,7 +282,10 @@ async fn sqlite_app_pool_executes_startup_effects_once_not_per_connection() {
     let pool = ctx.db.get_sqlite_connection_pool();
     let mut first = pool.acquire().await.unwrap();
     let mut second = pool.acquire().await.unwrap();
-    assert_ne!(first.as_mut() as *mut _, second.as_mut() as *mut _);
+    assert_ne!(
+        std::ptr::from_mut(first.as_mut()),
+        std::ptr::from_mut(second.as_mut())
+    );
     for connection in [&mut first, &mut second] {
         let count: i64 = sea_orm::sqlx::query_scalar("SELECT count(*) FROM startup_probe")
             .fetch_one(&mut **connection)

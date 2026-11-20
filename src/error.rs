@@ -200,7 +200,8 @@ impl Serialize for YorishiroErrorCode {
 
 impl YorishiroErrorCode {
     /// Machine-readable string representation.
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::ValidationFailed => "validation_failed",
             Self::NotFound => "not_found",
@@ -220,25 +221,28 @@ impl YorishiroErrorCode {
     /// HTTP status code for this error code.
     ///
     /// Status codes are fixed by the HTTP specification and never change.
-    pub fn http_status(&self) -> axum::http::StatusCode {
+    #[must_use]
+    pub const fn http_status(self) -> axum::http::StatusCode {
         match self {
-            Self::ValidationFailed => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            Self::ValidationFailed | Self::RelationTypeMismatch => {
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY
+            }
             Self::NotFound => axum::http::StatusCode::NOT_FOUND,
             Self::ScopeInsufficient => axum::http::StatusCode::FORBIDDEN,
             Self::Conflict => axum::http::StatusCode::CONFLICT,
-            Self::RelationTypeMismatch => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             Self::Unauthenticated => axum::http::StatusCode::UNAUTHORIZED,
             Self::MaintenanceReadOnly => axum::http::StatusCode::LOCKED,
-            Self::MaintenanceFullLock => axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            Self::ProviderBusy => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Self::MaintenanceFullLock | Self::ProviderBusy | Self::BackendUnavailable => {
+                axum::http::StatusCode::SERVICE_UNAVAILABLE
+            }
             Self::ProviderUnreachable => axum::http::StatusCode::BAD_GATEWAY,
             Self::BackendUnsupported => axum::http::StatusCode::NOT_IMPLEMENTED,
-            Self::BackendUnavailable => axum::http::StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 
     /// Human-readable one-line description of the error.
-    pub fn description(&self) -> &'static str {
+    #[must_use]
+    pub const fn description(self) -> &'static str {
         match self {
             Self::ValidationFailed => "The request body does not conform to the expected schema",
             Self::NotFound => "The requested resource does not exist",
@@ -254,6 +258,17 @@ impl YorishiroErrorCode {
             Self::BackendUnavailable => "A required backend component is not configured",
         }
     }
+    fn message_response(
+        self,
+        message: impl Into<String>,
+    ) -> (axum::http::StatusCode, serde_json::Value) {
+        (
+            self.http_status(),
+            serde_json::json!({
+                "error": { "code": self.as_str(), "message": message.into() }
+            }),
+        )
+    }
 }
 
 impl YorishiroError {
@@ -267,7 +282,8 @@ impl YorishiroError {
     ///
     /// `Internal` has no code (it is not listed in `YorishiroErrorCode`),
     /// so this returns `None`. Callers must handle `Internal` separately.
-    pub fn code(&self) -> Option<YorishiroErrorCode> {
+    #[must_use]
+    pub const fn code(&self) -> Option<YorishiroErrorCode> {
         match self {
             Self::ValidationFailed { .. } => Some(YorishiroErrorCode::ValidationFailed),
             Self::NotFound { .. } => Some(YorishiroErrorCode::NotFound),
@@ -292,11 +308,10 @@ impl YorishiroError {
 
     /// Maps this error to an HTTP status code and JSON response body.
     ///
-    /// The error code, HTTP status, and description all come from
-    /// `YorishiroErrorCode` — there is exactly one place to look up or add
-    /// an error definition.
+    /// The error code, HTTP status, and description all come from `YorishiroErrorCode`, so error definitions have one source.
     ///
     /// Internal errors are logged here; the caller should not log them again.
+    #[must_use]
     pub fn into_http_parts(self) -> (axum::http::StatusCode, serde_json::Value) {
         match self {
             Self::ValidationFailed {
@@ -314,15 +329,7 @@ impl YorishiroError {
                     }
                 }),
             ),
-            Self::NotFound { message } => (
-                YorishiroErrorCode::NotFound.http_status(),
-                serde_json::json!({
-                    "error": {
-                        "code": YorishiroErrorCode::NotFound.as_str(),
-                        "message": message
-                    }
-                }),
-            ),
+            Self::NotFound { message } => YorishiroErrorCode::NotFound.message_response(message),
             Self::ScopeInsufficient { message, hint } => (
                 YorishiroErrorCode::ScopeInsufficient.http_status(),
                 serde_json::json!({
@@ -333,33 +340,13 @@ impl YorishiroError {
                     }
                 }),
             ),
-            Self::Conflict { message } => (
-                YorishiroErrorCode::Conflict.http_status(),
-                serde_json::json!({
-                    "error": {
-                        "code": YorishiroErrorCode::Conflict.as_str(),
-                        "message": message
-                    }
-                }),
-            ),
-            Self::RelationTypeMismatch { message } => (
-                YorishiroErrorCode::RelationTypeMismatch.http_status(),
-                serde_json::json!({
-                    "error": {
-                        "code": YorishiroErrorCode::RelationTypeMismatch.as_str(),
-                        "message": message
-                    }
-                }),
-            ),
-            Self::Unauthenticated => (
-                YorishiroErrorCode::Unauthenticated.http_status(),
-                serde_json::json!({
-                    "error": {
-                        "code": YorishiroErrorCode::Unauthenticated.as_str(),
-                        "message": "authentication required"
-                    }
-                }),
-            ),
+            Self::Conflict { message } => YorishiroErrorCode::Conflict.message_response(message),
+            Self::RelationTypeMismatch { message } => {
+                YorishiroErrorCode::RelationTypeMismatch.message_response(message)
+            }
+            Self::Unauthenticated => {
+                YorishiroErrorCode::Unauthenticated.message_response("authentication required")
+            }
             Self::Maintenance {
                 message,
                 read_only,
@@ -404,24 +391,12 @@ impl YorishiroError {
                     }
                 }),
             ),
-            Self::BackendUnsupported { message } => (
-                YorishiroErrorCode::BackendUnsupported.http_status(),
-                serde_json::json!({
-                    "error": {
-                        "code": YorishiroErrorCode::BackendUnsupported.as_str(),
-                        "message": message
-                    }
-                }),
-            ),
-            Self::BackendUnavailable { message } => (
-                YorishiroErrorCode::BackendUnavailable.http_status(),
-                serde_json::json!({
-                    "error": {
-                        "code": YorishiroErrorCode::BackendUnavailable.as_str(),
-                        "message": message
-                    }
-                }),
-            ),
+            Self::BackendUnsupported { message } => {
+                YorishiroErrorCode::BackendUnsupported.message_response(message)
+            }
+            Self::BackendUnavailable { message } => {
+                YorishiroErrorCode::BackendUnavailable.message_response(message)
+            }
             Self::Internal(ref err) => {
                 let message = report_internal(err);
                 (
@@ -444,7 +419,7 @@ impl YorishiroError {
 impl From<YorishiroError> for loco_rs::Error {
     fn from(err: YorishiroError) -> Self {
         let (status, body) = err.into_http_parts();
-        loco_rs::Error::CustomError(
+        Self::CustomError(
             status,
             loco_rs::controller::ErrorDetail {
                 error: Some(status.to_string()),
@@ -469,9 +444,9 @@ pub enum ValidationErrorCode {
     DepthExceeded,
     /// A numeric field uses minimum/maximum on a non-numeric type.
     NumericOnNonNumeric,
-    /// A string-only constraint (format, min_length, max_length, pattern) is used on a non-string type.
+    /// A string-only constraint (format, `min_length`, `max_length`, pattern) is used on a non-string type.
     StringConstraintOnNonString,
-    /// An array constraint (min_items, max_items, unique_items) is used on a non-array type.
+    /// An array constraint (`min_items`, `max_items`, `unique_items`) is used on a non-array type.
     ArrayConstraintOnNonArray,
     /// An array items.type is neither 'string' nor 'object'.
     InvalidArrayItemType,

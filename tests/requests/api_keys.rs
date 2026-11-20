@@ -1,5 +1,6 @@
 use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value;
 use uuid::Uuid;
 use yorishiro::App;
@@ -22,12 +23,16 @@ async fn scope_rejection_does_not_touch_a_key_but_a_read_does() {
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let key =
             fixtures::issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
-        let before = Entity::list_for_workspace(&ctx.db, workspace_id, Default::default())
-            .await
-            .expect("list workspace keys")
-            .into_iter()
-            .find(|key| key.scope == "read")
-            .expect("read key");
+        let before = Entity::list_for_workspace(
+            &ctx.db,
+            workspace_id,
+            yorishiro::models::pagination::ListParams::default(),
+        )
+        .await
+        .expect("list workspace keys")
+        .into_iter()
+        .find(|key| key.scope == "read")
+        .expect("read key");
         assert!(before.last_used_at.is_none());
         let denied = request
             .post("/api/entities")
@@ -36,14 +41,18 @@ async fn scope_rejection_does_not_touch_a_key_but_a_read_does() {
             .await;
         assert_eq!(denied.status_code(), StatusCode::FORBIDDEN);
         assert!(
-            Entity::list_for_workspace(&ctx.db, workspace_id, Default::default())
-                .await
-                .expect("list workspace keys")
-                .into_iter()
-                .find(|key| key.id == before.id)
-                .expect("read key remains")
-                .last_used_at
-                .is_none()
+            Entity::list_for_workspace(
+                &ctx.db,
+                workspace_id,
+                yorishiro::models::pagination::ListParams::default()
+            )
+            .await
+            .expect("list workspace keys")
+            .into_iter()
+            .find(|key| key.id == before.id)
+            .expect("read key remains")
+            .last_used_at
+            .is_none()
         );
         let read = request
             .get(&format!("/api/workspaces/{workspace_id}"))
@@ -51,14 +60,18 @@ async fn scope_rejection_does_not_touch_a_key_but_a_read_does() {
             .await;
         assert_eq!(read.status_code(), StatusCode::OK);
         assert!(
-            Entity::list_for_workspace(&ctx.db, workspace_id, Default::default())
-                .await
-                .expect("list workspace keys")
-                .into_iter()
-                .find(|key| key.id == before.id)
-                .expect("read key remains")
-                .last_used_at
-                .is_some()
+            Entity::list_for_workspace(
+                &ctx.db,
+                workspace_id,
+                yorishiro::models::pagination::ListParams::default()
+            )
+            .await
+            .expect("list workspace keys")
+            .into_iter()
+            .find(|key| key.id == before.id)
+            .expect("read key remains")
+            .last_used_at
+            .is_some()
         );
     })
     .await;
@@ -205,7 +218,7 @@ async fn concurrent_rotation_issues_only_one_replacement() {
             }
         );
         let mut statuses = [a.status_code().as_u16(), b.status_code().as_u16()];
-        statuses.sort();
+        statuses.sort_unstable();
         assert_eq!(statuses, [201, 409]);
         let listed = request
             .get("/api/api-keys")
@@ -258,7 +271,6 @@ async fn key_rotation_preserves_grants_and_retains_secret_free_history() {
         assert!(old["effective_scope"].is_null());
         assert!(!listed.to_string().contains(original["full_key"].as_str().unwrap()));
         assert!(!listed.to_string().contains("key_hash"));
-        use sea_orm::{ActiveModelTrait, ActiveValue::Set};
         // Direct write (c): issuance rejects a past expiry, so time passing is injected by moving the stored expiry.
         yorishiro::models::api_keys::ActiveModel {
             id: Set(replacement["id"].as_str().unwrap().parse().unwrap()),
@@ -278,6 +290,10 @@ async fn key_rotation_preserves_grants_and_retains_secret_free_history() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one credential history compares authorized and denied rotation and revocation while tracking one-time plaintext disclosure"
+)]
 async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
     boot_request_with_timezone::<App, _, _>("Asia/Tokyo", |request, ctx| async move {
         let timezone = ctx
@@ -454,6 +470,10 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the same tenant compares issuer roles and credential bindings before using and listing the issued keys"
+)]
 async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
     use sea_orm::TransactionTrait;
     use yorishiro::models::{api_keys, tenancy};
@@ -598,7 +618,6 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .json(&serde_json::json!({"name":"denied-escalation", "scope":"write", "tenant_scoped":true}))
             .await.assert_status(StatusCode::FORBIDDEN);
 
-        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
         let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
         // Direct write (a): the model issuer operation takes no expiry, and this key must stay the same issuer principal.
         api_keys::Entity::update_many()

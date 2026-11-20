@@ -29,7 +29,7 @@ pub(crate) fn start_relay(ctx: &AppContext) -> loco_rs::Result<()> {
                 .await;
             tokio::select! {
                 _ = stopped.changed() => break,
-                _ = tokio::time::sleep(poll_interval) => {}
+                () = tokio::time::sleep(poll_interval) => {}
             }
         }
     });

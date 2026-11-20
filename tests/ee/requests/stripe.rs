@@ -1,15 +1,28 @@
+use std::sync::Arc;
+
 use crate::requests::boot_request;
 use crate::requests::boot_request_with;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::{HeaderValue, StatusCode};
 use chrono::Utc;
+use loco_rs::app::AppContext;
 use serde_json::json;
 use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::App;
+use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::edition::ee::models::tenant_billing;
 
 const WEBHOOK_SECRET: &str = "whsec_test";
+
+fn enable_stripe(ctx: &AppContext) {
+    ctx.shared_store
+        .insert(Arc::new(LicenceState::licensed(LicenceClaims {
+            sub: "stripe-test".into(),
+            plan: "pro".into(),
+            exp: Utc::now().timestamp() + 3600,
+        })));
+}
 
 /// Stripe as the apps boot with it.
 fn stripe_overrides() -> [crate::requests::Override; 3] {
@@ -21,52 +34,85 @@ fn stripe_overrides() -> [crate::requests::Override; 3] {
 }
 
 fn sign(secret: &str, timestamp: i64, payload: &[u8]) -> String {
-    let mut signed_payload = format!("{timestamp}.").into_bytes();
-    signed_payload.extend_from_slice(payload);
-    yorishiro::edition::ee::data::hmac_sign::sign(secret.as_bytes(), &signed_payload)
+    stripe_webhook::Webhook::generate_test_header(
+        std::str::from_utf8(payload).unwrap(),
+        secret,
+        Some(timestamp),
+    )
+    .split_once(",v1=")
+    .unwrap()
+    .1
+    .to_owned()
+}
+
+fn event_body(
+    event_id: &str,
+    event_type: &str,
+    created: i64,
+    object: &serde_json::Value,
+) -> Vec<u8> {
+    json!({
+        "id": event_id,
+        "type": event_type,
+        "created": created,
+        "livemode": false,
+        "pending_webhooks": 1,
+        "data": { "object": object }
+    })
+    .to_string()
+    .into_bytes()
+}
+
+fn subscription_object(created: i64, customer_id: &str) -> serde_json::Value {
+    json!({
+        "id": "sub_fixture", "customer": customer_id, "created": created,
+        "automatic_tax": {"enabled": false}, "billing_cycle_anchor": created,
+        "billing_mode": {"type": "classic"}, "billing_schedules": [],
+        "cancel_at_period_end": false, "collection_method": "charge_automatically",
+        "currency": "usd", "discounts": [], "invoice_settings": {"issuer": {"type": "self"}},
+        "livemode": false, "metadata": {}, "start_date": created, "status": "active",
+        "items": {"object": "list", "has_more": false, "url": "/v1/subscription_items", "data": [{
+            "id": "si_fixture", "subscription": "sub_fixture", "created": created,
+            "current_period_start": created, "current_period_end": created + 86_400,
+            "discounts": [], "metadata": {},
+            "plan": {"id": "plan_fixture", "active": true, "billing_scheme": "per_unit",
+                "created": created, "currency": "usd", "interval": "month",
+                "interval_count": 1, "livemode": false, "usage_type": "licensed"},
+            "price": {"id": "price_pro", "active": true, "billing_scheme": "per_unit",
+                "created": created, "currency": "usd", "livemode": false,
+                "metadata": {}, "product": "prod_fixture", "type": "recurring"}
+        }]}
+    })
 }
 
 fn subscription_updated_body(event_id: &str, created: i64, customer_id: &str) -> Vec<u8> {
-    json!({
-        "id": event_id,
-        "type": "customer.subscription.updated",
-        "created": created,
-        "data": {
-            "object": {
-                "customer": customer_id,
-                "items": { "data": [{ "price": { "id": "price_pro" } }] }
-            }
-        }
-    })
-    .to_string()
-    .into_bytes()
+    event_body(
+        event_id,
+        "customer.subscription.updated",
+        created,
+        &subscription_object(created, customer_id),
+    )
 }
 
 fn subscription_deleted_body(event_id: &str, created: i64, customer_id: &str) -> Vec<u8> {
-    json!({
-        "id": event_id,
-        "type": "customer.subscription.deleted",
-        "created": created,
-        "data": { "object": { "customer": customer_id } }
-    })
-    .to_string()
-    .into_bytes()
+    let mut object = subscription_object(created, customer_id);
+    object["status"] = json!("canceled");
+    event_body(event_id, "customer.subscription.deleted", created, &object)
 }
 
 fn checkout_completed_body(event_id: &str, created: i64, tenant_id: Uuid) -> Vec<u8> {
-    json!({
-        "id": event_id,
-        "type": "checkout.session.completed",
-        "created": created,
-        "data": {
-            "object": {
-                "client_reference_id": tenant_id,
-                "customer": "cus_checkout"
-            }
-        }
-    })
-    .to_string()
-    .into_bytes()
+    event_body(
+        event_id,
+        "checkout.session.completed",
+        created,
+        &json!({
+            "id": "cs_test_fixture", "client_reference_id": tenant_id, "customer": "cus_checkout",
+            "automatic_tax": {"enabled": false}, "created": created, "custom_fields": [],
+            "custom_text": {}, "expires_at": created + 3600, "livemode": false,
+            "mode": "subscription", "payment_method_types": ["card"],
+            "payment_status": "paid", "shipping_options": []
+        }),
+    )
 }
 
 /// A duplicate delivery of an already-applied event must not re-apply it.
@@ -80,9 +126,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
         "YORISHIRO_STRIPE_PRICE_TEAM",
     ]);
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        enable_stripe(&ctx);
         changed.set(
             "YORISHIRO_STRIPE_WEBHOOK_SECRET",
             "changed-after-config-load",
@@ -160,9 +204,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
     boot_request_with::<App, _, _>(
         &[&stripe_overrides()[..], &overrides[..]].concat(),
         |request, ctx| async move {
-            if crate::requests::skip_unlicensed(&ctx) {
-                return;
-            }
+            enable_stripe(&ctx);
             let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
                 .await
                 .tenant_id;
@@ -227,9 +269,7 @@ async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
     boot_request_with::<App, _, _>(
         &[&stripe_overrides()[..], &overrides[..]].concat(),
         |request, ctx| async move {
-            if crate::requests::skip_unlicensed(&ctx) {
-                return;
-            }
+            enable_stripe(&ctx);
             let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
                 .await
                 .tenant_id;
@@ -280,9 +320,7 @@ async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
 #[tokio::test]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        enable_stripe(&ctx);
         let body = subscription_updated_body("evt_x", 1_000, "cus_x");
         let response = request
             .post("/api/stripe/webhook")
@@ -303,9 +341,7 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
 #[tokio::test]
 async fn a_tampered_payload_is_rejected() {
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        enable_stripe(&ctx);
         let body = subscription_updated_body("evt_tamper", Utc::now().timestamp(), "cus_t");
         let now = Utc::now().timestamp();
         let signature = sign(WEBHOOK_SECRET, now, &body);
@@ -326,13 +362,11 @@ async fn a_tampered_payload_is_rejected() {
     .await;
 }
 
-/// Structural signature failures keep the webhook's plain-text 400 contract.
+/// Signature failures return a plain-text 400.
 #[tokio::test]
 async fn malformed_signature_headers_have_exact_plain_text_rejections() {
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        enable_stripe(&ctx);
         let body = subscription_updated_body("evt_header", 1_000, "cus_header");
         let now = Utc::now().timestamp();
         let signature = sign(WEBHOOK_SECRET, now, &body);
@@ -350,7 +384,7 @@ async fn malformed_signature_headers_have_exact_plain_text_rejections() {
             .bytes(body.clone().into())
             .await;
         assert_eq!(invalid.status_code(), StatusCode::BAD_REQUEST);
-        assert_eq!(invalid.text(), "no v1 signature matched the computed HMAC");
+        assert_eq!(invalid.text(), "invalid Stripe signature");
 
         let malformed = request
             .post("/api/stripe/webhook")
@@ -361,7 +395,7 @@ async fn malformed_signature_headers_have_exact_plain_text_rejections() {
             .bytes(body.clone().into())
             .await;
         assert_eq!(malformed.status_code(), StatusCode::BAD_REQUEST);
-        assert_eq!(malformed.text(), "invalid Stripe-Signature header");
+        assert_eq!(malformed.text(), "invalid Stripe signature");
 
         let mut invalid_utf8 = HeaderValue::from_bytes(&[0xff]).unwrap();
         invalid_utf8.set_sensitive(true);
@@ -383,9 +417,7 @@ async fn malformed_signature_headers_have_exact_plain_text_rejections() {
 #[tokio::test]
 async fn malformed_json_is_rejected_after_signature_verification() {
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        enable_stripe(&ctx);
         let body = b"not json".to_vec();
         let now = Utc::now().timestamp();
         let valid_signature = sign(WEBHOOK_SECRET, now, &body);
@@ -396,7 +428,7 @@ async fn malformed_json_is_rejected_after_signature_verification() {
             .bytes(body.clone().into())
             .await;
         assert_eq!(valid.status_code(), StatusCode::BAD_REQUEST);
-        assert_eq!(valid.text(), "invalid JSON body");
+        assert_eq!(valid.text(), "invalid Stripe event");
 
         let invalid_signature = request
             .post("/api/stripe/webhook")
@@ -404,10 +436,7 @@ async fn malformed_json_is_rejected_after_signature_verification() {
             .bytes(body.into())
             .await;
         assert_eq!(invalid_signature.status_code(), StatusCode::BAD_REQUEST);
-        assert_eq!(
-            invalid_signature.text(),
-            "no v1 signature matched the computed HMAC"
-        );
+        assert_eq!(invalid_signature.text(), "invalid Stripe signature");
     })
     .await;
 }
@@ -416,9 +445,7 @@ async fn malformed_json_is_rejected_after_signature_verification() {
 #[tokio::test]
 async fn a_stale_subscription_event_is_not_reapplied() {
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        enable_stripe(&ctx);
         let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
             .await
             .tenant_id;
@@ -464,9 +491,7 @@ async fn a_stale_subscription_event_is_not_reapplied() {
 #[tokio::test]
 async fn checkout_completion_links_the_stripe_customer() {
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        enable_stripe(&ctx);
         let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
             .await
             .tenant_id;

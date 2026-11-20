@@ -7,10 +7,11 @@ use super::*;
 
 #[tokio::test]
 async fn mcp_authentication_database_failure_is_redacted() {
+    use sea_orm::ConnectionTrait;
+
     if !crate::require_sqlite_backend() {
         return;
     }
-    use sea_orm::ConnectionTrait;
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let session = initialize(&request).await;

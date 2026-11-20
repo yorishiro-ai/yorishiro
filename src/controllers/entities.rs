@@ -31,7 +31,7 @@ pub(crate) async fn create_entity(
     let workspace_id = authorized.ctx.require_workspace()?;
     let input = body.into();
     let created_by = authorized.ctx.user_id;
-    let quotas = crate::quotas(&ctx, authorized.ctx.tenant_id).await?;
+    let quotas = crate::data::quotas::for_tenant(&ctx, authorized.ctx.tenant_id).await?;
     let record = entity_entities::create_with_quota(
         authorized.txn(),
         workspace_id,

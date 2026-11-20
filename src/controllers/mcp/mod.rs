@@ -50,6 +50,7 @@ pub use policy::{McpToolPolicy, McpToolSet};
 pub use server::{YorishiroMcpServer, scope_requirement};
 
 /// The complete community-edition tool set.
+#[must_use]
 pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
     compose_tool_routers([
         YorishiroMcpServer::tool_router_entities(),
@@ -104,7 +105,10 @@ pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
             if let (Some(field), Some(problem)) =
                 (detail["field"].as_str(), detail["problem"].as_str())
             {
-                message.push_str(&format!("\n  {field}: {problem}"));
+                message.push_str("\n  ");
+                message.push_str(field);
+                message.push_str(": ");
+                message.push_str(problem);
             }
         }
     }
@@ -112,7 +116,8 @@ pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
         .as_str()
         .filter(|hint| !hint.is_empty())
     {
-        message.push_str(&format!("\nhint: {hint}"));
+        message.push_str("\nhint: ");
+        message.push_str(hint);
     }
     let mut result = CallToolResult::error(vec![ContentBlock::text(message)]);
     result.structured_content = Some(body);

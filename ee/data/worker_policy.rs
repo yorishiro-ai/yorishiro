@@ -24,14 +24,6 @@ impl WorkerClassLimits {
             tenant_private: Option<Limit>,
             official: Option<Limit>,
         }
-        let limits: Limits = config
-            .initializers
-            .as_ref()
-            .and_then(|values| values.get("worker_admission"))
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()?
-            .unwrap_or_default();
         fn limit(key: &str, value: Option<Limit>) -> Result<Option<i32>, loco_rs::Error> {
             match value {
                 None => Ok(None),
@@ -47,6 +39,15 @@ impl WorkerClassLimits {
                 }),
             }
         }
+
+        let limits: Limits = config
+            .initializers
+            .as_ref()
+            .and_then(|values| values.get("worker_admission"))
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()?
+            .unwrap_or_default();
 
         Ok(Self {
             shared: limit("YORISHIRO_WORKER_CLASS_SHARED_LIMIT / initializers.worker_admission.shared", limits.shared)?.unwrap_or(1),

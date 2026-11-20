@@ -137,9 +137,7 @@ pub(crate) async fn enqueue(
     )
     .await?;
     let worker_class =
-        crate::controllers::extractors::resolve_worker_class(ctx, auth.require_workspace()?)
-            .await
-            .map_err(|error| error.0)?;
+        crate::workers::target::resolve_worker_class(ctx, auth.require_workspace()?).await?;
     let args = ConfirmProposalsArgs {
         lifecycle_id: None,
         tenant_id: auth.tenant_id,

@@ -204,13 +204,13 @@ fn community_inventory_contract_is_valid() {
 fn composition_rejects_duplicate_registered_names_even_when_disabled() {
     fn router(name: &'static str) -> ToolRouter<yorishiro::controllers::mcp::YorishiroMcpServer> {
         ToolRouter::new().with_route(ToolRoute::new_dyn(
-            Tool::new(name, "test tool", Arc::new(Default::default())),
+            Tool::new(name, "test tool", Arc::new(serde_json::Map::default())),
             |_context| Box::pin(async { Ok(CallToolResult::default().into()) }),
         ))
     }
 
     let disabled = router("duplicate").with_disabled("duplicate");
-    assert!(disabled.list_all().is_empty());
+    assert_eq!(disabled.list_all(), [] as [Tool; 0]);
     assert!(disabled.map.contains_key("duplicate"));
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

@@ -54,6 +54,8 @@ Request tests boot through `boot_request`: SQLite gets its own database file and
 An app booted by other means must call `close_app_pools` before it returns, or teardown panics even on a passing test.
 
 Licensed tests skip without `YORISHIRO_LICENSE_KEY`, and the E5 model tests skip without `models/multilingual-e5-base/`.
+Run the opt-in Stripe tests with `cargo test --locked --features stripe-tests --test mod -- ::stripe::`.
+The Stripe request tests install a test licence state and do not require a Stripe account or a signed EE licence.
 `UPDATE_FIXTURES=1 cargo test --features enterprise enterprise_inventory_contract` rewrites `tests/fixtures/mcp-inventory.md`; review the diff before committing.
 
 Metaschema validation includes property-based tests for arbitrary schema-shaped definitions and rejection of empty `entity_types`.

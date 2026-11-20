@@ -102,7 +102,7 @@ pub struct FieldDef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub items: Option<ArrayItems>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub properties: Option<BTreeMap<String, FieldDef>>,
+    pub properties: Option<BTreeMap<String, Self>>,
     #[serde(
         default,
         rename = "x-embed",

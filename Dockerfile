@@ -1,5 +1,4 @@
-# Multi-stage build producing a self-contained runtime image, used both for distribution and as
-# the `app` service in compose.yml.
+# Builds the runtime image used for distribution and by `docker-compose.yml`.
 #
 #   docker compose up --build
 #   docker run --rm -e DATABASE_URL=... -e QUEUE_URL=... -e HOST=... yorishiro
@@ -40,8 +39,8 @@ RUN channel=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml) \
     && rm /tmp/rustup-init.sh
 COPY . .
 RUN python3 patches/loco-rs/verify.py --prepare
-# The edition is selected at build time with EDITION=ce or EDITION=ee. CE does not compile the
-# enterprise module; EE includes it and retains its runtime licence gate.
+# CE excludes the enterprise overlay at build time.
+# EE still checks the licence at runtime for gated features.
 ARG EDITION=ee
 ARG BUILD_SHA=dev
 ENV BUILD_SHA=${BUILD_SHA}
@@ -90,8 +89,7 @@ ENV HOME=/home/yorishiro
 ENV LOCO_ENV=production
 ENV LOCO_CONFIG_FOLDER=/app/config
 USER yorishiro
-# 5150 is the server's own default port (`config/production.yaml`'s `server.port`), which is what the
-# compose file and the healthcheck below expect.
+# Compose and the health check use the production default port.
 EXPOSE 5150
 # `/_ping` rather than `/_health`: both come from loco's default routes, and `_ping` answers
 # without touching the database, so this reports on the process rather than on its dependencies.

@@ -12,15 +12,14 @@ use crate::edition::ee::data::stripe::StripeConfig;
 use crate::edition::ee::models::stripe_events;
 
 pub mod inbound {
-    use super::SIGNATURE_TOLERANCE_SECS;
     use axum::http::HeaderMap;
+    use stripe_webhook::{Webhook, WebhookError};
 
-    use crate::edition::ee::data::hmac_sign;
-
+    #[derive(Debug)]
     pub enum Error {
         MissingSignatureHeader,
-        Signature(&'static str),
-        InvalidJson(serde_json::Error),
+        InvalidSignature,
+        InvalidPayload,
     }
 
     pub use crate::edition::ee::dtos::stripe::VerifiedStripeEvent;
@@ -38,92 +37,38 @@ pub mod inbound {
         )
     }
 
-    ///
     /// # Errors
-    /// Returns an error if the operation cannot be completed.
+    /// Returns an error for a missing header, invalid signature, or invalid event.
     pub fn verify_at(
         headers: &HeaderMap,
         payload: &[u8],
         secret: &str,
         now: i64,
     ) -> Result<VerifiedStripeEvent, Error> {
-        let mut signature_headers = headers.get_all("stripe-signature").iter();
-        let Some(signature_value) = signature_headers.next() else {
-            return Err(Error::MissingSignatureHeader);
-        };
-        if signature_headers.next().is_some() {
-            return Err(Error::Signature("invalid Stripe-Signature header"));
-        }
-        let Ok(signature_header) = signature_value.to_str() else {
-            return Err(Error::MissingSignatureHeader);
-        };
-
-        verify_signature(payload, signature_header, secret, now).map_err(Error::Signature)?;
-        serde_json::from_slice(payload).map_err(Error::InvalidJson)
-    }
-
-    fn verify_signature(
-        payload: &[u8],
-        signature_header: &str,
-        secret: &str,
-        now: i64,
-    ) -> Result<(), &'static str> {
-        let mut timestamp: Option<i64> = None;
-        let mut candidates = Vec::new();
-        for part in signature_header.split(',') {
-            let mut kv = part.split('=');
-            let (Some(key), Some(value), None) = (kv.next(), kv.next(), kv.next()) else {
-                return Err("invalid Stripe-Signature header");
-            };
-            if !valid_key(key)
-                || value.is_empty()
-                || value
-                    .bytes()
-                    .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
-            {
-                return Err("invalid Stripe-Signature header");
-            }
-            match key {
-                "t" if timestamp.is_some() => {
-                    return Err("invalid Stripe-Signature header");
-                }
-                "t" => timestamp = value.parse().ok(),
-                "v1" => candidates.push(value),
-                _ => {}
-            }
-        }
-        let timestamp = timestamp.ok_or("missing timestamp in Stripe-Signature header")?;
-        if now.abs_diff(timestamp) > SIGNATURE_TOLERANCE_SECS as u64 {
-            return Err("Stripe-Signature timestamp is outside the allowed tolerance");
-        }
-        if candidates.is_empty() {
-            return Err("missing v1 signature in Stripe-Signature header");
-        }
-
-        let mut signed_payload = format!("{timestamp}.").into_bytes();
-        signed_payload.extend_from_slice(payload);
-
-        if candidates
-            .iter()
-            .any(|candidate| hmac_sign::verify(secret.as_bytes(), &signed_payload, candidate))
+        let signature = headers
+            .get("stripe-signature")
+            .and_then(|header| header.to_str().ok())
+            .ok_or(Error::MissingSignatureHeader)?;
+        // The SDK checks tolerance with signed subtraction and abs(), which can overflow.
+        if signature
+            .split(',')
+            .filter_map(|part| part.strip_prefix("t="))
+            .filter_map(|timestamp| timestamp.parse::<i64>().ok())
+            .any(|timestamp| now.abs_diff(timestamp) > i64::MAX.cast_unsigned())
         {
-            Ok(())
-        } else {
-            Err("no v1 signature matched the computed HMAC")
+            return Err(Error::InvalidSignature);
         }
-    }
-
-    fn valid_key(key: &str) -> bool {
-        !key.is_empty()
-            && key
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        let payload = std::str::from_utf8(payload).map_err(|_| Error::InvalidPayload)?;
+        Webhook::construct_event_with_timestamp(payload, signature, secret, now).map_err(
+            |error| match error {
+                WebhookError::BadParse(_) => Error::InvalidPayload,
+                _ => Error::InvalidSignature,
+            },
+        )?;
+        // Billing uses the original object fields across Stripe API versions.
+        serde_json::from_str(payload).map_err(|_| Error::InvalidPayload)
     }
 }
-
-/// How far a webhook's `t=` timestamp may drift from now before it's rejected as a possible replay.
-/// Stripe's own guidance uses 5 minutes.
-pub const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 
 /// Returns 501 without a configured secret, 400 on a missing/invalid signature or malformed body, and 200 once the event has been applied (or was simply not one we act on).
 ///
@@ -134,16 +79,13 @@ async fn stripe_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    let config = match StripeConfig::from_config(&ctx.config) {
-        Ok(config) => config,
-        Err(_) => {
-            tracing::error!("invalid initializers.stripe configuration");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Stripe configuration is invalid",
-            )
-                .into_response();
-        }
+    let Ok(config) = StripeConfig::from_config(&ctx.config) else {
+        tracing::error!("invalid initializers.stripe configuration");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Stripe configuration is invalid",
+        )
+            .into_response();
     };
     let Some(secret) = config.webhook_secret.as_deref() else {
         return (
@@ -159,16 +101,11 @@ async fn stripe_webhook(
         Err(inbound::Error::MissingSignatureHeader) => {
             return (StatusCode::BAD_REQUEST, "missing Stripe-Signature header").into_response();
         }
-        Err(inbound::Error::Signature(reason)) => {
-            tracing::warn!(
-                reason,
-                "rejected Stripe webhook: signature verification failed"
-            );
-            return (StatusCode::BAD_REQUEST, reason).into_response();
+        Err(inbound::Error::InvalidSignature) => {
+            return (StatusCode::BAD_REQUEST, "invalid Stripe signature").into_response();
         }
-        Err(inbound::Error::InvalidJson(err)) => {
-            tracing::warn!(error = %err, "rejected Stripe webhook: invalid JSON body");
-            return (StatusCode::BAD_REQUEST, "invalid JSON body").into_response();
+        Err(inbound::Error::InvalidPayload) => {
+            return (StatusCode::BAD_REQUEST, "invalid Stripe event").into_response();
         }
     };
 

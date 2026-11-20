@@ -24,6 +24,10 @@ impl MigrationTrait for Migration {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered migration DDL keeps table definitions, constraints, and grants together"
+)]
 async fn up_workspaces(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let mut table = Table::create()
         .table(Alias::new("workspace_workspaces"))

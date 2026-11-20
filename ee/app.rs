@@ -1,4 +1,4 @@
-//! The enterprise half of the edition wiring: each function here has a community counterpart in `src/app.rs`, and `src/lib.rs` picks one per build.
+//! `src/lib.rs` composes these contributions with the base application.
 //! Plan-based quotas, worker and embedding lookups, route, worker, MCP tool and task registration, and seeding are overlaid here.
 
 use std::sync::Arc;
@@ -12,20 +12,20 @@ use crate::edition::ee::controllers::middleware::edition;
 use crate::edition::ee::workers::infer_fill::{InferFillArgs, InferFillWorker};
 use crate::workers::registry::WorkerRegistry;
 
-pub(crate) async fn quotas(
+pub(crate) async fn quota_override(
     ctx: &AppContext,
     tenant_id: uuid::Uuid,
-) -> std::result::Result<crate::data::quotas::Quotas, crate::YorishiroError> {
+) -> std::result::Result<Option<crate::data::quotas::Quotas>, crate::YorishiroError> {
     use crate::edition::ee::data::plan::{Plan, PlanPolicy};
     if PlanPolicy::current(ctx)? == PlanPolicy::Disabled {
-        return Ok(crate::data::quotas::Quotas::default());
+        return Ok(None);
     }
     let plan = Plan::for_tenant(ctx, tenant_id).await?;
     let caps = plan.caps();
-    Ok(crate::data::quotas::Quotas {
+    Ok(Some(crate::data::quotas::Quotas {
         workspaces: caps.max_workspaces,
         entities: caps.default_max_entities,
-    })
+    }))
 }
 
 pub(crate) async fn workspace_worker_class(
@@ -58,15 +58,15 @@ pub(crate) fn is_active(ctx: &AppContext) -> bool {
     edition::is_active(ctx)
 }
 
-pub(crate) async fn tenant_reindex_scheduler(
+pub(crate) async fn run_reindex_schedule_override(
     ctx: &AppContext,
     tick: chrono::DateTime<chrono::Utc>,
-) -> Result<()> {
-    if is_active(ctx) {
-        crate::edition::ee::models::tenant_reindex_schedules::tick(ctx, tick).await
-    } else {
-        crate::workers::startup_reindex::run_metadata_scan(ctx).await
+) -> Result<bool> {
+    if !is_active(ctx) {
+        return Ok(false);
     }
+    crate::edition::ee::models::tenant_reindex_schedules::tick(ctx, tick).await?;
+    Ok(true)
 }
 
 pub(crate) fn tenant_creation_cap(
