@@ -1,162 +1,64 @@
-use axum::http::HeaderMap;
-use yorishiro::edition::ee::controllers::stripe::SIGNATURE_TOLERANCE_SECS;
-use yorishiro::edition::ee::data::hmac_sign;
-
-use axum::http::HeaderValue;
-use yorishiro::edition::ee::controllers::stripe::inbound::*;
+use axum::http::{HeaderMap, HeaderValue};
+use stripe_webhook::Webhook;
+use yorishiro::edition::ee::controllers::stripe::inbound::{Error, verify_at};
 
 const SECRET: &str = "whsec_test";
 const NOW: i64 = 1_700_000_000;
+const EVENT: &str = r#"{"id":"evt_1","type":"test.event","created":1700000000,"livemode":false,"pending_webhooks":1,"data":{"object":{}}}"#;
 
-fn headers(timestamp: i64, signatures: &[&str]) -> HeaderMap {
-    let value = std::iter::once(format!("t={timestamp}"))
-        .chain(signatures.iter().map(|signature| format!("v1={signature}")))
-        .collect::<Vec<_>>()
-        .join(",");
-    header(&value)
-}
-
-fn header(value: &str) -> HeaderMap {
+fn signed_headers(payload: &str, timestamp: i64) -> HeaderMap {
     let mut headers = HeaderMap::new();
-    headers.insert("stripe-signature", HeaderValue::from_str(value).unwrap());
+    headers.insert(
+        "stripe-signature",
+        HeaderValue::from_str(&Webhook::generate_test_header(
+            payload,
+            SECRET,
+            Some(timestamp),
+        ))
+        .unwrap(),
+    );
     headers
 }
 
-fn signed_header(timestamp: i64, payload: &[u8]) -> String {
-    let mut signed_payload = format!("{timestamp}.").into_bytes();
-    signed_payload.extend_from_slice(payload);
-    hmac_sign::sign(SECRET.as_bytes(), &signed_payload)
-}
-
-fn event() -> Vec<u8> {
-    br#"{"id":"evt_1","type":"test.event","created":1700000000,"data":{"object":{}}}"#.to_vec()
-}
-
 #[test]
-fn rejects_missing_and_malformed_headers() {
-    let payload = event();
-    let missing = verify_at(&HeaderMap::new(), &payload, SECRET, NOW).unwrap_err();
-    assert!(matches!(missing, Error::MissingSignatureHeader));
-
-    let mut malformed = HeaderMap::new();
-    malformed.insert("stripe-signature", HeaderValue::from_static("v1=abc"));
-    let error = verify_at(&malformed, &payload, SECRET, NOW).unwrap_err();
+fn verifies_signed_events_and_rejects_tampering() {
+    let headers = signed_headers(EVENT, NOW);
+    assert!(verify_at(&headers, EVENT.as_bytes(), SECRET, NOW).is_ok());
     assert!(matches!(
-        error,
-        Error::Signature("missing timestamp in Stripe-Signature header")
+        verify_at(&headers, format!("{EVENT} ").as_bytes(), SECRET, NOW),
+        Err(Error::InvalidSignature),
     ));
 }
 
 #[test]
-fn rejects_duplicate_physical_headers_duplicate_t_and_malformed_segments() {
-    let payload = event();
-    let signature = signed_header(NOW, &payload);
-
-    let mut duplicate_headers = headers(NOW, &[&signature]);
-    duplicate_headers.append(
-        "stripe-signature",
-        HeaderValue::from_str(&format!("t={NOW},v1={signature}")).unwrap(),
-    );
-    assert!(matches!(
-        verify_at(&duplicate_headers, &payload, SECRET, NOW),
-        Err(Error::Signature("invalid Stripe-Signature header"))
-    ));
-
-    assert!(matches!(
-        verify_at(
-            &header(&format!("t={NOW},t={NOW},v1={signature}")),
-            &payload,
-            SECRET,
-            NOW
-        ),
-        Err(Error::Signature("invalid Stripe-Signature header"))
-    ));
-
-    for suffix in [",", ",,foo=bar", ",foo", ",foo=bar=baz", ",=bar", ",foo="] {
+fn rejects_expired_and_extreme_timestamps() {
+    for timestamp in [NOW - 301, NOW + 301, i64::MIN, i64::MAX] {
         assert!(matches!(
             verify_at(
-                &header(&format!("t={NOW},v1={signature}{suffix}")),
-                &payload,
+                &signed_headers(EVENT, timestamp),
+                EVENT.as_bytes(),
                 SECRET,
                 NOW
             ),
-            Err(Error::Signature("invalid Stripe-Signature header"))
+            Err(Error::InvalidSignature),
         ));
     }
 }
 
 #[test]
-fn rejects_invalid_utf8_and_extreme_timestamps_without_overflow() {
-    let payload = event();
-    let mut invalid_utf8 = HeaderMap::new();
-    invalid_utf8.insert(
-        "stripe-signature",
-        HeaderValue::from_bytes(&[0xff]).unwrap(),
-    );
+fn rejects_missing_signature_and_invalid_event() {
     assert!(matches!(
-        verify_at(&invalid_utf8, &payload, SECRET, NOW),
-        Err(Error::MissingSignatureHeader)
+        verify_at(&HeaderMap::new(), EVENT.as_bytes(), SECRET, NOW),
+        Err(Error::MissingSignatureHeader),
     ));
-
-    for timestamp in [i64::MIN, i64::MAX] {
-        let signature = signed_header(timestamp, &payload);
-        assert!(matches!(
-            verify_at(&headers(timestamp, &[&signature]), &payload, SECRET, NOW),
-            Err(Error::Signature(
-                "Stripe-Signature timestamp is outside the allowed tolerance"
-            ))
-        ));
-    }
-}
-
-#[test]
-fn rejects_invalid_signatures_and_accepts_one_of_multiple_signatures() {
-    let payload = event();
-    let valid = signed_header(NOW, &payload);
-    let invalid = headers(NOW, &["not-hex"]);
+    let invalid = "not json";
     assert!(matches!(
-        verify_at(&invalid, &payload, SECRET, NOW),
-        Err(Error::Signature(
-            "no v1 signature matched the computed HMAC"
-        ))
+        verify_at(
+            &signed_headers(invalid, NOW),
+            invalid.as_bytes(),
+            SECRET,
+            NOW
+        ),
+        Err(Error::InvalidPayload),
     ));
-
-    let multiple = headers(NOW, &["not-hex", &valid]);
-    assert!(verify_at(&multiple, &payload, SECRET, NOW).is_ok());
-
-    let non_v1 = header(&format!("t={NOW},v0=legacy,v1={valid}"));
-    assert!(verify_at(&non_v1, &payload, SECRET, NOW).is_ok());
-}
-
-#[test]
-fn accepts_tolerance_boundaries_and_rejects_outside_them() {
-    let payload = event();
-    for timestamp in [
-        NOW - SIGNATURE_TOLERANCE_SECS,
-        NOW + SIGNATURE_TOLERANCE_SECS,
-    ] {
-        let signature = signed_header(timestamp, &payload);
-        assert!(verify_at(&headers(timestamp, &[&signature]), &payload, SECRET, NOW).is_ok());
-    }
-
-    for timestamp in [
-        NOW - SIGNATURE_TOLERANCE_SECS - 1,
-        NOW + SIGNATURE_TOLERANCE_SECS + 1,
-    ] {
-        let signature = signed_header(timestamp, &payload);
-        assert!(matches!(
-            verify_at(&headers(timestamp, &[&signature]), &payload, SECRET, NOW),
-            Err(Error::Signature(
-                "Stripe-Signature timestamp is outside the allowed tolerance"
-            ))
-        ));
-    }
-}
-
-#[test]
-fn parses_only_after_signature_verification() {
-    let payload = br"not json";
-    let signature = signed_header(NOW, payload);
-    let error = verify_at(&headers(NOW, &[&signature]), payload, SECRET, NOW).unwrap_err();
-    assert!(matches!(error, Error::InvalidJson(_)));
 }

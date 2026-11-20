@@ -1,4 +1,5 @@
 use crate::requests::boot_request;
+use aws_lc_rs::digest::{SHA256, digest};
 use sea_orm::sea_query::ExprTrait;
 use sea_orm::sqlx::Connection as _;
 use sea_orm::{
@@ -8,7 +9,6 @@ use sea_orm::{
     ColumnTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, QuerySelect, SelectExt,
     Statement,
 };
-use sha2::{Digest, Sha256};
 use yorishiro::App;
 use yorishiro::error::YorishiroError;
 use yorishiro::models::_entities::{
@@ -135,7 +135,7 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
 
     let metadata: serde_json::Value = serde_json::from_str(metadata).unwrap();
     assert_eq!(
-        hex::encode(Sha256::digest(bytes)),
+        hex::encode(digest(&SHA256, bytes).as_ref()),
         metadata["sha256"].as_str().unwrap()
     );
     assert_eq!(bytes.len(), (2100 + 12) * dimensions * 4);

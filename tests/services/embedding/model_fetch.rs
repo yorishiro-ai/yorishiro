@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use sha2::{Digest, Sha256};
+use aws_lc_rs::digest::{SHA256, digest};
 use tempfile::tempdir;
 use yorishiro::services::embedding::model_fetch::*;
 
@@ -14,7 +14,7 @@ fn artifact(bytes: &[u8]) -> Artifact {
     Artifact {
         remote_path: "test.bin",
         local_name: "test.bin",
-        sha256: Box::leak(hex::encode(Sha256::digest(bytes)).into_boxed_str()),
+        sha256: Box::leak(hex::encode(digest(&SHA256, bytes).as_ref()).into_boxed_str()),
         size: bytes.len() as u64,
         description: "test artifact",
     }

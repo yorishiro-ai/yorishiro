@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use sha2::{Digest, Sha256};
+use aws_lc_rs::digest::{Context, SHA256};
 
 /// One file to fetch, with everything needed to verify it.
 #[derive(Clone, Copy)]
@@ -314,7 +314,7 @@ async fn download_verified(
             })?;
 
     // Streamed chunk by chunk rather than collected with `bytes()`: buffering hundreds of megabytes in memory only to write it straight back out costs the whole model's size in resident memory for no benefit.
-    let mut hasher = Sha256::new();
+    let mut hasher = Context::new(&SHA256);
     let mut written: u64 = 0;
     while let Some(chunk) = response
         .chunk()
@@ -347,7 +347,7 @@ async fn download_verified(
         .into());
     }
 
-    let digest = hex::encode(hasher.finalize());
+    let digest = hex::encode(hasher.finish().as_ref());
     if digest != artifact.sha256 {
         return Err(format!("{url} has SHA256 {digest}, expected {}: the download is corrupt or the file has been tampered with",
             artifact.sha256).into());

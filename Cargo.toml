@@ -86,10 +86,11 @@ community = ["openapi"]
 # The enterprise edition is the community edition plus the `ee/` overlay.
 enterprise = [
   "community",
+  "dep:async-stripe-webhook",
   "dep:base64",
-  "dep:hmac",
   "dep:jsonwebtoken",
 ]
+stripe-tests = ["enterprise"]
 openapi = ["dep:utoipa", "dep:utoipa-swagger-ui"]
 
 [workspace.dependencies]
@@ -108,7 +109,6 @@ reqwest = { version = "0.13.5", features = ["json", "rustls", "form"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154" }
 serial_test = { version = "4.0.1" }
-sha2 = { version = "0.11.1" }
 tracing = { version = "0.1.44" }
 tracing-subscriber = { version = "0.3.23", features = ["json"] }
 sea-orm = { version = "2.0.4", features = [
@@ -136,7 +136,7 @@ sea-orm.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 uuid.workspace = true
-sha2.workspace = true
+aws-lc-rs = "1.19.0"
 jsonschema = { version = "0.61.2" }
 rmcp = { version = "3.9.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
 schemars = { version = "1.2.3", features = ["uuid1"] }
@@ -151,8 +151,9 @@ sqlite-vec = "=0.1.9"
 # Register sqlite-vec with the same SQLite library SQLx uses.
 libsqlite3-sys = "0.40.0"
 # Enterprise-only dependencies.
+# The async-stripe SDK splits webhook verification from its outbound HTTP client.
+async-stripe-webhook = { version = "1.0.0-rc.10", optional = true }
 jsonwebtoken = { version = "12.0.0", features = ["aws_lc_rs"], optional = true }  # licence and OIDC verification without the vulnerable RustCrypto RSA backend
-hmac = { version = "0.13.0", optional = true }          # Stripe webhook signature (ee/controllers/stripe.rs)
 base64 = { version = "0.23.1", optional = true }        # OAuth/PKCE encoding (ee/services/oauth.rs)
 
 # OpenAPI is shared by both editions.

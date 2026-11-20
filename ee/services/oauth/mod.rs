@@ -5,8 +5,8 @@
 pub mod discovery;
 mod id_token;
 
+use aws_lc_rs::digest::{SHA256, digest};
 use base64::Engine;
-use sha2::{Digest, Sha256};
 
 use crate::YorishiroError;
 use crate::edition::ee::controllers::oauth::state_token;
@@ -106,7 +106,7 @@ pub async fn handle_callback(
         &config.client_id,
     )?;
     let expected_nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(Sha256::digest(pkce_verifier.as_bytes()));
+        .encode(digest(&SHA256, pkce_verifier.as_bytes()).as_ref());
     if claims.nonce.as_deref() != Some(expected_nonce.as_str()) {
         return Err(YorishiroError::Unauthenticated);
     }

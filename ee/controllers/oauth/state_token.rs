@@ -6,9 +6,9 @@
 //! That is what the CSRF cookie is for: `authorize` sets a random, per-browser value as an `HttpOnly`/`Secure`/`SameSite=Lax` cookie and embeds `SHA256(cookie value)` in the signed `state` payload; `callback` recomputes that hash from whatever cookie the browser actually presents and rejects the request if it does not match [`verify`]'s `csrf_hash` output.
 //! An attacker who captures a victim's `code`/`state` pair cannot forge the victim's browser's cookie, so the double-submit check fails even though the `state` signature itself is valid.
 
+use aws_lc_rs::digest::{SHA256, digest};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use sha2::{Digest, Sha256};
 
 use crate::edition::ee::data::hmac_sign;
 
@@ -46,7 +46,7 @@ pub fn issue_at(signing_key: &[u8], issued_at: i64) -> IssuedState {
 
     // 43 alphanumeric characters provide over 256 bits and satisfy RFC 7636's verifier grammar.
     let pkce_verifier = loco_rs::hash::random_string(43);
-    let pkce_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pkce_verifier.as_bytes()));
+    let pkce_challenge = URL_SAFE_NO_PAD.encode(digest(&SHA256, pkce_verifier.as_bytes()).as_ref());
 
     let payload = format!("{issued_at}.{csrf_hash}.{pkce_verifier}");
     let signature = hmac_sign::sign(signing_key, payload.as_bytes());
@@ -104,5 +104,5 @@ pub fn verify_at(signing_key: &[u8], state: &str, now: i64) -> Option<VerifiedSt
 /// Hashes a CSRF cookie value the same way [`issue`] does, for `callback` to compare against [`VerifiedState::csrf_hash`].
 #[must_use]
 pub fn hash_csrf_cookie(cookie_value: &str) -> String {
-    hex::encode(Sha256::digest(cookie_value.as_bytes()))
+    hex::encode(digest(&SHA256, cookie_value.as_bytes()).as_ref())
 }

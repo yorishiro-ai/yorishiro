@@ -4,9 +4,9 @@ mod authenticate;
 mod issue;
 mod manage;
 
+use aws_lc_rs::digest::{SHA256, digest};
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect};
-use sha2::{Digest, Sha256};
 
 use crate::db::{AppContextBackend, DbHandle};
 use crate::error::{ResultExt, YorishiroError};
@@ -231,7 +231,7 @@ pub struct CreatedTenantApiKey {
 /// Hashes a presented key into the form stored in `api_keys.key_hash`.
 #[must_use]
 pub fn hash_key(raw: &str) -> Vec<u8> {
-    Sha256::digest(raw.as_bytes()).to_vec()
+    digest(&SHA256, raw.as_bytes()).as_ref().to_vec()
 }
 
 /// Generates the shared credential format; only the hash is persisted.
