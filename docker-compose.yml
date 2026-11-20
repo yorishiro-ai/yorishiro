@@ -69,11 +69,11 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
     volumes:
-      # Use a fresh volume without changing or deleting legacy test_pgdata.
-      - test_pgdata_non_superuser:/var/lib/postgresql
+      - test_pgdata:/var/lib/postgresql
       - ./scripts/init-test-postgres.sql:/docker-entrypoint-initdb.d/init-test-postgres.sql:ro
     healthcheck:
-      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "yorishiro", "-d", "yorishiro"]
+      # Do not accept an existing volume initialized with a superuser test role.
+      test: ["CMD-SHELL", "PGPASSWORD=yorishiro psql -XAt -h 127.0.0.1 -U yorishiro -d yorishiro -c 'SELECT NOT (rolsuper OR rolbypassrls) FROM pg_roles WHERE rolname = current_user' | grep -qx t"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -152,4 +152,4 @@ services:
 
 volumes:
   pgdata:
-  test_pgdata_non_superuser:
+  test_pgdata:
