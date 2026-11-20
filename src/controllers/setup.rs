@@ -1,7 +1,7 @@
 //! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/root/login`.
 //!
-//! Creates the deployment's first tenant, workspace and admin account, then issues a tenant-scoped admin key for that account.
-//! The key is not bound to the default workspace: it can act on every workspace of the tenant and names the target per request.
+//! Creates the deployment's first tenant and admin account, then issues a tenant-scoped admin key.
+//! The admin creates and selects workspaces explicitly.
 //! The resolved edition tenant cap controls whether first-run setup is available.
 //! An unlimited cap disables the wizard; the source default is one tenant.
 
@@ -73,7 +73,6 @@ async fn setup(
             user_id: account.user_id,
             email: account.email,
             tenant_id: account.tenant_id,
-            workspace_id: account.workspace_id,
             api_key: created.plaintext,
         }),
     ))

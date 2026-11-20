@@ -40,6 +40,12 @@ async fn signup_without_invite_creates_its_own_tenant() {
         let login = login_response.json::<serde_json::Value>();
         assert_eq!(login["tenant_id"], signup_body["tenant_id"]);
         assert!(login.get("workspace_id").is_none());
+        let workspaces = request
+            .get("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", login["api_key"].as_str().unwrap()))
+            .await;
+        workspaces.assert_status_ok();
+        assert_eq!(workspaces.json::<serde_json::Value>(), serde_json::json!([]));
         request.post("/auth/login")
             .json(&serde_json::json!({"email":"no-invite@example.com", "password":"correct-horse-battery-staple"}))
             .await.assert_status(StatusCode::NOT_FOUND);

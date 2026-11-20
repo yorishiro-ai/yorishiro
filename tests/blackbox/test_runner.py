@@ -287,8 +287,7 @@ class ArgumentTests(unittest.TestCase):
 
     def test_bootstrap_uses_setup_or_signup_without_removed_tasks(self):
         value = "00000000-0000-0000-0000-000000000001"
-        account = {"user_id": value, "tenant_id": value, "workspace_id": value,
-                   "api_key": "ysr_bootstrap"}
+        account = {"user_id": value, "tenant_id": value, "api_key": "ysr_bootstrap"}
         for suite, edition in (("cli", "ce"), ("tenant-postgres", "ee")):
             args = run.parse_args(self.arguments())
             args.suite, args.edition = suite, edition
@@ -303,13 +302,14 @@ class ArgumentTests(unittest.TestCase):
                         patch.object(app, "http", return_value=(200, {}, "{}")), \
                         patch.object(app, "rest", return_value=account) as rest, \
                         patch.object(app, "login", return_value="ysr_login"), \
-                        patch.object(app, "create_workspace", return_value=value), \
+                        patch.object(app, "create_workspace", return_value=value) as create, \
                         patch.object(app, "issue", return_value=(value, "ysr_selected")):
                     app.boot()
                     cli.assert_called_once_with("db", "migrate")
                     task.assert_not_called()
                     self.assertEqual(rest.call_args.args[1],
                                      "/auth/signup" if suite == "tenant-postgres" else "/setup")
+                    create.assert_called_once_with("blackbox")
                     self.assertEqual(app.key, "ysr_selected")
                     self.assertEqual(app.tenant_key,
                                      "ysr_login" if suite == "tenant-postgres" else "ysr_bootstrap")

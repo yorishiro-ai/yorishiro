@@ -88,7 +88,8 @@ async fn authorize(State(ctx): State<AppContext>) -> Result<Response, ApiError> 
 }
 
 /// `GET /auth/oauth/callback`: the identity provider's redirect target.
-/// Exchanges the authorization code for tokens, verifies the ID token, resolves (or auto-provisions) the Yorishiro user/tenant/workspace it corresponds to, issues an API key exactly the way `POST /auth/root/login` does, and hands it to the client via a URL fragment (`#api_key=...`), a fragment rather than a query parameter so the key never appears in server access logs or gets sent back to any server in a `Referer` header.
+/// Verifies the OAuth identity and finds or provisions the Yorishiro user and tenant.
+/// Issues a tenant-scoped API key like `POST /auth/root/login` and returns it in a URL fragment to keep it out of access logs and `Referer` headers.
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/callback", params(("code" = Option<String>, Query), ("state" = Option<String>, Query), ("error" = Option<String>, Query)), responses((status = 302, description = "Redirects to the application login result"), (status = 400, body = crate::controllers::openapi::ApiErrorBody), (status = 403, description = "Account recovery or selected workspace access denied"), (status = 422, description = "Workspace selection required or invalid provider claims"), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
 async fn callback(
     State(ctx): State<AppContext>,

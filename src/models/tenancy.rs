@@ -15,7 +15,6 @@ pub(crate) struct SetupAccount {
     pub(crate) user_id: Uuid,
     pub(crate) email: String,
     pub(crate) tenant_id: Uuid,
-    pub(crate) workspace_id: Uuid,
 }
 
 /// # Errors
@@ -153,7 +152,6 @@ pub(crate) async fn setup_first_account(
     }
     let tenant = tenant_tenants::create_tenant(&txn, "default", max_tenants).await?;
     crate::models::iam::builtin::bootstrap(&txn, tenant.id).await?;
-    let workspace = create_workspace(&txn, tenant.id, "default", None, None).await?;
     let user = register_member(&txn, tenant.id, email, password, display_name).await?;
     assign_initial_root(&txn, tenant.id, user.id).await?;
     txn.commit().await.internal()?;
@@ -161,7 +159,6 @@ pub(crate) async fn setup_first_account(
         user_id: user.id,
         email: user.root_email(),
         tenant_id: tenant.id,
-        workspace_id: workspace.id,
     })
 }
 
