@@ -37,6 +37,27 @@ pub struct KeyGrant {
 }
 
 impl Model {
+    pub(crate) async fn is_root_credential(
+        conn: &impl ConnectionTrait,
+        id: Uuid,
+    ) -> Result<bool, YorishiroError> {
+        let key = Entity::find_by_id(id)
+            .one(conn)
+            .await
+            .internal()?
+            .filter(Self::is_active)
+            .ok_or(YorishiroError::Unauthenticated)?;
+        if key.role_id.is_some() {
+            return Ok(false);
+        }
+        match key.user_id {
+            Some(user_id) => {
+                crate::models::iam_tenant_roots::Model::contains(conn, key.tenant_id, user_id).await
+            }
+            None => Ok(false),
+        }
+    }
+
     pub(crate) fn is_active(&self) -> bool {
         self.revoked_at.is_none()
             && self
@@ -56,11 +77,15 @@ impl Model {
                 key.is_active()
                     && key.tenant_id == presented.tenant_id
                     && key.user_id == presented.user_id
-                    && key
-                        .workspace_id
-                        .is_none_or(|id| Some(id) == presented.workspace_id)
             })
             .ok_or(YorishiroError::Unauthenticated)?;
+        if key
+            .workspace_id
+            .is_some_and(|id| Some(id) != presented.workspace_id)
+            && !Self::is_root_credential(conn, key.id).await?
+        {
+            return Err(YorishiroError::Unauthenticated);
+        }
         if let Some(workspace_id) = presented.workspace_id {
             let tenant =
                 crate::models::workspace_workspaces::get_workspace_tenant(conn, workspace_id)
@@ -181,7 +206,7 @@ pub struct AuthContext {
 impl AuthContext {
     /// Requests already authenticated may finish; later authentications read the committed membership.
     pub(crate) async fn with_current_membership(
-        self,
+        mut self,
         conn: &impl ConnectionTrait,
     ) -> Result<Self, YorishiroError> {
         crate::models::tenant_tenants::Model::require_active(conn, self.tenant_id).await?;
@@ -189,6 +214,10 @@ impl AuthContext {
             && !crate::models::tenant_memberships::is_member(conn, self.tenant_id, user_id).await?
         {
             return Err(YorishiroError::Unauthenticated);
+        }
+        if Model::is_root_credential(conn, self.api_key_id).await? {
+            self.scope = ApiKeyScope::Migration;
+            self.audit = true;
         }
         Ok(self)
     }

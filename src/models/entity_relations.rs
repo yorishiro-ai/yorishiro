@@ -80,6 +80,19 @@ pub(crate) fn parse_relation_status(value: &str) -> Result<RelationStatus, Yoris
     })
 }
 
+pub(crate) async fn workspace_for_actor(
+    db: &impl ConnectionTrait,
+    actor: &crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<Uuid, YorishiroError> {
+    let record = Entity::find_by_id(id)
+        .one(db)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found("relation was not found"))?;
+    crate::models::iam::access::check_workspace_target(db, actor, record.workspace_id).await
+}
+
 pub struct CreateRelationInput {
     pub source_id: Uuid,
     pub target_id: Uuid,
@@ -277,9 +290,50 @@ pub(crate) async fn list(
     workspace_id: Uuid,
     query: ListRelationsQuery,
 ) -> Result<Vec<RelationRecord>, YorishiroError> {
+    list_workspaces(conn, &[workspace_id], query).await
+}
+
+pub(crate) async fn list_for_actor(
+    db: &DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    query: ListRelationsQuery,
+) -> Result<Vec<RelationRecord>, YorishiroError> {
+    use crate::models::iam::{
+        access::IamEvaluation,
+        policy::{Action, Resource},
+    };
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let evaluation =
+        IamEvaluation::load(&txn, actor, crate::models::api_keys::ApiKeyScope::Read).await?;
+    let workspaces = if let Some(workspace_id) = actor.workspace_id {
+        evaluation
+            .require(
+                Action::RelationList,
+                Resource::Workspace {
+                    tenant_id: actor.tenant_id,
+                    workspace_id,
+                },
+            )
+            .await?;
+        let result = list(&txn, workspace_id, query).await?;
+        txn.commit().await.internal()?;
+        return Ok(result);
+    } else {
+        evaluation.workspace_ids(Action::RelationList).await?
+    };
+    let records = list_workspaces(&txn, &workspaces, query).await?;
+    txn.commit().await.internal()?;
+    Ok(records)
+}
+
+async fn list_workspaces(
+    conn: &impl ConnectionTrait,
+    workspaces: &[Uuid],
+    query: ListRelationsQuery,
+) -> Result<Vec<RelationRecord>, YorishiroError> {
     use crate::models::_entities::entity_relations::Column;
 
-    let mut select = Entity::find().filter(Column::WorkspaceId.eq(workspace_id));
+    let mut select = Entity::find().filter(Column::WorkspaceId.is_in(workspaces.iter().copied()));
     if let Some(source_id) = query.source_id {
         select = select.filter(Column::SourceId.eq(source_id));
     }

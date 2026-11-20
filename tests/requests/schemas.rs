@@ -40,7 +40,7 @@ async fn schema_deletion_refuses_active_versions_and_references() {
         let TestTenant {
             api_key: key,
             workspace_id,
-            owner_id,
+            tenant_id,
             ..
         } = TestTenant::create(
             &request,
@@ -68,9 +68,14 @@ async fn schema_deletion_refuses_active_versions_and_references() {
             .delete(&format!("/api/schemas/{v2_id}"))
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
-        let read_key =
-            super::fixtures::issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false)
-                .await;
+        let read_key = super::fixtures::issue_api_key(
+            &ctx,
+            workspace_id,
+            super::fixtures::create_iam_administrator(&ctx, tenant_id).await,
+            ApiKeyScope::Read,
+            false,
+        )
+        .await;
         request
             .delete(&format!("/api/schemas/{v2_id}"))
             .add_header("Authorization", format!("Bearer {read_key}"))

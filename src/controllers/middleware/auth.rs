@@ -197,14 +197,15 @@ impl<'a> RequestAuth<'a> {
         self.begin(ctx, required >= ApiKeyScope::Write).await
     }
 
-    pub(crate) async fn authorize_audit(
+    pub(crate) async fn verify_audit(
         &self,
         key: &str,
         headers: &[(String, String)],
-    ) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
+    ) -> Result<AuthContext, YorishiroError> {
         let ctx = self.resolve(key, headers).await?;
         require_audit(&ctx)?;
-        self.begin(ctx, false).await
+        Entity::touch_authenticated(self.app, &ctx).await?;
+        Ok(ctx)
     }
 
     pub(crate) async fn begin(

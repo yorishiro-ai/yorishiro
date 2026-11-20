@@ -12,10 +12,20 @@ async fn audit_tool_preserves_independent_grant_and_rest_parity() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let session = initialize(&request).await;
+        let administrator =
+            crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let without_audit = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            administrator,
+            ApiKeyScope::Migration,
+            false,
+        )
+        .await;
         let denied = mcp_call(
             &request,
             &session,
-            &tenant.api_key,
+            &without_audit,
             2,
             "tools/call",
             json!({"name":"list_audit_log","arguments":{}}),
@@ -25,7 +35,7 @@ async fn audit_tool_preserves_independent_grant_and_rest_parity() {
         let audit_key = issue_api_key(
             &ctx,
             tenant.workspace_id,
-            tenant.owner_id,
+            administrator,
             ApiKeyScope::Read,
             true,
         )
@@ -55,7 +65,11 @@ async fn audit_tool_preserves_independent_grant_and_rest_parity() {
         )
         .await;
         assert_eq!(invalid["result"]["isError"], true);
-        for (key, expected) in [(&tenant.api_key, false), (&audit_key, true)] {
+        for (key, expected) in [
+            (&without_audit, false),
+            (&audit_key, true),
+            (&tenant.api_key, true),
+        ] {
             let capabilities = mcp_call(
                 &request,
                 &session,

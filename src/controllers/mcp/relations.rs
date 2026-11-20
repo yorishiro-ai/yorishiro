@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::entity_relations::{self, SetRelationStatusInput};
 
@@ -103,15 +103,32 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match super::authorize(
+        let required = self.required_scope("create_relation")?;
+        let actor = match super::verify(self.app_context(), &parts, required).await? {
+            super::VerifyOutcome::Verified(actor) => actor,
+            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        let mut authorized = match super::authorize::Authorized::for_target(
             self.app_context(),
-            &parts,
-            self.required_scope("create_relation")?,
+            &actor,
+            required,
+            crate::models::iam::access::WorkspaceTarget::Workspace(
+                match crate::models::entity_entities::workspace_for_actor(
+                    &self.app_context().db,
+                    &actor,
+                    args.source_id,
+                )
+                .await
+                {
+                    Ok(id) => id,
+                    Err(error) => return Ok(err_to_tool_result(error)),
+                },
+            ),
         )
-        .await?
+        .await
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            Ok(authorized) => authorized,
+            Err(error) => return Ok(err_to_tool_result(error)),
         };
         if let Err(error) = authorized
             .require_action(crate::models::iam::policy::Action::RelationCreate)
@@ -138,15 +155,21 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match super::authorize(
+        let required = self.required_scope("get_relation")?;
+        let actor = match super::verify(self.app_context(), &parts, required).await? {
+            super::VerifyOutcome::Verified(actor) => actor,
+            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        let mut authorized = match super::authorize::Authorized::for_target(
             self.app_context(),
-            &parts,
-            self.required_scope("get_relation")?,
+            &actor,
+            required,
+            crate::models::iam::access::WorkspaceTarget::Relation(args.id),
         )
-        .await?
+        .await
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            Ok(authorized) => authorized,
+            Err(error) => return Ok(err_to_tool_result(error)),
         };
         if let Err(error) = authorized
             .require_action(crate::models::iam::policy::Action::RelationGet)
@@ -170,15 +193,21 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<DeleteRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match super::authorize(
+        let required = self.required_scope("delete_relation")?;
+        let actor = match super::verify(self.app_context(), &parts, required).await? {
+            super::VerifyOutcome::Verified(actor) => actor,
+            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        let mut authorized = match super::authorize::Authorized::for_target(
             self.app_context(),
-            &parts,
-            self.required_scope("delete_relation")?,
+            &actor,
+            required,
+            crate::models::iam::access::WorkspaceTarget::Relation(args.id),
         )
-        .await?
+        .await
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            Ok(authorized) => authorized,
+            Err(error) => return Ok(err_to_tool_result(error)),
         };
         if let Err(error) = authorized
             .require_action(crate::models::iam::policy::Action::RelationDelete)
@@ -203,33 +232,27 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListRelationsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match super::authorize(
+        let actor = match super::verify(
             self.app_context(),
             &parts,
             self.required_scope("list_relations")?,
         )
         .await?
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            super::VerifyOutcome::Verified(actor) => actor,
+            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::RelationList)
-            .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
 
         let query = match args.try_into() {
             Ok(query) => query,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
 
-        let workspace_id = authorized.workspace_id();
-        let records = match entity_relations::list(authorized.txn(), workspace_id, query).await {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let records =
+            match entity_relations::list_for_actor(&self.app_context().db, &actor, query).await {
+                Ok(value) => value,
+                Err(err) => return Ok(err_to_tool_result(err)),
+            };
         ok_json(records)
     }
 
@@ -245,15 +268,21 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SetRelationStatusArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match super::authorize(
+        let required = self.required_scope("set_relation_status")?;
+        let actor = match super::verify(self.app_context(), &parts, required).await? {
+            super::VerifyOutcome::Verified(actor) => actor,
+            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        let mut authorized = match super::authorize::Authorized::for_target(
             self.app_context(),
-            &parts,
-            self.required_scope("set_relation_status")?,
+            &actor,
+            required,
+            crate::models::iam::access::WorkspaceTarget::Relation(args.id),
         )
-        .await?
+        .await
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            Ok(authorized) => authorized,
+            Err(error) => return Ok(err_to_tool_result(error)),
         };
         if let Err(error) = authorized
             .require_action(crate::models::iam::policy::Action::RelationUpdate)

@@ -10,38 +10,23 @@ use loco_rs::controller::Routes;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{Authorized, MigrationScope, ReadScope, WriteScope};
+use crate::controllers::extractors::{
+    AuthContext, Authorized, MigrationScope, Verified, WriteScope,
+};
 use crate::dtos::entities::{
     CreateEntityRequest, FillDefaultsRequest, FillDefaultsResponse, ListEntitiesParams,
     ReindexResponse, UndoResponse, UpdateEntityRequest,
 };
 use crate::models::entity_entities::{self, EntityRecord};
-use crate::workers::embedding_sync;
 use crate::workers::reindex;
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/entities", request_body = CreateEntityRequest, responses((status = 201, body = EntityRecord), (status = 400, body = super::openapi::ApiErrorBody), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"])), ("x-yorishiro-required-actions" = json!(["entity_create"] ))), tag = "community"))]
 pub(crate) async fn create_entity(
     State(ctx): State<AppContext>,
-    mut authorized: Authorized<WriteScope>,
+    verified: Verified<WriteScope>,
     Json(body): Json<CreateEntityRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    authorized
-        .require_action(crate::models::iam::policy::Action::EntityCreate)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let input = body.into();
-    let created_by = authorized.ctx.user_id;
-    let quotas = crate::data::quotas::for_tenant(&ctx, authorized.ctx.tenant_id).await?;
-    let record = entity_entities::create_with_quota(
-        authorized.txn(),
-        workspace_id,
-        input,
-        created_by,
-        quotas.entities,
-    )
-    .await?;
-    embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id, authorized.txn()).await?;
-    authorized.commit().await?;
+    let record = entity_entities::create_for_actor(&ctx, &verified.ctx, body.into()).await?;
     Ok((StatusCode::CREATED, Json(record)))
 }
 
@@ -50,56 +35,43 @@ pub(crate) async fn create_entity(
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn get_entity(
-    mut authorized: Authorized<ReadScope>,
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
     Path(id): Path<Uuid>,
 ) -> Result<Json<EntityRecord>, ApiError> {
-    authorized
-        .require_action(crate::models::iam::policy::Action::EntityGet)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let record = entity_entities::get(authorized.txn(), workspace_id, id).await?;
+    let record = entity_entities::get_for_actor(&ctx, &actor, id).await?;
     Ok(Json(record))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/entities/{id}", params(("id" = Uuid, Path)), request_body = UpdateEntityRequest, responses((status = 200, body = EntityRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"])), ("x-yorishiro-required-actions" = json!(["entity_update"] ))), tag = "community"))]
 pub(crate) async fn update_entity(
     State(ctx): State<AppContext>,
-    mut authorized: Authorized<WriteScope>,
+    verified: Verified<WriteScope>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateEntityRequest>,
 ) -> Result<Json<EntityRecord>, ApiError> {
-    authorized
-        .require_action(crate::models::iam::policy::Action::EntityUpdate)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let updated_by = authorized.ctx.user_id;
-    let record = entity_entities::update(
-        authorized.txn(),
-        workspace_id,
+    let actor = verified.ctx;
+    let record = entity_entities::update_for_actor(
+        &ctx,
+        &actor,
         entity_entities::UpdateEntityInput {
             id,
             data: body.data,
-            updated_by,
+            updated_by: actor.user_id,
             expected_updated_at: body.expected_updated_at,
         },
     )
     .await?;
-    embedding_sync::enqueue_after_write(&ctx, workspace_id, record.id, authorized.txn()).await?;
-    authorized.commit().await?;
     Ok(Json(record))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/entities/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Entity deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"])), ("x-yorishiro-required-actions" = json!(["entity_delete"] ))), tag = "community"))]
 pub(crate) async fn delete_entity(
-    mut authorized: Authorized<WriteScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<WriteScope>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    authorized
-        .require_action(crate::models::iam::policy::Action::EntityDelete)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    entity_entities::delete(authorized.txn(), workspace_id, id).await?;
-    authorized.commit().await?;
+    entity_entities::delete_for_actor(&ctx, &verified.ctx, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -108,16 +80,13 @@ pub(crate) async fn delete_entity(
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn list_entities(
-    mut authorized: Authorized<ReadScope>,
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
     Query(params): Query<ListEntitiesParams>,
 ) -> Result<Json<Vec<EntityRecord>>, ApiError> {
-    authorized
-        .require_action(crate::models::iam::policy::Action::EntityList)
-        .await?;
     let query = params.try_into()?;
 
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let records = entity_entities::list(authorized.txn(), workspace_id, query).await?;
+    let records = entity_entities::list_for_actor(&ctx.db, &actor, query).await?;
     Ok(Json(records))
 }
 
@@ -127,9 +96,15 @@ async fn list_entities(
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/{job_id}/undo", params(("job_id" = Uuid, Path)), responses((status = 202, body = UndoResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"])), ("x-yorishiro-required-actions" = json!(["migration_undo"]))), tag = "community"))]
 pub(crate) async fn undo_migration_job(
     State(ctx): State<AppContext>,
-    authorized: Authorized<MigrationScope>,
+    verified: Verified<MigrationScope>,
     Path(job_id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<UndoResponse>), ApiError> {
+    let authorized = Authorized::<MigrationScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::SnapshotJob(job_id),
+    )
+    .await?;
     let queued_id =
         crate::workers::undo::enqueue(&ctx, authorized.txn(), &authorized.ctx, job_id).await?;
     authorized.commit().await?;
@@ -144,9 +119,16 @@ pub(crate) async fn undo_migration_job(
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/migration-jobs/{job_id}", params(("job_id" = Uuid, Path)), responses((status = 200, body = crate::models::queue_job_lifecycles::BulkJobStatus), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"])), ("x-yorishiro-required-actions" = json!(["migration_job_get"] ))), tag = "community"))]
 pub(crate) async fn migration_job_status(
-    mut authorized: Authorized<MigrationScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<MigrationScope>,
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
+    let mut authorized = Authorized::<MigrationScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Job(job_id),
+    )
+    .await?;
     authorized
         .require_action(crate::models::iam::policy::Action::MigrationJobGet)
         .await?;
@@ -177,8 +159,16 @@ pub(crate) async fn migration_job_status(
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/reindex", responses((status = 200, body = ReindexResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"])), ("x-yorishiro-required-actions" = json!(["workspace_reindex"]))), tag = "community"))]
 pub(crate) async fn reindex_workspace(
     State(ctx): State<AppContext>,
-    authorized: Authorized<MigrationScope>,
+    verified: Verified<MigrationScope>,
 ) -> Result<Json<ReindexResponse>, ApiError> {
+    let authorized = Authorized::<MigrationScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::WorkspaceReindex,
+        ),
+    )
+    .await?;
     let job_id = reindex::enqueue_requested(&ctx, authorized.txn(), &authorized.ctx).await?;
     authorized.commit().await?;
 
@@ -192,9 +182,17 @@ pub(crate) async fn reindex_workspace(
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/migration-jobs/fill-defaults", request_body = FillDefaultsRequest, responses((status = 202, body = FillDefaultsResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["migration"])), ("x-yorishiro-required-actions" = json!(["migration_fill_defaults"]))), tag = "community"))]
 pub(crate) async fn fill_defaults(
     State(ctx): State<AppContext>,
-    authorized: Authorized<MigrationScope>,
+    verified: Verified<MigrationScope>,
     Json(body): Json<FillDefaultsRequest>,
 ) -> Result<(StatusCode, Json<FillDefaultsResponse>), ApiError> {
+    let authorized = Authorized::<MigrationScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::MigrationFillDefaults,
+        ),
+    )
+    .await?;
     let job_id = crate::workers::fill_defaults::enqueue(
         &ctx,
         authorized.txn(),

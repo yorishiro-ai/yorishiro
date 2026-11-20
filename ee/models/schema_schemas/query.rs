@@ -48,6 +48,36 @@ pub(crate) async fn list_with_upstream_changes(
     workspace_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<UpstreamChange>, YorishiroError> {
+    list_workspaces(conn, &[workspace_id], page).await
+}
+
+pub(crate) async fn list_for_actor(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    page: ListParams,
+) -> Result<Vec<UpstreamChange>, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let workspaces = crate::models::iam::access::permitted_workspaces(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::policy::Action::SchemaUpstreamList,
+    )
+    .await?;
+    let records = if let [workspace] = workspaces.as_slice() {
+        list_with_upstream_changes(&txn, *workspace, page).await?
+    } else {
+        list_workspaces(&txn, &workspaces, page).await?
+    };
+    txn.commit().await.internal()?;
+    Ok(records)
+}
+
+async fn list_workspaces(
+    conn: &impl ConnectionTrait,
+    workspaces: &[Uuid],
+    page: ListParams,
+) -> Result<Vec<UpstreamChange>, YorishiroError> {
     use crate::models::_entities::{schema_schemas as schema, template_templates as template};
     let rows = schema::Entity::find()
         .select_only()
@@ -68,11 +98,12 @@ pub(crate) async fn list_with_upstream_changes(
                 .to(template::Column::Id)
                 .into(),
         )
-        .filter(schema::Column::WorkspaceId.eq(workspace_id))
+        .filter(schema::Column::WorkspaceId.is_in(workspaces.iter().copied()))
         .filter(schema::Column::Status.eq(SchemaStatus::Active.as_db_str()))
         .filter(schema::Column::OriginStatus.eq(SchemaOriginStatus::Linked.as_db_str()))
         .filter(schema::Column::OriginUpdatedAt.is_null())
         .order_by_desc(template::Column::UpdatedAt)
+        .order_by_asc(schema::Column::Id)
         .limit(page.limit())
         .offset(page.offset())
         .into_model::<Row>()

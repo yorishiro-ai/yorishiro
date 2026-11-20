@@ -131,6 +131,22 @@ pub(crate) async fn grant_iam_administrator(
     .expect("attach fixture administrator policy");
 }
 
+pub(crate) async fn create_iam_administrator(ctx: &AppContext, tenant_id: Uuid) -> Uuid {
+    let txn = ctx.db.begin().await.expect("begin administrator setup");
+    let user = tenancy::register_member(
+        &txn,
+        tenant_id,
+        &unique_email("administrator"),
+        "hunter2-hunter2",
+        None,
+    )
+    .await
+    .expect("create administrator");
+    grant_iam_administrator(&txn, tenant_id, user.id).await;
+    txn.commit().await.expect("commit administrator setup");
+    user.id
+}
+
 /// Arguments for shared tenant/workspace/owner setup.
 pub(crate) struct TenantArgs {
     /// Tenant name. Defaults to a unique name.

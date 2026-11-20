@@ -153,3 +153,37 @@ pub async fn list_for_workspace(
         .await
         .internal()
 }
+
+pub(crate) async fn list_for_actor(
+    db: &DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    page: crate::models::pagination::ListParams,
+) -> Result<Vec<Model>, YorishiroError> {
+    use crate::models::_entities::api_key_audit_log::Column;
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let current = crate::models::api_keys::Model::current_context(&txn, actor).await?;
+    crate::models::iam::access::require_audit(&current)?;
+    let workspaces = crate::models::iam::access::permitted_workspaces(
+        &txn,
+        &current,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::policy::Action::AuditLogList,
+    )
+    .await?;
+    let records = if let [workspace] = workspaces.as_slice() {
+        list_for_workspace(&txn, *workspace, page).await?
+    } else {
+        Entity::find()
+            .filter(Column::WorkspaceId.is_in(workspaces))
+            .filter(Column::TenantId.eq(current.tenant_id))
+            .order_by_desc(Column::CreatedAt)
+            .order_by_desc(Column::Id)
+            .limit(page.limit())
+            .offset(page.offset())
+            .all(&txn)
+            .await
+            .internal()?
+    };
+    txn.commit().await.internal()?;
+    Ok(records)
+}

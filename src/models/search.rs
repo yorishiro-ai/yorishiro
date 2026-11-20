@@ -111,6 +111,52 @@ pub(crate) async fn search_text(
     search_by_vector(&txn, workspace_id, vector, text, query).await
 }
 
+pub(crate) async fn search_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+    text: &str,
+    query: SearchQuery,
+    limiter: &crate::controllers::middleware::rate_limit::RateLimiter,
+) -> Result<Vec<SearchHit>, YorishiroError> {
+    let workspaces = {
+        let txn = crate::db::begin_write(&ctx.db).await.internal()?;
+        super::iam::access::permitted_workspaces(
+            &txn,
+            actor,
+            super::api_keys::ApiKeyScope::Read,
+            super::iam::policy::Action::Search,
+        )
+        .await?
+    };
+    for &workspace_id in &workspaces {
+        ensure_available(&ctx.db, workspace_id).await?;
+        crate::controllers::middleware::rate_limit::charge_search_tokens(
+            limiter,
+            workspace_id,
+            text,
+        )?;
+    }
+    let mut ranked = Vec::new();
+    for workspace_id in workspaces {
+        let mut selected = actor.clone();
+        selected.workspace_id = Some(workspace_id);
+        for (rank, hit) in search_text(ctx, &selected, text, query.clone())
+            .await?
+            .into_iter()
+            .enumerate()
+        {
+            ranked.push((rank, hit));
+        }
+    }
+    // Local ranks are comparable across providers; cosine distances from different models are not.
+    ranked.sort_by_key(|(rank, hit)| (*rank, hit.entity.id));
+    Ok(ranked
+        .into_iter()
+        .take(usize::try_from(query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT)).internal()?)
+        .map(|(_, hit)| hit)
+        .collect())
+}
+
 pub(crate) async fn authorize_search(
     ctx: &loco_rs::app::AppContext,
     actor: &crate::models::api_keys::AuthContext,

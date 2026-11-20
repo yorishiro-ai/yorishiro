@@ -22,7 +22,7 @@ async fn schema_archive_preserves_history_and_version_sequence() {
         let entity = request.post("/api/entities").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"schema_name":"archive-history","entity_type":"note","data":{"title":"retained"}})).await;
         entity.assert_status(StatusCode::CREATED);
         let entity_id = entity.json::<Value>()["id"].as_str().unwrap().to_owned();
-        let read_key = issue_api_key(&ctx, tenant.workspace_id, tenant.owner_id, ApiKeyScope::Read, false).await;
+        let read_key = issue_api_key(&ctx, tenant.workspace_id, crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await, ApiKeyScope::Read, false).await;
         let denied = mcp_call(&request, &session, &read_key, 2, "tools/call", json!({"name":"archive_schema","arguments":{"schema_id":id}})).await;
         assert_eq!(denied["result"]["isError"], true);
         let archived = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"archive_schema","arguments":{"schema_id":id}})).await;
@@ -58,7 +58,7 @@ async fn delete_schema_tool_removes_only_unreferenced_archived_versions() {
         let v3 = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
         v3.assert_status(StatusCode::CREATED);
         let v3_id = v3.json::<Value>()["schema"]["id"].as_str().unwrap().to_owned();
-        let read_key = issue_api_key(&ctx, tenant.workspace_id, tenant.owner_id, ApiKeyScope::Read, false).await;
+        let read_key = issue_api_key(&ctx, tenant.workspace_id, crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await, ApiKeyScope::Read, false).await;
         let denied = mcp_call(&request, &session, &read_key, 2, "tools/call", json!({"name":"delete_schema","arguments":{"schema_id":v1_id}})).await;
         assert_eq!(denied["result"]["isError"], true);
         let bound = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"delete_schema","arguments":{"schema_id":v1_id}})).await;

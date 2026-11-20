@@ -71,11 +71,12 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
             owner_id: user_id,
             api_key: key,
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let administrator = fixtures::create_iam_administrator(&ctx, tenant_id).await;
         let read_key = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             workspace_id,
             ApiKeyScope::Read,
-            Some(user_id),
+            Some(administrator),
             false,
         )
         .await

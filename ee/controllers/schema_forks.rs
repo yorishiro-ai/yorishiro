@@ -1,10 +1,11 @@
 //! REST endpoints for workspace-owned schema forks.
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope};
+use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope, Verified};
 use axum::Json;
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 use uuid::Uuid;
 
@@ -12,26 +13,22 @@ use crate::edition::ee::models::workspace_schema_forks as model;
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schema-forks", responses((status = 200, body = [crate::edition::ee::controllers::openapi::ForkRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_fork_list"]))), tag = "enterprise"))]
 async fn list(
-    mut authorized: Authorized<ReadScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<ReadScope>,
 ) -> Result<Json<Vec<model::ForkRecord>>, ApiError> {
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaForkList)
-        .await?;
-    Ok(Json(
-        model::list(
-            authorized.txn(),
-            authorized.ctx.tenant_id,
-            authorized.ctx.require_workspace()?,
-        )
-        .await?,
-    ))
+    Ok(Json(model::list_for_actor(&ctx, &verified.ctx).await?))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schema-forks/{fork_id}", params(("fork_id" = Uuid, Path)), responses((status = 200, body = crate::edition::ee::controllers::openapi::ForkRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_fork_get"]))), tag = "enterprise"))]
 async fn get(
-    mut authorized: Authorized<ReadScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<ReadScope>,
     Path(fork_id): Path<Uuid>,
 ) -> Result<Json<model::ForkRecord>, ApiError> {
+    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
+        model::workspace_for_actor(&ctx.db, &verified.ctx, fork_id).await?,
+    );
+    let mut authorized = Authorized::<ReadScope>::for_target(&ctx, verified.ctx, target).await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaForkGet)
         .await?;
@@ -48,9 +45,14 @@ async fn get(
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schema-forks", request_body = crate::edition::ee::controllers::openapi::CreateForkRequest, responses((status = 201, body = crate::edition::ee::controllers::openapi::ForkRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_fork_create"]))), tag = "enterprise"))]
 async fn create(
-    mut authorized: Authorized<SchemaScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<SchemaScope>,
     Json(input): Json<model::CreateInput>,
 ) -> Result<(StatusCode, Json<model::ForkRecord>), ApiError> {
+    let target = crate::models::iam::access::WorkspaceTarget::Permission(
+        crate::models::iam::policy::Action::SchemaForkCreate,
+    );
+    let mut authorized = Authorized::<SchemaScope>::for_target(&ctx, verified.ctx, target).await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaForkCreate)
         .await?;
@@ -67,10 +69,15 @@ async fn create(
 
 #[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/schema-forks/{fork_id}", params(("fork_id" = Uuid, Path)), request_body = crate::edition::ee::controllers::openapi::UpdateForkRequest, responses((status = 200, body = crate::edition::ee::controllers::openapi::ForkRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_fork_update"]))), tag = "enterprise"))]
 async fn update(
-    mut authorized: Authorized<SchemaScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<SchemaScope>,
     Path(fork_id): Path<Uuid>,
     Json(input): Json<model::UpdateInput>,
 ) -> Result<Json<model::ForkRecord>, ApiError> {
+    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
+        model::workspace_for_actor(&ctx.db, &verified.ctx, fork_id).await?,
+    );
+    let mut authorized = Authorized::<SchemaScope>::for_target(&ctx, verified.ctx, target).await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaForkUpdate)
         .await?;
@@ -88,9 +95,14 @@ async fn update(
 
 #[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/schema-forks/{fork_id}", params(("fork_id" = Uuid, Path)), responses((status = 204, description = "Schema fork deleted"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_fork_delete"]))), tag = "enterprise"))]
 async fn delete(
-    mut authorized: Authorized<SchemaScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<SchemaScope>,
     Path(fork_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
+    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
+        model::workspace_for_actor(&ctx.db, &verified.ctx, fork_id).await?,
+    );
+    let mut authorized = Authorized::<SchemaScope>::for_target(&ctx, verified.ctx, target).await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaForkDelete)
         .await?;

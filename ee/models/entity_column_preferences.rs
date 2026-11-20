@@ -55,6 +55,39 @@ pub(crate) async fn list(
     Ok(rows.into_iter().map(to_preference).collect())
 }
 
+pub(crate) async fn list_for_actor(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::api_keys::AuthContext,
+    page: ListParams,
+) -> Result<Vec<ColumnPreference>, YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    let workspaces = crate::models::iam::access::permitted_workspaces(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::policy::Action::EntityColumnsGet,
+    )
+    .await?;
+    let records = if let [workspace] = workspaces.as_slice() {
+        list(&txn, *workspace, page).await?
+    } else {
+        Entity::find()
+            .filter(Column::WorkspaceId.is_in(workspaces))
+            .order_by_asc(Column::EntityType)
+            .order_by_asc(Column::WorkspaceId)
+            .limit(page.limit())
+            .offset(page.offset())
+            .all(&txn)
+            .await
+            .internal()?
+            .into_iter()
+            .map(to_preference)
+            .collect()
+    };
+    txn.commit().await.internal()?;
+    Ok(records)
+}
+
 /// Stores the choice, replacing whatever was there.
 ///
 /// `ON CONFLICT` rather than a read-then-write: two tabs saving at once would otherwise both see no row and both insert, and the unique constraint would turn the loser into a 500.

@@ -15,7 +15,9 @@ async fn api_key_tool_issues_tenant_scoped_keys_with_the_same_ceilings() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let session = initialize(&request).await;
-        let denied = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"create_api_key","arguments":{"name":"from-bound","tenant_scoped":true}})).await;
+        let administrator = crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let bound = crate::requests::fixtures::issue_api_key(&ctx, tenant.workspace_id, administrator, ApiKeyScope::Migration, false).await;
+        let denied = mcp_call(&request, &session, &bound, 2, "tools/call", json!({"name":"create_api_key","arguments":{"name":"from-bound","tenant_scoped":true}})).await;
         assert_eq!(denied["result"]["isError"], true);
         let issuer = yorishiro::models::api_keys::Entity::create_tenant_api_key(&ctx.db, tenant.tenant_id, ApiKeyScope::Migration, Some(tenant.owner_id), true, "initial-admin").await.unwrap();
         let created = mcp_call(&request, &session, &issuer.plaintext, 3, "tools/call", json!({"name":"create_api_key","arguments":{"name":"tenant-scoped","scope":"write","tenant_scoped":true}})).await;
@@ -25,7 +27,7 @@ async fn api_key_tool_issues_tenant_scoped_keys_with_the_same_ceilings() {
             .add_header("Authorization", format!("Bearer {}", record["full_key"].as_str().unwrap()))
             .await.assert_status(StatusCode::OK);
         assert_eq!(record["scope"], "write");
-        assert_eq!(record["effective_scope"], "write");
+        assert_eq!(record["effective_scope"], "migration");
         let rest = request.post("/api/api-keys").add_header("Authorization", format!("Bearer {}", issuer.plaintext)).json(&json!({"name":"rest-twin","scope":"write","tenant_scoped":true})).await;
         rest.assert_status(StatusCode::CREATED);
         let rest_record = rest.json::<Value>();
@@ -113,7 +115,8 @@ async fn expired_keys_are_rejected_over_rest_and_an_existing_mcp_session() {
 async fn issued_read_key_reads_but_rejects_valid_mutations_over_both_transports() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let administrator_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let administrator = crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let administrator_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator).await;
         request.post("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
             .json(&json!({"template_id":"task-management"})).await.assert_status(StatusCode::CREATED);

@@ -9,9 +9,7 @@ use rmcp::{tool, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::controllers::mcp::{
-    AuthzOutcome, YorishiroMcpServer, authorize, err_to_tool_result, ok_json,
-};
+use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::edition::ee::models::entity_column_preferences;
 use crate::models::api_keys::ApiKeyScope;
 
@@ -43,26 +41,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListColumnsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match authorize(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_entity_columns")?,
-        )
-        .await?
-        {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::EntityColumnsGet)
-            .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
-
-        match entity_column_preferences::list(
-            authorized.txn(),
-            authorized.workspace_id(),
+        let required = self.required_scope("list_entity_columns")?;
+        let actor =
+            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
+                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
+                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
+        match entity_column_preferences::list_for_actor(
+            &self.app_context().db,
+            &actor,
             crate::models::pagination::ListParams::new(args.limit, args.offset),
         )
         .await
@@ -78,15 +65,25 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SetColumnsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match authorize(
+        let required = self.required_scope("set_entity_columns")?;
+        let actor =
+            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
+                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
+                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
+        let target = crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::EntityColumnsUpdate,
+        );
+        let mut authorized = match crate::controllers::mcp::authorize::Authorized::for_target(
             self.app_context(),
-            &parts,
-            self.required_scope("set_entity_columns")?,
+            &actor,
+            required,
+            target,
         )
-        .await?
+        .await
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            Ok(authorized) => authorized,
+            Err(error) => return Ok(err_to_tool_result(error)),
         };
         if let Err(error) = authorized
             .require_action(crate::models::iam::policy::Action::EntityColumnsUpdate)
@@ -116,15 +113,25 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ResetColumnsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match authorize(
+        let required = self.required_scope("reset_entity_columns")?;
+        let actor =
+            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
+                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
+                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
+        let target = crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::EntityColumnsDelete,
+        );
+        let mut authorized = match crate::controllers::mcp::authorize::Authorized::for_target(
             self.app_context(),
-            &parts,
-            self.required_scope("reset_entity_columns")?,
+            &actor,
+            required,
+            target,
         )
-        .await?
+        .await
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            Ok(authorized) => authorized,
+            Err(error) => return Ok(err_to_tool_result(error)),
         };
         if let Err(error) = authorized
             .require_action(crate::models::iam::policy::Action::EntityColumnsDelete)

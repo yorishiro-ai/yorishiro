@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{AuthzOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::recall::{self, DEFAULT_RECALL_DEPTH, DEFAULT_RECALL_LIMIT};
 
@@ -35,15 +35,32 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<RecallContextArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match super::authorize(
+        let required = self.required_scope("recall_context")?;
+        let actor = match super::verify(self.app_context(), &parts, required).await? {
+            super::VerifyOutcome::Verified(actor) => actor,
+            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        };
+        let mut authorized = match super::authorize::Authorized::for_target(
             self.app_context(),
-            &parts,
-            self.required_scope("recall_context")?,
+            &actor,
+            required,
+            crate::models::iam::access::WorkspaceTarget::Workspace(
+                match crate::models::entity_entities::workspace_for_actor(
+                    &self.app_context().db,
+                    &actor,
+                    args.entity_id,
+                )
+                .await
+                {
+                    Ok(id) => id,
+                    Err(error) => return Ok(err_to_tool_result(error)),
+                },
+            ),
         )
-        .await?
+        .await
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            Ok(authorized) => authorized,
+            Err(error) => return Ok(err_to_tool_result(error)),
         };
         if let Err(error) = authorized
             .require_action(crate::models::iam::policy::Action::Recall)

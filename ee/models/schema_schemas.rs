@@ -6,4 +6,4 @@ mod query;
 
 pub(crate) use merge::MergePlan;
 pub(crate) use origin::{merge_apply, merge_preview};
-pub(crate) use query::list_with_upstream_changes;
+pub(crate) use query::list_for_actor;

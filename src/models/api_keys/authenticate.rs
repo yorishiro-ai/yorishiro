@@ -13,7 +13,7 @@ impl Entity {
     ///
     /// `SeaQuery` calls the `authenticate_api_key` SECURITY DEFINER function to read through RLS and projects only `id/workspace_id/tenant_id/scope/user_id/audit`, never `key_hash` itself.
     ///
-    /// A workspace-scoped key always resolves to the workspace recorded on it.
+    /// Non-root workspace-scoped keys resolve to their recorded workspace.
     /// A tenant-scoped key resolves `requested_workspace` when present, otherwise it has no workspace.
     ///
     /// # Errors
@@ -63,7 +63,7 @@ impl Entity {
             &db.identity_connection(),
             row.workspace_id,
             row.tenant_id,
-            row.user_id,
+            row.id,
             requested_workspace,
         )
         .await?;
@@ -81,7 +81,8 @@ impl Entity {
 
     /// Chooses which workspace a verified credential acts on.
     ///
-    /// A workspace-scoped key always acts on its own workspace, and a header naming another one is refused.
+    /// Non-root workspace-scoped keys cannot select a different workspace.
+    /// Root credentials may select any workspace in their tenant.
     /// A tenant-scoped key acts on the requested workspace when it belongs to the same tenant, or has no workspace.
     ///
     /// # Errors
@@ -90,10 +91,13 @@ impl Entity {
         conn: &impl ConnectionTrait,
         key_workspace: Option<Uuid>,
         tenant_id: Uuid,
-        _user_id: Option<Uuid>,
+        key_id: Uuid,
         requested: Option<Uuid>,
     ) -> Result<Option<Uuid>, YorishiroError> {
-        if let Some(workspace_id) = key_workspace {
+        let root = Model::is_root_credential(conn, key_id).await?;
+        if let Some(workspace_id) = key_workspace
+            && !root
+        {
             if let Some(requested) = requested
                 && requested != workspace_id
             {
@@ -121,7 +125,7 @@ impl Entity {
             }
             return Ok(Some(requested));
         }
-        Ok(None)
+        Ok(key_workspace)
     }
 
     /// SQLite equivalent of [`Self::authenticate`], for a deployment with no `DbHandle` (see `Hooks::after_context`).
@@ -145,7 +149,7 @@ impl Entity {
             conn,
             key.workspace_id,
             key.tenant_id,
-            key.user_id,
+            key.id,
             requested_workspace,
         )
         .await?;

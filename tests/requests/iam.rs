@@ -49,6 +49,282 @@ async fn create_workspace(request: &loco_rs::TestServer, api_key: &str) -> uuid:
 }
 
 #[tokio::test]
+async fn unselected_lists_do_not_expose_workspaces_without_iam_grants() {
+    use crate::requests::fixtures;
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant = fixtures::TestTenant::create(&request, &ctx, fixtures::TenantArgs::default()).await;
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(
+            &txn, tenant.tenant_id, &fixtures::unique_email("no-grants"), "hunter2-hunter2", None,
+        ).await.unwrap();
+        txn.commit().await.unwrap();
+        let key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, member.id).await;
+        for path in ["/api/schemas", "/api/entities", "/api/relations", "/api/search?query_text=private"] {
+            let response = request.get(path).add_header("Authorization", format!("Bearer {key}")).await;
+            response.assert_status_ok();
+            assert_eq!(response.json::<serde_json::Value>(), serde_json::json!([]));
+        }
+        request.post("/api/entities")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"schema_name":"general-notes","entity_type":"note","data":{"title":"denied"}}))
+            .await.assert_status(StatusCode::FORBIDDEN);
+    }).await;
+}
+
+#[tokio::test]
+async fn entity_creation_selects_the_only_authorized_workspace() {
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant = crate::requests::fixtures::TestTenant::create(
+            &request, &ctx, crate::requests::fixtures::TenantArgs::default(),
+        ).await;
+        request.post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"template_id":"general-notes"}))
+            .await.assert_status(StatusCode::CREATED);
+        let administrator = crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator).await;
+        let input = serde_json::json!({"schema_name":"general-notes","entity_type":"note","data":{"title":"implicit"}});
+        let created = request.post("/api/entities")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&input).await;
+        created.assert_status(StatusCode::CREATED);
+        assert_eq!(created.json::<serde_json::Value>()["workspace_id"], tenant.workspace_id.to_string());
+        create_workspace(&request, &key).await;
+        request.post("/api/entities")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&input).await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    }).await;
+}
+
+#[tokio::test]
+async fn relation_operations_resolve_the_source_and_relation_workspaces() {
+    use crate::requests::fixtures;
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant = fixtures::TestTenant::create(&request, &ctx, fixtures::TenantArgs::default()).await;
+        let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator).await;
+        request.post("/api/schemas").add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"template_id":"general-notes"})).await.assert_status(StatusCode::CREATED);
+        let mut ids = Vec::new();
+        for title in ["source", "target"] {
+            let response = request.post("/api/entities").add_header("Authorization", format!("Bearer {key}"))
+                .json(&serde_json::json!({"schema_name":"general-notes","entity_type":"note","data":{"title":title}})).await;
+            response.assert_status(StatusCode::CREATED);
+            ids.push(response.json::<serde_json::Value>()["id"].clone());
+        }
+        create_workspace(&request, &key).await;
+        let relation = request.post("/api/relations").add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"source_id":ids[0],"target_id":ids[1],"relation_type":"references","properties":{}})).await;
+        relation.assert_status(StatusCode::CREATED);
+        let id = relation.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let path = format!("/api/relations/{id}");
+        request.get(&path).add_header("Authorization", format!("Bearer {key}")).await.assert_status_ok();
+        request.put(&format!("{path}/status")).add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"status":"archived"})).await.assert_status_ok();
+        request.delete(&path).add_header("Authorization", format!("Bearer {key}"))
+            .await.assert_status(StatusCode::NO_CONTENT);
+    }).await;
+}
+
+#[tokio::test]
+async fn schema_ids_resolve_the_workspace_and_creation_refuses_ambiguity() {
+    use crate::requests::fixtures;
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant =
+            fixtures::TestTenant::create(&request, &ctx, fixtures::TenantArgs::default()).await;
+        let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator).await;
+        let created = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"template_id":"general-notes"}))
+            .await;
+        created.assert_status(StatusCode::CREATED);
+        let id = created.json::<serde_json::Value>()["schema"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(
+            &txn,
+            tenant.tenant_id,
+            &fixtures::unique_email("schema-no-grant"),
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+        let denied = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, member.id).await;
+        request
+            .get(&format!("/api/schemas/{id}"))
+            .add_header("Authorization", format!("Bearer {denied}"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        let other = create_workspace(&request, &key).await;
+        request
+            .get(&format!("/api/schemas/{id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status_ok();
+        request
+            .get(&format!("/api/schemas/{id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("x-workspace-id", other.to_string())
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"template_id":"general-notes"}))
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        request
+            .post(&format!("/api/schemas/{id}/archive"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status_ok();
+        request
+            .delete(&format!("/api/schemas/{id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status(StatusCode::CONFLICT);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one account history compares root credential overrides with delegated cross-workspace reads over REST and MCP"
+)]
+async fn root_credentials_are_not_limited_by_scope_audit_or_workspace_binding() {
+    use yorishiro::models::api_keys::{ApiKeyScope, Entity};
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
+        let key = Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            Some(tenant.owner_id),
+            false,
+        )
+        .await
+        .unwrap()
+        .plaintext;
+        let response = request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"name":"root-created"}))
+            .await;
+        response.assert_status(StatusCode::CREATED);
+        let workspace = response.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("x-workspace-id", &workspace)
+            .json(&serde_json::json!({"template_id":"general-notes"}))
+            .await
+            .assert_status(StatusCode::CREATED);
+        request
+            .get("/api/audit-log")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("x-workspace-id", &workspace)
+            .await
+            .assert_status_ok();
+        let initialized = request
+            .post("/mcp")
+            .add_header("Accept", "application/json, text/event-stream")
+            .json(
+                &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+                    "protocolVersion":"2025-03-26","capabilities":{},
+                    "clientInfo":{"name":"root-test","version":"1"}
+                }}),
+            )
+            .await;
+        initialized.assert_status_ok();
+        let session = initialized.headers()["mcp-session-id"].to_str().unwrap();
+        let result = iam_mcp_call(
+            &request,
+            session,
+            &key,
+            "list_schemas",
+            serde_json::json!({"workspace_id":workspace}),
+        )
+        .await;
+        assert_ne!(result["result"]["isError"], true, "{result}");
+        assert!(result.get("error").is_none(), "{result}");
+        let root =
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
+        let result = iam_mcp_call(
+            &request,
+            session,
+            &root,
+            "list_schemas",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_ne!(result["result"]["isError"], true, "{result}");
+        assert!(result.get("error").is_none(), "{result}");
+        let administrator =
+            crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let delegated =
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator)
+                .await;
+        let result = iam_mcp_call(
+            &request,
+            session,
+            &delegated,
+            "list_schemas",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_ne!(result["result"]["isError"], true, "{result}");
+        assert!(result.get("error").is_none(), "{result}");
+        let response = request
+            .get("/api/schemas")
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .await;
+        response.assert_status_ok();
+        assert_eq!(response.json::<Vec<serde_json::Value>>().len(), 1);
+        request.get("/api/relations")
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status_ok();
+        request.post("/api/entities")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .add_header("x-workspace-id", &workspace)
+            .json(&serde_json::json!({"schema_name":"general-notes","entity_type":"note","data":{"title":"visible"}}))
+            .await.assert_status(StatusCode::CREATED);
+        let response = request.get("/api/entities")
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .await;
+        response.assert_status_ok();
+        assert_eq!(response.json::<Vec<serde_json::Value>>().len(), 1);
+        let id = response.json::<Vec<serde_json::Value>>()[0]["id"].as_str().unwrap().to_owned();
+        request.get(&format!("/api/entities/{id}"))
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status_ok();
+        request.put(&format!("/api/entities/{id}"))
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .json(&serde_json::json!({"data":{"title":"updated"}}))
+            .await.assert_status_ok();
+        request.delete(&format!("/api/entities/{id}"))
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status(StatusCode::NO_CONTENT);
+    })
+    .await;
+}
+
+#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the same credentials and audit history are needed to compare denied, rolled-back, and committed IAM mutations across REST and MCP"
@@ -97,7 +373,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].action, "group_create");
             let tenant_id = body["tenant_id"].as_str().unwrap().parse().unwrap();
-            let user_id = body["user_id"].as_str().unwrap().parse().unwrap();
+            let user_id = crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await;
             let audit_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
                 &ctx.db,
                 tenant_id,
@@ -236,7 +512,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .get("/api/schemas")
                 .add_header("Authorization", format!("Bearer {api_key}"))
                 .await
-                .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+                .assert_status(StatusCode::OK);
             let whoami = request
                 .get("/api/whoami")
                 .add_header("Authorization", format!("Bearer {api_key}"))
@@ -277,7 +553,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 assert_eq!(chosen["workspace_id"], second_id.to_string());
             }
 
-            let user_id: uuid::Uuid = identity["user_id"].as_str().unwrap().parse().unwrap();
+            let user_id = crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await;
             let scoped_key = yorishiro::models::api_keys::Entity::create_api_key(
                 &ctx.db,
                 workspace_id,
@@ -897,7 +1173,7 @@ async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
         bearer!(root_key, request.post(&assume))
             .json(&serde_json::json!({}))
             .await
-            .assert_status(StatusCode::FORBIDDEN);
+            .assert_status(StatusCode::CREATED);
 
         bearer!(
             root_key,

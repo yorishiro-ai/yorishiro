@@ -1,17 +1,28 @@
+use axum::extract::State;
 use axum::http::header;
 use axum::response::IntoResponse;
 use axum::routing::get;
+use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{Authorized, ReadScope};
+use crate::controllers::extractors::{Authorized, ReadScope, Verified};
 use crate::models::transfer::export;
 
 /// Line-delimited JSON export of every schema, entity, and relation belonging to the workspace, one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/export.jsonl", responses((status = 200, description = "Newline-delimited JSON export, at most 8 MiB and 10,000 records", content_type = "application/x-ndjson", body = String), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["export"]))), tag = "community"))]
 pub(crate) async fn export_jsonl(
-    mut authorized: Authorized<ReadScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<ReadScope>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let mut authorized = Authorized::<ReadScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::Export,
+        ),
+    )
+    .await?;
     authorized
         .require_action(crate::models::iam::policy::Action::Export)
         .await?;

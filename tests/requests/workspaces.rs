@@ -574,7 +574,7 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
             .assert_status(StatusCode::NO_CONTENT);
         request
             .delete(&format!("/api/workspaces/{sibling_id}"))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {key}"))
             .await
             .assert_status(StatusCode::FORBIDDEN);
         super::fixtures::grant_workspace(

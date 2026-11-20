@@ -10,19 +10,27 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope};
+use crate::controllers::extractors::{AuthContext, Authorized, ReadScope, SchemaScope, Verified};
 use crate::data::templates::{self, TemplateSummary};
 use crate::dtos::schemas::{CreateSchemaRequest, CreateSchemaResponse};
 use crate::error::YorishiroError;
+use crate::models::api_keys::ApiKeyScope;
 use crate::models::schema_schemas::metaschema::{self, MetaSchemaDefinition};
 use crate::models::schema_schemas::{self, SchemaRecord, SchemaSummary};
 use crate::models::template_templates;
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/{schema_id}/archive", params(("schema_id" = Uuid, Path)), responses((status = 200, body = SchemaRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_archive"] ))), tag = "community"))]
 pub(crate) async fn archive_schema(
-    mut authorized: Authorized<SchemaScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<SchemaScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
+    let mut authorized = Authorized::<SchemaScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
+    )
+    .await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaArchive)
         .await?;
@@ -38,9 +46,16 @@ pub(crate) async fn archive_schema(
 
 #[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/schemas/{schema_id}", params(("schema_id" = Uuid, Path)), responses((status = 204, description = "Schema version deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_delete"] ))), tag = "community"))]
 pub(crate) async fn delete_schema(
-    mut authorized: Authorized<SchemaScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<SchemaScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
+    let mut authorized = Authorized::<SchemaScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
+    )
+    .await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaDelete)
         .await?;
@@ -56,14 +71,12 @@ pub(crate) async fn delete_schema(
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [SchemaSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_list"] ))), tag = "community"))]
 pub(crate) async fn list_schemas(
-    mut authorized: Authorized<ReadScope>,
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<SchemaSummary>>, ApiError> {
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaList)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let summaries = schema_schemas::list(authorized.txn(), workspace_id, page.try_into()?).await?;
+    crate::controllers::middleware::auth::require_scope(&actor, ApiKeyScope::Read)?;
+    let summaries = schema_schemas::list_for_actor(&ctx.db, &actor, page.try_into()?).await?;
     Ok(Json(summaries))
 }
 
@@ -73,9 +86,17 @@ pub(crate) async fn list_schemas(
 /// Returns an error if the operation cannot be completed.
 async fn create_schema(
     State(ctx): State<AppContext>,
-    mut authorized: Authorized<SchemaScope>,
+    verified: Verified<SchemaScope>,
     Json(body): Json<CreateSchemaRequest>,
 ) -> Result<(StatusCode, Json<CreateSchemaResponse>), ApiError> {
+    let mut authorized = Authorized::<SchemaScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::SchemaCreate,
+        ),
+    )
+    .await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaCreate)
         .await?;
@@ -121,9 +142,18 @@ async fn create_schema(
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn get_active_schema(
-    mut authorized: Authorized<ReadScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<ReadScope>,
     Path(name): Path<String>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
+    let mut authorized = Authorized::<ReadScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::SchemaGet,
+        ),
+    )
+    .await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaGet)
         .await?;
@@ -134,9 +164,16 @@ async fn get_active_schema(
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/{schema_id}", params(("schema_id" = Uuid, Path)), responses((status = 200, body = SchemaRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_get"] ))), tag = "community"))]
 pub(crate) async fn get_schema_by_id(
-    mut authorized: Authorized<ReadScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<ReadScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
+    let mut authorized = Authorized::<ReadScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
+    )
+    .await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaGet)
         .await?;
@@ -147,7 +184,7 @@ pub(crate) async fn get_schema_by_id(
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/templates", responses((status = 200, body = [TemplateSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub(crate) async fn list_templates(
-    _authorized: Authorized<ReadScope>,
+    _verified: Verified<ReadScope>,
 ) -> Result<Json<Vec<TemplateSummary>>, ApiError> {
     Ok(Json(templates::list_templates()))
 }
@@ -157,7 +194,7 @@ pub(crate) async fn list_templates(
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn get_template(
-    _authorized: Authorized<ReadScope>,
+    _verified: Verified<ReadScope>,
     Path(id): Path<String>,
 ) -> Result<Json<MetaSchemaDefinition>, ApiError> {
     let definition = templates::get_template(&id)?;
@@ -166,9 +203,18 @@ async fn get_template(
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/active/{name}/entity-types/{entity_type}/json-schema", params(("name" = String, Path), ("entity_type" = String, Path)), responses((status = 200, body = super::openapi::JsonSchema), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_get"] ))), tag = "community"))]
 pub(crate) async fn get_entity_type_json_schema(
-    mut authorized: Authorized<ReadScope>,
+    State(ctx): State<AppContext>,
+    verified: Verified<ReadScope>,
     Path((name, entity_type)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
+    let mut authorized = Authorized::<ReadScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::SchemaGet,
+        ),
+    )
+    .await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaGet)
         .await?;

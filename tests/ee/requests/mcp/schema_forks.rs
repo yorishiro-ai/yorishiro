@@ -23,7 +23,7 @@ async fn schema_fork_tools_match_rest_and_enforce_workspace_scope() {
         let target: Value = target.json();
         let workspace_id = target["id"].as_str().unwrap().parse().unwrap();
         let key = issue_api_key(&ctx, workspace_id, tenant.owner_id, ApiKeyScope::Schema, false).await;
-        let read_key = issue_api_key(&ctx, workspace_id, tenant.owner_id, ApiKeyScope::Read, false).await;
+        let read_key = issue_api_key(&ctx, workspace_id, crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await, ApiKeyScope::Read, false).await;
         let input = json!({"source_workspace_id":tenant.workspace_id,"source_schema_id":source["schema"]["id"]});
         let denied = mcp_call(&request, &session, &read_key, 2, "tools/call", json!({"name":"create_schema_fork","arguments":input})).await;
         assert_eq!(denied["result"]["isError"], true);

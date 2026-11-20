@@ -20,6 +20,44 @@ use crate::models::_entities::schema_schemas::Column as SchemaColumn;
 use crate::models::_entities::workspace_schema_fork_heads as fork_heads;
 pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Column, Entity, Model};
 
+pub(crate) async fn workspace_for_actor(
+    db: &impl ConnectionTrait,
+    actor: &crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<Uuid, YorishiroError> {
+    if let Some(workspace_id) = actor.workspace_id {
+        return Ok(workspace_id);
+    }
+    let fork = Entity::find_by_id(id)
+        .one(db)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found("schema fork was not found"))?;
+    crate::models::iam::access::check_workspace_target(db, actor, fork.workspace_id).await
+}
+
+pub(crate) async fn list_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+) -> Result<Vec<ForkRecord>, YorishiroError> {
+    let txn = crate::db::begin_write(&ctx.db).await.internal()?;
+    let workspaces = crate::models::iam::access::permitted_workspaces(
+        &txn,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::policy::Action::SchemaForkList,
+    )
+    .await?;
+    let mut records = Vec::new();
+    for workspace in workspaces {
+        let scoped = crate::db::begin_workspace(ctx, actor.tenant_id, workspace).await?;
+        records.extend(list(&scoped, actor.tenant_id, workspace).await?);
+    }
+    records.sort_by_key(|record| (record.created_at, record.id));
+    txn.commit().await.internal()?;
+    Ok(records)
+}
+
 #[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ForkRecord {

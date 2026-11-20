@@ -3,7 +3,7 @@
 
 mod api_keys;
 mod audit_log;
-mod authorize;
+pub(crate) mod authorize;
 pub mod entities;
 mod export;
 mod iam;
@@ -44,7 +44,7 @@ use crate::controllers::middleware::auth;
 use crate::error::YorishiroError;
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
 
-pub(crate) use authorize::{AuthzOutcome, VerifyOutcome, authorize, verify};
+pub(crate) use authorize::{VerifyOutcome, verify};
 use authorize::{extract_bearer_key, header_error};
 pub use policy::{McpToolPolicy, McpToolSet};
 pub use server::{YorishiroMcpServer, scope_requirement};

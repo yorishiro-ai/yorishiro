@@ -14,9 +14,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::controllers::mcp::{
-    AuthzOutcome, YorishiroMcpServer, authorize, err_to_tool_result, ok_json,
-};
+use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::api_keys::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
@@ -50,34 +48,22 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListUpstreamChangesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match authorize(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_upstream_changes")?,
-        )
-        .await?
-        {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaUpstreamList)
-            .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
-
-        let workspace_id = authorized.workspace_id();
+        let required = self.required_scope("list_upstream_changes")?;
+        let actor =
+            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
+                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
+                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        let changes = match crate::edition::ee::models::schema_schemas::list_with_upstream_changes(
+        let changes = match crate::edition::ee::models::schema_schemas::list_for_actor(
             &self.app_context().db,
-            workspace_id,
+            &actor,
             page,
         )
         .await
         {
             Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
+            Err(error) => return Ok(err_to_tool_result(error)),
         };
         ok_json(changes)
     }
@@ -91,15 +77,22 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MergePreviewArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match authorize(
+        let required = self.required_scope("merge_preview")?;
+        let actor =
+            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
+                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
+                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
+        let mut authorized = match crate::controllers::mcp::authorize::Authorized::for_target(
             self.app_context(),
-            &parts,
-            self.required_scope("merge_preview")?,
+            &actor,
+            required,
+            crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
         )
-        .await?
+        .await
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            Ok(authorized) => authorized,
+            Err(error) => return Ok(err_to_tool_result(error)),
         };
         if let Err(error) = authorized
             .require_action(crate::models::iam::policy::Action::SchemaMergePreview)
@@ -137,15 +130,22 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MergeApplyArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut authorized = match authorize(
+        let required = self.required_scope("merge_apply")?;
+        let actor =
+            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
+                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
+                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+            };
+        let mut authorized = match crate::controllers::mcp::authorize::Authorized::for_target(
             self.app_context(),
-            &parts,
-            self.required_scope("merge_apply")?,
+            &actor,
+            required,
+            crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
         )
-        .await?
+        .await
         {
-            AuthzOutcome::Authorized(authorized) => authorized,
-            AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
+            Ok(authorized) => authorized,
+            Err(error) => return Ok(err_to_tool_result(error)),
         };
         if let Err(error) = authorized
             .require_action(crate::models::iam::policy::Action::SchemaMergeApply)

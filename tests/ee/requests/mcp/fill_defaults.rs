@@ -35,7 +35,10 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             },
         )
         .await;
-        let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
+        let administrator =
+            crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await;
+        let read_key =
+            issue_api_key(&ctx, workspace_id, administrator, ApiKeyScope::Read, false).await;
         let audit_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, true).await;
 
         let v1 = serde_json::from_value(serde_json::json!({

@@ -286,10 +286,18 @@ async fn reindex_audit_detail_is_workspace_id_and_is_recorded_before_relay_publi
 async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&request, &ctx).await;
-
+        let administrator = super::fixtures::create_iam_administrator(&ctx, setup.tenant_id).await;
+        let key = issue_api_key(
+            &ctx,
+            setup.workspace_id,
+            administrator,
+            ApiKeyScope::Migration,
+            false,
+        )
+        .await;
         let response = request
             .get("/api/audit-log")
-            .add_header("Authorization", format!("Bearer {}", setup.migration_key))
+            .add_header("Authorization", format!("Bearer {key}"))
             .await;
         assert_eq!(
             response.status_code(),

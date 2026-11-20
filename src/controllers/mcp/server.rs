@@ -15,6 +15,20 @@ pub struct YorishiroMcpServer {
 }
 
 impl YorishiroMcpServer {
+    fn advertised_tool(mut tool: rmcp::model::Tool) -> rmcp::model::Tool {
+        let schema = Arc::make_mut(&mut tool.input_schema);
+        let properties = schema
+            .entry("properties")
+            .or_insert_with(|| serde_json::json!({}));
+        if let Some(properties) = properties.as_object_mut() {
+            properties.entry("workspace_id").or_insert_with(|| serde_json::json!({
+                "type":"string", "format":"uuid",
+                "description":"Workspace to operate on for this call. No workspace-bound key is required."
+            }));
+        }
+        tool
+    }
+
     pub(crate) fn new(
         ctx: AppContext,
         tool_router: ToolRouter<Self>,
@@ -82,10 +96,37 @@ impl ServerHandler for YorishiroMcpServer {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        context: RequestContext<RoleServer>,
+        mut context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         if !self.tool_policy.allows(&self.ctx, request.name.as_ref()) {
             return Err(ErrorData::invalid_params("tool not found", None));
+        }
+        if let Some(workspace) = request
+            .arguments
+            .as_ref()
+            .and_then(|args| args.get("workspace_id"))
+        {
+            let workspace = workspace
+                .as_str()
+                .and_then(|value| uuid::Uuid::parse_str(value).ok())
+                .ok_or_else(|| ErrorData::invalid_params("workspace_id must be a UUID", None))?;
+            if let Some(parts) = context.extensions.get_mut::<axum::http::request::Parts>() {
+                let value = axum::http::HeaderValue::from_str(&workspace.to_string())
+                    .map_err(crate::error::mcp_internal)?;
+                if parts
+                    .headers
+                    .get(crate::models::api_keys::WORKSPACE_HEADER)
+                    .is_some_and(|header| header != value)
+                {
+                    return Err(ErrorData::invalid_params(
+                        "workspace_id conflicts with x-workspace-id",
+                        None,
+                    ));
+                }
+                parts
+                    .headers
+                    .insert(crate::models::api_keys::WORKSPACE_HEADER, value);
+            }
         }
         let maintenance = match crate::models::system_maintenance::get(&self.ctx.db).await {
             Ok(state) => state,
@@ -107,7 +148,12 @@ impl ServerHandler for YorishiroMcpServer {
         let supports_cache_hints = context
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
-        let mut tools = self.tool_router.list_all();
+        let mut tools: Vec<_> = self
+            .tool_router
+            .list_all()
+            .into_iter()
+            .map(Self::advertised_tool)
+            .collect();
         tools.retain(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()));
         std::future::ready(Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
@@ -123,7 +169,10 @@ impl ServerHandler for YorishiroMcpServer {
         if !self.tool_policy.allows(&self.ctx, name) {
             return None;
         }
-        self.tool_router.get(name).cloned()
+        self.tool_router
+            .get(name)
+            .cloned()
+            .map(Self::advertised_tool)
     }
 
     fn get_info(&self) -> ServerConfig {
@@ -132,7 +181,10 @@ impl ServerHandler for YorishiroMcpServer {
              Every tool call requires authentication via an `Authorization: Bearer <api-key>` \
              header, and the tools available depend on the API key's scope \
              (read/write/schema, where higher scopes include the permissions of lower ones). \
-             Tenant-scoped keys require `X-Workspace-Id` for workspace operations; tenant operations do not select a workspace.",
+             Select a workspace with the `workspace_id` tool argument or `X-Workspace-Id` header. \
+             Without selection, lists and search span permitted workspaces, resource IDs resolve their workspace, \
+             and destination operations select a workspace only when exactly one is permitted. \
+             Tenant root accounts have all permissions within their tenant regardless of key scope or binding.",
         )
     }
 }

@@ -97,22 +97,13 @@ async fn validated_trust(
     for principal in trust.principals() {
         let known = match principal {
             Principal::Tenant => true,
-            Principal::User { user_id } => {
-                if crate::models::iam_tenant_roots::Model::contains(txn, tenant_id, user_id).await?
-                {
-                    return Err(invalid(
-                        "the tenant root cannot assume roles",
-                        "name a tenant user, a group or a service key",
-                    ));
-                }
-                tenant_memberships::Entity::find()
-                    .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
-                    .filter(tenant_memberships::Column::UserId.eq(user_id))
-                    .one(txn)
-                    .await
-                    .internal()?
-                    .is_some()
-            }
+            Principal::User { user_id } => tenant_memberships::Entity::find()
+                .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
+                .filter(tenant_memberships::Column::UserId.eq(user_id))
+                .one(txn)
+                .await
+                .internal()?
+                .is_some(),
             Principal::Group { group_id } => {
                 crate::models::iam_groups::Model::find(txn, tenant_id, group_id)
                     .await?
@@ -373,12 +364,12 @@ impl Model {
         } else if !trust.names_service_key(actor.api_key_id) {
             return Err(denied());
         }
-        if !trusted {
+        let root = api_keys::Model::is_root_credential(&txn, actor.api_key_id).await?;
+        if !trusted && !root {
             return Err(denied());
         }
 
-        let caller_scope = ApiKeyScope::from_db_str(&caller_key.scope)
-            .ok_or_else(|| YorishiroError::Internal("unknown api key scope".into()))?;
+        let caller_scope = api_keys::Model::current_context(&txn, actor).await?.scope;
         let scope = scope.unwrap_or(caller_scope);
         if scope > caller_scope {
             return Err(YorishiroError::ScopeInsufficient {
@@ -396,7 +387,7 @@ impl Model {
         }
         let mut expires_at: chrono::DateTime<chrono::FixedOffset> =
             (crate::data::time::now() + chrono::Duration::seconds(duration)).into();
-        if let Some(limit) = caller_key.expires_at {
+        if !root && let Some(limit) = caller_key.expires_at {
             expires_at = expires_at.min(limit);
         }
         let session = api_keys::Entity::create_role_session(

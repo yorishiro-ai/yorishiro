@@ -163,7 +163,9 @@ impl Entity {
             .await
             .internal()?
             .ok_or(YorishiroError::Unauthenticated)?;
-        if issuer_binding.workspace_id.is_some() && old.workspace_id != issuer_binding.workspace_id
+        if issuer_binding.workspace_id.is_some()
+            && old.workspace_id != issuer_binding.workspace_id
+            && !Model::is_root_credential(&txn, actor.api_key_id).await?
         {
             return Err(YorishiroError::ScopeInsufficient {
                 message: "replacement target exceeds the issuing key's binding".into(),
@@ -174,7 +176,8 @@ impl Entity {
         let scope = stored_scope(&old.scope)?;
         let current = Model::current_context(&txn, actor).await?;
         crate::models::iam::access::require_key_grant(&txn, &current, scope, old.audit).await?;
-        if let Some(limit) = issuer_binding.expires_at
+        if !Model::is_root_credential(&txn, actor.api_key_id).await?
+            && let Some(limit) = issuer_binding.expires_at
             && old.expires_at.is_none_or(|expiry| expiry > limit)
         {
             return Err(YorishiroError::ScopeInsufficient {

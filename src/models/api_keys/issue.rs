@@ -208,14 +208,17 @@ impl Entity {
             .await
             .internal()?
             .ok_or(YorishiroError::Unauthenticated)?;
-        if issuer_key.workspace_id.is_some() {
+        if issuer_key.workspace_id.is_some()
+            && !Model::is_root_credential(&txn, issuer.api_key_id).await?
+        {
             return Err(YorishiroError::ScopeInsufficient {
                 message: "a tenant-scoped key can only be issued with a tenant-scoped credential"
                     .into(),
                 hint: "issue it from a key without a workspace binding".into(),
             });
         }
-        if let Some(limit) = issuer_key.expires_at
+        if !Model::is_root_credential(&txn, issuer.api_key_id).await?
+            && let Some(limit) = issuer_key.expires_at
             && expires_at.is_none_or(|expiry| expiry > limit)
         {
             return Err(YorishiroError::ScopeInsufficient {
@@ -311,7 +314,8 @@ impl Entity {
                 .await
                 .internal()?
                 .ok_or(YorishiroError::Unauthenticated)?;
-            if let Some(limit) = issuer_key.expires_at
+            if !Model::is_root_credential(&txn, issuer.api_key_id).await?
+                && let Some(limit) = issuer_key.expires_at
                 && expires_at.is_none_or(|expiry| expiry > limit)
             {
                 return Err(YorishiroError::ScopeInsufficient {
