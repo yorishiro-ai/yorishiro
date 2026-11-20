@@ -31,8 +31,8 @@ WORKDIR /build
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV PATH=/usr/local/cargo/bin:$PATH
-COPY Cargo.toml .
-RUN channel=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml) \
+COPY rust-toolchain.toml .
+RUN channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml) \
     && test -n "$channel" \
     && curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh \
     && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain "$channel" \
