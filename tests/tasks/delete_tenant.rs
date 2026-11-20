@@ -1,6 +1,7 @@
 use loco_rs::task::Vars;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 use yorishiro::App;
+use yorishiro::models::_entities::tenant_retirement_events::Column;
 use yorishiro::models::{tenant_retirement_events, tenant_tenants, user_users};
 
 use crate::requests::boot_request;
@@ -104,7 +105,6 @@ async fn delete_task_requires_confirmation_and_disablement_and_supports_retry() 
                 .unwrap()
                 .is_some()
         );
-        use yorishiro::models::_entities::tenant_retirement_events::Column;
         let events = tenant_retirement_events::Entity::find()
             .filter(Column::TenantId.eq(target.tenant_id))
             .all(&ctx.db)
@@ -172,7 +172,6 @@ async fn sqlite_retirement_retains_quota_until_deletion_and_preserves_identities
                 .unwrap()
                 .is_some()
         );
-        use yorishiro::models::_entities::tenant_retirement_events::Column;
         let events = tenant_retirement_events::Entity::find()
             .filter(Column::TenantId.eq(target.tenant_id))
             .all(&ctx.db)

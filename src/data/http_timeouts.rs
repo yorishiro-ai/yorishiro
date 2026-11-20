@@ -22,7 +22,7 @@ pub enum HttpTimeout {
 
 /// The deadline for `kind` under an explicit set of deployment timeouts.
 #[must_use]
-pub(crate) fn deadline_for(kind: HttpTimeout, timeouts: HttpTimeouts) -> Duration {
+pub(crate) const fn deadline_for(kind: HttpTimeout, timeouts: HttpTimeouts) -> Duration {
     Duration::from_secs(match kind {
         HttpTimeout::EmbeddingRequest => timeouts.embedding_request_seconds,
         HttpTimeout::LocalEmbedding => timeouts.local_embedding_seconds,

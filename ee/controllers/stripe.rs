@@ -134,16 +134,13 @@ async fn stripe_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    let config = match StripeConfig::from_config(&ctx.config) {
-        Ok(config) => config,
-        Err(_) => {
-            tracing::error!("invalid initializers.stripe configuration");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Stripe configuration is invalid",
-            )
-                .into_response();
-        }
+    let Ok(config) = StripeConfig::from_config(&ctx.config) else {
+        tracing::error!("invalid initializers.stripe configuration");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Stripe configuration is invalid",
+        )
+            .into_response();
     };
     let Some(secret) = config.webhook_secret.as_deref() else {
         return (

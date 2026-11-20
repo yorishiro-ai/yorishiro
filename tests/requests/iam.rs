@@ -1,8 +1,12 @@
 use crate::requests::boot_request_with;
 use axum::http::StatusCode;
-use sea_orm::EntityTrait;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait, TransactionTrait};
 use yorishiro::App;
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 pub(crate) async fn iam_mcp_call(
     request: &loco_rs::TestServer,
     session: &str,
@@ -22,11 +26,15 @@ pub(crate) async fn iam_mcp_call(
         .lines()
         .filter_map(|line| line.strip_prefix("data:").map(str::trim))
         .find(|line| !line.is_empty())
-        .unwrap_or(text.trim());
+        .unwrap_or_else(|| text.trim());
     serde_json::from_str(payload).expect("MCP JSON response")
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the same credentials and audit history are needed to compare denied, rolled-back, and committed IAM mutations across REST and MCP"
+)]
 async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
     let overrides = [crate::requests::max_tenants(1)];
     boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
@@ -160,7 +168,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert_eq!(events.len(), 2);
             assert!(events.iter().any(|event| event.action == "policy_create"));
 
-            use sea_orm::ConnectionTrait;
             // Direct write (c): deterministic fault injection making the audit insert fail.
             ctx.db
                 .execute_unprepared(
@@ -530,8 +537,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let next = request.get("/api/iam/groups?limit=1&offset=1")
                 .add_header("Authorization", format!("Bearer {api_key}")).await.json::<serde_json::Value>();
             assert_eq!(first.as_array().unwrap().len(), 1);
-            assert!(next.as_array().unwrap().is_empty());
-            use sea_orm::{ActiveModelTrait, ActiveValue::Set, TransactionTrait};
+            assert_eq!(next, serde_json::json!([]));
             let txn = ctx.db.begin().await.unwrap();
             // Direct write (a): `create_tenant` enforces the one-tenant cap, and the IAM group operations are crate-private.
             let foreign_tenant = yorishiro::models::tenant_tenants::ActiveModel {
@@ -619,7 +625,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let inventory = request.get("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext)).await;
             inventory.assert_status_ok();
-            assert!(inventory.json::<Vec<serde_json::Value>>().is_empty());
+            assert_eq!(inventory.json::<Vec<serde_json::Value>>(), [] as [serde_json::Value; 0]);
             let denied_list = iam_mcp_call(&request, &session, &user_key.plaintext,
                 "list_workspaces", serde_json::json!({})).await;
             let denied_list: serde_json::Value = serde_json::from_str(denied_list["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -714,6 +720,10 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the same human and role session compare inherited permissions as role policies and their attachments change"
+)]
 async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
     let overrides = [crate::requests::max_tenants(1)];
     boot_request_with::<App, _, _>(&overrides, |request, _ctx| async move {

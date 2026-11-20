@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex};
 
+use sea_orm::sea_query::{Alias, Expr, Func};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use uuid::Uuid;
+use yorishiro::models::_entities::entity_embeddings;
 
 use yorishiro::models::_entities::workspace_workspaces;
 use yorishiro::models::{entity_entities, entity_entities::CreateEntityInput, schema_schemas};
@@ -53,7 +55,7 @@ async fn record_delivery(ctx: &loco_rs::app::AppContext, workspace_id: Uuid) -> 
 #[tokio::test]
 async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-    let crate::requests::fixtures::TestTenant { tenant_id, workspace_id, api_key, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+    let crate::requests::fixtures::TestTenant { tenant_id, workspace_id, api_key, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
     let default_calls = Arc::new(Mutex::new(0));
     let workspace_calls = Arc::new(Mutex::new(0));
     let (default, _default_server) =
@@ -119,8 +121,6 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     assert_eq!(*workspace_calls.lock().unwrap(), 1);
     assert_eq!(*default_calls.lock().unwrap(), 0);
     let backend = ctx.db.get_database_backend();
-    use sea_orm::sea_query::{Alias, Expr, Func};
-    use yorishiro::models::_entities::entity_embeddings;
     let length = Func::cust(Alias::new(if backend == sea_orm::DatabaseBackend::Sqlite {
         "length"
     } else {
@@ -155,7 +155,12 @@ async fn disabled_provider_is_a_terminal_worker_error() {
         ctx.shared_store.insert(provider);
         let expected_error = "embedding provider disabled";
         let crate::requests::fixtures::TestTenant { workspace_id, .. } =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+            crate::requests::fixtures::TestTenant::create(
+                &request,
+                &ctx,
+                crate::requests::fixtures::TenantArgs::default(),
+            )
+            .await;
         let lifecycle_id = record_delivery(&ctx, workspace_id).await;
         crate::requests::fill_defaults::finish_with_status(&ctx, lifecycle_id, "failed").await;
         let lifecycle = yorishiro::models::queue_job_lifecycles::Entity::find_by_id(lifecycle_id)

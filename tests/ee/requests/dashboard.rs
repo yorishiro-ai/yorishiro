@@ -93,7 +93,7 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
         assert_eq!(body["plan"], serde_json::Value::Null);
         assert_eq!(body["usage"]["workspace_count"], 1);
         assert_eq!(body["usage"]["member_count"], 1);
-        assert!(body["members"].as_array().unwrap().is_empty());
+        assert_eq!(body["members"], serde_json::json!([]));
     })
     .await;
 }

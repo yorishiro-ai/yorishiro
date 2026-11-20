@@ -5,19 +5,52 @@ exclude = ["patches/loco-rs/source"]
 [workspace.package]
 rust-version = "1.100.0"
 
-# Lint levels live here so `cargo build`, `cargo clippy` and rust-analyzer all report the same findings as warnings.
+# Rust lint levels apply to every build; Clippy lint levels apply when running Clippy, including rust-analyzer's save checks.
 # CI and the Makefile turn every warning into an error with `-D warnings`.
 [workspace.lints.rust]
 unused_qualifications = "warn"
 unreachable_pub = "warn"
 
 [workspace.lints.clippy]
+# Groups have lower priority so individual project policies can override them.
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Rust 1.100 suggests `pub` for crate-visible helpers inside private modules,
+# which then triggers unreachable_pub; preserve the narrower API boundary.
+redundant_pub_crate = "allow"
 # Every `allow` needs a reason, and `expect` is preferred so a stale suppression is itself reported.
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
 dbg_macro = "warn"
 todo = "warn"
 unimplemented = "warn"
+# Restriction policies that do not conflict with idiomatic Rust or Loco's layout.
+as_pointer_underscore = "warn"
+as_underscore = "warn"
+cfg_not_test = "warn"
+default_union_representation = "warn"
+empty_drop = "warn"
+fn_to_numeric_cast_any = "warn"
+lossy_float_literal = "warn"
+mem_forget = "warn"
+mixed_read_write_in_expression = "warn"
+mutex_atomic = "warn"
+mutex_integer = "warn"
+precedence_bits = "warn"
+rc_mutex = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+string_lit_chars_any = "warn"
+suspicious_xor_used_as_pow = "warn"
+try_err = "warn"
+undocumented_unsafe_blocks = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+unnecessary_self_imports = "warn"
+unused_result_ok = "warn"
+# Keep tail expressions and `?`; do not enable implicit_return or question_mark_used.
+# Loco needs both table.rs and mod.rs, so neither module-file restriction applies.
+# Keep public re-exports, CLI output, Unicode data and floating-point vector math.
 # Public fallibility and panics are documented on every public API.
 missing_errors_doc = "warn"
 missing_panics_doc = "warn"
@@ -96,7 +129,7 @@ sea-orm = { version = "2.0.4", features = [
   "postgres-vector",
 ] }
 uuid = { version = "1.29.0", features = ["v4", "v7", "serde"] }
-redis = { version = "=1.8.1", features = ["aio", "tokio-comp"] }
+redis = { version = "1.8.2", features = ["aio", "tokio-comp"] }
 
 [dependencies]
 loco-rs = { workspace = true }
@@ -105,6 +138,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "time", "macros", "sync", "fs", "io-util"] }
 futures = "0.3.34"
+hex = "0.4.3"
 axum.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -113,7 +147,7 @@ chrono.workspace = true
 chrono-tz.workspace = true
 uuid.workspace = true
 sha2.workspace = true
-jsonschema = { version = "=0.60.2" }
+jsonschema = { version = "0.61.2" }
 rmcp = { version = "3.9.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
 schemars = { version = "1.2.3", features = ["uuid1"] }
 # OpenAI-compatible embedding provider (services::embedding::openai): talks to LM Studio/Ollama/
@@ -129,10 +163,10 @@ sqlite-vec = "=0.1.9"
 # Direct dependency for FFI (sqlite3_auto_extension) — sea-orm 2.x does not
 # re-export libsqlite3_sys from its own sqlx dependency, so we reach it
 # directly here and avoid the version-mismatch E0432.
-libsqlite3-sys = "=0.37.0"
+libsqlite3-sys = "0.40.0"
 # The following are reached only from `ee/`, which compiles into this crate rather than its own.
 # Kept as a labelled group so the paid edition's dependency footprint stays legible after the merge.
-jsonwebtoken = { version = "11.1.0", features = ["aws_lc_rs"], optional = true }  # licence and OIDC verification without the vulnerable RustCrypto RSA backend
+jsonwebtoken = { version = "12.0.0", features = ["aws_lc_rs"], optional = true }  # licence and OIDC verification without the vulnerable RustCrypto RSA backend
 hmac = { version = "0.13.0", optional = true }          # Stripe webhook signature (ee/controllers/stripe.rs)
 base64 = { version = "0.23.1", optional = true }        # OAuth/PKCE encoding (ee/services/oauth.rs)
 utoipa = { version = "6.0.0", features = ["axum_extras", "uuid", "chrono"], optional = true }

@@ -38,7 +38,10 @@ db_enum! {
     }
 }
 
-/// Ids only, not the `EntityRecord` or the provider's model name: everything is re-read inside `perform`, so an update racing ahead of a still-queued job is picked up as the entity's current state rather than overwritten with what was true at enqueue time.
+/// Identifies the entity to re-read when the embedding job runs.
+///
+/// Re-reading the entity and provider in `perform` preserves updates that race ahead of a queued job.
+///
 /// A deleted entity is not found on that re-read, and the job is a no-op.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EmbeddingSyncArgs {
@@ -235,9 +238,7 @@ pub(crate) async fn enqueue_after_write(
     entity_id: Uuid,
     txn: &sea_orm::DatabaseTransaction,
 ) -> Result<(), YorishiroError> {
-    let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
-        .await
-        .map_err(|error| error.0)?;
+    let worker_class = crate::workers::target::resolve_worker_class(ctx, workspace_id).await?;
     let args = EmbeddingSyncArgs {
         lifecycle_id: None,
         workspace_id,

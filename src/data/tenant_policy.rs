@@ -18,7 +18,7 @@ impl TenantLimit {
     pub(crate) fn maximum(&self) -> Option<u64> {
         match self {
             Self::Unlimited => None,
-            Self::Configured(max) => Some((*max).max(0) as u64),
+            Self::Configured(max) => Some(u64::from((*max).max(0).cast_unsigned())),
             Self::SingleTenant => Some(1),
         }
     }

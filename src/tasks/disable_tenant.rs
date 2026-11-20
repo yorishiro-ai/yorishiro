@@ -12,18 +12,7 @@ impl Task for DisableTenant {
         }
     }
     async fn run(&self, ctx: &AppContext, vars: &task::Vars) -> Result<()> {
-        let parse_target = |name: &str| -> Result<Uuid> {
-            vars.cli_arg(name)?.parse::<Uuid>().map_err(|_| {
-                crate::YorishiroError::ValidationFailed {
-                    message: format!("{name} is not a valid UUID"),
-                    details: vec![],
-                    hint: "provide matching tenant_id and confirmed_tenant_id UUIDs".into(),
-                }
-                .into()
-            })
-        };
-        let tenant_id = parse_target("tenant_id")?;
-        let confirmation = parse_target("confirmed_tenant_id")?;
+        let (tenant_id, confirmation) = super::tenant_confirmation(vars)?;
         crate::models::tenant_tenants::retirement::disable_by_operator(
             &ctx.db,
             tenant_id,

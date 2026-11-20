@@ -4,6 +4,10 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub(crate) struct Migration;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered migration DDL keeps table definitions, constraints, and grants together"
+)]
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     fn use_transaction(&self) -> Option<bool> {

@@ -34,6 +34,10 @@ async fn run(ctx: &AppContext, task: &str, workspace_id: Uuid) -> loco_rs::Resul
     loco_rs::boot::run_task::<App>(ctx, Some(&task.to_owned()), &vars).await
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn workspace_with_notes(
     request: &loco_rs::TestServer,
     ctx: &AppContext,
@@ -171,7 +175,10 @@ async fn the_tasks_reject_a_workspace_id_that_is_not_a_uuid() {
             loco_rs::boot::run_task::<App>(&ctx, Some(&"resync_embeddings".to_owned()), &vars)
                 .await;
         assert!(result.is_err(), "resync_embeddings must reject it");
-        assert!(deliveries(&ctx, workspace).await.is_empty());
+        assert_eq!(
+            deliveries(&ctx, workspace).await,
+            [] as [serde_json::Value; 0]
+        );
     })
     .await;
 }

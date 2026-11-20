@@ -4,7 +4,7 @@ use yorishiro::{
     models::iam::trust_policy::{Caller, Principal, TrustPolicy},
 };
 
-fn parse(document: serde_json::Value) -> Result<TrustPolicy, YorishiroError> {
+fn parse(document: &serde_json::Value) -> Result<TrustPolicy, YorishiroError> {
     TrustPolicy::parse(&document.to_string())
 }
 
@@ -24,7 +24,7 @@ fn caller(user_id: Option<Uuid>, groups: &[Uuid], key: Uuid) -> Caller<'_> {
 fn trust_requires_an_allow_that_names_the_caller() {
     let (alice, bob, key) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
     let policy = parse(
-        serde_json::json!({"statements": [{"effect": "allow", "principals": [user(alice)]}]}),
+        &serde_json::json!({"statements": [{"effect": "allow", "principals": [user(alice)]}]}),
     )
     .unwrap();
     assert!(policy.permits(&caller(Some(alice), &[], key)));
@@ -34,7 +34,7 @@ fn trust_requires_an_allow_that_names_the_caller() {
 #[test]
 fn an_explicit_deny_wins_over_any_allow() {
     let (alice, key) = (Uuid::new_v4(), Uuid::new_v4());
-    let policy = parse(serde_json::json!({"statements": [
+    let policy = parse(&serde_json::json!({"statements": [
         {"effect": "allow", "principals": [{"type": "tenant"}]},
         {"effect": "deny", "principals": [user(alice)]},
     ]}))
@@ -46,7 +46,7 @@ fn an_explicit_deny_wins_over_any_allow() {
 #[test]
 fn a_group_principal_matches_its_members_only() {
     let (group, key) = (Uuid::new_v4(), Uuid::new_v4());
-    let policy = parse(serde_json::json!({"statements": [
+    let policy = parse(&serde_json::json!({"statements": [
         {"effect": "allow", "principals": [{"type": "group", "group_id": group}]},
     ]}))
     .unwrap();
@@ -58,7 +58,7 @@ fn a_group_principal_matches_its_members_only() {
 #[test]
 fn a_service_key_must_be_named_explicitly() {
     let (key, other) = (Uuid::new_v4(), Uuid::new_v4());
-    let named = parse(serde_json::json!({"statements": [
+    let named = parse(&serde_json::json!({"statements": [
         {"effect": "allow", "principals": [{"type": "service_key", "api_key_id": key}]},
     ]}))
     .unwrap();
@@ -67,7 +67,7 @@ fn a_service_key_must_be_named_explicitly() {
     assert!(!named.permits(&caller(None, &[], other)));
     assert!(!named.permits(&caller(Some(Uuid::new_v4()), &[], key)));
 
-    let tenant = parse(serde_json::json!({"statements": [
+    let tenant = parse(&serde_json::json!({"statements": [
         {"effect": "allow", "principals": [{"type": "tenant"}]},
     ]}))
     .unwrap();
@@ -78,7 +78,7 @@ fn a_service_key_must_be_named_explicitly() {
 #[test]
 fn principals_lists_every_named_principal() {
     let (alice, group) = (Uuid::new_v4(), Uuid::new_v4());
-    let policy = parse(serde_json::json!({"statements": [
+    let policy = parse(&serde_json::json!({"statements": [
         {"effect": "allow", "principals": [user(alice), {"type": "group", "group_id": group}]},
         {"effect": "deny", "principals": [{"type": "tenant"}]},
     ]}))
@@ -106,7 +106,7 @@ fn malformed_documents_are_rejected() {
     for document in invalid {
         assert!(
             matches!(
-                parse(document.clone()),
+                parse(&document),
                 Err(YorishiroError::ValidationFailed { .. })
             ),
             "{document}"
@@ -115,6 +115,6 @@ fn malformed_documents_are_rejected() {
     let too_many = serde_json::json!({"statements": (0..17)
         .map(|_| serde_json::json!({"effect": "allow", "principals": [{"type": "tenant"}]}))
         .collect::<Vec<_>>()});
-    assert!(parse(too_many).is_err());
+    assert!(parse(&too_many).is_err());
     assert!(TrustPolicy::parse(&"x".repeat(20_000)).is_err());
 }

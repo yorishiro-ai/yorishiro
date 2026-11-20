@@ -40,7 +40,7 @@ async fn export_orders_schema_history_by_name_and_version_across_pages() {
         let rows: Vec<Value> = response.text().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
         let actual: Vec<_> = rows.iter().map(|row| {
             assert_eq!(row["kind"], "schema");
-            (row["record"]["name"].as_str().unwrap(), row["record"]["version"].as_i64().unwrap() as i32)
+            (row["record"]["name"].as_str().unwrap(), i32::try_from(row["record"]["version"].as_i64().unwrap()).unwrap())
         }).collect();
         assert_eq!(actual, expected);
     }).await;

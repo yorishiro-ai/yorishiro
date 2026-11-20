@@ -37,7 +37,10 @@ where
     let Some(id) = lifecycle_id else {
         return work().await;
     };
-    let attempt = match Entity::start(&ctx.db, id).await.map_err(message)? {
+    let attempt = match Entity::start(&ctx.db, id)
+        .await
+        .map_err(|error| message(&error))?
+    {
         Admission::Started { attempt } | Admission::Recovered { attempt } => attempt,
         Admission::Duplicate { .. } | Admission::Terminal => return Ok(()),
         Admission::Saturated { attempt } => {
@@ -54,7 +57,7 @@ where
                 }
                 None => Entity::defer(&ctx.db, id, None, SATURATED).await,
             }
-            .map_err(message)?;
+            .map_err(|error| message(&error))?;
             return requeue::<W, A>(ctx, id, class, workspace_id, args).await;
         }
     };
@@ -65,7 +68,7 @@ where
         Ok(()) => {
             Entity::finish(&ctx.db, id, Some(attempt), LifecycleStatus::Completed, None)
                 .await
-                .map_err(message)?;
+                .map_err(|error| message(&error))?;
             Ok(())
         }
         Err(error) => {
@@ -77,7 +80,7 @@ where
                 Some(&error.to_string()),
             )
             .await
-            .map_err(message)?;
+            .map_err(|error| message(&error))?;
             tracing::error!(lifecycle_id = %id, worker_class = class.as_db_str(), error = %error, "terminal worker failure");
             Err(error)
         }
@@ -131,13 +134,13 @@ where
         Some(vec![tag]),
     )
     .await
-    .map_err(message)?;
+    .map_err(|error| message(&error))?;
     txn.commit()
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     Ok(())
 }
 
-fn message(error: sea_orm::DbErr) -> loco_rs::Error {
+fn message(error: &sea_orm::DbErr) -> loco_rs::Error {
     loco_rs::Error::Message(error.to_string())
 }

@@ -85,6 +85,10 @@ impl Default for Limits {
 /// Deadlines for outbound calls, in seconds.
 #[derive(Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields, default)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "serialized timeout settings retain explicit units in their keys"
+)]
 pub(crate) struct HttpTimeouts {
     /// One embedding request to an OpenAI-compatible provider.
     pub(crate) embedding_request_seconds: u64,
@@ -118,7 +122,7 @@ fn default_timezone() -> String {
     "UTC".into()
 }
 
-fn default_max_tenants() -> i32 {
+const fn default_max_tenants() -> i32 {
     1
 }
 
@@ -175,11 +179,11 @@ pub struct Embedding {
     pub(crate) provider_concurrency: usize,
 }
 
-fn default_local_max_sequence_length() -> usize {
+const fn default_local_max_sequence_length() -> usize {
     512
 }
 
-fn default_provider_concurrency() -> usize {
+const fn default_provider_concurrency() -> usize {
     1
 }
 

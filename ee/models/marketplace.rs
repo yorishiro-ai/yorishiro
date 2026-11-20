@@ -151,6 +151,19 @@ impl TemplateVersionStatus {
 }
 
 #[derive(FromQueryResult)]
+struct MarketplaceListingDbRecord {
+    template_id: Uuid,
+    name: String,
+    description: Option<String>,
+    tags: Value,
+    author: Option<String>,
+    tenant_id: Uuid,
+    latest_stable_version: Option<i32>,
+    review_count: i64,
+    average_rating: Option<f64>,
+}
+
+#[derive(FromQueryResult)]
 struct TemplateVersionDbRecord {
     id: Uuid,
     template_id: Uuid,
@@ -305,7 +318,7 @@ pub struct PublishVersionRequest {
     pub status: TemplateVersionStatus,
 }
 
-fn default_status() -> TemplateVersionStatus {
+const fn default_status() -> TemplateVersionStatus {
     TemplateVersionStatus::Draft
 }
 
@@ -359,7 +372,7 @@ impl TryFrom<ForkSourceDbRecord> for ForkSource {
 /// subqueries rather than a `JOIN` + `GROUP BY`: `limit` bounds the page to 200 rows, so their cost
 /// is bounded too, and nothing has measured the rewrite as faster.
 ///
-/// SeaQuery builds the correlated aggregates inside the same paginated entity projection.
+/// `SeaQuery` builds the correlated aggregates inside the same paginated entity projection.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -367,24 +380,12 @@ pub async fn list_marketplace(
     conn: &impl ConnectionTrait,
     page: ListParams,
 ) -> Result<Vec<MarketplaceListing>, YorishiroError> {
-    require_postgres(conn, "listing the marketplace")?;
     use crate::models::_entities::{
         template_reviews as review, template_templates as template, template_versions as version,
     };
     use sea_orm::sea_query::{Alias, SimpleExpr};
     use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
-    #[derive(FromQueryResult)]
-    struct Listing {
-        template_id: Uuid,
-        name: String,
-        description: Option<String>,
-        tags: Value,
-        author: Option<String>,
-        tenant_id: Uuid,
-        latest_stable_version: Option<i32>,
-        review_count: i64,
-        average_rating: Option<f64>,
-    }
+    require_postgres(conn, "listing the marketplace")?;
     let latest = Query::select()
         .expr(Expr::col((version::Entity, version::Column::Version)).max())
         .from(version::Entity)
@@ -449,9 +450,9 @@ pub async fn list_marketplace(
         .filter(Expr::exists(published))
         .order_by_asc(template::Column::Name)
         .order_by_asc(template::Column::Id)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
-        .into_model::<Listing>()
+        .limit(page.limit())
+        .offset(page.offset())
+        .into_model::<MarketplaceListingDbRecord>()
         .all(conn)
         .await
         .internal()?;
@@ -515,8 +516,8 @@ pub async fn list_versions(
                 .add(TemplateColumn::TenantId.eq(tenant_id)),
         )
         .order_by_desc(Column::Version)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
+        .limit(page.limit())
+        .offset(page.offset())
         .into_model::<AuthorizedTemplateVersionDbRecord>()
         .all(conn)
         .await
@@ -531,7 +532,7 @@ pub async fn list_versions(
 ///
 /// Called inside the transaction that holds `template-version:{template_id}`'s advisory lock (`models::marketplace::publish_version`): at READ COMMITTED, Postgres locks no range for rows that do not exist yet, so two concurrent inserts would otherwise read the same maximum and collide on the `template_id, version` unique index.
 ///
-/// SeaQuery builds one `INSERT ... SELECT` so the version is computed in the inserting statement.
+/// `SeaQuery` builds one `INSERT ... SELECT` so the version is computed in the inserting statement.
 /// Splitting this into a separate `SELECT max(version)` plus an `ActiveModel` insert would reopen exactly the race the advisory lock and single-statement `COALESCE` together close.
 pub(crate) async fn insert_next_version(
     conn: &impl ConnectionTrait,
@@ -539,8 +540,9 @@ pub(crate) async fn insert_next_version(
     request: &PublishVersionRequest,
     user_id: Option<Uuid>,
 ) -> Result<TemplateVersionRecord, YorishiroError> {
-    require_postgres(conn, "publishing a template version")?;
     use crate::models::_entities::template_versions::{Column, Entity};
+
+    require_postgres(conn, "publishing a template version")?;
     let select = Query::select()
         .expr(Expr::val(template_id))
         .expr(Expr::col(Column::Version).max().if_null(0).add(1))
@@ -616,8 +618,8 @@ pub async fn list_reviews(
                 .add(TemplateColumn::Visibility.eq(TemplateVisibility::Community.as_db_str())),
         )
         .order_by_desc(Column::CreatedAt)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
+        .limit(page.limit())
+        .offset(page.offset())
         .into_model::<AuthorizedTemplateReviewDbRecord>()
         .all(conn)
         .await

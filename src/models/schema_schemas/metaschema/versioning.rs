@@ -17,7 +17,9 @@ pub struct VersioningDiff {
 }
 
 /// Non-breaking: adding an optional field, description changes, adding enum values.
-/// Breaking: removing/renaming a field, changing its type, making it required, removing an entity_type, changing a relation_type.
+///
+/// Breaking: removing/renaming a field, changing its type, making it required, removing an `entity_type`, changing a `relation_type`.
+#[must_use]
 pub fn diff(old: &MetaSchemaDefinition, new: &MetaSchemaDefinition) -> VersioningDiff {
     let mut reasons = Vec::new();
 
@@ -65,9 +67,8 @@ fn lowered_ceiling<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
         // A ceiling where there was none: anything above it was valid a moment ago.
         (None, Some(_)) => true,
         // Dropping the ceiling only ever admits more data.
-        (Some(_), None) => false,
+        (_, None) => false,
         (Some(old), Some(new)) => new < old,
-        (None, None) => false,
     }
 }
 
@@ -76,9 +77,8 @@ fn lowered_ceiling<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
 fn raised_floor<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
     match (old, new) {
         (None, Some(_)) => true,
-        (Some(_), None) => false,
+        (_, None) => false,
         (Some(old), Some(new)) => new > old,
-        (None, None) => false,
     }
 }
 

@@ -105,55 +105,26 @@ async fn recall_context_traverses_two_hops_and_dedupes_a_diamond() {
                 .await
                 .expect("create unreached");
 
-        entity_relations::create(
-            &ctx.db,
-            fixture.workspace_id,
-            entity_relations::CreateRelationInput {
-                source_id: root.id,
-                target_id: mid.id,
-                relation_type: "links_to".into(),
-                properties: serde_json::json!({}),
-            },
-        )
-        .await
-        .expect("root -> mid");
-        entity_relations::create(
-            &ctx.db,
-            fixture.workspace_id,
-            entity_relations::CreateRelationInput {
-                source_id: mid.id,
-                target_id: leaf.id,
-                relation_type: "links_to".into(),
-                properties: serde_json::json!({}),
-            },
-        )
-        .await
-        .expect("mid -> leaf");
-        // Diamond: leaf also points straight back to mid, so mid is reachable via two paths.
-        entity_relations::create(
-            &ctx.db,
-            fixture.workspace_id,
-            entity_relations::CreateRelationInput {
-                source_id: leaf.id,
-                target_id: mid.id,
-                relation_type: "links_to".into(),
-                properties: serde_json::json!({}),
-            },
-        )
-        .await
-        .expect("leaf -> mid (diamond)");
-        entity_relations::create(
-            &ctx.db,
-            fixture.workspace_id,
-            entity_relations::CreateRelationInput {
-                source_id: leaf.id,
-                target_id: unreached.id,
-                relation_type: "links_to".into(),
-                properties: serde_json::json!({}),
-            },
-        )
-        .await
-        .expect("leaf -> unreached");
+        // The back edge reaches mid twice; unreached remains beyond the two-hop bound.
+        for (source_id, target_id) in [
+            (root.id, mid.id),
+            (mid.id, leaf.id),
+            (leaf.id, mid.id),
+            (leaf.id, unreached.id),
+        ] {
+            entity_relations::create(
+                &ctx.db,
+                fixture.workspace_id,
+                entity_relations::CreateRelationInput {
+                    source_id,
+                    target_id,
+                    relation_type: "links_to".into(),
+                    properties: serde_json::json!({}),
+                },
+            )
+            .await
+            .expect("create graph edge");
+        }
 
         let context = recall::recall_context(
             &ctx.db,

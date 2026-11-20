@@ -62,6 +62,10 @@ pub(crate) async fn queue_for_tag(
 }
 
 /// Boots the app, installs `provider` as the worker's deployment default, and runs a query embedding worker against the app's queue until `callback` returns.
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 pub(crate) async fn boot_with_query_worker<F, Fut>(
     provider: Arc<dyn EmbeddingProvider>,
     callback: F,
@@ -72,6 +76,10 @@ pub(crate) async fn boot_with_query_worker<F, Fut>(
     boot_with_query_worker_and_drain(provider, callback, |_| async {}).await;
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 pub(crate) async fn boot_with_query_worker_and_drain<F, Fut, D, Done>(
     provider: Arc<dyn EmbeddingProvider>,
     callback: F,

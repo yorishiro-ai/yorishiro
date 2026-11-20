@@ -20,3 +20,18 @@ pub mod tenant_reindex_scheduler;
 pub(crate) mod db_load_guard;
 pub mod maintenance;
 pub(crate) mod maintenance_status;
+
+/// Parses the target and explicit confirmation used by destructive tenant commands.
+fn tenant_confirmation(vars: &loco_rs::task::Vars) -> loco_rs::Result<(uuid::Uuid, uuid::Uuid)> {
+    let parse = |name: &str| -> loco_rs::Result<uuid::Uuid> {
+        vars.cli_arg(name)?.parse::<uuid::Uuid>().map_err(|_| {
+            crate::YorishiroError::ValidationFailed {
+                message: format!("{name} is not a valid UUID"),
+                details: vec![],
+                hint: "provide matching tenant_id and confirmed_tenant_id UUIDs".into(),
+            }
+            .into()
+        })
+    };
+    Ok((parse("tenant_id")?, parse("confirmed_tenant_id")?))
+}

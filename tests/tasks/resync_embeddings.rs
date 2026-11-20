@@ -16,6 +16,10 @@ fn note_definition() -> serde_json::Value {
     crate::requests::fixtures::note_schema("note", true)
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn insert_workspace(
     request: &loco_rs::TestServer,
     ctx: &loco_rs::app::AppContext,
@@ -218,6 +222,10 @@ async fn reindex_workspace_restamps_only_after_every_entity_succeeds() {
 
 /// An entity modified between `reindex_workspace`'s batch fetch and its write landing must be reported as a failure, not silently counted as reindexed, or the workspace would restamp while that row still holds a vector from before the concurrent modification: the exact stamp/data mismatch the write-time model check exists to catch, this time caused by the migration tool racing an ordinary write instead of a misconfigured deployment.
 /// A workspace stamped with an old model and two entities, returning the workspace and the first entity.
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn seed_two_entities(
     request: &loco_rs::TestServer,
     ctx: &loco_rs::app::AppContext,
@@ -318,7 +326,7 @@ async fn reindex_workspace_reports_a_concurrently_modified_entity_as_a_failure()
             ).await.expect("concurrent update");
                 release.add_permits(1);
             };
-        rejected_by_concurrent_change(reindex, modify).await;
+        Box::pin(rejected_by_concurrent_change(reindex, modify)).await;
         assert!(
             !embedding_is_set(&ctx, first.id).await,
             "no partial vectors may be published"
@@ -347,7 +355,7 @@ async fn reindex_rejects_entities_added_after_enumeration() {
             insert_entity(&ctx, workspace_id, "added while provider was paused").await;
             release.add_permits(1);
         };
-        rejected_by_concurrent_change(reindex, modify).await;
+        Box::pin(rejected_by_concurrent_change(reindex, modify)).await;
         assert!(
             !embedding_is_set(&ctx, first.id).await,
             "no partial vectors may be published"
@@ -381,7 +389,7 @@ async fn old_embedding_response_cannot_overwrite_completed_reindex() {
             assert!(result.failures.is_empty());
             release.add_permits(1);
         };
-        rejected_by_concurrent_change(reindex, modify).await;
+        Box::pin(rejected_by_concurrent_change(reindex, modify)).await;
         assert!(embedding_is_set(&ctx, first.id).await);
 
         assert_eq!(
@@ -411,7 +419,7 @@ async fn newer_reindex_supersedes_a_paused_run() {
             assert!(result.failures.is_empty());
             release.add_permits(1);
         };
-        rejected_by_concurrent_change(reindex, modify).await;
+        Box::pin(rejected_by_concurrent_change(reindex, modify)).await;
         assert!(embedding_is_set(&ctx, first.id).await);
 
         assert_eq!(

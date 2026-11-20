@@ -1,4 +1,5 @@
 //! Which columns the Entities table shows, chosen per workspace and entity type.
+//!
 //! Mounted at `/api/workspace/entity-columns` (singular): base's own workspace routes are mounted at `api/workspaces` (plural), so this does not collide.
 //!
 //! Reading needs `read`, writing needs `write`: this is a display preference, not schema state, so a key that may create entities may also decide how they are listed.

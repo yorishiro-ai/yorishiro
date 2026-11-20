@@ -26,6 +26,7 @@
 //! ```
 
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::_entities::entity_embeddings;
 use crate::models::_entities::entity_entities::Column as EntityColumn;
 use crate::models::entity_entities;
 use crate::models::search::SearchHit;
@@ -35,6 +36,7 @@ use loco_rs::task::Vars;
 use sea_orm::FromQueryResult;
 use sea_orm::Statement;
 use sea_orm::sea_query::{Alias, Asterisk, Expr, ExprTrait, JoinType, Query};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait};
 use uuid::Uuid;
 
 /// `cargo loco task sqlite_ann_benchmark workspace_id:<uuid> [min_entities:<int>] [max_latency_ms:<int>]`
@@ -83,10 +85,6 @@ impl Task for SqliteAnnBenchmark {
         let table_name = crate::models::entity_embeddings::TABLE.to_owned();
 
         // Count entities with embeddings in this workspace.
-        use crate::models::_entities::entity_embeddings;
-        use sea_orm::{
-            ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
-        };
         let entity_count = entity_embeddings::Entity::find()
             .join(
                 JoinType::InnerJoin,
@@ -110,24 +108,21 @@ impl Task for SqliteAnnBenchmark {
             .await
             .map_err(|e| Error::Message(e.to_string()))?;
 
-        match sample_row {
-            Some((_, vector_blob)) => {
-                let vector = vector_blob_to_f32(vector_blob);
-                run_benchmark(
-                    ctx,
-                    workspace_id,
-                    &vector,
-                    &table_name,
-                    entity_count,
-                    min_entities,
-                    max_latency_ms,
-                )
-                .await
-            }
-            None => {
-                println!("no embeddings with vector data found for workspace {workspace_id}");
-                Ok(())
-            }
+        if let Some((_, vector_blob)) = sample_row {
+            let vector = vector_blob_to_f32(&vector_blob);
+            run_benchmark(
+                ctx,
+                workspace_id,
+                &vector,
+                &table_name,
+                entity_count,
+                min_entities,
+                max_latency_ms,
+            )
+            .await
+        } else {
+            println!("no embeddings with vector data found for workspace {workspace_id}");
+            Ok(())
         }
     }
 }
@@ -169,7 +164,7 @@ async fn fetch_sample_embedding(
     Ok(row.map(|er| (er.entity_id, er.embedding)))
 }
 
-fn vector_blob_to_f32(blob: Vec<u8>) -> Vec<f32> {
+fn vector_blob_to_f32(blob: &[u8]) -> Vec<f32> {
     // Re-interpret the BLOB as f32 LE values.
     assert_eq!(
         blob.len() % 4,
@@ -254,7 +249,8 @@ async fn run_benchmark(
     println!();
     println!("--- Recommendation ---");
     let entities_ok = entity_count >= min_entities;
-    let latency_ok = full_scan.median_ms <= max_latency_ms as f64;
+    let latency_ok = full_scan.median_ms
+        <= std::time::Duration::from_millis(max_latency_ms).as_secs_f64() * 1000.0;
 
     if !entities_ok {
         println!(
@@ -318,6 +314,10 @@ async fn benchmark_phase(
     let mut latencies = Vec::with_capacity(iterations);
     for _ in 0..iterations {
         let start = std::time::Instant::now();
+        #[expect(
+            clippy::needless_collect,
+            reason = "benchmark latency includes materializing every converted search hit"
+        )]
         let hits: Vec<SearchHit> = SearchRow::find_by_statement(knn.clone())
             .all(conn)
             .await
@@ -337,7 +337,7 @@ async fn benchmark_phase(
     latencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mid = latencies.len() / 2;
     let median = if latencies.len() % 2 == 0 {
-        (latencies[mid - 1] + latencies[mid]) / 2.0
+        f64::midpoint(latencies[mid - 1], latencies[mid])
     } else {
         latencies[mid]
     };

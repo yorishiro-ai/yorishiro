@@ -46,8 +46,8 @@ pub(crate) async fn list(
     let rows = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .order_by_asc(Column::EntityType)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
+        .limit(page.limit())
+        .offset(page.offset())
         .all(conn)
         .await
         .internal()?;

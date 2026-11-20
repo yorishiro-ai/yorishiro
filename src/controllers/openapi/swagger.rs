@@ -1,11 +1,11 @@
-//! OpenAPI documentation assembled from the routes and handler-local metadata.
+//! `OpenAPI` documentation assembled from the routes and handler-local metadata.
 
 #[cfg(not(feature = "openapi"))]
-use super::openapi::route_inventory::RouteInventory;
+use super::route_inventory::RouteInventory;
 #[cfg(not(feature = "openapi"))]
 use axum::Router;
 #[cfg(not(feature = "openapi"))]
-pub(crate) fn mount(router: Router, _inventory: &RouteInventory) -> Router {
+pub(crate) const fn mount(router: Router, _inventory: &RouteInventory) -> Router {
     router
 }
 
@@ -24,6 +24,7 @@ pub mod implementation {
     ///
     /// # Panics
     /// Panics if an internal invariant required by this operation is violated.
+    #[must_use]
     pub fn openapi_method(method: &Method) -> HttpMethod {
         match *method {
             Method::GET => HttpMethod::Get,
@@ -55,9 +56,10 @@ pub mod implementation {
     /// Panics if an internal invariant required by this operation is violated.
     pub fn add_schema(components: &mut Components, name: String, schema: RefOr<Schema>) {
         if let Some(existing) = components.schemas.get(&name) {
-            if existing != &schema {
-                panic!("conflicting OpenAPI component schema: {name}");
-            }
+            assert!(
+                existing == &schema,
+                "conflicting OpenAPI component schema: {name}"
+            );
             return;
         }
         components.schemas.insert(name, schema);
@@ -116,6 +118,7 @@ pub mod implementation {
     ///
     /// # Panics
     /// Panics if an internal invariant required by this operation is violated.
+    #[must_use]
     pub fn openapi_for(inventory: &RouteInventory) -> utoipa::openapi::OpenApi {
         let mut paths = PathsBuilder::new();
         let mut components = Components::new();

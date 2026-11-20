@@ -1,4 +1,5 @@
 //! Following an origin template: `/api/schemas/upstream-changes`, `merge-preview` and `merge`.
+//!
 //! This overlays base's own `/api/schemas` namespace, since merging a schema is a schema operation from the client's side, not an administrative one like the dashboard or Stripe.
 //!
 use crate::controllers::ApiError;

@@ -495,6 +495,32 @@ pub async fn cancel_work(
     Ok(())
 }
 
+async fn shared_user_account_count(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+) -> Result<u64, YorishiroError> {
+    let user_ids = tenant_memberships::Entity::find()
+        .select_only()
+        .column(tenant_memberships::Column::UserId)
+        .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
+        .into_tuple::<Uuid>()
+        .all(conn)
+        .await
+        .internal()?;
+    let count = tenant_memberships::Entity::find()
+        .select_only()
+        .column(tenant_memberships::Column::UserId)
+        .filter(tenant_memberships::Column::UserId.is_in(user_ids))
+        .filter(tenant_memberships::Column::TenantId.ne(tenant_id))
+        .distinct()
+        .into_tuple::<Uuid>()
+        .all(conn)
+        .await
+        .internal()?
+        .len() as u64;
+    Ok(count)
+}
+
 /// Inventories one tenant without changing credentials, memberships, jobs or data.
 /// This operator entry point requires a trusted identity connection, not a tenant-scoped pool.
 ///
@@ -526,25 +552,7 @@ pub async fn inventory(
         .count(conn)
         .await
         .internal()?;
-    let user_ids = tenant_memberships::Entity::find()
-        .select_only()
-        .column(tenant_memberships::Column::UserId)
-        .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
-        .into_tuple::<Uuid>()
-        .all(conn)
-        .await
-        .internal()?;
-    let shared_user_accounts = tenant_memberships::Entity::find()
-        .select_only()
-        .column(tenant_memberships::Column::UserId)
-        .filter(tenant_memberships::Column::UserId.is_in(user_ids))
-        .filter(tenant_memberships::Column::TenantId.ne(tenant_id))
-        .distinct()
-        .into_tuple::<Uuid>()
-        .all(conn)
-        .await
-        .internal()?
-        .len() as u64;
+    let shared_user_accounts = shared_user_account_count(conn, tenant_id).await?;
     let external_workspace_forks = workspace_schema_forks::Entity::find()
         .filter(workspace_schema_forks::Column::SourceWorkspaceId.is_in(workspace_ids.clone()))
         .filter(workspace_schema_forks::Column::TenantId.ne(tenant_id))

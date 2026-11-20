@@ -9,6 +9,10 @@ use super::fixtures::{TenantArgs, TestTenant};
 mod deletion;
 
 /// Creates the next schema version from the definition and returns its id.
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn create_schema_version(
     request: &loco_rs::TestServer,
     key: &str,
@@ -27,6 +31,10 @@ async fn create_schema_version(
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one version history exercises authorization, reference blockers, and racing deletes without rebuilding unrelated fixtures"
+)]
 async fn schema_deletion_refuses_active_versions_and_references() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant {
@@ -99,7 +107,7 @@ async fn schema_deletion_refuses_active_versions_and_references() {
         };
         let (first, second) = tokio::join!(delete(), delete());
         let mut statuses = [first.status_code().as_u16(), second.status_code().as_u16()];
-        statuses.sort();
+        statuses.sort_unstable();
         assert_eq!(
             statuses,
             [204, 404],

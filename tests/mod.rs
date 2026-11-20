@@ -42,6 +42,10 @@ async fn has_active_job(
 
 /// A SQLite application config for fixtures, whichever backend the suite runs on.
 /// The ambient `DATABASE_URL` and queue settings are replaced while the test configuration renders, then restored.
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until configuration rendering completes"
+)]
 pub(crate) fn sqlite_fixture_config(uri: &str) -> loco_rs::config::Config {
     let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
     guard.set("DATABASE_URL", uri);
@@ -76,7 +80,7 @@ thread_local! {
 
 /// Held for as long as a test reads the process environment while it runs.
 pub(crate) struct EnvironmentRead {
-    _lock: Option<std::sync::RwLockReadGuard<'static, ()>>,
+    lock: Option<std::sync::RwLockReadGuard<'static, ()>>,
 }
 
 impl EnvironmentRead {
@@ -91,7 +95,7 @@ impl EnvironmentRead {
             let (readers, writers) = scopes.get();
             scopes.set((readers + 1, writers));
         });
-        Self { _lock: lock }
+        Self { lock }
     }
 }
 
@@ -112,7 +116,7 @@ struct EnvironmentWrite {
 fn an_environment_reader_can_nest_inside_a_writer() {
     let _write = EnvironmentWrite::enter();
     let read = EnvironmentRead::enter();
-    assert!(read._lock.is_none(), "the writer already owns the lock");
+    assert!(read.lock.is_none(), "the writer already owns the lock");
 }
 
 #[test]
@@ -120,6 +124,7 @@ fn an_environment_write_inside_a_reader_is_refused() {
     let _read = EnvironmentRead::enter();
     let result = std::panic::catch_unwind(EnvironmentWrite::enter);
     assert!(result.is_err(), "a write cannot bypass a held read lock");
+    drop(result);
     assert_eq!(SCOPES.with(std::cell::Cell::get), (1, 0));
 }
 
@@ -207,8 +212,13 @@ impl Drop for EnvGuard {
 
 #[test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 fn env_guard_restores_original_value_on_normal_drop() {
     const VARIABLE: &str = "YORISHIRO_TEST_ENV_GUARD";
+
     let outer = EnvGuard::capture(&[VARIABLE]);
     let original = OsString::from("original-value");
     outer.set(VARIABLE, &original);
@@ -223,8 +233,13 @@ fn env_guard_restores_original_value_on_normal_drop() {
 
 #[test]
 #[serial(process_environment)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "environment overrides remain active until this scope ends"
+)]
 fn env_guard_restores_original_value_during_unwind() {
     const VARIABLE: &str = "YORISHIRO_TEST_ENV_GUARD";
+
     let outer = EnvGuard::capture(&[VARIABLE]);
     let original = OsString::from("original-value");
     outer.set(VARIABLE, &original);

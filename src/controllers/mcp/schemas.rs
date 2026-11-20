@@ -37,6 +37,7 @@ pub(crate) struct GetTemplateArgs {
 pub(crate) struct GetEntityTypeJsonSchemaArgs {
     /// Name of the active schema.
     pub schema_name: String,
+    #[expect(clippy::doc_markdown, reason = "MCP exposes this description verbatim")]
     /// entity_type name within that schema.
     pub entity_type: String,
 }
@@ -51,6 +52,7 @@ pub(crate) struct ListSchemasArgs {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct CreateSchemaArgs {
+    #[expect(clippy::doc_markdown, reason = "MCP exposes this description verbatim")]
     /// JSON object conforming to `MetaSchemaDefinition` (name/description/entity_types/relation_types).
     /// If a schema with the same name already exists, whether the change is breaking or non-breaking is detected automatically and it is registered as a new version.
     /// Mutually exclusive with `template_id`; exactly one of the two must be set.
@@ -358,7 +360,7 @@ impl YorishiroMcpServer {
         )
         .await?
         {
-            AuthzOutcome::Authorized(_authorized) => _authorized,
+            AuthzOutcome::Authorized(authorized) => authorized,
             AuthzOutcome::ScopeDenied(denied) => return Ok(denied),
         };
 

@@ -7,15 +7,16 @@ use yorishiro::models::tenant_tenants::retirement;
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
-    if !crate::require_postgres_backend() {
-        return;
-    }
     use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter};
     use yorishiro::models::_entities::tenant_retirement_events::Column as EventColumn;
     use yorishiro::models::{
         api_keys, query_embedding_requests as queries, queue_job_lifecycles as jobs,
         tenant_retirement_events, tenant_tenants,
     };
+
+    if !crate::require_postgres_backend() {
+        return;
+    }
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -61,11 +62,11 @@ async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
+    use yorishiro::models::{query_embedding_requests as queries, queue_job_lifecycles as jobs};
     if !crate::require_postgres_backend() {
         return;
     }
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
-    use yorishiro::models::{query_embedding_requests as queries, queue_job_lifecycles as jobs};
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
             return;
@@ -124,24 +125,17 @@ async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
             .await
             .unwrap();
         txn.commit().await.unwrap();
-        assert_eq!(
-            jobs::Entity::find_by_id(ids[0])
-                .one(&ctx.db)
-                .await
-                .unwrap()
-                .unwrap()
-                .status,
-            "cancelled"
-        );
-        assert_eq!(
-            jobs::Entity::find_by_id(ids[1])
-                .one(&ctx.db)
-                .await
-                .unwrap()
-                .unwrap()
-                .status,
-            "queued"
-        );
+        for (id, expected) in [(ids[0], "cancelled"), (ids[1], "queued")] {
+            assert_eq!(
+                jobs::Entity::find_by_id(id)
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                expected
+            );
+        }
         assert!(
             jobs::Entity::finish(
                 &ctx.db,
@@ -172,10 +166,11 @@ async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
+    use yorishiro::models::{api_keys, tenancy};
+
     if !crate::require_postgres_backend() {
         return;
     }
-    use yorishiro::models::{api_keys, tenancy};
 
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
@@ -272,11 +267,12 @@ async fn retirement_inventory_does_not_expose_accounts() {
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn retirement_inventory_preserves_cross_tenant_fork_integrity() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    use yorishiro::models::{schema_schemas, workspace_schema_forks};
+
     if !crate::require_postgres_backend() {
         return;
     }
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
-    use yorishiro::models::{schema_schemas, workspace_schema_forks};
 
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {

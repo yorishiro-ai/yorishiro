@@ -7,6 +7,15 @@ pub(crate) struct Quotas {
     pub(crate) entities: Option<i32>,
 }
 
+pub(crate) async fn for_tenant(
+    ctx: &loco_rs::app::AppContext,
+    tenant_id: uuid::Uuid,
+) -> Result<Quotas, crate::YorishiroError> {
+    Ok(crate::quota_override(ctx, tenant_id)
+        .await?
+        .unwrap_or_default())
+}
+
 pub(crate) fn effective_limit(manual: Option<i32>, policy: Option<i32>) -> Option<i32> {
     match (manual, policy) {
         (Some(manual), Some(policy)) => Some(manual.min(policy)),

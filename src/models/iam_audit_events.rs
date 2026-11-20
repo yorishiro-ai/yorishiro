@@ -45,8 +45,8 @@ impl Model {
             )
             .order_by_desc(crate::models::_entities::iam_audit_events::Column::CreatedAt)
             .order_by_desc(crate::models::_entities::iam_audit_events::Column::Id)
-            .limit(params.limit() as u64)
-            .offset(params.offset() as u64)
+            .limit(params.limit())
+            .offset(params.offset())
             .all(&txn)
             .await
             .internal()?;

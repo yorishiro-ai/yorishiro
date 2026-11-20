@@ -1,6 +1,7 @@
 use loco_rs::task::Vars;
 use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait};
 use yorishiro::App;
+use yorishiro::models::tenant_tenants::retirement;
 use yorishiro::models::{api_keys, user_users};
 
 use crate::requests::boot_request;
@@ -142,7 +143,6 @@ async fn deleting_the_root_reaps_the_tenant_once_the_deadline_passes() {
         delete(&ctx, tenant.owner_id, tenant.owner_id)
             .await
             .unwrap();
-        use yorishiro::models::tenant_tenants::retirement;
         assert_eq!(
             retirement::reap_due(&ctx.db, chrono::Utc::now())
                 .await

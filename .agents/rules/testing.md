@@ -11,8 +11,8 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | `make test-postgres` | The whole suite on PostgreSQL; every test creates and drops its own database | PostgreSQL |
 | `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
-| `make clippy-ce` | Clippy for every CE target, including public error and panic docs | CE |
-| `make clippy-ee` | Clippy for every EE target, including public error and panic docs | EE |
+| `make clippy-ce` | Strict Clippy for every CE target, including tests | CE |
+| `make clippy-ee` | Strict Clippy for every EE target, including tests | EE |
 | `make fmt-check` | `cargo fmt --all -- --check` | — |
 | `make check-all` | Formatting, Python/boundary checks, CE check, and CE Clippy | CE |
 | `make check-all-ee` | Formatting, Python/boundary checks, EE check, and EE Clippy | EE |
@@ -104,7 +104,10 @@ A module that needs `ee/` is declared with `#[cfg(feature = "enterprise")]`, and
 
 ## Lints and rust-analyzer
 
-Lint levels live in `Cargo.toml` (`[workspace.lints]`) and their settings and banned APIs in `clippy.toml`, so `cargo build`, `cargo clippy` and rust-analyzer report the same findings; `rust-analyzer.toml` makes the editor run Clippy on every target with the `enterprise` feature.
+`Cargo.toml` (`[workspace.lints]`) sets the lint levels for the Rust compiler and Clippy.
+Clippy enables `all`, `pedantic`, and `nursery`, plus selected restriction lints, with its settings and banned APIs in `clippy.toml`.
+The generated SeaORM entities are exempt at their module declaration.
+`rust-analyzer.toml` runs Clippy on every target with the `enterprise` feature; `make clippy-ce` checks the community-only build separately.
 CI and `make clippy-ce` / `make clippy-ee` add `-D warnings`, so a warning in the editor is an error in CI.
 Do not dismiss an editor diagnostic because a narrower command omits its target.
 

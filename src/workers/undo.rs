@@ -136,9 +136,7 @@ pub(crate) async fn enqueue(
     .await?;
     entity_entities::require_job_snapshots(txn, auth.require_workspace()?, snapshot_job_id).await?;
     let worker_class =
-        crate::controllers::extractors::resolve_worker_class(ctx, auth.require_workspace()?)
-            .await
-            .map_err(|error| error.0)?;
+        crate::workers::target::resolve_worker_class(ctx, auth.require_workspace()?).await?;
     let args = UndoArgs {
         lifecycle_id: None,
         tenant_id: auth.tenant_id,

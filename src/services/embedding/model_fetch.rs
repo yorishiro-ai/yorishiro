@@ -20,7 +20,7 @@ pub struct Artifact {
     /// SHA256 of the file's bytes.
     ///
     /// Taken by downloading the file and running `sha256sum` on it, never transcribed from a response header.
-    /// The headers cannot be trusted for this. `model.safetensors` answers with two different 64-hex values (`x-linked-etag` on the 302 and `etag` on the 200), and nothing in the response says which is the content digest; it is the 302's. A small tokenizer file's ETag matches neither, being a 40-hex Git blob SHA1, since it is small enough not to go through LFS.
+    /// The headers cannot be trusted for this. `model.safetensors` answers with two different 64-hex values (`x-linked-etag` on the 302 and `etag` on the 200), and nothing in the response says which is the content digest; it is the 302's. A small tokenizer file's `ETag` matches neither, being a 40-hex Git blob SHA1, since it is small enough not to go through LFS.
     /// Updating the owning definition's revision means re-measuring these the same way.
     pub sha256: &'static str,
     /// Expected length in bytes, checked before hashing.
@@ -31,12 +31,12 @@ pub struct Artifact {
     pub description: &'static str,
 }
 
-/// One selectable local model: everything `super::build_local_provider` and [`super::local`] need to fetch, load, and identify it, and nothing that lives outside this module reaches for a bare `REPO`/`REVISION` constant instead.
+/// Defines the artifacts and identity of one selectable local model.
 ///
 /// Model and tokenizer artifacts share one definition so their pinned revisions stay together.
 pub struct LocalModelDef {
     /// The model identifier reported by [`super::EmbeddingProvider::model_name`] and stamped onto a workspace at creation.
-    /// Uses the HuggingFace repository identifier independently of the inference engine.
+    /// Uses the `HuggingFace` repository identifier independently of the inference engine.
     pub(super) id: &'static str,
     /// Selects this definition via `YORISHIRO_LOCAL_MODEL`, and names its own cache/default-path subdirectory.
     /// Short and filesystem-safe, unlike `Self::id`, which contains a `/`.
@@ -244,7 +244,7 @@ fn staging_path(dir: &Path, artifact: &Artifact) -> PathBuf {
 /// How long a `.partial.` file must have gone untouched before a sweep will remove it.
 ///
 /// Long enough that an in-flight download is never a candidate: the sweep only ever looks at files whose mtime has not moved for this long, and a live download writes continuously.
-pub const STALE_PARTIAL_AGE: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+pub const STALE_PARTIAL_AGE: std::time::Duration = std::time::Duration::from_hours(6);
 
 /// Removes abandoned temp files left by earlier killed downloads.
 ///
@@ -347,7 +347,7 @@ async fn download_verified(
         .into());
     }
 
-    let digest = crate::data::encoding::hex(hasher.finalize());
+    let digest = hex::encode(hasher.finalize());
     if digest != artifact.sha256 {
         return Err(format!("{url} has SHA256 {digest}, expected {}: the download is corrupt or the file has been tampered with",
             artifact.sha256).into());

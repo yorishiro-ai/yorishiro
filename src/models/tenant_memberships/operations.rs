@@ -376,8 +376,8 @@ pub async fn list_members(
         .find_also_related(user_users::Entity)
         .order_by_asc(Column::CreatedAt)
         .order_by_asc(Column::Id)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
+        .limit(page.limit())
+        .offset(page.offset())
         .all(conn)
         .await
         .internal()?;

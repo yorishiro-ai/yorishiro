@@ -294,7 +294,7 @@ async fn postgres_scheduler_detached_connection_close_releases_without_unlock() 
     };
     drop(ownership);
     // Closing the detached session without an explicit unlock models a process crash.
-    assert!(!held_key.is_empty());
+    assert_ne!(held_key, "");
     conn.close().await.unwrap();
     let final_ownership =
         yorishiro::edition::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)

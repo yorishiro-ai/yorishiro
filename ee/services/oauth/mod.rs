@@ -1,8 +1,12 @@
 //! OAuth2/OIDC login: an additional, optional way to obtain a Yorishiro API key alongside the community server's own `POST /auth/root/login` (email/password).
+//!
 //! Configuration lives in `data::oauth`; browser state lives beside `controllers::oauth`; user provisioning lives in `models::user_users`.
 
 pub mod discovery;
 mod id_token;
+
+use base64::Engine;
+use sha2::{Digest, Sha256};
 
 use crate::YorishiroError;
 use crate::edition::ee::controllers::oauth::state_token;
@@ -15,6 +19,7 @@ pub struct AuthorizeRedirect {
 }
 
 /// Builds the provider's authorize URL (the OAuth 2.0 authorize endpoint) with a freshly issued, signed `state` (see `state_token`) and PKCE challenge (RFC 7636) attached.
+///
 /// `openid email profile` is a fixed scope request, not configurable: `email` is the one claim `users::find_or_create` requires.
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -100,8 +105,6 @@ pub async fn handle_callback(
         &config.issuer_url,
         &config.client_id,
     )?;
-    use base64::Engine;
-    use sha2::{Digest, Sha256};
     let expected_nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .encode(Sha256::digest(pkce_verifier.as_bytes()));
     if claims.nonce.as_deref() != Some(expected_nonce.as_str()) {
@@ -123,8 +126,6 @@ fn url_with_query(base: &str, params: &[(&str, &str)]) -> Result<String, Yorishi
             format!("provider's authorization_endpoint '{base}' is not a valid URL: {err}").into(),
         )
     })?;
-    for (key, value) in params {
-        url.query_pairs_mut().append_pair(key, value);
-    }
+    url.query_pairs_mut().extend_pairs(params.iter().copied());
     Ok(url.to_string())
 }

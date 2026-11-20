@@ -88,9 +88,11 @@ async fn detect_startup_reindex(ctx: &AppContext) {
             continue;
         }
         let provider_model = provider.model_name();
-        if !workspace.is_stamped_with_other_embedding(&provider_model, provider.dimensions())
-            && !workspace.has_other_document_prefix(provider.document_prefix())
-        {
+        if !workspace.needs_reindex(
+            &provider_model,
+            provider.dimensions(),
+            provider.document_prefix(),
+        ) {
             continue;
         }
         tracing::info!(
@@ -114,7 +116,13 @@ pub async fn run_metadata_scan(ctx: &AppContext) -> loco_rs::Result<()> {
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     let mut failures = Vec::new();
     for workspace in workspaces {
-        let metadata = match resolve_workspace_metadata(ctx, workspace.id, &settings).await {
+        let metadata = match crate::models::workspace_workspaces::effective_embedding_metadata(
+            ctx,
+            workspace.id,
+            &settings,
+        )
+        .await
+        {
             Ok(metadata) => metadata,
             Err(error) => {
                 failures.push(format!("workspace {}: {error}", workspace.id));
@@ -122,9 +130,11 @@ pub async fn run_metadata_scan(ctx: &AppContext) -> loco_rs::Result<()> {
             }
         };
         let Some(metadata) = metadata else { continue };
-        if (workspace.is_stamped_with_other_embedding(&metadata.model, metadata.dimensions)
-            || workspace.has_other_document_prefix(&metadata.document_prefix))
-            && let Err(error) = enqueue_metadata_reindex(ctx, workspace.id).await
+        if workspace.needs_reindex(
+            &metadata.model,
+            metadata.dimensions,
+            &metadata.document_prefix,
+        ) && let Err(error) = enqueue_metadata_reindex(ctx, workspace.id).await
         {
             failures.push(format!("workspace {}: {error}", workspace.id));
         }
@@ -137,15 +147,6 @@ pub async fn run_metadata_scan(ctx: &AppContext) -> loco_rs::Result<()> {
             failures.join("; ")
         )))
     }
-}
-
-async fn resolve_workspace_metadata(
-    ctx: &AppContext,
-    workspace_id: uuid::Uuid,
-    settings: &crate::data::settings::Settings,
-) -> Result<Option<crate::services::embedding::EmbeddingMetadata>, crate::YorishiroError> {
-    crate::models::workspace_workspaces::effective_embedding_metadata(ctx, workspace_id, settings)
-        .await
 }
 
 async fn enqueue_reindex(ctx: &AppContext, workspace_id: uuid::Uuid) {
@@ -164,11 +165,9 @@ async fn enqueue_metadata_reindex(
     if active_reindex_exists(ctx, workspace_id).await? {
         return Ok(());
     }
-    let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
+    let worker_class = crate::workers::target::resolve_worker_class(ctx, workspace_id)
         .await
-        .map_err(|error| {
-            loco_rs::Error::Message(format!("workspace {workspace_id}: {}", error.0))
-        })?;
+        .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))?;
     let args = crate::workers::reindex::ReindexArgs {
         lifecycle_id: None,
         workspace_id,

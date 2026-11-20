@@ -4,7 +4,7 @@ use yorishiro::models::pagination::ListParams;
 
 #[test]
 fn extreme_pages_are_rejected_without_wrapping_to_the_first_page() {
-    for (page, page_size) in [(u64::MAX, 50), (184467440737095517, 100)] {
+    for (page, page_size) in [(u64::MAX, 50), (184_467_440_737_095_517, 100)] {
         let result = ListParams::try_from(PageParams(PaginationQuery { page, page_size }));
         assert!(matches!(
             result,

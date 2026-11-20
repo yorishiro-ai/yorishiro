@@ -61,6 +61,10 @@ pub(crate) struct TestTenant {
 }
 
 impl TestTenant {
+    #[expect(
+        clippy::future_not_send,
+        reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+    )]
     pub(crate) async fn create(
         request: &loco_rs::TestServer,
         ctx: &AppContext,

@@ -51,6 +51,7 @@ db_enum! {
 }
 
 /// Serializes every producer of a schema version for one workspace and name.
+///
 /// Fork heads use this same lock as ordinary schema creation, so both paths
 /// observe one version sequence even when they run concurrently.
 ///
@@ -103,7 +104,7 @@ pub(crate) async fn delete(
     workspace_id: Uuid,
     schema_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
     let schema = get_by_id(conn, workspace_id, schema_id).await?;
     lock_version(conn, workspace_id, &schema.name).await?;
@@ -125,6 +126,35 @@ pub(crate) async fn delete(
         });
     }
     // References to a version are retained history, so deletion refuses them with their name instead of cascading.
+    let blockers = deletion_blockers(conn, schema_id).await?;
+    if !blockers.is_empty() {
+        return Err(YorishiroError::Conflict {
+            message: format!(
+                "schema '{}' version {} is still referenced by: {}",
+                schema.name,
+                schema.version,
+                blockers.join(", ")
+            ),
+        });
+    }
+    let deleted = Entity::delete_by_id(schema_id)
+        .exec(conn)
+        .await
+        .internal()?;
+    if deleted.rows_affected == 0 {
+        return Err(YorishiroError::not_found(format!(
+            "schema '{schema_id}' was not found"
+        )));
+    }
+    Ok(())
+}
+
+async fn deletion_blockers(
+    conn: &impl ConnectionTrait,
+    schema_id: Uuid,
+) -> Result<Vec<&'static str>, YorishiroError> {
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+
     let mut blockers: Vec<&str> = Vec::new();
     let entities = crate::models::_entities::entity_entities::Entity::find()
         .filter(crate::models::_entities::entity_entities::Column::SchemaId.eq(schema_id))
@@ -196,8 +226,8 @@ pub(crate) async fn delete(
                 YorishiroError::not_found(format!("schema '{schema_id}' was not found"))
             })?;
         (
-            row.try_get::<i64>("", "forks").internal()? as u64,
-            row.try_get::<i64>("", "fork_heads").internal()? as u64,
+            u64::try_from(row.try_get::<i64>("", "forks").internal()?).internal()?,
+            u64::try_from(row.try_get::<i64>("", "fork_heads").internal()?).internal()?,
         )
     } else {
         (forks, fork_heads)
@@ -208,26 +238,7 @@ pub(crate) async fn delete(
     if fork_heads > 0 {
         blockers.push("schema fork heads");
     }
-    if !blockers.is_empty() {
-        return Err(YorishiroError::Conflict {
-            message: format!(
-                "schema '{}' version {} is still referenced by: {}",
-                schema.name,
-                schema.version,
-                blockers.join(", ")
-            ),
-        });
-    }
-    let deleted = Entity::delete_by_id(schema_id)
-        .exec(conn)
-        .await
-        .internal()?;
-    if deleted.rows_affected == 0 {
-        return Err(YorishiroError::not_found(format!(
-            "schema '{schema_id}' was not found"
-        )));
-    }
-    Ok(())
+    Ok(blockers)
 }
 
 /// One version of a workspace's schema.
@@ -256,7 +267,7 @@ impl TryFrom<Model> for SchemaRecord {
     type Error = YorishiroError;
 
     fn try_from(row: Model) -> Result<Self, Self::Error> {
-        Ok(SchemaRecord {
+        Ok(Self {
             id: row.id,
             tenant_id: row.tenant_id,
             workspace_id: row.workspace_id,
@@ -309,12 +320,8 @@ pub async fn get_active_schema(
         .await
         .internal()?;
 
-    match row {
-        Some(row) => row.try_into(),
-        None => Err(YorishiroError::not_found(format!(
-            "no active schema named '{name}'"
-        ))),
-    }
+    row.ok_or_else(|| YorishiroError::not_found(format!("no active schema named '{name}'")))?
+        .try_into()
 }
 
 /// Counts a workspace's currently *active* schemas: one row per distinct name, since `create_schema` archives the previous version before activating a new one.
@@ -331,7 +338,7 @@ pub(crate) async fn count_active(
         .count(conn)
         .await
         .internal()
-        .map(|n| n as i64)
+        .and_then(|count| i64::try_from(count).internal())
 }
 
 /// Fetches a specific schema version by id (used to resolve the version an entity references).
@@ -351,12 +358,8 @@ pub(crate) async fn get_by_id(
         .await
         .internal()?;
 
-    match row {
-        Some(row) => row.try_into(),
-        None => Err(YorishiroError::not_found(format!(
-            "schema '{schema_id}' was not found"
-        ))),
-    }
+    row.ok_or_else(|| YorishiroError::not_found(format!("schema '{schema_id}' was not found")))?
+        .try_into()
 }
 
 /// A schema whose origin template has been edited since the copy was taken.
@@ -429,8 +432,8 @@ pub(crate) async fn list(
         .filter(Column::WorkspaceId.eq(workspace_id))
         .order_by_asc(Column::Name)
         .order_by_asc(Column::Version)
-        .limit(page.limit() as u64)
-        .offset(page.offset() as u64)
+        .limit(page.limit())
+        .offset(page.offset())
         .all(conn)
         .await
         .internal()?;
@@ -457,7 +460,7 @@ pub(crate) async fn notify_upstream_change(
         .await
         .internal()?;
 
-    Ok(result.rows_affected as usize)
+    usize::try_from(result.rows_affected).internal()
 }
 
 ///
@@ -518,19 +521,14 @@ pub async fn create_schema(
         .internal()?
         .map_or(0, |row| row.version);
 
-    let (next_version, diff) = match &previous {
-        Some(previous) => {
-            let diff = metaschema::diff(&previous.definition, &definition);
-            (latest_version + 1, diff)
-        }
-        None => (
-            latest_version + 1,
-            VersioningDiff {
-                is_breaking: false,
-                reasons: Vec::new(),
-            },
-        ),
-    };
+    let next_version = latest_version + 1;
+    let diff = previous.as_ref().map_or_else(
+        || VersioningDiff {
+            is_breaking: false,
+            reasons: Vec::new(),
+        },
+        |previous| metaschema::diff(&previous.definition, &definition),
+    );
 
     if previous.is_some() {
         // `update_many` is a builder call and never runs `ActiveModelBehavior::before_save`, so `updated_at` is set explicitly here or archiving a schema version would leave its timestamp stale.

@@ -5,8 +5,12 @@ use yorishiro::workers::queue::*;
 #[tokio::test]
 async fn the_installed_policy_decides_and_a_missing_one_refuses() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default()).await;
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let mut expected = Vec::new();
         for class in [
             WorkerClass::TenantPrivate,
@@ -104,9 +108,12 @@ async fn enabled_policy_rechecks_licence_before_each_admission() {
     crate::requests::boot_request_with::<yorishiro::App, _, _>(
         &overrides,
         |request, ctx| async move {
-            let fixture =
-                crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default())
-                    .await;
+            let fixture = crate::requests::fixtures::TestTenant::create(
+                &request,
+                &ctx,
+                crate::requests::fixtures::TenantArgs::default(),
+            )
+            .await;
             let now = chrono::Utc::now().timestamp();
             ctx.shared_store
                 .insert(Arc::new(LicenceState::licensed(LicenceClaims {

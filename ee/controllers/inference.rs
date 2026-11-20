@@ -25,7 +25,7 @@ use crate::edition::ee::models::workspace_llm_keys;
 /// `POST /api/schemas/active/{name}/infer-fill`
 ///
 /// Enqueues an async infer-fill job whose answers are stored as reviewable proposals.
-/// Requires inference_create on the selected workspace in addition to schema scope.
+/// Requires `inference_create` on the selected workspace in addition to schema scope.
 /// The worker rechecks the credential and IAM policy before inference and proposal storage.
 ///
 /// Poll for completion via `GET /api/inference-jobs/{job_id}`.
@@ -180,7 +180,7 @@ async fn discard_proposals(
     ))
 }
 
-/// Enqueues confirmation with inference_confirm on the selected workspace and schema scope.
+/// Enqueues confirmation with `inference_confirm` on the selected workspace and schema scope.
 /// The worker rechecks the credential and IAM policy before applying proposals.
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/confirm", params(("job_id" = String, Path)), responses((status = 202, body = crate::dtos::jobs::QueuedJobResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 409, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["inference_confirm"]))), tag = "enterprise"))]
 async fn confirm_proposals(

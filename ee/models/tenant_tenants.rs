@@ -45,9 +45,9 @@ pub(crate) async fn compute_tenant_usage(
 
     Ok(TenantUsage {
         tenant_id,
-        workspace_count: workspace_count as i64,
-        member_count: member_count as i64,
-        entity_count: entity_count as i64,
+        workspace_count: i64::try_from(workspace_count).internal()?,
+        member_count: i64::try_from(member_count).internal()?,
+        entity_count: i64::try_from(entity_count).internal()?,
     })
 }
 

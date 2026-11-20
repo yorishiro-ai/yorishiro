@@ -6,7 +6,7 @@ use yorishiro::workers::embedding_sync::{EmbeddingSyncWorker, WorkerClass};
 /// A tag here would put a second, fixed tag on every job and let a worker for another target match on it.
 #[test]
 fn the_worker_declares_no_routing_of_its_own() {
-    assert!(EmbeddingSyncWorker::tags().is_empty());
+    assert_eq!(EmbeddingSyncWorker::tags(), [] as [String; 0]);
     assert!(EmbeddingSyncWorker::queue().is_none());
 }
 
@@ -457,7 +457,7 @@ mod conflict {
         Arc<Semaphore>,
     ) {
         let entered = Arc::new(Notify::new());
-        let release = Arc::new(Semaphore::new(if gated { 0 } else { 1 }));
+        let release = Arc::new(Semaphore::new(usize::from(!gated)));
         let observed = entered.clone();
         let gate = release.clone();
         let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
@@ -485,12 +485,21 @@ mod conflict {
         (provider, server, entered, release)
     }
 
+    #[expect(
+        clippy::future_not_send,
+        reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+    )]
     async fn seed(request: &loco_rs::TestServer, ctx: &AppContext) -> (Uuid, Uuid) {
         let crate::requests::fixtures::TestTenant {
             tenant_id,
             workspace_id,
             ..
-        } = crate::requests::fixtures::TestTenant::create(request, ctx, Default::default()).await;
+        } = crate::requests::fixtures::TestTenant::create(
+            request,
+            ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         seed_embeddable_entity(ctx, tenant_id, workspace_id).await
     }
 
@@ -524,6 +533,10 @@ mod conflict {
         (workspace_id, entity.id)
     }
 
+    #[expect(
+        clippy::future_not_send,
+        reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+    )]
     async fn seed_without_embeddable_content(
         request: &loco_rs::TestServer,
         ctx: &AppContext,
@@ -532,7 +545,12 @@ mod conflict {
             tenant_id,
             workspace_id,
             ..
-        } = crate::requests::fixtures::TestTenant::create(request, ctx, Default::default()).await;
+        } = crate::requests::fixtures::TestTenant::create(
+            request,
+            ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         seed_plain_entity(ctx, tenant_id, workspace_id).await
     }
 
@@ -580,10 +598,11 @@ mod conflict {
     #[tokio::test]
     #[cfg(feature = "enterprise")]
     async fn tenant_disablement_discards_a_late_embedding() {
+        use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+
         if !crate::require_postgres_backend() {
             return;
         }
-        use sea_orm::{ActiveModelTrait, ActiveValue::Set};
         boot_request::<App, _, _>(|request, ctx| async move {
             let (workspace_id, entity_id) = seed(&request, &ctx).await;
             let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
@@ -682,6 +701,10 @@ mod conflict {
     }
 
     #[tokio::test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "three live worker entry points must contend for the same installed provider limiter before teardown"
+    )]
     async fn three_document_worker_entries_share_the_installed_limiter() {
         boot_request_with::<App, _, _>(&[("queue.num_workers", 3.into())], |request, ctx| async move {
             let (workspace_id, first) = seed(&request, &ctx).await;
@@ -748,8 +771,8 @@ mod conflict {
             .await;
             let processing = match processing {
                 Ok(count) => count,
-                Err(_) => panic!(
-                    "expected all 3 owned jobs processing; jobs={:?}, provider calls={}, active={}, max_active={}",
+                Err(error) => panic!(
+                    "expected all 3 owned jobs processing: {error}; jobs={:?}, provider calls={}, active={}, max_active={}",
                     harness.observation.owned_statuses(&queue_ids).await,
                     provider.calls.load(Ordering::SeqCst),
                     provider.active.load(Ordering::SeqCst),
@@ -808,6 +831,10 @@ mod conflict {
     }
 
     #[tokio::test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "controlled document and query deliveries share one limiter and verify admission order before draining workers"
+    )]
     async fn document_and_query_workers_share_fifo_embedding_admission() {
         use loco_rs::{app::Hooks, bgworker::JobStatus};
         boot_request_with::<App, _, _>(&[("queue.num_workers", 2.into())], |request, ctx| async move {
@@ -882,9 +909,7 @@ mod conflict {
                 });
                 let request_id = tokio::time::timeout(std::time::Duration::from_secs(10), async {
                     loop {
-                        if query.is_finished() {
-                            panic!("query caller finished before its delivery was observed processing: {:?}", (&mut query).await);
-                        }
+                        assert!(!query.is_finished(), "query caller finished before its delivery was observed processing: {:?}", (&mut query).await);
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
                         let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
@@ -972,6 +997,10 @@ mod conflict {
     }
 
     #[tokio::test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one running worker observes a provider error and then proves the original limiter admits the next delivery"
+    )]
     async fn provider_error_releases_real_worker_permit_without_replacement() {
         use loco_rs::{app::Hooks, bgworker::JobStatus};
         boot_request_with::<App, _, _>(
@@ -1011,13 +1040,10 @@ mod conflict {
                     }
                 })
                 .await;
-                let failed_id = match published {
-                    Ok(id) => id,
-                    Err(_) => {
-                        App::on_shutdown(&worker_ctx).await;
-                        queue.close().await.unwrap();
-                        panic!("production relay did not publish the first delivery");
-                    }
+                let Ok(failed_id) = published else {
+                    App::on_shutdown(&worker_ctx).await;
+                    queue.close().await.unwrap();
+                    panic!("production relay did not publish the first delivery");
                 };
                 let running = queue.clone();
                 let worker =
@@ -1149,6 +1175,10 @@ mod conflict {
         .await;
     }
 
+    #[expect(
+        clippy::future_not_send,
+        reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+    )]
     async fn run_backend_admission_scenario_inner(
         request: &loco_rs::TestServer,
         harness: &QueueHarness,
@@ -1251,6 +1281,10 @@ mod conflict {
         assert_eq!(final_rows.iter().filter(|r| ids.contains(&r.id)).count(), 2);
     }
 
+    #[expect(
+        clippy::future_not_send,
+        reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+    )]
     async fn run_backend_admission_scenario(
         request: &loco_rs::TestServer,
         harness: QueueHarness,
@@ -1268,6 +1302,10 @@ mod conflict {
     }
 
     #[tokio::test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "two independently booted worker contexts must overlap provider calls to demonstrate their limits are not shared"
+    )]
     async fn independently_booted_contexts_keep_independent_embedding_limits() {
         if !crate::require_sqlite_backend() {
             return;
@@ -1497,6 +1535,10 @@ mod conflict {
 
     /// A write during embedding cancels the stale delivery; a REST update queues current data.
     #[tokio::test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the provider gate orders an entity edit between embedding and publication to verify the stale delivery is superseded"
+    )]
     async fn a_write_during_embedding_supersedes_the_old_delivery() {
         use loco_rs::{app::Hooks, bgworker::JobStatus};
         boot_request::<App, _, _>(|request, ctx| async move {

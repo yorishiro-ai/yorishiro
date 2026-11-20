@@ -104,9 +104,10 @@ pub(crate) async fn import_with_quota(
                 // Prefer a schema line this import just created; fall back to looking the exported ID up in the destination workspace, for a schema that already exists there.
                 let schema_name = match schema_name_by_old_id.get(&entity.schema_id) {
                     Some(name) => name.clone(),
-                    None => match schema_name_by_id.get(&entity.schema_id) {
-                        Some(name) => name.clone(),
-                        None => {
+                    None => {
+                        if let Some(name) = schema_name_by_id.get(&entity.schema_id) {
+                            name.clone()
+                        } else {
                             let name =
                                 schema_schemas::get_by_id(conn, workspace_id, entity.schema_id)
                                     .await
@@ -115,7 +116,7 @@ pub(crate) async fn import_with_quota(
                             schema_name_by_id.insert(entity.schema_id, name.clone());
                             name
                         }
-                    },
+                    }
                 };
 
                 let input = CreateEntityInput {

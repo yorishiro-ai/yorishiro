@@ -28,6 +28,12 @@ pub(crate) const PGVECTOR_HNSW_VECTOR_MAX_DIMS: usize = 2000;
 /// pgvector's dense HNSW limit for the half-precision `halfvec` type.
 pub(crate) const PGVECTOR_HNSW_HALFVEC_MAX_DIMS: usize = 4000;
 
+/// Half-precision index width, or `None` when full precision can be indexed.
+pub(crate) fn hnsw_halfvec_dimensions(dimensions: usize) -> Option<usize> {
+    (dimensions > PGVECTOR_HNSW_VECTOR_MAX_DIMS)
+        .then_some(dimensions.min(PGVECTOR_HNSW_HALFVEC_MAX_DIMS))
+}
+
 pub use crate::models::_entities::entity_embeddings::{ActiveModel, Entity, Model};
 
 impl sea_orm::ActiveModelBehavior for ActiveModel {}

@@ -155,7 +155,7 @@ fn accepts_tolerance_boundaries_and_rejects_outside_them() {
 
 #[test]
 fn parses_only_after_signature_verification() {
-    let payload = br#"not json"#;
+    let payload = br"not json";
     let signature = signed_header(NOW, payload);
     let error = verify_at(&headers(NOW, &[&signature]), payload, SECRET, NOW).unwrap_err();
     assert!(matches!(error, Error::InvalidJson(_)));

@@ -17,6 +17,10 @@ struct Setup {
     audit_key: String,
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn setup(request: &loco_rs::TestServer, ctx: &loco_rs::app::AppContext) -> Setup {
     let TestTenant {
         tenant_id,
@@ -249,7 +253,7 @@ async fn reindex_audit_detail_is_workspace_id_and_is_recorded_before_relay_publi
         let committed_audit = yorishiro::models::api_key_audit_log::list_for_workspace(
             &ctx.db,
             setup.workspace_id,
-            Default::default(),
+            yorishiro::models::pagination::ListParams::default(),
         )
         .await
         .expect("relay reads committed audit rows");
@@ -323,25 +327,25 @@ async fn an_audit_key_cannot_read_another_tenants_audit_log() {
             .await
             .assert_status_ok();
 
-        let tenant_a_log = request
+        let owner_log = request
             .get("/api/audit-log")
             .add_header("Authorization", format!("Bearer {}", tenant_a.audit_key))
             .await;
-        let tenant_a_body: Vec<serde_json::Value> = tenant_a_log.json();
+        let owner_entries: Vec<serde_json::Value> = owner_log.json();
         assert_eq!(
-            tenant_a_body.len(),
+            owner_entries.len(),
             1,
-            "tenant a must see its own entries: {tenant_a_body:?}"
+            "tenant a must see its own entries: {owner_entries:?}"
         );
 
-        let tenant_b_log = request
+        let other_log = request
             .get("/api/audit-log")
             .add_header("Authorization", format!("Bearer {}", tenant_b.audit_key))
             .await;
-        let tenant_b_body: Vec<serde_json::Value> = tenant_b_log.json();
+        let other_entries: Vec<serde_json::Value> = other_log.json();
         assert!(
-            tenant_b_body.is_empty(),
-            "tenant b must not see tenant a's audit trail: {tenant_b_body:?}"
+            other_entries.is_empty(),
+            "tenant b must not see tenant a's audit trail: {other_entries:?}"
         );
     })
     .await;

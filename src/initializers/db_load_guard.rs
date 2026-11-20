@@ -71,7 +71,9 @@ impl LoadGuardConfig {
     /// Reads the opt-in guard settings.
     ///
     /// A zero `settings.db_load_guard.threshold` disables the guard.
-    pub(crate) fn from_settings(settings: &crate::data::settings::DbLoadGuard) -> Option<Self> {
+    pub(crate) const fn from_settings(
+        settings: &crate::data::settings::DbLoadGuard,
+    ) -> Option<Self> {
         if settings.threshold <= 0 {
             return None;
         }
@@ -85,6 +87,7 @@ impl LoadGuardConfig {
 }
 
 /// Returns the maintenance transition allowed by the current load history.
+#[must_use]
 pub fn decide(
     current: &MaintenanceState,
     busy_for: Duration,
@@ -109,7 +112,7 @@ pub struct LoadHistory {
 }
 
 impl LoadHistory {
-    fn reset(&mut self) {
+    const fn reset(&mut self) {
         self.busy_since = None;
         self.quiet_since = None;
     }

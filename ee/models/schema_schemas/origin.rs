@@ -7,11 +7,12 @@
 //! Passing `ctx.db` for the schema side would bypass RLS; passing the RLS-scoped connection for the template side would fail with a permission error.
 
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::_entities::schema_schemas::{Column, Entity};
 use crate::models::schema_schemas::metaschema::{MetaSchemaDefinition, VersioningDiff};
 use crate::models::schema_schemas::{self, SchemaRecord};
 use crate::models::template_templates;
 use loco_rs::app::AppContext;
-use sea_orm::ConnectionTrait;
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use uuid::Uuid;
 
 use super::merge::{self, MergePlan};
@@ -148,8 +149,6 @@ pub(crate) async fn merge_apply(
 
     // Clear the origin_updated_at flag on the new active version so the next
     // upstream-changes poll will not re-report this one until the template moves again.
-    use crate::models::_entities::schema_schemas::{Column, Entity};
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
     Entity::update_many()
         .col_expr(Column::OriginUpdatedAt, Expr::val(crate::data::time::now()))
         .filter(Column::Id.eq(schema.id))

@@ -86,9 +86,7 @@ impl Model {
         conn: &impl ConnectionTrait,
     ) -> Result<KeyGrant, YorishiroError> {
         let scope = stored_scope(&self.scope)?;
-        let effective_scope = if !self.is_active() {
-            None
-        } else {
+        let effective_scope = if self.is_active() {
             let presented = AuthContext {
                 api_key_id: self.id,
                 workspace_id: self.workspace_id,
@@ -104,6 +102,8 @@ impl Model {
                 }
                 Err(error) => return Err(error),
             }
+        } else {
+            None
         };
         Ok(KeyGrant {
             state: if self.revoked_at.is_some() {
@@ -158,7 +158,8 @@ db_enum! {
 
 impl ApiKeyScope {
     /// Whether a key with this scope can perform an operation requiring `required`.
-    pub fn satisfies(self, required: ApiKeyScope) -> bool {
+    #[must_use]
+    pub fn satisfies(self, required: Self) -> bool {
         self >= required
     }
 }
@@ -228,6 +229,7 @@ pub struct CreatedTenantApiKey {
 }
 
 /// Hashes a presented key into the form stored in `api_keys.key_hash`.
+#[must_use]
 pub fn hash_key(raw: &str) -> Vec<u8> {
     Sha256::digest(raw.as_bytes()).to_vec()
 }

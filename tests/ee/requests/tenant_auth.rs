@@ -1,6 +1,7 @@
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
+use sea_orm::EntityTrait;
 use yorishiro::App;
 use yorishiro::db::DbHandle;
 use yorishiro::edition::ee::controllers::middleware::auth::WORKSPACE_HEADER;
@@ -32,6 +33,10 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
 
 /// Tenant keys need a workspace only for workspace-scoped operations.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one tenant credential and MCP session compare workspace selection, missing headers, and inherited access across requests"
+)]
 async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
     if !crate::require_postgres_backend() {
         return;
@@ -116,7 +121,6 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             .add_header("x-tenant-id", "invalid")
             .await
             .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
-        use sea_orm::EntityTrait;
         let persisted = yorishiro::models::api_keys::Entity::find_by_id(tenant_key.id)
             .one(&identity)
             .await
@@ -164,8 +168,8 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         assert!(identity["bound_workspace_id"].is_null());
         assert_eq!(identity["stored_scope"], "read");
         assert_eq!(identity["scope"], "read");
-        assert!(!identity["workspace_name"].as_str().unwrap().is_empty());
-        assert!(!identity["tenant_name"].as_str().unwrap().is_empty());
+        assert_ne!(identity["workspace_name"].as_str().unwrap(), "");
+        assert_ne!(identity["tenant_name"].as_str().unwrap(), "");
         assert!(!response.text().contains(&tenant_key.plaintext));
         assert!(!response.text().contains("key_hash"));
         // Each MCP call resolves its own headers, including calls in the same session.
@@ -232,11 +236,12 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
 
 #[tokio::test]
 async fn tenant_key_rechecks_iam_policy_after_detachment() {
+    use sea_orm::TransactionTrait;
+    use yorishiro::models::{api_keys, tenancy};
+
     if !crate::require_postgres_backend() {
         return;
     }
-    use sea_orm::{EntityTrait, TransactionTrait};
-    use yorishiro::models::{api_keys, tenancy};
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let txn = ctx.db.begin().await.unwrap();

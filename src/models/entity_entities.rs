@@ -35,7 +35,7 @@ impl std::fmt::Debug for Model {
             .field("updated_by", &self.updated_by)
             .field("created_at", &self.created_at)
             .field("updated_at", &self.updated_at)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -126,7 +126,7 @@ pub(crate) struct EmbeddingSnapshot {
 pub(crate) async fn missing_embeddings(
     db: &impl ConnectionTrait,
     workspace_id: Uuid,
-) -> Result<Vec<EmbeddingSnapshot>, DbErr> {
+) -> Result<Vec<Uuid>, DbErr> {
     use sea_orm::sea_query::{Alias, Query};
     let embedded = Query::select()
         .column(Alias::new("entity_id"))
@@ -135,16 +135,10 @@ pub(crate) async fn missing_embeddings(
         .to_owned();
     Entity::find()
         .select_only()
-        .columns([
-            Column::Id,
-            Column::SchemaId,
-            Column::EntityType,
-            Column::Data,
-            Column::EmbeddingSyncToken,
-        ])
+        .column(Column::Id)
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Expr::col(Column::Id).not_in_subquery(embedded))
-        .into_model::<EmbeddingSnapshot>()
+        .into_tuple::<Uuid>()
         .all(db)
         .await
 }
@@ -183,7 +177,7 @@ pub struct EntityRecord {
 
 impl From<Model> for EntityRecord {
     fn from(row: Model) -> Self {
-        EntityRecord {
+        Self {
             id: row.id,
             workspace_id: row.workspace_id,
             schema_id: row.schema_id,

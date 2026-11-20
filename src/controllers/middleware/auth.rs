@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use axum::http::{HeaderMap, request::Parts};
+use axum::http::HeaderMap;
 use loco_rs::app::AppContext;
 use loco_rs::prelude::async_trait;
 use sea_orm::DatabaseTransaction;
@@ -35,10 +35,9 @@ pub(crate) fn header_pairs(headers: &HeaderMap) -> Result<Vec<(String, String)>,
 }
 
 /// Extracts the bearer credential from an Authorization header.
-pub(crate) fn extract_bearer_key(parts: &Parts) -> Option<&str> {
+pub(crate) fn extract_bearer_key(headers: &HeaderMap) -> Option<&str> {
     bearer_credential(
-        parts
-            .headers
+        headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok()),
     )
@@ -47,6 +46,7 @@ pub(crate) fn extract_bearer_key(parts: &Parts) -> Option<&str> {
 /// Extracts the API key from an `Authorization` header value, or `None` if the header is absent, is not a `Bearer` credential, or carries an empty one.
 ///
 /// Every adapter that authenticates a request routes through here, so `Authorization: Bearer ` with nothing after it gets the same answer everywhere.
+#[must_use]
 pub fn bearer_credential(header_value: Option<&str>) -> Option<&str> {
     header_value
         .and_then(|value| value.strip_prefix("Bearer "))
@@ -122,6 +122,7 @@ impl Authenticator for DefaultAuthenticator {
 }
 
 /// The authenticator a deployment gets when it does not choose one.
+#[must_use]
 pub fn default_authenticator() -> Arc<dyn Authenticator> {
     Arc::new(DefaultAuthenticator)
 }
@@ -134,7 +135,7 @@ pub(crate) struct RequestAuth<'a> {
 }
 
 impl<'a> RequestAuth<'a> {
-    pub(crate) fn new(app: &'a AppContext) -> Self {
+    pub(crate) const fn new(app: &'a AppContext) -> Self {
         Self { app }
     }
 

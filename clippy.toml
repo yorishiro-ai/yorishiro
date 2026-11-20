@@ -1,11 +1,8 @@
 # Lint levels are in Cargo.toml's [workspace.lints]; this file holds their settings and the project's banned APIs.
-# `cargo build`, `cargo clippy` and rust-analyzer read both, and CI turns every warning into an error.
+# Clippy reads this file; rust-analyzer runs Clippy on save, and CI treats warnings as errors.
 
-# Nothing is released yet, so clippy may suggest changes to public signatures.
+# Clippy may suggest changes to exported Rust signatures; keep the public REST, MCP, and CLI contracts stable.
 avoid-breaking-exported-api = false
-
-# Debug-only helpers never ship; assertions live in tests/.
-allow-dbg-in-tests = true
 
 disallowed-macros = [
     { path = "std::debug_assert", reason = "use assert!, or a test under tests/" },

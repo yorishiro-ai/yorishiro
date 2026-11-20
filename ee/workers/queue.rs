@@ -37,9 +37,13 @@ impl QueuePolicy for PlanQueuePolicy {
         let limit = Some(match class {
             WorkerClass::Shared => limits.shared,
             WorkerClass::TenantPrivate => limits.tenant_private,
-            WorkerClass::Official => limits
-                .official
-                .unwrap_or_else(|| plan.compute_policy().base_official_concurrency as i32),
+            WorkerClass::Official => limits.official.map_or_else(
+                || {
+                    i32::try_from(plan.compute_policy().base_official_concurrency)
+                        .map_err(|error| error.to_string())
+                },
+                Ok,
+            )?,
         });
         Ok(ConcurrencyPolicy {
             plan: plan.as_str().to_owned(),

@@ -1,6 +1,10 @@
 //! Issuing keys: direct keys, login keys, role sessions and delegated keys.
 
-use super::*;
+use super::{
+    ActiveModel, ActiveModelTrait, ActiveValue, ApiKeyScope, AuthContext, CreatedApiKey,
+    CreatedTenantApiKey, DatabaseConnection, Entity, EntityTrait, LOGIN_SESSION_HOURS, Model,
+    PaginatorTrait, ResultExt, Uuid, YorishiroError, generate_key, hash_key, validate_key_name,
+};
 
 impl Entity {
     /// Issues a new API key of the form `ysr_<prefix>_<secret>`, with 48 random alphanumeric secret characters (over 285 bits of entropy).
@@ -199,7 +203,7 @@ impl Entity {
         .await?;
         let current = Model::current_context(&txn, issuer).await?;
         crate::models::iam::access::require_key_grant(&txn, &current, scope, audit).await?;
-        let issuer_key = Entity::find_by_id(issuer.api_key_id)
+        let issuer_key = Self::find_by_id(issuer.api_key_id)
             .one(&txn)
             .await
             .internal()?
@@ -302,7 +306,7 @@ impl Entity {
             .await?;
             let current = Model::current_context(&txn, issuer).await?;
             crate::models::iam::access::require_key_grant(&txn, &current, scope, audit).await?;
-            let issuer_key = Entity::find_by_id(issuer.api_key_id)
+            let issuer_key = Self::find_by_id(issuer.api_key_id)
                 .one(&txn)
                 .await
                 .internal()?

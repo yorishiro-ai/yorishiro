@@ -12,7 +12,8 @@ use tracing_subscriber::fmt::{format::Writer, time::FormatTime};
 pub struct ConfiguredTimer(chrono_tz::Tz);
 
 impl ConfiguredTimer {
-    pub fn new(timezone: chrono_tz::Tz) -> Self {
+    #[must_use]
+    pub const fn new(timezone: chrono_tz::Tz) -> Self {
         Self(timezone)
     }
 }
@@ -20,7 +21,7 @@ impl ConfiguredTimer {
 impl FormatTime for ConfiguredTimer {
     fn format_time(&self, writer: &mut Writer<'_>) -> fmt::Result {
         let timestamp =
-            crate::data::time::in_timezone(crate::data::time::now(), self.0).to_rfc3339();
+            crate::data::time::in_timezone(&crate::data::time::now(), self.0).to_rfc3339();
         write!(writer, "{timestamp} ")
     }
 }

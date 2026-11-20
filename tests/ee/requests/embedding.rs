@@ -1,7 +1,9 @@
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, SelectExt};
 use yorishiro::App;
+use yorishiro::models::_entities::queue_job_lifecycles::{Column, Entity};
 use yorishiro::models::api_keys::ApiKeyScope;
 
 #[tokio::test]
@@ -17,6 +19,10 @@ async fn postgres_document_prefix_revision_contract() {
     document_prefix_revision_contract().await;
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn document_prefix_revision_contract() {
     use sea_orm::EntityTrait;
     use yorishiro::models::workspace_workspaces;
@@ -288,8 +294,6 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
         );
 
         // GET returns the new assignment while durable reindex work is queued.
-        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, SelectExt};
-        use yorishiro::models::_entities::queue_job_lifecycles::{Column, Entity};
         assert!(
             Entity::find()
                 .filter(Column::WorkspaceId.eq(setup.workspace_id))

@@ -16,7 +16,7 @@ fn local_settings(local_model: &str, dimensions: usize) -> Settings {
             "local_model": local_model, "local_max_sequence_length": 512
         },
         "rate_limit": {
-            "auth_max_requests": 10, "auth_window_seconds": 60, "search_tokens_per_minute": 100000
+            "auth_max_requests": 10, "auth_window_seconds": 60, "search_tokens_per_minute": 100_000
         },
         "db_load_guard": { "threshold": 0, "sustain_seconds": 30, "poll_seconds": 5 }
     }))

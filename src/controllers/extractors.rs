@@ -1,4 +1,5 @@
 //! Request extractors that authenticate a caller and declare the required API key scope in the handler's type.
+//!
 //! `Authorized` also opens the RLS-scoped transaction, so a handler cannot reach tenant data without passing through it.
 
 use std::marker::PhantomData;
@@ -31,22 +32,11 @@ fn log_auth_rejection(parts: &Parts, err: &YorishiroError) {
 
 /// Requires a nonempty bearer credential and logs rejection without exposing it.
 fn extract_bearer_key(parts: &Parts) -> Result<&str, ApiError> {
-    auth::extract_bearer_key(parts).ok_or_else(|| {
+    auth::extract_bearer_key(&parts.headers).ok_or_else(|| {
         let err = YorishiroError::Unauthenticated;
         log_auth_rejection(parts, &err);
         ApiError(err)
     })
-}
-
-/// Resolves the workspace's persisted assignment, falling back to shared compute.
-pub(crate) async fn resolve_worker_class(
-    ctx: &AppContext,
-    workspace_id: Uuid,
-) -> Result<crate::workers::embedding_sync::WorkerClass, ApiError> {
-    Ok(crate::workspace_worker_class(&ctx.db, workspace_id)
-        .await
-        .map_err(ApiError)?
-        .unwrap_or(crate::workers::embedding_sync::WorkerClass::Shared))
 }
 
 /// The workspace search quota shared by REST and MCP.
@@ -63,6 +53,7 @@ pub(crate) fn search_token_limiter(
 }
 
 /// The sole entry point for authenticated requests with no scope requirement and no DB connection.
+///
 /// Requiring this type as a handler argument is itself a declaration that "this route requires authentication."
 pub struct AuthContext(pub api_keys::AuthContext);
 
@@ -84,7 +75,7 @@ where
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
 
-        Ok(AuthContext(ctx))
+        Ok(Self(ctx))
     }
 }
 
@@ -114,6 +105,7 @@ impl RequiredScope for MigrationScope {
 }
 
 /// An extractor that authenticates, verifies the required scope, and begins a transaction with the RLS context already set in a single call (see `TenantDb::begin_for_workspace`).
+///
 /// There is no way to obtain a `DatabaseTransaction` on the tenant pool except through this type, which structurally prevents forgetting the scope check.
 ///
 /// **A write handler must call `.commit().await?` before returning, or every write it made is silently discarded** (`DatabaseTransaction` rolls back on drop).
@@ -127,7 +119,8 @@ pub struct Authorized<R> {
 }
 
 impl<R> Authorized<R> {
-    pub fn txn(&self) -> &sea_orm::DatabaseTransaction {
+    #[must_use]
+    pub const fn txn(&self) -> &sea_orm::DatabaseTransaction {
         &self.txn
     }
 
@@ -190,7 +183,7 @@ where
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
 
-        Ok(Authorized {
+        Ok(Self {
             ctx,
             txn,
             identity: app_ctx.db.clone(),
@@ -252,7 +245,7 @@ where
         )
         .await?;
 
-        Ok(AuditAuthorized {
+        Ok(Self {
             app_ctx,
             ctx,
             txn: Arc::new(tokio::sync::Mutex::new(txn)),
@@ -262,6 +255,7 @@ where
 }
 
 /// A connection-less version of `Authorized<R>`: it only authenticates and verifies `R`'s scope, without acquiring a DB connection.
+///
 /// Handlers that do slow work before touching the database should use this instead and call `TenantDb::acquire_for_workspace` afterward.
 pub struct Verified<R> {
     pub ctx: api_keys::AuthContext,
@@ -287,7 +281,7 @@ where
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
 
-        Ok(Verified {
+        Ok(Self {
             ctx,
             _scope: PhantomData,
         })

@@ -9,6 +9,10 @@ use crate::requests::fixtures::{TenantArgs, TestTenant};
 const NEW_PASSWORD: &str = "new-root-password-123";
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one password reset verifies identity preservation, attributed-key revocation, service-key retention, and old-password fencing together"
+)]
 async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -201,6 +205,10 @@ async fn wait_for_membership_lock(db: &sea_orm::DatabaseConnection, fence: &str,
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "unsafe target variants share the original credentials so every rejection can be checked for unintended mutation"
+)]
 async fn root_reset_rejects_unsafe_targets_without_changing_credentials() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

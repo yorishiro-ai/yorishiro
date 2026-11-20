@@ -2,12 +2,16 @@ use crate::requests::boot_request;
 use crate::requests::boot_request_with;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbBackend, EntityTrait, PaginatorTrait, QueryFilter,
+    TransactionTrait,
+};
 use std::sync::Arc;
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::db::DbHandle;
 use yorishiro::edition::ee::models::inference_jobs::{self, InferenceJobStatus};
+use yorishiro::models::_entities::inference_jobs as rows;
 
 /// Setting, reading and clearing a workspace's LLM credentials over REST.
 /// The key itself never comes back from GET, only what it configured.
@@ -197,6 +201,10 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 }
 
 /// Creates one schema and one entity for the infer-fill request tests.
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 pub(crate) async fn create_entity(request: &loco_rs::TestServer, setup: &TestTenant) -> Uuid {
     let create_schema = request
         .post("/api/schemas")
@@ -246,6 +254,10 @@ pub(crate) async fn create_entity(request: &loco_rs::TestServer, setup: &TestTen
 
 /// A proposal remains separate from the entity until an explicit confirmation.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pending proposal remains unchanged through queued authorization failures before explicit MCP confirmation and snapshot-backed undo"
+)]
 async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
@@ -542,6 +554,10 @@ async fn create_completed_proposal(
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the same reviewer crosses implicit deny, explicit deny, detached, and allowed policies before comparing REST and MCP proposal results"
+)]
 async fn proposals_can_be_listed_rejected_and_discarded() {
     boot_request::<App, _, _>(|request, ctx| async move {
         if crate::requests::skip_unlicensed(&ctx) {
@@ -614,7 +630,7 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
             }
             for (index, name) in ["get_inference_job", "list_inference_proposals", "get_inference_confirmation",
                 "reject_inference_proposals", "discard_inference_proposals", "confirm_inference_proposals"].into_iter().enumerate() {
-                let mcp = super::mcp::mcp_call(&request, &session, &key.plaintext, index as i64 + 10, "tools/call",
+                let mcp = super::mcp::mcp_call(&request, &session, &key.plaintext, i64::try_from(index).unwrap() + 10, "tools/call",
                     serde_json::json!({"name":name,"arguments":{"job_id":rejected_job}})).await;
                 assert_eq!(mcp["result"]["structuredContent"]["error"]["code"], "scope_insufficient", "{name}: {mcp}");
             }
@@ -1058,7 +1074,6 @@ async fn infer_fill_dispatch_failure_rolls_back_job() {
             .await;
         assert_eq!(put_key.status_code(), StatusCode::NO_CONTENT);
 
-        use sea_orm::{ConnectionTrait, DbBackend};
         // Database fault injection is isolated from other tests and uses real enqueue.
         let fault = match ctx.db.get_database_backend() {
             DbBackend::Postgres => "ALTER TABLE queue_job_dispatch_outbox ADD CONSTRAINT refuse_test_dispatch CHECK (false)",
@@ -1074,7 +1089,6 @@ async fn infer_fill_dispatch_failure_rolls_back_job() {
         assert_eq!(response.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
 
         // The failed POST cannot return a job ID; inspect this workspace for orphan rows.
-        use yorishiro::models::_entities::inference_jobs as rows;
         let jobs = rows::Entity::find()
             .filter(rows::Column::WorkspaceId.eq(setup.workspace_id))
             .all(&ctx.db)

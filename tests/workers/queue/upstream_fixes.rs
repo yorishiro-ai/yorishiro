@@ -43,6 +43,10 @@ async fn sql_queue_close_releases_pool_and_retained_worker_context() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "two gated consumers verify claim-age refresh and stale success or failure fencing while draining workers on every outcome"
+)]
 async fn redis_claim_refreshes_age_and_fences_reaped_completion_and_failure() {
     use futures::FutureExt;
     use loco_rs::app::Hooks;
@@ -58,9 +62,12 @@ async fn redis_claim_refreshes_age_and_fences_reaped_completion_and_failure() {
             if !crate::requests::uses_redis_queue(&ctx) {
                 return;
             }
-            let fixture =
-                crate::requests::fixtures::TestTenant::create(&request, &ctx, Default::default())
-                    .await;
+            let fixture = crate::requests::fixtures::TestTenant::create(
+                &request,
+                &ctx,
+                crate::requests::fixtures::TenantArgs::default(),
+            )
+            .await;
             let attempt = Arc::new(AtomicUsize::new(0));
             let release = [
                 Arc::new(tokio::sync::Semaphore::new(0)),

@@ -39,8 +39,8 @@ pub(crate) fn app_version() -> String {
 ///
 /// # Errors
 /// Returns an error when the configuration is invalid, or when the command starts workers without a valid worker target.
-pub(crate) async fn load_config(env: &Environment) -> Result<Config> {
-    let mut config = crate::data::config::load(env).await?;
+pub(crate) fn load_config(env: &Environment) -> Result<Config> {
+    let mut config = crate::data::config::load(env)?;
     let start = crate::workers::start::worker_start_from_args(std::env::args_os())
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
     crate::workers::start::configure_start(&mut config, start);
@@ -82,7 +82,7 @@ pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
 pub(crate) async fn after_context(ctx: AppContext) -> Result<AppContext> {
     let mut ctx = ctx;
     initializers::database::install(&mut ctx).await?;
-    let ctx = install_services(ctx).await?;
+    let ctx = install_services(ctx)?;
     initializers::queue::install(&ctx);
     Ok(ctx)
 }
@@ -217,7 +217,7 @@ impl RouteMounts {
         self
     }
 
-    /// Records the OpenAPI documents of the group mounted last.
+    /// Records the `OpenAPI` documents of the group mounted last.
     #[cfg(feature = "openapi")]
     pub(crate) fn document(
         &mut self,
@@ -393,7 +393,7 @@ pub(crate) async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
 /// The embedding provider is deliberately not among them: it can hold a model of a gigabyte or more, and the API and MCP server, the scheduler, and every CLI command run without one.
 /// Only a process that consumes the queue installs it, in [`connect_workers`].
 /// Loco builds a context twice for `yorishiro start`, so anything built here would be built twice.
-async fn install_services(ctx: AppContext) -> Result<AppContext> {
+fn install_services(ctx: AppContext) -> Result<AppContext> {
     let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
     // The pools install before this hook and already parse the zone; `config::validate` accepted it at load.
     let zone = crate::data::time::parse_timezone(&settings.timezone).map_err(|error| {

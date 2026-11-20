@@ -38,12 +38,11 @@ async fn concurrent_create_workspace_cannot_exceed_the_cap() {
                 let result =
                     tenancy::create_workspace(&txn, tenant_id, &format!("racer-{i}"), None, None)
                         .await;
-                match result {
-                    Ok(_) => txn.commit().await.is_ok(),
-                    Err(_) => {
-                        txn.rollback().await.expect("rollback rejected racer");
-                        false
-                    }
+                if result.is_ok() {
+                    txn.commit().await.is_ok()
+                } else {
+                    txn.rollback().await.expect("rollback rejected racer");
+                    false
                 }
             }));
         }

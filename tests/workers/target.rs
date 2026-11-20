@@ -235,12 +235,20 @@ mod concurrency {
     use yorishiro::workers::embedding_sync::WorkerClass;
     use yorishiro::workers::reindex::{self, ReindexArgs};
 
+    #[expect(
+        clippy::future_not_send,
+        reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+    )]
     async fn workspace_of_new_tenant(
         request: &loco_rs::TestServer,
         ctx: &loco_rs::app::AppContext,
     ) -> (Uuid, Uuid) {
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(request, ctx, Default::default()).await;
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            request,
+            ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         (fixture.tenant_id, fixture.workspace_id)
     }
 
@@ -291,7 +299,7 @@ mod concurrency {
             .expect("admit the job")
     }
 
-    fn started(admission: &Admission) -> bool {
+    fn started(admission: Admission) -> bool {
         matches!(admission, Admission::Started { .. })
     }
 
@@ -323,10 +331,10 @@ mod concurrency {
                 );
                 assert_eq!(first.concurrency_limit, None);
 
-                assert!(started(&start(&ctx, &first).await));
-                assert!(started(&start(&ctx, &second).await));
+                assert!(started(start(&ctx, &first).await));
+                assert!(started(start(&ctx, &second).await));
                 // Another workspace's job is not held back by it.
-                assert!(started(&start(&ctx, &other).await));
+                assert!(started(start(&ctx, &other).await));
             },
         )
         .await;
@@ -369,9 +377,9 @@ mod concurrency {
                 assert_ne!(other.concurrency_key, first.concurrency_key);
                 assert_eq!(first.concurrency_limit, None);
 
-                assert!(started(&start(&ctx, &first).await));
-                assert!(started(&start(&ctx, &second).await));
-                assert!(started(&start(&ctx, &other).await));
+                assert!(started(start(&ctx, &first).await));
+                assert!(started(start(&ctx, &second).await));
+                assert!(started(start(&ctx, &other).await));
             },
         )
         .await;
@@ -404,8 +412,8 @@ mod concurrency {
                         "the default {key} cap is disabled"
                     );
 
-                    assert!(started(&start(&ctx, &first).await), "{key}");
-                    assert!(started(&start(&ctx, &second).await), "{key}");
+                    assert!(started(start(&ctx, &first).await), "{key}");
+                    assert!(started(start(&ctx, &second).await), "{key}");
                 }
             },
         )
@@ -448,8 +456,8 @@ mod concurrency {
                         "the default {key} cap is disabled"
                     );
 
-                    assert!(started(&start(&ctx, &first).await), "{key}");
-                    assert!(started(&start(&ctx, &second).await), "{key}");
+                    assert!(started(start(&ctx, &first).await), "{key}");
+                    assert!(started(start(&ctx, &second).await), "{key}");
                 }
             },
         )

@@ -12,13 +12,12 @@
 
 use std::collections::HashSet;
 
+use sea_orm::sqlx::Connection;
 use sea_orm::{DatabaseBackend, DatabaseConnection, FromQueryResult, Statement};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::entity_embeddings::{
-    MAX_EMBEDDING_DIMENSIONS, PGVECTOR_HNSW_HALFVEC_MAX_DIMS, PGVECTOR_HNSW_VECTOR_MAX_DIMS,
-};
+use crate::models::entity_embeddings::{MAX_EMBEDDING_DIMENSIONS, hnsw_halfvec_dimensions};
 
 /// Name prefix of every index this maintenance creates and retires.
 const INDEX_PREFIX: &str = "ysr_hnsw_";
@@ -105,7 +104,10 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                 // No declared width: no index is wanted; owned leftovers are retired in cleanup.
                 continue;
             };
-            if !(1..=MAX_EMBEDDING_DIMENSIONS as i32).contains(&dimensions) {
+            let Ok(dimensions) = usize::try_from(dimensions) else {
+                continue;
+            };
+            if !(1..=MAX_EMBEDDING_DIMENSIONS).contains(&dimensions) {
                 continue;
             }
             if candidate.embedded < PROMOTION_THRESHOLD && !candidate.indexed {
@@ -127,7 +129,7 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
                 .await
                 .internal()?;
             }
-            create_index(&mut conn, &name, candidate.workspace_id, dimensions as usize).await?;
+            create_index(&mut conn, &name, candidate.workspace_id, dimensions).await?;
         }
         for (name, _) in &existing {
             if wanted.contains(name) {
@@ -146,7 +148,6 @@ pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), Y
         Ok(())
     }
     .await;
-    use sea_orm::sqlx::Connection;
     let closed = conn.close().await.internal();
     outcome?;
     closed
@@ -200,10 +201,9 @@ async fn create_index(
 /// Above the half-precision limit the first 4,000 dimensions carry the index; the search
 /// reranks candidates in original full-precision coordinates.
 fn index_expression(dimensions: usize) -> String {
-    if dimensions <= PGVECTOR_HNSW_VECTOR_MAX_DIMS {
+    let Some(indexed_dims) = hnsw_halfvec_dimensions(dimensions) else {
         return format!("(embedding::vector({dimensions})) vector_cosine_ops");
-    }
-    let indexed_dims = dimensions.min(PGVECTOR_HNSW_HALFVEC_MAX_DIMS);
+    };
     if indexed_dims == dimensions {
         format!("(l2_normalize(embedding)::halfvec({dimensions})) halfvec_cosine_ops")
     } else {

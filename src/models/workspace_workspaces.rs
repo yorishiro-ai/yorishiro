@@ -145,12 +145,12 @@ pub(crate) async fn embedding_provider(
 ) -> Result<Option<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>, YorishiroError>
 {
     let revision = embedding_revision(&ctx.db, workspace_id).await?;
-    let provider = match crate::workspace_embedding_provider(&ctx.db, workspace_id).await? {
-        Some(provider) => Some(provider),
-        None => ctx
-            .shared_store
-            .get::<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>(),
-    };
+    let provider = crate::workspace_embedding_provider(&ctx.db, workspace_id)
+        .await?
+        .or_else(|| {
+            ctx.shared_store
+                .get::<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>()
+        });
     if embedding_revision(&ctx.db, workspace_id).await? != revision {
         return Err(YorishiroError::Conflict {
             message: "workspace changed during provider resolution".into(),
@@ -215,12 +215,19 @@ pub struct StartupReindexRow {
 }
 
 impl StartupReindexRow {
+    pub(crate) fn needs_reindex(&self, model: &str, dimensions: usize, prefix: &str) -> bool {
+        self.is_stamped_with_other_embedding(model, dimensions)
+            || self.has_other_document_prefix(prefix)
+    }
+
     /// Compares document preprocessing independently of query-only instructions.
+    #[must_use]
     pub fn has_other_document_prefix(&self, prefix: &str) -> bool {
         self.embedding_model.is_some() && self.embedding_document_prefix != prefix
     }
     /// Whether the workspace's stored vectors differ from the effective provider identity.
     /// A workspace with no stamp has no vectors to replace: its first write stamps it.
+    #[must_use]
     pub fn is_stamped_with_other_embedding(&self, provider_model: &str, dimensions: usize) -> bool {
         self.embedding_reindexing
             || self.embedding_model.as_deref().is_some_and(|model| {
@@ -289,15 +296,7 @@ pub(crate) async fn stamped_for_reindex(
 ) -> Result<Vec<StartupReindexRow>, YorishiroError> {
     use crate::models::_entities::workspace_workspaces::Column;
 
-    Entity::find()
-        .select_only()
-        .columns([
-            Column::Id,
-            Column::EmbeddingModel,
-            Column::EmbeddingDimensions,
-            Column::EmbeddingReindexing,
-            Column::EmbeddingDocumentPrefix,
-        ])
+    startup_reindex_rows()
         .filter(
             Column::EmbeddingModel
                 .is_not_null()
@@ -307,6 +306,39 @@ pub(crate) async fn stamped_for_reindex(
         .all(conn)
         .await
         .internal()
+}
+
+pub(crate) async fn startup_reindex_needed(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    provider: &dyn crate::services::embedding::EmbeddingProvider,
+) -> Result<bool, YorishiroError> {
+    use crate::models::_entities::workspace_workspaces::Column;
+
+    let row = startup_reindex_rows()
+        .filter(Column::Id.eq(workspace_id))
+        .into_model::<StartupReindexRow>()
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
+    Ok(row.needs_reindex(
+        &provider.model_name(),
+        provider.dimensions(),
+        provider.document_prefix(),
+    ))
+}
+
+fn startup_reindex_rows() -> Select<Entity> {
+    use crate::models::_entities::workspace_workspaces::Column;
+
+    Entity::find().select_only().columns([
+        Column::Id,
+        Column::EmbeddingModel,
+        Column::EmbeddingDimensions,
+        Column::EmbeddingReindexing,
+        Column::EmbeddingDocumentPrefix,
+    ])
 }
 
 pub(crate) async fn list_for_actor(
@@ -450,7 +482,7 @@ pub(crate) async fn detail_for_actor(
     let entity_count = crate::models::entity_entities::count(&txn, id).await?;
     let relation_count = crate::models::entity_relations::count(&txn, id).await?;
     let schema_count = crate::models::schema_schemas::count_active(&txn, id).await?;
-    let quotas = crate::quotas(ctx, workspace.tenant_id).await?;
+    let quotas = crate::data::quotas::for_tenant(ctx, workspace.tenant_id).await?;
     txn.commit().await.internal()?;
     authorization.commit().await.internal()?;
     Ok(crate::dtos::workspaces::WorkspaceDetail {
@@ -463,7 +495,7 @@ pub(crate) async fn detail_for_actor(
             quotas.entities,
         ),
         schema_id: workspace.schema_id,
-        created_at: crate::data::time::render(ctx, workspace.created_at),
+        created_at: crate::data::time::render(ctx, &workspace.created_at),
         entity_count,
         relation_count,
         schema_count,

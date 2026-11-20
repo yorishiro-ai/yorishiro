@@ -1,11 +1,16 @@
 //! The guarded write of one embedding vector: it lands only while the entity still carries the token it was computed from.
 
+use sea_orm::sea_query::{Alias, Expr, OnConflict, Query};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, ExprTrait, QueryFilter, SelectExt,
 };
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
+use crate::models::_entities::entity_entities::{Column, Entity};
+use crate::models::_entities::workspace_workspaces::{
+    Column as WorkspaceColumn, Entity as Workspace,
+};
 
 /// Input for writing an embedding vector with concurrency guarding.
 pub(super) struct VectorWriteInput {
@@ -20,7 +25,7 @@ pub(super) struct VectorWriteInput {
 
 /// Writes a vector and guards it with the entity snapshot.
 ///
-/// Both insert and conflict-update branches check the current entity token in one SeaQuery statement.
+/// Both insert and conflict-update branches check the current entity token in one `SeaQuery` statement.
 ///
 /// Returns `Ok(true)` when the write landed, `Ok(false)` when the entity was deleted,
 /// and `Err(ConcurrentModification)` when the entity's token has changed since the
@@ -32,9 +37,6 @@ pub(super) async fn embed_and_write(
     super::validate_vector(&input.vector, input.vector.len())?;
     let backend = conn.get_database_backend();
     let table = super::TABLE;
-
-    use crate::models::_entities::entity_entities::{Column, Entity};
-    use sea_orm::sea_query::{Alias, Expr, OnConflict, Query};
 
     let vector: sea_orm::Value = match backend {
         DatabaseBackend::Sqlite => crate::db::sqlite_vec_blob(&input.vector).into(),
@@ -50,9 +52,6 @@ pub(super) async fn embed_and_write(
     let embedding = Alias::new("embedding");
     let workspace = Alias::new("workspace_id");
     let tenant = Alias::new("tenant_id");
-    use crate::models::_entities::workspace_workspaces::{
-        Column as WorkspaceColumn, Entity as Workspace,
-    };
     let current = Query::select()
         .expr(Expr::val(1))
         .from(Entity)

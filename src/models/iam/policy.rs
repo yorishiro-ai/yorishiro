@@ -250,7 +250,11 @@ impl Action {
         Self::RoleAssume,
     ];
 
-    pub(crate) fn applies_to(self, resource: Resource) -> bool {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one exhaustive action-to-resource table keeps authorization coverage visible and compiler checked"
+    )]
+    pub(crate) const fn applies_to(self, resource: Resource) -> bool {
         match self {
             Self::TenantGet
             | Self::IamAuditList
@@ -402,7 +406,7 @@ pub enum Resource {
 }
 
 impl Resource {
-    fn tenant_id(self) -> Uuid {
+    const fn tenant_id(self) -> Uuid {
         match self {
             Self::Tenant { tenant_id }
             | Self::Workspace { tenant_id, .. }

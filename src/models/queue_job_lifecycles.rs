@@ -137,7 +137,7 @@ impl Entity {
         id: Uuid,
         provider_job_id: &str,
     ) -> Result<(), DbErr> {
-        let result = Entity::update_many()
+        let result = Self::update_many()
             .col_expr(
                 Column::ProviderJobId,
                 Expr::value(Some(provider_job_id.to_owned())),
@@ -162,7 +162,7 @@ impl Entity {
     ) -> Result<bool, DbErr> {
         use crate::workers::reindex::ReindexArgs;
 
-        Ok(Entity::find()
+        Ok(Self::find()
             .filter(Column::JobName.is_in([ReindexArgs::JOB_NAME, ReindexArgs::STARTUP_JOB_NAME]))
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Status.is_in([
@@ -185,7 +185,7 @@ impl Entity {
         error: &str,
     ) -> Result<(), DbErr> {
         let now = crate::data::time::database_instant(crate::data::time::now());
-        let result = Entity::update_many()
+        let result = Self::update_many()
             .col_expr(
                 Column::Status,
                 Expr::value(LifecycleStatus::Retrying.as_db_str()),
@@ -198,16 +198,19 @@ impl Entity {
             )
             .col_expr(Column::Error, Expr::value(Some(error.to_owned())))
             .filter(Column::Id.eq(id))
-            .filter(if let Some(attempt) = attempt {
-                Column::Attempt
-                    .eq(attempt)
-                    .and(Column::Status.eq(LifecycleStatus::Running.as_db_str()))
-            } else {
-                Column::Status.is_in([
-                    LifecycleStatus::Queued.as_db_str(),
-                    LifecycleStatus::Retrying.as_db_str(),
-                ])
-            })
+            .filter(attempt.map_or_else(
+                || {
+                    Column::Status.is_in([
+                        LifecycleStatus::Queued.as_db_str(),
+                        LifecycleStatus::Retrying.as_db_str(),
+                    ])
+                },
+                |attempt| {
+                    Column::Attempt
+                        .eq(attempt)
+                        .and(Column::Status.eq(LifecycleStatus::Running.as_db_str()))
+                },
+            ))
             .exec(db)
             .await?;
         tracing::warn!(lifecycle_id = %id, error = error, "queue job deferred for retry");
@@ -227,7 +230,7 @@ impl Entity {
         error: &str,
         now: DateTimeWithTimeZone,
     ) -> Result<(), DbErr> {
-        let result = Entity::update_many()
+        let result = Self::update_many()
             .col_expr(
                 Column::Status,
                 Expr::value(LifecycleStatus::Retrying.as_db_str()),
@@ -264,7 +267,7 @@ impl Entity {
         attempt: i32,
         now: DateTimeWithTimeZone,
     ) -> Result<bool, DbErr> {
-        let result = Entity::update_many()
+        let result = Self::update_many()
             .col_expr(Column::LeaseUntil, Expr::value(now + lease_duration()))
             .filter(Column::Id.eq(id))
             .filter(Column::Attempt.eq(attempt))
@@ -338,7 +341,7 @@ impl Entity {
         error: Option<&str>,
     ) -> Result<(), DbErr> {
         let now = crate::data::time::now();
-        let mut update = Entity::update_many()
+        let mut update = Self::update_many()
             .col_expr(Column::Status, Expr::value(status.as_db_str()))
             .col_expr(
                 Column::LeaseUntil,
@@ -531,6 +534,7 @@ pub enum Admission {
     Terminal,
 }
 
+#[must_use]
 pub fn running_lease_is_live(
     lease_until: Option<DateTimeWithTimeZone>,
     now: DateTimeWithTimeZone,
@@ -538,7 +542,8 @@ pub fn running_lease_is_live(
     lease_until.is_none_or(|lease| lease > now)
 }
 
-pub fn lease_duration() -> chrono::Duration {
+#[must_use]
+pub const fn lease_duration() -> chrono::Duration {
     chrono::Duration::minutes(LEASE_DURATION_MINUTES)
 }
 

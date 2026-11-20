@@ -18,7 +18,7 @@ use crate::error::YorishiroError;
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
-pub async fn load(environment: &Environment) -> Result<Config> {
+pub fn load(environment: &Environment) -> Result<Config> {
     let folder = crate::data::env::config_folder().map(PathBuf::from);
     let config = if let Some(folder) = folder.as_ref()
         && matches!(environment, Environment::Production)
@@ -62,6 +62,11 @@ fn load_example(folder: &Path, environment: &Environment) -> Result<Config> {
 /// Returns an error when a setting is invalid.
 pub fn validate(config: &Config) -> Result<()> {
     validate_queue_policy(config)?;
+    validate_http_config(config)?;
+    validate_settings(config)
+}
+
+fn validate_http_config(config: &Config) -> Result<()> {
     if config
         .logger
         .file_appender
@@ -97,6 +102,10 @@ pub fn validate(config: &Config) -> Result<()> {
         }
         let _ = cors.cors()?;
     }
+    Ok(())
+}
+
+fn validate_settings(config: &Config) -> Result<()> {
     let settings = config.settings::<crate::data::settings::Settings>()?;
     crate::workers::target::targets_for_start(&settings.worker_targets)
         .map_err(|error| Error::Message(format!("settings.worker_targets: {error}")))?;

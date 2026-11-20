@@ -14,13 +14,7 @@ fn artifact(bytes: &[u8]) -> Artifact {
     Artifact {
         remote_path: "test.bin",
         local_name: "test.bin",
-        sha256: Box::leak(
-            Sha256::digest(bytes)
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
-                .into_boxed_str(),
-        ),
+        sha256: Box::leak(hex::encode(Sha256::digest(bytes)).into_boxed_str()),
         size: bytes.len() as u64,
         description: "test artifact",
     }
@@ -40,7 +34,7 @@ fn partial_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn assert_no_partials(dir: &Path) {
-    assert!(partial_files(dir).is_empty());
+    assert_eq!(partial_files(dir), [] as [PathBuf; 0]);
 }
 
 async fn loopback_server(
@@ -267,12 +261,12 @@ async fn concurrent_fetches_use_distinct_staging_paths_and_rename_only_verified_
     let url = format!("{}/artifact", server.url);
     let artifact = artifact(b"payload");
     let client = client();
-    let (first, second) = tokio::join!(
+    let results = tokio::join!(
         ensure_file_with_client(dir.path(), &url, &artifact, &client),
         ensure_file_with_client(dir.path(), &url, &artifact, &client),
     );
     drop(server);
-    let successes = [first, second]
+    let successes = <[_; 2]>::from(results)
         .iter()
         .filter(|result| result.is_ok())
         .count();

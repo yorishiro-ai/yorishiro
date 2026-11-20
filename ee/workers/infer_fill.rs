@@ -72,21 +72,13 @@ async fn open_workspace_write_scope(
         .map_err(|error| Error::Message(error.to_string()))
 }
 
-/// Shared implementation of the infer-fill worker's perform body.
-async fn perform_infer_fill(
+async fn inference_snapshot(
     ctx: &AppContext,
     args: &InferFillArgs,
-    job_id: Uuid,
-    attempt: i32,
-) -> Result<(i64, i64)> {
-    check_actor(ctx, args)
-        .await
-        .map_err(|error| Error::Message(error.to_string()))?;
-    let config = workspace_llm_keys::get(&ctx.db, args.workspace_id)
-        .await
-        .internal()?
-        .ok_or_else(|| Error::Message("workspace has no LLM credentials configured".into()))?;
-
+) -> Result<(
+    schema_schemas::SchemaRecord,
+    Vec<infer_fill::OutdatedEntity>,
+)> {
     let schema_txn = open_workspace_scope(ctx, args.workspace_id).await?;
 
     // Take a consistent workspace snapshot without holding a database transaction
@@ -110,6 +102,26 @@ async fn perform_infer_fill(
     .await
     .internal()?;
     schema_txn.commit().await.internal()?;
+
+    Ok((active, rows))
+}
+
+/// Shared implementation of the infer-fill worker's perform body.
+async fn perform_infer_fill(
+    ctx: &AppContext,
+    args: &InferFillArgs,
+    job_id: Uuid,
+    attempt: i32,
+) -> Result<(i64, i64)> {
+    check_actor(ctx, args)
+        .await
+        .map_err(|error| Error::Message(error.to_string()))?;
+    let config = workspace_llm_keys::get(&ctx.db, args.workspace_id)
+        .await
+        .internal()?
+        .ok_or_else(|| Error::Message("workspace has no LLM credentials configured".into()))?;
+
+    let (active, rows) = inference_snapshot(ctx, args).await?;
 
     let timeouts = crate::data::settings::configured(ctx)
         .map_err(|error| Error::Message(error.to_string()))?
@@ -330,64 +342,90 @@ impl InferFillWorker {
                 if let Some(heartbeat) = heartbeat {
                     heartbeat.abort();
                 }
-                let owned = inference_jobs::complete_proposals_attempt(
-                    &self.ctx.db,
-                    job_id,
-                    attempt,
-                    proposed,
-                    skipped,
-                )
-                .await
-                .internal()?;
-                if owned
-                    && admitted
-                    && let Some(id) = args.lifecycle_id
-                {
-                    let _ = crate::models::queue_job_lifecycles::Entity::finish(
-                        &self.ctx.db,
-                        id,
-                        Some(attempt),
-                        crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
-                        None,
-                    )
-                    .await;
-                }
-                Ok(())
+                self.complete_attempt(&args, attempt, admitted, proposed, skipped)
+                    .await
             }
             Err(e) => {
                 if let Some(heartbeat) = heartbeat {
                     heartbeat.abort();
                 }
-                if admitted && let Some(lifecycle_id) = args.lifecycle_id {
-                    if matches!(
-                        check_actor(&self.ctx, &args).await,
-                        Err(crate::YorishiroError::Unauthenticated
-                            | crate::YorishiroError::ScopeInsufficient { .. })
-                    ) {
-                        inference_jobs::fail_attempt(&self.ctx.db, job_id, attempt, &e.to_string())
-                            .await
-                            .internal()?;
-                        crate::models::queue_job_lifecycles::Entity::finish(
-                            &self.ctx.db,
-                            lifecycle_id,
-                            Some(attempt),
-                            crate::models::queue_job_lifecycles::LifecycleStatus::Failed,
-                            None,
-                        )
-                        .await
-                        .internal()?;
-                        return Err(e);
-                    }
-                    defer_and_enqueue(&self.ctx, &args, Some(attempt), &e.to_string(), true)
-                        .await?;
-                    return Ok(());
-                }
-                inference_jobs::fail_attempt(&self.ctx.db, job_id, attempt, &e.to_string())
-                    .await
-                    .internal()?;
-                Err(e)
+                self.fail_or_retry(&args, attempt, admitted, e).await
             }
         }
+    }
+
+    async fn complete_attempt(
+        &self,
+        args: &InferFillArgs,
+        attempt: i32,
+        admitted: bool,
+        proposed: i64,
+        skipped: i64,
+    ) -> Result<()> {
+        let owned = inference_jobs::complete_proposals_attempt(
+            &self.ctx.db,
+            args.job_id,
+            attempt,
+            proposed,
+            skipped,
+        )
+        .await
+        .internal()?;
+        if owned
+            && admitted
+            && let Some(id) = args.lifecycle_id
+        {
+            let _ = crate::models::queue_job_lifecycles::Entity::finish(
+                &self.ctx.db,
+                id,
+                Some(attempt),
+                crate::models::queue_job_lifecycles::LifecycleStatus::Completed,
+                None,
+            )
+            .await;
+        }
+        Ok(())
+    }
+
+    async fn fail_or_retry(
+        &self,
+        args: &InferFillArgs,
+        attempt: i32,
+        admitted: bool,
+        error: Error,
+    ) -> Result<()> {
+        if admitted && let Some(lifecycle_id) = args.lifecycle_id {
+            if matches!(
+                check_actor(&self.ctx, args).await,
+                Err(crate::YorishiroError::Unauthenticated
+                    | crate::YorishiroError::ScopeInsufficient { .. })
+            ) {
+                inference_jobs::fail_attempt(
+                    &self.ctx.db,
+                    args.job_id,
+                    attempt,
+                    &error.to_string(),
+                )
+                .await
+                .internal()?;
+                crate::models::queue_job_lifecycles::Entity::finish(
+                    &self.ctx.db,
+                    lifecycle_id,
+                    Some(attempt),
+                    crate::models::queue_job_lifecycles::LifecycleStatus::Failed,
+                    None,
+                )
+                .await
+                .internal()?;
+                return Err(error);
+            }
+            defer_and_enqueue(&self.ctx, args, Some(attempt), &error.to_string(), true).await?;
+            return Ok(());
+        }
+        inference_jobs::fail_attempt(&self.ctx.db, args.job_id, attempt, &error.to_string())
+            .await
+            .internal()?;
+        Err(error)
     }
 }
 

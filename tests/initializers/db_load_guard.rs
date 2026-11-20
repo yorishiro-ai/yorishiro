@@ -140,7 +140,9 @@ fn failed_reading_resets_the_sustain_window(load_fails: bool) {
     assert!(matches!(
         over(
             &mut history,
-            start + sustain + sustain - Duration::from_secs(1)
+            (start + sustain + sustain)
+                .checked_sub(Duration::from_secs(1))
+                .unwrap()
         ),
         StepOutcome::Continue
     ));

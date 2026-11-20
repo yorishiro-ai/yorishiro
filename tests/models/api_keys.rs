@@ -1,6 +1,7 @@
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use sea_orm::TransactionTrait;
+use sha2::{Digest, Sha256};
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::api_keys::Entity as ApiKeys;
@@ -91,7 +92,6 @@ async fn revoke_retains_history_and_a_second_revoke_reports_not_found() {
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0].id, created.id);
         assert!(keys[0].revoked_at.is_some());
-        use sha2::{Digest, Sha256};
         assert_ne!(
             keys[0].key_hash,
             Sha256::digest(created.plaintext.as_bytes()).to_vec()

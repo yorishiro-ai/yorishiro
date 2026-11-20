@@ -8,7 +8,7 @@ fn configured_timer_renders_dst_offsets_and_json_safe_timestamp() {
     )
     .format_time(&mut Writer::new(&mut tokyo))
     .unwrap();
-    assert!(tokyo.ends_with(" "));
+    assert!(tokyo.ends_with(' '));
     assert!(tokyo.contains("+09:00"));
 
     let mut new_york = String::new();
@@ -18,7 +18,7 @@ fn configured_timer_renders_dst_offsets_and_json_safe_timestamp() {
     .format_time(&mut Writer::new(&mut new_york))
     .unwrap();
     assert!(new_york.contains("-04:00") || new_york.contains("-05:00"));
-    assert!(new_york.ends_with(" "));
+    assert!(new_york.ends_with(' '));
     let json_timestamp = new_york.trim_end();
     assert!(!json_timestamp.ends_with(' '));
     assert!(json_timestamp.contains('T'));

@@ -75,6 +75,9 @@ fn unknown_persisted_visibility_is_internal_and_input_is_validation_failed() {
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn list_and_get_respect_tenant_and_community_visibility() {
+    use crate::requests::fixtures::{TenantArgs, TestTenant};
+    use yorishiro::models::pagination::ListParams;
+
     if !crate::require_postgres_backend() {
         return;
     }
@@ -82,8 +85,6 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
         if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
-        use crate::requests::fixtures::{TenantArgs, TestTenant};
-        use yorishiro::models::pagination::ListParams;
 
         let owner_a = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let owner_b = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

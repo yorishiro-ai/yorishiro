@@ -52,6 +52,10 @@ async fn insert_reference(
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one fork history covers copy and follow modes and checks that recorded heads cannot be rewritten"
+)]
 async fn schema_fork_crud_copy_follow_and_history_guards() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant {
@@ -59,7 +63,6 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
             workspace_id: source_workspace_id,
             owner_id,
             api_key: source_key,
-            ..
         } = TestTenant::create(
             &request,
             &ctx,
@@ -118,7 +121,8 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         assert_eq!(fork["definition"], schema["schema"]["definition"]);
         let fork_id = fork["id"].as_str().unwrap().to_owned();
         let original_head_id: Uuid = fork["fork_schema_id"].as_str().unwrap().parse().unwrap();
-        let original_head_version = fork["fork_schema_version"].as_i64().unwrap() as i32;
+        let original_head_version =
+            i32::try_from(fork["fork_schema_version"].as_i64().unwrap()).unwrap();
         // Direct write (b): proves the fork-head history trigger rejects updates.
         let history_update = workspace_schema_fork_heads::Entity::update_many()
             .col_expr(
@@ -318,7 +322,8 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         assert!(after_follow_list.json::<serde_json::Value>()[0]["upstream_version"].is_null());
         let current_head_id: Uuid =
             serde_json::from_value(followed["fork_schema_id"].clone()).unwrap();
-        let current_head_version = followed["fork_schema_version"].as_i64().unwrap() as i32;
+        let current_head_version =
+            i32::try_from(followed["fork_schema_version"].as_i64().unwrap()).unwrap();
         let old_reference =
             insert_reference(&ctx, target.id, original_head_id, original_head_version).await;
         let delete_old_referenced = request
@@ -390,6 +395,10 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "two tenant fixtures exercise the same fork through each HTTP path to verify RLS isolation"
+)]
 async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
     if !crate::require_postgres_backend() {
         return;
@@ -403,7 +412,6 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
             workspace_id: source_workspace,
             owner_id: owner_a,
             api_key: source_key,
-            ..
         } = TestTenant::create(
             &request,
             &ctx,
@@ -469,13 +477,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
             .add_header("Authorization", format!("Bearer {read_b}"))
             .await;
         assert_eq!(list_b.status_code(), StatusCode::OK);
-        assert!(
-            list_b
-                .json::<serde_json::Value>()
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        assert_eq!(list_b.json::<serde_json::Value>(), serde_json::json!([]));
 
         let get_b = request
             .get(&format!("/api/schema-forks/{fork_id}"))
@@ -523,7 +525,6 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
             workspace_id: workspace_a,
             owner_id,
             api_key: key_a,
-            ..
         } = TestTenant::create(
             &request,
             &ctx,
@@ -614,6 +615,10 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "both directions must race against the same schema graph so the resulting edge and cycle rejection can be checked together"
+)]
 async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
     if !crate::require_postgres_backend() {
         return;
@@ -624,7 +629,6 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
             workspace_id: workspace_a,
             owner_id,
             api_key: key_a,
-            ..
         } = TestTenant::create(
             &request,
             &ctx,
@@ -639,27 +643,27 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
             fixtures::issue_api_key(&ctx, workspace_b.id, owner_id, ApiKeyScope::Schema, false)
                 .await;
 
-        let schema_a_response = request
+        let first_response = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {key_a}"))
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
-        assert_eq!(schema_a_response.status_code(), StatusCode::CREATED);
-        let schema_a: serde_json::Value = schema_a_response.json();
-        let schema_a_id = schema_a["schema"]["id"]
+        assert_eq!(first_response.status_code(), StatusCode::CREATED);
+        let schema_a: serde_json::Value = first_response.json();
+        let first_schema_id = schema_a["schema"]["id"]
             .as_str()
             .unwrap()
             .parse::<Uuid>()
             .unwrap();
 
-        let schema_b_response = request
+        let second_response = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {key_b}"))
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
-        assert_eq!(schema_b_response.status_code(), StatusCode::CREATED);
-        let schema_b: serde_json::Value = schema_b_response.json();
-        let schema_b_id = schema_b["schema"]["id"]
+        assert_eq!(second_response.status_code(), StatusCode::CREATED);
+        let schema_b: serde_json::Value = second_response.json();
+        let second_schema_id = schema_b["schema"]["id"]
             .as_str()
             .unwrap()
             .parse::<Uuid>()
@@ -687,7 +691,7 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
                 workspace_a,
                 yorishiro::edition::ee::models::workspace_schema_forks::CreateInput {
                     source_workspace_id: workspace_b.id,
-                    source_schema_id: schema_b_id,
+                    source_schema_id: second_schema_id,
                 },
             )
             .await;
@@ -706,7 +710,7 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
                 workspace_b.id,
                 yorishiro::edition::ee::models::workspace_schema_forks::CreateInput {
                     source_workspace_id: workspace_a,
-                    source_schema_id: schema_a_id,
+                    source_schema_id: first_schema_id,
                 },
             )
             .await;
@@ -823,6 +827,10 @@ async fn fork_creation_shares_the_schema_version_lock() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "both direct write attempts use the same scoped tenant and foreign fork to verify isolation and schema integrity"
+)]
 async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
     if !crate::require_postgres_backend() {
         return;
@@ -836,7 +844,6 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
             workspace_id: source_workspace,
             owner_id: owner_a,
             api_key: source_key,
-            ..
         } = TestTenant::create(
             &request,
             &ctx,
@@ -965,7 +972,6 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
             workspace_id: source_workspace,
             owner_id,
             api_key: source_key,
-            ..
         } = TestTenant::create(
             &request,
             &ctx,

@@ -1,4 +1,4 @@
-//! ID token (JWT) verification, per the OpenID Connect Core specification.
+//! ID token (JWT) verification, per the `OpenID` Connect Core specification.
 //!
 //! Signature verification uses whichever key in the provider's JWKS matches the token's `kid` header; `iss`/`aud`/`exp` are checked by `jsonwebtoken`'s own `Validation`.
 

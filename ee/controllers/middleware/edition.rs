@@ -99,41 +99,41 @@ impl LicenceState {
             return Self::default();
         };
 
-        match verify(token, PUBLIC_KEY_PEM) {
-            Ok(claims) => {
-                // `sub` is free-form and routinely an email address, so it does not go in a routine log line.
-                // Plan and expiry are what an operator needs to see; the issuee is in the key they already hold.
-                tracing::info!(
-                    plan = %claims.plan,
-                    expires_at = claims.exp,
-                    "licence key accepted: enterprise features are enabled"
-                );
-                Self {
-                    claims: Some(claims),
-                }
+        if let Ok(claims) = verify(token, PUBLIC_KEY_PEM) {
+            // `sub` is free-form and routinely an email address, so it does not go in a routine log line.
+            // Plan and expiry are what an operator needs to see; the issuee is in the key they already hold.
+            tracing::info!(
+                plan = %claims.plan,
+                expires_at = claims.exp,
+                "licence key accepted: enterprise features are enabled"
+            );
+            Self {
+                claims: Some(claims),
             }
-            Err(_) => {
-                tracing::warn!(
-                    "licence key was set but did not verify: enterprise features are disabled"
-                );
-                Self::default()
-            }
+        } else {
+            tracing::warn!(
+                "licence key was set but did not verify: enterprise features are disabled"
+            );
+            Self::default()
         }
     }
 
     /// Builds a state directly from claims, for tests and for a caller that verified elsewhere.
-    pub fn licensed(claims: LicenceClaims) -> Self {
+    #[must_use]
+    pub const fn licensed(claims: LicenceClaims) -> Self {
         Self {
             claims: Some(claims),
         }
     }
 
     /// Whether enterprise features are currently unlocked: a verified key that has not yet expired.
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.is_active_at(crate::data::time::now().timestamp())
     }
 
     /// The pure fold [`Self::is_active`] wraps, so expiry is testable without waiting for a clock or mocking one.
+    #[must_use]
     pub fn is_active_at(&self, now: i64) -> bool {
         self.claims.as_ref().is_some_and(|c| c.exp > now)
     }
@@ -175,7 +175,7 @@ pub(crate) async fn licence_gate(
     .into_response()
 }
 
-/// Marks the OpenAPI operations of a route group that `licence_gate` covers.
+/// Marks the `OpenAPI` operations of a route group that `licence_gate` covers.
 #[cfg(feature = "openapi")]
 pub(crate) fn licence_required(
     mut docs: Vec<crate::controllers::openapi::route_inventory::RouteDoc>,

@@ -20,6 +20,10 @@ use crate::http_stub::HttpStub;
 use crate::requests::boot_request;
 
 /// A workspace stamped with `model`, and a worker context that enqueues through the configured Loco provider.
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
 async fn scenario(
     request: &loco_rs::TestServer,
     ctx: &AppContext,
@@ -66,10 +70,16 @@ async fn queued(ctx: &AppContext, workspace: Uuid) -> bool {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one workspace tracks query-only changes, document-prefix invalidation, and atomic stamp publication across provider replacements"
+)]
 async fn deployment_document_prefix_change_queues_and_restamps_after_publication() {
+    use loco_rs::bgworker::BackgroundWorker;
     use yorishiro::models::{
         entity_embeddings, entity_entities, schema_schemas, workspace_workspaces,
     };
+    use yorishiro::workers::reindex::{ReindexArgs, ReindexWorker};
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let workspace = tenant.workspace_id;
@@ -175,6 +185,35 @@ async fn deployment_document_prefix_change_queues_and_restamps_after_publication
         assert_eq!(published.embedding_model.as_deref(), Some("same-model"));
         assert!(published.embedding_revision > before.embedding_revision);
         assert!(!published.embedding_reindexing);
+
+        // A manual reindex can publish before an already queued startup repair is delivered.
+        let startup = Lifecycles::find()
+            .filter(yorishiro::models::queue_job_lifecycles::Column::WorkspaceId.eq(workspace))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        ReindexWorker::build(&ctx)
+            .perform(ReindexArgs {
+                lifecycle_id: Some(startup.id),
+                workspace_id: workspace,
+                worker_class: WorkerClass::Shared,
+                startup: true,
+                actor: None,
+            })
+            .await
+            .unwrap();
+        let after_startup = workspace_workspaces::Entity::find_by_id(workspace)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after_startup.embedding_revision,
+            published.embedding_revision
+        );
+        assert!(!after_startup.embedding_reindexing);
+        assert!(!queued(&ctx, workspace).await);
         assert_eq!(
             *inputs.lock().await,
             ["old: title: stored document", "new: title: stored document"]

@@ -109,6 +109,10 @@ async fn down_templates(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered migration DDL keeps table definitions, constraints, and grants together"
+)]
 async fn up_template_catalog(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     manager
         .create_table(

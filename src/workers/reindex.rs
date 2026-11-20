@@ -34,6 +34,10 @@ pub struct ReindexArgs {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "identifier field names are part of the persisted reindex job format"
+)]
 pub struct ReindexActor {
     pub tenant_id: Uuid,
     pub api_key_id: Uuid,
@@ -45,7 +49,7 @@ impl ReindexArgs {
     pub(crate) const JOB_NAME: &'static str = "reindex";
     pub(crate) const STARTUP_JOB_NAME: &'static str = "startup_reindex";
 
-    pub(crate) fn job_name(&self) -> &'static str {
+    pub(crate) const fn job_name(&self) -> &'static str {
         if self.startup {
             Self::STARTUP_JOB_NAME
         } else {
@@ -110,6 +114,7 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         args.workspace_id,
         provider.as_ref(),
         actor.as_ref(),
+        args.startup,
     )
     .await
     .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
@@ -177,9 +182,9 @@ pub async fn enqueue_reindex(
         ));
     }
 
-    let worker_class = crate::controllers::extractors::resolve_worker_class(ctx, workspace_id)
+    let worker_class = crate::workers::target::resolve_worker_class(ctx, workspace_id)
         .await
-        .map_err(|error| loco_rs::Error::from(error.0))?;
+        .map_err(loco_rs::Error::from)?;
     crate::workers::dispatch::dispatch_reindex(
         ctx,
         ReindexArgs {
@@ -232,9 +237,7 @@ pub(crate) async fn enqueue_requested(
     )
     .await?;
     let worker_class =
-        crate::controllers::extractors::resolve_worker_class(ctx, actor.require_workspace()?)
-            .await
-            .map_err(|error| error.0)?;
+        crate::workers::target::resolve_worker_class(ctx, actor.require_workspace()?).await?;
     let id = crate::workers::dispatch::dispatch_reindex(
         ctx,
         ReindexArgs {

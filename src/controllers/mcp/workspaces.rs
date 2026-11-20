@@ -176,7 +176,7 @@ impl YorishiroMcpServer {
                     .map(|record| workspace_workspaces::WorkspaceRecord {
                         created_at: crate::data::time::render(
                             self.app_context(),
-                            record.created_at,
+                            &record.created_at,
                         )
                         .fixed_offset(),
                         ..record

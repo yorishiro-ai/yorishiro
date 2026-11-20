@@ -53,7 +53,7 @@ pub(crate) fn render_records(
                 .parse()
                 .expect("audit action matches the DB constraint"),
             detail: record.detail,
-            created_at: crate::data::time::in_timezone(record.created_at, timezone).to_rfc3339(),
+            created_at: crate::data::time::in_timezone(&record.created_at, timezone).to_rfc3339(),
         })
         .collect()
 }

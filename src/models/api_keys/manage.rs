@@ -1,6 +1,11 @@
 //! Listing, revoking and rotating keys.
 
-use super::*;
+use super::{
+    ActiveModel, ActiveModelTrait, ActiveValue, ApiKeyScope, AuthContext, ColumnTrait,
+    ConnectionTrait, CreatedApiKey, DatabaseConnection, Entity, EntityTrait, Expr, KeyGrant, Model,
+    QueryFilter, QueryOrder, QuerySelect, ResultExt, Uuid, YorishiroError, generate_key, hash_key,
+    stored_scope,
+};
 
 impl Entity {
     /// Every API key issued for a workspace, oldest first.
@@ -15,11 +20,11 @@ impl Entity {
     ) -> Result<Vec<Model>, YorishiroError> {
         use crate::models::_entities::api_keys::Column;
 
-        Entity::find()
+        Self::find()
             .filter(Column::WorkspaceId.eq(workspace_id))
             .order_by_asc(Column::CreatedAt)
-            .limit(page.limit() as u64)
-            .offset(page.offset() as u64)
+            .limit(page.limit())
+            .offset(page.offset())
             .all(conn)
             .await
             .internal()
@@ -55,7 +60,7 @@ impl Entity {
     ) -> Result<Vec<Model>, YorishiroError> {
         use crate::models::_entities::api_keys::Column;
 
-        Entity::find()
+        Self::find()
             .filter(Column::TenantId.eq(tenant_id))
             .order_by_asc(Column::CreatedAt)
             .order_by_asc(Column::Id)
@@ -114,7 +119,7 @@ impl Entity {
         conn: &impl ConnectionTrait,
         condition: sea_orm::Condition,
     ) -> Result<(), YorishiroError> {
-        let keys = Entity::find()
+        let keys = Self::find()
             .filter(condition)
             .filter(crate::models::_entities::api_keys::Column::RevokedAt.is_null())
             .all(conn)
@@ -142,7 +147,7 @@ impl Entity {
             },
         )
         .await?;
-        let old = Entity::find_by_id(key_id)
+        let old = Self::find_by_id(key_id)
             .one(&txn)
             .await
             .internal()?
@@ -153,7 +158,7 @@ impl Entity {
                 message: "only an active key can be rotated; issue a new key instead".into(),
             });
         }
-        let issuer_binding = Entity::find_by_id(actor.api_key_id)
+        let issuer_binding = Self::find_by_id(actor.api_key_id)
             .one(&txn)
             .await
             .internal()?
@@ -196,7 +201,7 @@ impl Entity {
         .await
         .internal()?;
         Self::delete_for_tenant(&txn, actor.tenant_id, key_id).await?;
-        Entity::update_many()
+        Self::update_many()
             .col_expr(
                 crate::models::_entities::api_keys::Column::ReplacedById,
                 Expr::val(inserted.id),
@@ -226,7 +231,7 @@ impl Entity {
     ) -> Result<(), YorishiroError> {
         use crate::models::_entities::api_keys::Column;
 
-        let result = Entity::update_many()
+        let result = Self::update_many()
             .col_expr(Column::RevokedAt, Expr::val(crate::data::time::now()))
             .col_expr(Column::KeyHash, Expr::val(hash_key(&generate_key().1)))
             .filter(Column::Id.eq(key_id))

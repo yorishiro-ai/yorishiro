@@ -44,8 +44,8 @@ impl Model {
             .filter(Column::TenantId.eq(actor.tenant_id))
             .filter(Column::UserId.eq(user_id))
             .order_by_asc(Column::Id)
-            .limit(params.limit() as u64)
-            .offset(params.offset() as u64)
+            .limit(params.limit())
+            .offset(params.offset())
             .all(&txn)
             .await
             .internal()?;

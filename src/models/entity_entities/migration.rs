@@ -157,7 +157,7 @@ fn missing_fields_in_value(
                 name: if parent.is_empty() {
                     name.clone()
                 } else {
-                    pointer.clone()
+                    pointer
                 },
                 r#type: definition.r#type,
                 required: definition.required,
@@ -191,12 +191,12 @@ pub(crate) async fn fill_defaults(
     job_id: Uuid,
     updated_by: Option<Uuid>,
 ) -> Result<FillDefaultsReport, YorishiroError> {
+    use crate::models::_entities::entity_entities::Column;
+
     let active =
         crate::models::schema_schemas::get_active_schema(conn, workspace_id, schema_name).await?;
 
     // Fetch all entities behind the active version.
-    use crate::models::_entities::entity_entities::Column;
-
     let rows: Vec<EntityRecord> = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .join(
@@ -226,9 +226,9 @@ pub(crate) async fn fill_defaults(
         let entity_type = &record.entity_type;
 
         // Find the active version's entity type definition.
-        let active_entity = match active.definition.entity_types.get(entity_type.as_str()) {
-            Some(def) => def,
-            None => continue, // Entity type dropped in active version; nothing to fill.
+        let Some(active_entity) = active.definition.entity_types.get(entity_type.as_str()) else {
+            // Entity type dropped in active version; nothing to fill.
+            continue;
         };
 
         // Take a snapshot before modifying.
@@ -296,7 +296,7 @@ fn fill_fields_in_value(
             if let Some(ref_val) = &prop_def.default {
                 obj.insert(name.clone(), ref_val.clone());
             } else {
-                let empty = empty_value_for_type(&prop_def.r#type);
+                let empty = empty_value_for_type(prop_def.r#type);
                 obj.insert(name.clone(), empty);
             }
             count += 1;
@@ -307,7 +307,7 @@ fn fill_fields_in_value(
 }
 
 /// Returns a type-appropriate empty value for a field type.
-fn empty_value_for_type(type_name: &metaschema::FieldTypeName) -> Value {
+fn empty_value_for_type(type_name: metaschema::FieldTypeName) -> Value {
     match type_name {
         metaschema::FieldTypeName::Boolean => Value::Bool(false),
         metaschema::FieldTypeName::Integer | metaschema::FieldTypeName::Number => {

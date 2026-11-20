@@ -52,6 +52,7 @@ impl McpToolPolicy for ManagementToolPolicy {
 }
 
 /// The complete enterprise-only MCP tool set.
+#[must_use]
 pub fn tool_router() -> ToolRouter<YorishiroMcpServer> {
     compose_tool_routers([
         YorishiroMcpServer::tool_router_dashboard(),

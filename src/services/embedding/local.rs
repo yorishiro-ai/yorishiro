@@ -79,7 +79,7 @@ impl LocalEmbeddingProvider {
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
-    pub fn load(config: LocalEmbeddingConfig) -> Result<Self, YorishiroError> {
+    pub fn load(config: &LocalEmbeddingConfig) -> Result<Self, YorishiroError> {
         let def = config.def;
         if config.max_sequence_length < MIN_SEQUENCE_LENGTH {
             return Err(internal(format!(
@@ -155,7 +155,10 @@ impl LocalEmbeddingProvider {
     }
 
     /// Sets the deployment's outbound deadlines on a loaded provider.
-    pub(crate) fn with_timeouts(mut self, timeouts: crate::data::settings::HttpTimeouts) -> Self {
+    pub(crate) const fn with_timeouts(
+        mut self,
+        timeouts: crate::data::settings::HttpTimeouts,
+    ) -> Self {
         self.timeouts = timeouts;
         self
     }
@@ -260,6 +263,7 @@ fn l2_normalize(vector: &mut [f32]) {
 ///
 /// `pub` (rather than private) only so this module's own tests can call it directly; `#[doc(hidden)]` keeps it out of the public API docs.
 #[doc(hidden)]
+#[must_use]
 pub fn mean_pool_normalized(
     token_embeddings: &[f32],
     attention_mask: &[i64],
@@ -303,11 +307,13 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
     /// Undercounts by the prefix's own token length on a model with a non-empty query/document prefix (`embed_as` prepends it before tokenizing, but this method has no `EmbedKind` to know which prefix, if any, the caller is about to add).
     /// A few tokens' undercount on a quota meant to catch abuse rather than bill to the token is not worth threading `EmbedKind` through a method whose contract is "count this text", not "count what `embed_as` would eventually send".
     fn count_tokens(&self, text: &str) -> u32 {
-        match self.inner.tokenizer.encode(text, false) {
-            Ok(encoding) => u32::try_from(encoding.len()).unwrap_or(u32::MAX),
-            // A text this tokenizer cannot encode is one the model could not embed either; the request is about to fail on its own, so fall back rather than decide here.
-            Err(_) => u32::try_from(text.len().div_ceil(4)).unwrap_or(u32::MAX),
-        }
+        // A text this tokenizer cannot encode would fail embedding too, so fall back to an estimate.
+        let count = self
+            .inner
+            .tokenizer
+            .encode(text, false)
+            .map_or_else(|_| text.len().div_ceil(4), |encoding| encoding.len());
+        u32::try_from(count).unwrap_or(u32::MAX)
     }
 
     /// Prepends the selected model's query/document prefix before embedding.
@@ -350,13 +356,12 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
             crate::data::http_timeouts::HttpTimeout::LocalEmbedding,
             self.timeouts,
         );
-        match tokio::time::timeout(timeout, task).await {
-            Ok(result) => result,
-            Err(_) => Err(internal(format!(
+        tokio::time::timeout(timeout, task).await.map_err(|_| {
+            internal(format!(
                 "embedding timed out after {}s (inference queue congested?)",
                 timeout.as_secs()
-            ))),
-        }
+            ))
+        })?
     }
 }
 
@@ -407,7 +412,7 @@ pub(super) async fn build_local_provider(
         def,
         max_sequence_length,
     };
-    let provider = tokio::task::spawn_blocking(move || LocalEmbeddingProvider::load(local_config))
+    let provider = tokio::task::spawn_blocking(move || LocalEmbeddingProvider::load(&local_config))
         .await
         .map_err(|err| -> crate::error::BoxError {
             crate::error::BoxError::from(format!("local embedding model loader task failed: {err}"))

@@ -55,11 +55,13 @@ pub struct TemplateSummary {
 ///
 /// # Panics
 /// Panics if an internal invariant required by this operation is violated.
+#[must_use]
 pub fn parse(template: &BuiltinTemplate) -> MetaSchemaDefinition {
     serde_json::from_str(template.source)
         .unwrap_or_else(|err| panic!("built-in template '{}' failed to parse: {err}", template.id))
 }
 
+#[must_use]
 pub fn list_templates() -> Vec<TemplateSummary> {
     TEMPLATES
         .iter()

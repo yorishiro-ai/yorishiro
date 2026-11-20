@@ -113,7 +113,7 @@ pub async fn reindex_workspace_with_lock(
     workspace_id: Uuid,
     provider: &dyn crate::services::embedding::EmbeddingProvider,
 ) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
-    reindex_workspace_with_actor(ctx, workspace_id, provider, None).await
+    reindex_workspace_with_actor(ctx, workspace_id, provider, None, false).await
 }
 
 pub(crate) async fn reindex_workspace_with_actor(
@@ -121,6 +121,7 @@ pub(crate) async fn reindex_workspace_with_actor(
     workspace_id: Uuid,
     provider: &dyn crate::services::embedding::EmbeddingProvider,
     actor: Option<&crate::models::api_keys::AuthContext>,
+    startup: bool,
 ) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
     let lock = if crate::db::AppContextBackend::is_sqlite(ctx) {
         None
@@ -148,6 +149,7 @@ pub(crate) async fn reindex_workspace_with_actor(
         workspace_id,
         provider,
         actor,
+        startup,
     )
     .await;
     if let Some(lock) = lock {

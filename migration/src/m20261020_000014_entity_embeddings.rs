@@ -22,6 +22,10 @@ impl MigrationTrait for Migration {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered migration DDL keeps table definitions, constraints, and grants together"
+)]
 async fn up_entity_embeddings(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     {
         let name = "entity_embeddings";
@@ -88,7 +92,7 @@ async fn up_entity_embeddings(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
     }
 
     // Fence entity and provider mutations against embedding publication, including raw SQL writers.
-    helpers::pg_only(manager, r#"
+    helpers::pg_only(manager, r"
             CREATE FUNCTION touch_workspace_embedding_revision() RETURNS trigger
             LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
             BEGIN
@@ -120,7 +124,7 @@ async fn up_entity_embeddings(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
                 ON entity_entities FOR EACH ROW EXECUTE FUNCTION touch_workspace_embedding_revision();
             CREATE TRIGGER provider_embedding_revision BEFORE INSERT OR UPDATE OR DELETE
                 ON workspace_embedding_keys FOR EACH ROW EXECUTE FUNCTION touch_workspace_embedding_revision();
-        "#).await?;
+        ").await?;
     for table in ["entity_entities", "workspace_embedding_keys"] {
         for (operation, row) in [("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")] {
             let operation_sql = if table == "entity_entities" && operation == "UPDATE" {

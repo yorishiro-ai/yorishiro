@@ -12,9 +12,13 @@ fn issued_state_verifies_and_the_csrf_hash_matches_the_cookie() {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric())
     );
-    let verifier = issued.state.split('.').nth(2).unwrap();
-    assert_eq!(verifier.len(), 43);
-    assert!(verifier.bytes().all(|byte| byte.is_ascii_alphanumeric()));
+    let pkce_verifier = issued.state.split('.').nth(2).unwrap();
+    assert_eq!(pkce_verifier.len(), 43);
+    assert!(
+        pkce_verifier
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric())
+    );
     assert_ne!(issued.state, issue_at(KEY, 1_700_000_000).state);
     let verified =
         verify_at(KEY, &issued.state, 1_700_000_000).expect("a freshly issued state must verify");
@@ -36,7 +40,7 @@ fn verify_rejects_a_tampered_payload() {
     // Flip the last character of the payload without re-signing.
     let mut parts: Vec<&str> = issued.state.split('.').collect();
     let last_payload_part = parts[2].to_string();
-    let mut tampered_part = last_payload_part.clone();
+    let mut tampered_part = last_payload_part;
     tampered_part.push('x');
     parts[2] = &tampered_part;
     let tampered = parts.join(".");

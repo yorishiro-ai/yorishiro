@@ -44,8 +44,8 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
         assert!(identity.get("workspace_access").is_none());
         assert_eq!(identity["stored_scope"], "read");
         assert_eq!(identity["bound_workspace_id"], tenant.workspace_id.to_string());
-        assert!(!identity["workspace_name"].as_str().unwrap().is_empty());
-        assert!(!identity["tenant_name"].as_str().unwrap().is_empty());
+        assert_ne!(identity["workspace_name"].as_str().unwrap(), "");
+        assert_ne!(identity["tenant_name"].as_str().unwrap(), "");
         assert!(!result.to_string().contains(&key));
         assert!(!result.to_string().contains("key_hash"));
         let grants = mcp_call(
@@ -86,6 +86,10 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one viewer and policy compare login, REST, and MCP discovery while proving a sibling workspace stays private"
+)]
 async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
     use sea_orm::TransactionTrait;
     use yorishiro::models::workspace_memberships::WorkspaceRole;

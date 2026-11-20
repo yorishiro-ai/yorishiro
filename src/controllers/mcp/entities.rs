@@ -22,6 +22,7 @@ pub struct CreateEntityArgs {
     /// Name of the schema this entity conforms to.
     /// The workspace's current active version is used.
     pub schema_name: String,
+    #[expect(clippy::doc_markdown, reason = "MCP exposes this description verbatim")]
     /// entity_type name declared in the schema.
     pub entity_type: String,
     /// Entity body (JSON object) conforming to the schema's `fields` definition.
@@ -130,11 +131,15 @@ impl YorishiroMcpServer {
 
         let workspace_id = authorized.workspace_id();
         let created_by = authorized.auth_context().user_id;
-        let quotas =
-            match crate::quotas(self.app_context(), authorized.auth_context().tenant_id).await {
-                Ok(quotas) => quotas,
-                Err(error) => return Ok(err_to_tool_result(error)),
-            };
+        let quotas = match crate::data::quotas::for_tenant(
+            self.app_context(),
+            authorized.auth_context().tenant_id,
+        )
+        .await
+        {
+            Ok(quotas) => quotas,
+            Err(error) => return Ok(err_to_tool_result(error)),
+        };
         let record = match entity_entities::create_with_quota(
             authorized.txn(),
             workspace_id,
@@ -277,7 +282,7 @@ impl YorishiroMcpServer {
         match entity_entities::delete(authorized.txn(), workspace_id, args.id).await {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        }
         authorized.commit().await?;
         ok_json(serde_json::json!({ "deleted": true }))
     }

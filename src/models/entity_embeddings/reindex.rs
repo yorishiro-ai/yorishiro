@@ -16,6 +16,7 @@ pub struct ReindexFailure {
 }
 
 /// Outcome of a full [`reindex_workspace`] run.
+#[derive(Default)]
 pub struct ReindexOutcome {
     pub total: usize,
     pub reindexed: usize,
@@ -65,31 +66,17 @@ pub async fn reindex_workspace(
     workspace_id: Uuid,
     provider: &dyn EmbeddingProvider,
 ) -> Result<ReindexOutcome, YorishiroError> {
-    reindex_workspace_as(conn, workspace_id, provider, None).await
+    reindex_workspace_as(conn, workspace_id, provider, None, false).await
 }
 
-pub(crate) async fn reindex_workspace_as(
-    conn: &DatabaseConnection,
+async fn authorize_reindex(
+    txn: &sea_orm::DatabaseTransaction,
     workspace_id: Uuid,
-    provider: &dyn EmbeddingProvider,
     actor: Option<&crate::models::api_keys::AuthContext>,
-) -> Result<ReindexOutcome, YorishiroError> {
-    if provider.dimensions() == 0 || i32::try_from(provider.dimensions()).is_err() {
-        return Err(YorishiroError::ValidationFailed {
-            message: "provider dimensions must be a positive i32".into(),
-            details: vec![],
-            hint: "configure the provider output width".into(),
-        });
-    }
-    use crate::models::_entities::workspace_workspaces::Column;
-    use crate::models::workspace_workspaces;
-    use sea_orm::sea_query::Expr;
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-
-    let txn = crate::db::begin_write(conn).await.internal()?;
+) -> Result<(), YorishiroError> {
     if let Some(actor) = actor {
         crate::models::iam::access::require_iam_action(
-            &txn,
+            txn,
             actor,
             crate::models::api_keys::ApiKeyScope::Migration,
             crate::models::iam::policy::Action::WorkspaceReindex,
@@ -100,8 +87,32 @@ pub(crate) async fn reindex_workspace_as(
         )
         .await?;
     }
+    Ok(())
+}
+
+async fn begin_reindex(
+    conn: &DatabaseConnection,
+    workspace_id: Uuid,
+    provider: &dyn EmbeddingProvider,
+    actor: Option<&crate::models::api_keys::AuthContext>,
+    startup: bool,
+) -> Result<Option<(i64, i64)>, YorishiroError> {
+    use crate::models::_entities::workspace_workspaces::Column;
+    use crate::models::workspace_workspaces;
+    use sea_orm::sea_query::Expr;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let txn = crate::db::begin_write(conn).await.internal()?;
+    authorize_reindex(&txn, workspace_id, actor).await?;
     let revision = workspace_workspaces::embedding_revision(&txn, workspace_id).await?;
     workspace_workspaces::fence_embedding(&txn, workspace_id, revision).await?;
+    // A manual reindex may have published after the startup scan read its candidates.
+    if startup
+        && !workspace_workspaces::startup_reindex_needed(&txn, workspace_id, provider).await?
+    {
+        txn.rollback().await.internal()?;
+        return Ok(None);
+    }
     workspace_workspaces::check_embedding_assignment(&txn, workspace_id, provider).await?;
     let content_revision =
         workspace_workspaces::embedding_content_revision(&txn, workspace_id).await?;
@@ -116,7 +127,53 @@ pub(crate) async fn reindex_workspace_as(
         .internal()?;
     workspace_workspaces::set_embedding_reindexing(&txn, workspace_id, true).await?;
     txn.commit().await.internal()?;
-    let revision = revision + 1;
+    Ok(Some((revision + 1, content_revision)))
+}
+
+async fn clear_workspace_vectors(
+    txn: &sea_orm::DatabaseTransaction,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::{entity_embeddings as vectors, entity_entities as entities};
+    use sea_orm::sea_query::{Expr, Query};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let entities = Query::select()
+        .column(entities::Column::Id)
+        .from(entities::Entity)
+        .and_where(Expr::col(entities::Column::WorkspaceId).eq(workspace_id))
+        .to_owned();
+    super::Entity::delete_many()
+        .filter(vectors::Column::WorkspaceId.eq(workspace_id))
+        .filter(Expr::col(vectors::Column::EntityId).in_subquery(entities))
+        .exec(txn)
+        .await
+        .internal()?;
+    Ok(())
+}
+
+pub(crate) async fn reindex_workspace_as(
+    conn: &DatabaseConnection,
+    workspace_id: Uuid,
+    provider: &dyn EmbeddingProvider,
+    actor: Option<&crate::models::api_keys::AuthContext>,
+    startup: bool,
+) -> Result<ReindexOutcome, YorishiroError> {
+    use crate::models::workspace_workspaces;
+
+    if provider.dimensions() == 0 || i32::try_from(provider.dimensions()).is_err() {
+        return Err(YorishiroError::ValidationFailed {
+            message: "provider dimensions must be a positive i32".into(),
+            details: vec![],
+            hint: "configure the provider output width".into(),
+        });
+    }
+
+    let Some((revision, content_revision)) =
+        begin_reindex(conn, workspace_id, provider, actor, startup).await?
+    else {
+        return Ok(ReindexOutcome::default());
+    };
     let candidate_ids = crate::models::entity_entities::ids_for_workspace(conn, workspace_id)
         .await
         .internal()?;
@@ -150,19 +207,7 @@ pub(crate) async fn reindex_workspace_as(
     if failures.is_empty() {
         // Mutation triggers take this same row lock before changing entities or provider settings.
         let txn = crate::db::begin_write(conn).await.internal()?;
-        if let Some(actor) = actor {
-            crate::models::iam::access::require_iam_action(
-                &txn,
-                actor,
-                crate::models::api_keys::ApiKeyScope::Migration,
-                crate::models::iam::policy::Action::WorkspaceReindex,
-                crate::models::iam::policy::Resource::Workspace {
-                    tenant_id: actor.tenant_id,
-                    workspace_id,
-                },
-            )
-            .await?;
-        }
+        authorize_reindex(&txn, workspace_id, actor).await?;
         workspace_workspaces::fence_embedding(&txn, workspace_id, revision).await?;
         if workspace_workspaces::embedding_content_revision(&txn, workspace_id).await?
             != content_revision
@@ -171,26 +216,7 @@ pub(crate) async fn reindex_workspace_as(
                 message: "workspace entities changed during reindex; retry the operation".into(),
             });
         }
-        use sea_orm::sea_query::{Expr as QueryExpr, Query};
-        let entities = Query::select()
-            .column(crate::models::_entities::entity_entities::Column::Id)
-            .from(crate::models::entity_entities::Entity)
-            .and_where(
-                QueryExpr::col(crate::models::_entities::entity_entities::Column::WorkspaceId)
-                    .eq(workspace_id),
-            )
-            .to_owned();
-        super::Entity::delete_many()
-            .filter(
-                crate::models::_entities::entity_embeddings::Column::WorkspaceId.eq(workspace_id),
-            )
-            .filter(
-                QueryExpr::col(crate::models::_entities::entity_embeddings::Column::EntityId)
-                    .in_subquery(entities),
-            )
-            .exec(&txn)
-            .await
-            .internal()?;
+        clear_workspace_vectors(&txn, workspace_id).await?;
         for (record, vector) in prepared {
             if let Some(vector) = vector {
                 let written = embed_and_write(

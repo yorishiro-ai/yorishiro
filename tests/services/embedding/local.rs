@@ -27,7 +27,7 @@ fn mean_pooling_ignores_masked_tokens_and_normalizes() {
 #[test]
 fn load_rejects_out_of_range_max_sequence_length() {
     for max_sequence_length in [1, 513] {
-        let result = LocalEmbeddingProvider::load(LocalEmbeddingConfig {
+        let result = LocalEmbeddingProvider::load(&LocalEmbeddingConfig {
             model_path: "/nonexistent/model.safetensors".into(),
             tokenizer_path: "/nonexistent/tokenizer.json".into(),
             def: model_fetch::DEFAULT_MODEL,
@@ -42,7 +42,7 @@ fn load_rejects_out_of_range_max_sequence_length() {
 
 #[test]
 fn load_reports_missing_files_clearly() {
-    let result = LocalEmbeddingProvider::load(LocalEmbeddingConfig {
+    let result = LocalEmbeddingProvider::load(&LocalEmbeddingConfig {
         model_path: "/nonexistent/model.safetensors".into(),
         tokenizer_path: "/nonexistent/tokenizer.json".into(),
         def: model_fetch::DEFAULT_MODEL,
@@ -68,7 +68,7 @@ async fn embeds_texts_with_a_real_e5_model() {
         return;
     }
 
-    let provider = LocalEmbeddingProvider::load(LocalEmbeddingConfig {
+    let provider = LocalEmbeddingProvider::load(&LocalEmbeddingConfig {
         model_path: model_path.into(),
         tokenizer_path: tokenizer_path.into(),
         def: model_fetch::DEFAULT_MODEL,
@@ -124,15 +124,6 @@ async fn embeds_texts_with_a_real_e5_model() {
 /// The pinned Docker generator reproduces the fixture; this test requires local model files.
 #[tokio::test]
 async fn matches_a_real_sentence_transformers_run_of_e5() {
-    let model_path = std::env::var("YORISHIRO_TEST_E5_MODEL")
-        .unwrap_or_else(|_| "models/multilingual-e5-base/model.safetensors".into());
-    let tokenizer_path = std::env::var("YORISHIRO_TEST_E5_TOKENIZER")
-        .unwrap_or_else(|_| "models/multilingual-e5-base/tokenizer.json".into());
-    if !Path::new(&model_path).exists() || !Path::new(&tokenizer_path).exists() {
-        eprintln!("skipping matches_a_real_sentence_transformers_run_of_e5: model files not found");
-        return;
-    }
-
     #[derive(serde::Deserialize)]
     struct Fixture {
         entries: Vec<FixtureEntry>,
@@ -144,13 +135,22 @@ async fn matches_a_real_sentence_transformers_run_of_e5() {
         document_vector: Vec<f32>,
     }
 
+    let model_path = std::env::var("YORISHIRO_TEST_E5_MODEL")
+        .unwrap_or_else(|_| "models/multilingual-e5-base/model.safetensors".into());
+    let tokenizer_path = std::env::var("YORISHIRO_TEST_E5_TOKENIZER")
+        .unwrap_or_else(|_| "models/multilingual-e5-base/tokenizer.json".into());
+    if !Path::new(&model_path).exists() || !Path::new(&tokenizer_path).exists() {
+        eprintln!("skipping matches_a_real_sentence_transformers_run_of_e5: model files not found");
+        return;
+    }
+
     let fixture_bytes =
         std::fs::read("tests/fixtures/multilingual-e5-base_reference_embeddings.json")
             .expect("fixture missing: see tests/fixtures/generate_e5_reference/ to generate it");
     let fixture: Fixture =
         serde_json::from_slice(&fixture_bytes).expect("fixture is not valid JSON");
 
-    let provider = LocalEmbeddingProvider::load(LocalEmbeddingConfig {
+    let provider = LocalEmbeddingProvider::load(&LocalEmbeddingConfig {
         model_path: model_path.into(),
         tokenizer_path: tokenizer_path.into(),
         def: model_fetch::DEFAULT_MODEL,

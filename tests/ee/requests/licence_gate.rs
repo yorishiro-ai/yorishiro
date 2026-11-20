@@ -218,7 +218,7 @@ async fn missing_licence_state_closes_the_gate_again() {
                 &request,
                 &session,
                 "",
-                index as i64 + 3,
+                i64::try_from(index).unwrap() + 3,
                 "tools/call",
                 serde_json::json!({"name":name,"arguments":{}}),
             )

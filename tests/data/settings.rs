@@ -16,7 +16,7 @@ fn settings() -> serde_json::Value {
         "rate_limit": {
             "auth_max_requests": 10,
             "auth_window_seconds": 60,
-            "search_tokens_per_minute": 100000
+            "search_tokens_per_minute": 100_000
         },
         "db_load_guard": {
             "threshold": 0,

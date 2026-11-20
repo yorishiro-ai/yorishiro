@@ -8,16 +8,11 @@ use super::types::{ArrayItemType, FieldDef, FieldTypeName, MetaSchemaDefinition}
 #[doc(hidden)]
 pub const MAX_OBJECT_DEPTH: usize = 5;
 
-/// Escapes `~`/`/` per RFC6901 before embedding a value as a JSON Pointer segment.
-fn escape_pointer_segment(segment: &str) -> String {
-    segment.replace('~', "~0").replace('/', "~1")
-}
-
 /// Validates the metaschema definition itself:
-/// - entity_types / relation_types must have minimal internal consistency
-/// - relation_types' source/target must reference keys existing in this definition's entity_types
+/// - `entity_types` / `relation_types` must have minimal internal consistency
+/// - `relation_types`' source/target must reference keys existing in this definition's `entity_types`
 /// - array-type fields only allow items.type == "string" or "object" (with properties for the latter)
-/// - object-type fields require non-empty properties, nested up to MAX_OBJECT_DEPTH levels
+/// - object-type fields require non-empty properties, nested up to `MAX_OBJECT_DEPTH` levels
 /// - format is only valid for string fields; minimum/maximum are only valid for number/integer fields and require minimum <= maximum
 ///
 /// # Errors
@@ -48,16 +43,19 @@ pub fn validate_definition(def: &MetaSchemaDefinition) -> Result<(), YorishiroEr
     for (type_name, entity_type) in &def.entity_types {
         for (field_name, field) in &entity_type.fields {
             let field_path = format!(
-                "/entity_types/{}/fields/{}",
-                escape_pointer_segment(type_name),
-                escape_pointer_segment(field_name)
+                "/entity_types{}/fields{}",
+                jsonschema::paths::Location::new().join(type_name.as_str()),
+                jsonschema::paths::Location::new().join(field_name.as_str())
             );
             validate_field(field, &field_path, 1, &mut details);
         }
     }
 
     for (relation_name, relation) in &def.relation_types {
-        let relation_path = format!("/relation_types/{}", escape_pointer_segment(relation_name));
+        let relation_path = format!(
+            "/relation_types{}",
+            jsonschema::paths::Location::new().join(relation_name.as_str())
+        );
 
         if !def.entity_types.contains_key(&relation.source) {
             details.push(ValidationDetail {
@@ -103,6 +101,17 @@ fn validate_field(
     depth: usize,
     details: &mut Vec<ValidationDetail>,
 ) {
+    validate_nested_fields(field, field_path, depth, details);
+    validate_scalar_constraints(field, field_path, details);
+    validate_string_and_array_constraints(field, field_path, details);
+}
+
+fn validate_nested_fields(
+    field: &FieldDef,
+    field_path: &str,
+    depth: usize,
+    details: &mut Vec<ValidationDetail>,
+) {
     if field.r#type == FieldTypeName::Array {
         match &field.items {
             Some(items) => match items.r#type {
@@ -122,8 +131,8 @@ fn validate_field(
                         } else {
                             for (child_name, child_field) in properties {
                                 let child_path = format!(
-                                    "{field_path}/items/properties/{}",
-                                    escape_pointer_segment(child_name)
+                                    "{field_path}/items/properties{}",
+                                    jsonschema::paths::Location::new().join(child_name.as_str())
                                 );
                                 validate_field(child_field, &child_path, depth + 1, details);
                             }
@@ -145,7 +154,7 @@ fn validate_field(
                 expected: Some("items.type".into()),
                 actual: None,
             }),
-        };
+        }
     }
 
     if field.r#type == FieldTypeName::Object {
@@ -162,8 +171,8 @@ fn validate_field(
                 } else {
                     for (child_name, child_field) in properties {
                         let child_path = format!(
-                            "{field_path}/properties/{}",
-                            escape_pointer_segment(child_name)
+                            "{field_path}/properties{}",
+                            jsonschema::paths::Location::new().join(child_name.as_str())
                         );
                         validate_field(child_field, &child_path, depth + 1, details);
                     }
@@ -178,7 +187,13 @@ fn validate_field(
             }),
         }
     }
+}
 
+fn validate_scalar_constraints(
+    field: &FieldDef,
+    field_path: &str,
+    details: &mut Vec<ValidationDetail>,
+) {
     if let Some(format) = &field.format {
         if field.r#type != FieldTypeName::String {
             details.push(ValidationDetail {
@@ -231,7 +246,13 @@ fn validate_field(
             actual: Some(minimum.to_string()),
         });
     }
+}
 
+fn validate_string_and_array_constraints(
+    field: &FieldDef,
+    field_path: &str,
+    details: &mut Vec<ValidationDetail>,
+) {
     let string_type = field.r#type == FieldTypeName::String;
     if !string_type
         && (field.min_length.is_some() || field.max_length.is_some() || field.pattern.is_some())

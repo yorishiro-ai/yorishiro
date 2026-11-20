@@ -104,6 +104,14 @@ async fn root_removal_conflicts_and_preserves_the_root() {
     .await;
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the gated issuance-removal race shares setup and verifies both durable revocation and HTTP rejection after membership is restored"
+)]
 async fn issuance_and_removal_are_serialized(tenant_key: bool) {
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
     use yorishiro::models::_entities::api_keys::Column;
@@ -129,13 +137,14 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
             yorishiro::models::workspace_memberships::WorkspaceRole::Viewer,
         )
         .await;
-        #[cfg(feature = "enterprise")]
         if tenant_key {
-            let created = yorishiro::edition::ee::models::api_keys::create_tenant_api_key(
+            let created = api_keys::Entity::create_tenant_api_key(
                 &ctx.db,
                 tenant.tenant_id,
-                "read",
+                ApiKeyScope::Read,
                 Some(user.id),
+                false,
+                "membership-race-probe",
             )
             .await
             .expect("tenant issuance must succeed before removal, including SQLite ID generation");
@@ -163,19 +172,16 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
         let issue = async {
             barrier.wait().await;
             if tenant_key {
-                #[cfg(feature = "enterprise")]
-                {
-                    return yorishiro::edition::ee::models::api_keys::create_tenant_api_key(
-                        &ctx.db,
-                        tenant.tenant_id,
-                        "read",
-                        Some(user.id),
-                    )
-                    .await
-                    .map(|key| key.plaintext);
-                }
-                #[cfg(not(feature = "enterprise"))]
-                unreachable!("tenant keys require the overlay");
+                return api_keys::Entity::create_tenant_api_key(
+                    &ctx.db,
+                    tenant.tenant_id,
+                    ApiKeyScope::Read,
+                    Some(user.id),
+                    false,
+                    "membership-race",
+                )
+                .await
+                .map(|key| key.plaintext);
             }
             api_keys::Entity::create_api_key(
                 &ctx.db,
@@ -239,7 +245,6 @@ async fn workspace_key_issuance_cannot_survive_concurrent_membership_removal() {
     issuance_and_removal_are_serialized(false).await;
 }
 
-#[cfg(feature = "enterprise")]
 #[tokio::test]
 async fn tenant_key_issuance_cannot_survive_concurrent_membership_removal() {
     issuance_and_removal_are_serialized(true).await;

@@ -24,7 +24,7 @@ pub fn deployment_embedding_metadata(
     let config = &settings.embedding;
     if !((1..=4096).contains(&config.dimensions)) {
         return Err("embedding dimensions must be between 1 and 4096".into());
-    };
+    }
     if let (Some(_), Some(model)) = (&config.base_url, &config.model) {
         return Ok(Some(EmbeddingMetadata {
             model: model.clone(),
@@ -90,6 +90,10 @@ pub enum EmbeddingProviderAvailability {
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
     /// Prefix affecting persisted document vectors, not query-only instructions.
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "provider implementations return prefixes borrowed from their configuration"
+    )]
     fn document_prefix(&self) -> &str {
         ""
     }
@@ -180,11 +184,11 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 /// Priority order:
 ///
 /// 1. `YORISHIRO_EMBEDDING_BASE_URL` + `YORISHIRO_EMBEDDING_MODEL` both set — the OpenAI-compatible provider.
-///    This is the documented shape for an external embedding backend (LM Studio, Ollama, vLLM, or real OpenAI).
+///    This is the documented shape for an external embedding backend (LM Studio, Ollama, vLLM, or real `OpenAI`).
 /// 2. `YORISHIRO_EMBEDDING_PROVIDER=none` — explicitly disabled, returns [`UnconfiguredEmbeddingProvider`].
 /// 3. `YORISHIRO_EMBEDDING_PROVIDER=local` — the local in-process provider (candle-based safetensors).
 ///
-/// The configured default is the local provider; an explicit OpenAI provider requires both URL and model.
+/// The configured default is the local provider; an explicit `OpenAI` provider requires both URL and model.
 ///
 /// `YORISHIRO_EMBEDDING_DIMENSIONS` defaults to 768.
 ///
@@ -199,7 +203,7 @@ pub async fn build_embedding_provider(
     let dimensions = config.dimensions;
     if !((1..=4096).contains(&dimensions)) {
         return Err("embedding dimensions must be between 1 and 4096".into());
-    };
+    }
 
     // Check base_url/model presence before PROVIDER so that the documented
     // shape (PROVIDER unset, base_url+model set) reaches the OpenAI-compatible

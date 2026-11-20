@@ -26,6 +26,10 @@ impl MigrationTrait for Migration {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered migration DDL keeps table definitions, constraints, and grants together"
+)]
 async fn up_entity_relations(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let table = Table::create()
         .table(Alias::new("entity_relations"))

@@ -8,7 +8,7 @@
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
 EDITION ?= ee
 TEST_FEATURES = $(if $(filter ce,$(EDITION)),--no-default-features --features community,--features enterprise)
-export RUSTUP_TOOLCHAIN ?= $(shell sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
+# rustup reads rust-toolchain.toml; do not override it with Cargo's minimum version.
 export CARGO_HOME := $(abspath .cargo-cache)
 export CARGO_TARGET_DIR := $(abspath target)
 export PATH := $(CARGO_HOME)/bin:$(PATH)
