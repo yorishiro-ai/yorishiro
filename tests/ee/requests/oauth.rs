@@ -5,10 +5,10 @@ use crate::requests::boot_request;
 use crate::requests::boot_request_with;
 use axum::http::StatusCode;
 use axum::http::header;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
 use yorishiro::App;
 use yorishiro::db::AppContextBackend;
-use yorishiro::models::_entities::tenant_memberships;
+use yorishiro::models::_entities::{tenant_memberships, workspace_workspaces};
 
 /// A loopback address nothing listens on, so `authorize`'s discovery fetch fails fast with a connection refusal rather than depending on real DNS/network reachability in CI.
 /// Loopback, not a public hostname, so `discovery::require_https_or_loopback`'s `http://` exemption applies without needing a TLS-terminating stub server.
@@ -294,12 +294,9 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
     .await;
 }
 
-/// A first login must not leave the auto-provisioned workspace `schema_pending`: there is no admin present afterward to choose a starting schema for it, unlike `controllers::setup::setup`'s own bootstrap workspace.
-/// The workspace is provisioned with a schema from the built-in `general-notes` template and left `active`.
 #[tokio::test]
-async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_schema() {
+async fn first_oauth_login_creates_a_tenant_root_without_a_workspace() {
     boot_request::<App, _, _>(|_request, ctx| async move {
-        // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         let txn = ctx.db.begin().await.expect("begin");
         let user_id = yorishiro::edition::ee::models::user_users::find_or_create(
             &txn,
@@ -311,65 +308,34 @@ async fn find_or_create_provisions_an_active_workspace_with_a_general_notes_sche
         )
         .await
         .expect("first login provisioning");
-        // The assertions below read these rows back through `ctx.db`, so an uncommitted transaction would leave them invisible.
         txn.commit().await.expect("commit provisioning");
 
-        let workspace = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(
-            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, user_id)
+        let (_, tenant_id, _) =
+            yorishiro::models::tenancy::issue_login_key(&ctx.db, user_id, None, None)
                 .await
-                .unwrap()[0]
-                .id,
-        )
-        .one(&ctx.db)
-        .await
-        .unwrap()
-        .expect("the provisioned workspace must exist");
-
-        assert_eq!(
-            workspace.status, "active",
-            "an auto-provisioned workspace must not be left schema_pending"
-        );
-        let schema_id = workspace
-            .schema_id
-            .expect("the workspace must have a schema linked");
-
-        let schema = yorishiro::models::schema_schemas::get_active_schema(
-            &ctx.db,
-            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, user_id)
-                .await
-                .unwrap()[0]
-                .id,
-            "general-notes",
-        )
-        .await
-        .expect("the linked schema must be active");
-        assert_eq!(schema.id, schema_id);
-        assert_eq!(schema.name, "general-notes");
-        let memberships = tenant_memberships::Entity::find()
-            .filter(tenant_memberships::Column::TenantId.eq(workspace.tenant_id))
-            .all(&ctx.db)
+                .expect("first login can issue a tenant key without a workspace");
+        let root = yorishiro::models::iam_tenant_roots::Entity::find_by_id(tenant_id)
+            .one(&ctx.db)
             .await
-            .expect("OAuth tenant owner");
-        assert_eq!(memberships.len(), 1);
-        let candidates =
-            yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, memberships[0].user_id)
+            .unwrap()
+            .expect("OAuth tenant root");
+        assert_eq!(root.user_id, user_id);
+        assert_eq!(
+            workspace_workspaces::Entity::find()
+                .filter(workspace_workspaces::Column::TenantId.eq(tenant_id))
+                .count(&ctx.db)
                 .await
-                .expect("OAuth workspace discovery");
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].id, workspace.id);
+                .unwrap(),
+            0
+        );
     })
     .await;
 }
 
 #[tokio::test]
 async fn oauth_provisioning_policy_controls_new_caps() {
-    for (index, value, expected_tenant, expected_entities) in
-        [(0, None, None, None), (1, Some("true"), None, None)]
-    {
-        let overrides = [(
-            "initializers.plan_policy_enabled",
-            value.unwrap_or("false").into(),
-        )];
+    for (index, enabled) in ["false", "true"].into_iter().enumerate() {
+        let overrides = [("initializers.plan_policy_enabled", enabled.into())];
         boot_request_with::<App, _, _>(&overrides, |_request, ctx| async move {
             if crate::requests::skip_unlicensed(&ctx) {
                 return;
@@ -386,22 +352,17 @@ async fn oauth_provisioning_policy_controls_new_caps() {
             .await
             .expect("provisioning");
             txn.commit().await.expect("commit");
-            let workspace = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(
-                yorishiro::models::tenancy::list_workspaces_for_user(&ctx.db, user_id)
-                    .await
-                    .unwrap()[0]
-                    .id,
-            )
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .unwrap();
+            let membership = tenant_memberships::Entity::find()
+                .filter(tenant_memberships::Column::UserId.eq(user_id))
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .expect("provisioned tenant membership");
             let tenant =
-                yorishiro::models::tenant_tenants::Model::find_by_id(&ctx.db, workspace.tenant_id)
+                yorishiro::models::tenant_tenants::Model::find_by_id(&ctx.db, membership.tenant_id)
                     .await
                     .expect("provisioned tenant");
-            assert_eq!(tenant.max_workspaces, expected_tenant);
-            assert_eq!(workspace.max_entities, expected_entities);
+            assert_eq!(tenant.max_workspaces, None);
         })
         .await;
     }

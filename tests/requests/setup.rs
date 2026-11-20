@@ -91,17 +91,12 @@ async fn setup_uses_the_single_tenant_source_default() {
                 "password": "hunter2-hunter2",
             }))
             .await;
-        assert_eq!(
-            response.status_code(),
-            201,
-            "response: {:?}",
-            response.text()
-        );
+        response.assert_status(StatusCode::CREATED);
     })
     .await;
 }
 
-/// With the wizard enabled and no tenant yet, `POST /setup` creates the deployment's first tenant/workspace/owner and returns a working API key.
+/// `POST /setup` creates the first tenant and owner without a workspace and returns a working API key.
 /// A second call must be refused with 409 rather than creating a second tenant, and `GET /setup/status` must report `setup_required: false` once the first call has landed.
 #[tokio::test]
 async fn setup_bootstraps_once_and_refuses_a_second_call() {
@@ -120,16 +115,10 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
                 "display_name": "Owner",
             }))
             .await;
-        assert_eq!(
-            response.status_code(),
-            201,
-            "response: {:?}",
-            response.text()
-        );
+        response.assert_status(StatusCode::CREATED);
         let body: serde_json::Value = response.json();
         assert_eq!(body["email"], "owner@example.com");
         {
-            use sea_orm::EntityTrait;
             use yorishiro::models::iam_tenant_roots;
             let tenant_id: uuid::Uuid = body["tenant_id"].as_str().unwrap().parse().unwrap();
             let root = iam_tenant_roots::Entity::find_by_id(tenant_id)
@@ -139,17 +128,36 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
                 .expect("setup creates a tenant root");
             assert_eq!(root.user_id.to_string(), body["user_id"].as_str().unwrap());
         }
-        let api_key = body["api_key"].as_str().unwrap().to_string();
+        let auth = format!("Bearer {}", body["api_key"].as_str().unwrap());
 
-        // The tenant-scoped key requires the returned workspace ID in the header.
+        assert!(body.get("workspace_id").is_none());
+        let workspaces = request
+            .get("/api/workspaces")
+            .add_header("Authorization", &auth)
+            .await;
+        workspaces.assert_status_ok();
+        assert_eq!(
+            workspaces.json::<serde_json::Value>(),
+            serde_json::json!([])
+        );
+        let created = request
+            .post("/api/workspaces")
+            .add_header("Authorization", &auth)
+            .json(&serde_json::json!({"name": "first-workspace"}))
+            .await;
+        created.assert_status(StatusCode::CREATED);
+        let workspace = created.json::<serde_json::Value>();
+        let workspace_id = workspace["id"].as_str().unwrap();
+
+        // Tenant-scoped keys select an explicitly created workspace through the header.
         let whoami = request
             .get("/api/whoami")
-            .add_header("Authorization", format!("Bearer {api_key}"))
-            .add_header("x-workspace-id", body["workspace_id"].as_str().unwrap())
+            .add_header("Authorization", &auth)
+            .add_header("x-workspace-id", workspace_id)
             .await;
         assert_eq!(whoami.status_code(), StatusCode::OK);
         let identity: serde_json::Value = whoami.json();
-        assert_eq!(identity["workspace_id"], body["workspace_id"]);
+        assert_eq!(identity["workspace_id"], workspace_id);
         assert_eq!(identity["stored_scope"], "migration");
         assert_eq!(identity["scope"], "migration");
         assert_eq!(identity["audit"], true);
@@ -157,15 +165,10 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
         assert!(identity["bound_workspace_id"].is_null());
         let audit_log = request
             .get("/api/audit-log")
-            .add_header("Authorization", format!("Bearer {api_key}"))
-            .add_header("x-workspace-id", body["workspace_id"].as_str().unwrap())
+            .add_header("Authorization", &auth)
+            .add_header("x-workspace-id", workspace_id)
             .await;
-        assert_eq!(
-            audit_log.status_code(),
-            StatusCode::OK,
-            "{}",
-            audit_log.text()
-        );
+        audit_log.assert_status_ok();
 
         let status = request.get("/setup/status").await;
         let body: serde_json::Value = status.json();

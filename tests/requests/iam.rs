@@ -30,6 +30,24 @@ pub(crate) async fn iam_mcp_call(
     serde_json::from_str(payload).expect("MCP JSON response")
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "the request harness uses thread-local HTTP futures"
+)]
+async fn create_workspace(request: &loco_rs::TestServer, api_key: &str) -> uuid::Uuid {
+    let response = request
+        .post("/api/workspaces")
+        .add_header("Authorization", format!("Bearer {api_key}"))
+        .json(&serde_json::json!({"name": "default"}))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    response.json::<serde_json::Value>()["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
 #[tokio::test]
 #[expect(
     clippy::too_many_lines,
@@ -48,7 +66,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert_eq!(response.status_code(), 201, "{}", response.text());
             let body: serde_json::Value = response.json();
             let api_key = body["api_key"].as_str().unwrap().to_string();
-            let workspace_id: uuid::Uuid = body["workspace_id"].as_str().unwrap().parse().unwrap();
+            let workspace_id = create_workspace(&request, &api_key).await;
 
             let group = request
                 .post("/api/iam/groups")
@@ -742,7 +760,7 @@ async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
         assert_eq!(response.status_code(), 201, "{}", response.text());
         let body: serde_json::Value = response.json();
         let root_key = body["api_key"].as_str().unwrap().to_string();
-        let workspace_id = body["workspace_id"].as_str().unwrap().to_string();
+        let workspace_id = create_workspace(&request, &root_key).await.to_string();
         let identity = bearer!(root_key, request.get("/api/whoami"))
             .await
             .json::<serde_json::Value>();

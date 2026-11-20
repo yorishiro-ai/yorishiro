@@ -254,14 +254,13 @@ class App:
                 "email": "owner@example.invalid", "password": password,
             }, status=201, key="")
             self.tenant_key = self.login("owner@example.invalid", password)
-            self.workspace = self.create_workspace("blackbox")
         else:
             account = self.rest("POST", "/setup", {
                 "email": "owner@example.invalid", "password": password,
             }, status=201, key="")
             self.tenant_key = account["api_key"]
             self.secrets.append(self.tenant_key)
-            self.workspace = account["workspace_id"]
+        self.workspace = self.create_workspace("blackbox")
         self.account = account
         self.tenant = account["tenant_id"]
         self.key_id, self.key = self.issue(self.workspace, "schema")
