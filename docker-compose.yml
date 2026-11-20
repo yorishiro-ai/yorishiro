@@ -65,15 +65,15 @@ services:
     init: true
     container_name: testdb
     environment:
-      POSTGRES_USER: yorishiro
-      POSTGRES_PASSWORD: yorishiro
-      POSTGRES_DB: yorishiro
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
     volumes:
       - test_pgdata:/var/lib/postgresql
-      # Installs the extensions in template1 for disposable test databases.
-      - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
+      - ./scripts/init-test-postgres.sql:/docker-entrypoint-initdb.d/init-test-postgres.sql:ro
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "yorishiro"]
+      # Do not accept an existing volume initialized with a superuser test role.
+      test: ["CMD-SHELL", "PGPASSWORD=yorishiro psql -XAt -h 127.0.0.1 -U yorishiro -d yorishiro -c 'SELECT NOT (rolsuper OR rolbypassrls) FROM pg_roles WHERE rolname = current_user' | grep -qx t"]
       interval: 5s
       timeout: 3s
       retries: 5

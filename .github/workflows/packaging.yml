@@ -18,6 +18,8 @@ on:
       - .github/workflows/packaging.yml
       - Cargo.toml
       - Cargo.lock
+      - Dockerfile
+      - rust-toolchain.toml
       - config/production.yaml
       - scripts/release_version.py
       - scripts/release_images.py

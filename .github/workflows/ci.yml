@@ -149,12 +149,7 @@ jobs:
         env:
           POSTGRES_CONTAINER: ${{ job.services.db.id }}
         run: |
-          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d template1 \
-            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
-            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
-          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
-            -c "CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;" \
-            -c 'CREATE DATABASE yorishiro OWNER yorishiro;'
+          docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/init-test-postgres.sql
 
       - name: Run migrations with the built binary
         run: ./target/debug/yorishiro db migrate
@@ -280,12 +275,7 @@ jobs:
         env:
           POSTGRES_CONTAINER: ${{ job.services.db.id }}
         run: |
-          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d template1 \
-            -c 'CREATE EXTENSION IF NOT EXISTS vector;' \
-            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
-          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
-            -c "CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;" \
-            -c 'CREATE DATABASE yorishiro OWNER yorishiro;'
+          docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/init-test-postgres.sql
       - name: Run the tests
         run: make test-${{ matrix.database }} EDITION=${{ matrix.edition }}
 
@@ -396,11 +386,8 @@ jobs:
         env:
           POSTGRES_CONTAINER: ${{ job.services.db.id }}
         run: |
-          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d template1 \
-            -c 'CREATE EXTENSION IF NOT EXISTS vector;' -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
-          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
-            -c "CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;" \
-            -c 'CREATE DATABASE public_contract OWNER yorishiro;'
+          docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -v test_database=public_contract \
+            -U postgres -d postgres < scripts/init-test-postgres.sql
       - name: Exercise authenticated cross-tenant acceptance
         env:
           YORISHIRO_PUBLIC_POSTGRES_URL: postgres://yorishiro:yorishiro@localhost:5432/public_contract
