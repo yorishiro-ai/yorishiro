@@ -5,4 +5,8 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 \connect postgres
 CREATE ROLE yorishiro LOGIN PASSWORD 'yorishiro' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;
-CREATE DATABASE yorishiro OWNER yorishiro;
+\if :{?test_database}
+\else
+\set test_database yorishiro
+\endif
+CREATE DATABASE :"test_database" OWNER yorishiro;
