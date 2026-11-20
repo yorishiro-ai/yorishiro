@@ -1,26 +1,25 @@
-# Project settings for rust-analyzer versions supporting project-local TOML configuration.
-# Clients can override these settings through LSP configuration.
+# Editor clients can override these settings through LSP configuration.
 
 [cargo]
-# The enterprise overlay is compiled behind this feature; analyse it so ee/ gets full diagnostics.
+# Analyze the base and the enterprise overlay together.
 features = ["enterprise"]
 extraArgs = ["--locked"]
-# Tests live in tests/ and are part of the code the lints cover.
+# Include integration tests in editor checks.
 allTargets = true
 
 [check]
 # Run Clippy on save instead of `cargo check`.
 command = "clippy"
-# Targets and features inherit [cargo]; treat warnings as errors, as CI does.
+# Inherit Cargo targets and features and treat warnings as errors.
 extraArgs = ["--", "-D", "warnings"]
 
 [imports]
-# Group auto-imported paths the way AGENTS.md orders them: std, external crates, then this crate.
+# Group auto-imports by module and use `crate::` for local paths.
 group.enable = true
 granularity.group = "module"
 prefix = "crate"
 granularity.enforce = true
 
 [diagnostics]
-# Report rust-analyzer's own style lints (for example needless returns) in the editor.
+# Report rust-analyzer's own style lints alongside Clippy.
 styleLints.enable = true

@@ -1,5 +1,5 @@
-# Lint levels are in Cargo.toml's [workspace.lints]; this file holds their settings and the project's banned APIs.
-# Clippy reads this file; rust-analyzer runs Clippy on save, and CI treats warnings as errors.
+# Clippy settings and banned APIs.
+# Lint levels are in Cargo.toml's [workspace.lints].
 
 # Clippy may suggest changes to exported Rust signatures; keep the public REST, MCP, and CLI contracts stable.
 avoid-breaking-exported-api = false

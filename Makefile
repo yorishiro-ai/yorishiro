@@ -1,14 +1,10 @@
-# Run from anywhere with `make -C <this directory> <target>`: recipes run with this Makefile's directory as CWD, which is exactly what a Loco task needs (`Config::from_folder` always resolves a bare relative "config" against CWD, per CLAUDE.md's Loco rebuild notes).
+# Run from the repository root or use `make -C <repo> <target>` so Loco can find `config/`.
 
-# CI mirrors this structure: check / clippy / fmt-check run once, then test runs.
-# Tests pick their backend from DATABASE_URL and their edition from the feature set (EDITION=ce|ee, default ee).
-# Default database URL for PostgreSQL tests.
-# Override with: make test-postgres DATABASE_URL=postgres://user:pass@host:port/db
-# Targets like `doctor` do not use this default and require an explicit value.
+# Set DATABASE_URL to use a different PostgreSQL database for tests or local tasks.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
+# Select the edition for the test targets.
 EDITION ?= ee
 TEST_FEATURES = $(if $(filter ce,$(EDITION)),--no-default-features --features community,--features enterprise)
-# rustup reads rust-toolchain.toml; do not override it with Cargo's minimum version.
 export CARGO_HOME := $(abspath .cargo-cache)
 export CARGO_TARGET_DIR := $(abspath target)
 export PATH := $(CARGO_HOME)/bin:$(PATH)
@@ -59,7 +55,7 @@ test-location-check:
 		echo 'ERROR: tests and test-only code belong in tests/' >&2; exit 1; \
 	fi
 
-# Every PostgreSQL test creates and drops its own database, so no setup beyond a reachable server is needed.
+# Request tests create disposable databases from template1, which must already contain vector and pg_trgm.
 test-postgres: patch-check
 	@if [ "$(DATABASE_URL)" = "postgres://yorishiro:yorishiro@localhost:15432/yorishiro" ]; then \
 		docker compose up -d --wait testdb; \
@@ -69,8 +65,7 @@ test-postgres: patch-check
 test-sqlite: patch-check
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' cargo test --locked --workspace $(TEST_FEATURES)
 
-# The Valkey queue (Redis-compatible) next to a SQLite database. Set VALKEY_URL to use another server.
-# Only the tests that exercise the provider itself run here; everything else is queue-provider agnostic and runs on the SQL queues.
+# Run queue-provider tests against Valkey with SQLite for application data.
 VALKEY_URL ?= redis://localhost:6379
 test-valkey: patch-check
 	@if [ "$(VALKEY_URL)" = "redis://localhost:6379" ]; then docker compose up -d --wait redis; fi
@@ -84,7 +79,7 @@ build-ce: patch-check
 build-ee: patch-check
 	cargo build --locked --features enterprise --workspace
 
-# make task NAME=seed_official_templates [ARGS="key:value"]
+# Pass task arguments with NAME=<task> and ARGS="key:value".
 task: build
 	./target/debug/yorishiro task $(NAME) $(ARGS)
 
@@ -109,10 +104,10 @@ entities: build
 	fi
 	bash scripts/generate_entities.sh
 
-# CE is the base boundary. EE compatibility is checked separately after CE work is complete.
 patch-check:
 	python3 patches/loco-rs/verify.py --prepare
 
+# CI also checks the enterprise overlay separately.
 check-all: patch-check fmt-check python-lint edition-boundary-check test-location-check check-ce clippy-ce
 
 check-all-ee: patch-check fmt-check python-lint edition-boundary-check test-location-check check-ee clippy-ee
