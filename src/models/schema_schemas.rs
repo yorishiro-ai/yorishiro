@@ -384,6 +384,7 @@ pub(crate) async fn get_by_id(
 #[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpstreamChange {
+    pub workspace_id: Uuid,
     pub schema_id: Uuid,
     pub schema_name: String,
     /// The version of the schema currently in use here.
@@ -415,6 +416,7 @@ pub struct MergeDiffSummary {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct SchemaSummary {
     pub id: Uuid,
+    pub workspace_id: Uuid,
     pub name: String,
     pub version: i32,
     pub status: SchemaStatus,
@@ -425,6 +427,7 @@ impl From<Model> for SchemaSummary {
     fn from(model: Model) -> Self {
         Self {
             id: model.id,
+            workspace_id: model.workspace_id,
             name: model.name,
             version: model.version,
             status: SchemaStatus::from_db_str(&model.status).unwrap_or(SchemaStatus::Archived),
@@ -445,6 +448,7 @@ pub(crate) async fn list(
         .filter(Column::WorkspaceId.eq(workspace_id))
         .order_by_asc(Column::Name)
         .order_by_asc(Column::Version)
+        .order_by_asc(Column::Id)
         .limit(page.limit())
         .offset(page.offset())
         .all(conn)
@@ -455,30 +459,19 @@ pub(crate) async fn list(
 }
 
 pub(crate) async fn list_for_actor(
-    db: &DatabaseConnection,
+    ctx: &loco_rs::app::AppContext,
     actor: &crate::models::api_keys::AuthContext,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<SchemaSummary>, YorishiroError> {
     use crate::models::_entities::schema_schemas::Column;
-    use crate::models::iam::{access::IamEvaluation, policy::Action};
-    let txn = crate::db::begin_write(db).await.internal()?;
-    let evaluation =
-        IamEvaluation::load(&txn, actor, crate::models::api_keys::ApiKeyScope::Read).await?;
-    if let Some(workspace_id) = actor.workspace_id {
-        evaluation
-            .require(
-                Action::SchemaList,
-                crate::models::iam::policy::Resource::Workspace {
-                    tenant_id: actor.tenant_id,
-                    workspace_id,
-                },
-            )
-            .await?;
-        let result = list(&txn, workspace_id, page).await?;
+    use crate::models::iam::{access::read_workspaces, policy::Action};
+    let workspaces = read_workspaces(&ctx.db, actor, Action::SchemaList).await?;
+    let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
+    if let [workspace] = workspaces.as_slice() {
+        let records = list(&txn, *workspace, page).await?;
         txn.commit().await.internal()?;
-        return Ok(result);
+        return Ok(records);
     }
-    let workspaces = evaluation.workspace_ids(Action::SchemaList).await?;
     let rows = Entity::find()
         .filter(Column::TenantId.eq(actor.tenant_id))
         .filter(Column::WorkspaceId.is_in(workspaces))

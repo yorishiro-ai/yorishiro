@@ -27,17 +27,31 @@ pub enum YorishiroError {
         hint: String,
     },
 
+    WorkspaceSelectionRequired {
+        workspaces: Vec<uuid::Uuid>,
+    },
+    WorkspaceAccessDenied,
+
     /// The requested resource does not exist.
-    NotFound { message: String },
+    NotFound {
+        message: String,
+    },
 
     /// The authenticated principal lacks the required scope or role.
-    ScopeInsufficient { message: String, hint: String },
+    ScopeInsufficient {
+        message: String,
+        hint: String,
+    },
 
     /// The request would create a duplicate or contradict an existing resource.
-    Conflict { message: String },
+    Conflict {
+        message: String,
+    },
 
     /// The relation type does not match the expected category.
-    RelationTypeMismatch { message: String },
+    RelationTypeMismatch {
+        message: String,
+    },
 
     /// No valid authentication credentials were provided.
     Unauthenticated,
@@ -60,10 +74,15 @@ pub enum YorishiroError {
     },
 
     /// The embedding provider HTTP endpoint is unreachable.
-    ProviderUnreachable { url: String, message: String },
+    ProviderUnreachable {
+        url: String,
+        message: String,
+    },
 
     /// The requested feature is not supported on the current backend.
-    BackendUnsupported { message: String },
+    BackendUnsupported {
+        message: String,
+    },
 
     /// A required backend component (queue provider, embedding provider) is not configured.
     ///
@@ -71,7 +90,9 @@ pub enum YorishiroError {
     /// `ProviderBusy` (503, provider is busy): this variant covers the "not
     /// configured at all" case where no backend component exists to contact or
     /// wait for.
-    BackendUnavailable { message: String },
+    BackendUnavailable {
+        message: String,
+    },
 
     /// An unexpected internal error occurred.
     Internal(BoxError),
@@ -82,6 +103,12 @@ impl std::fmt::Display for YorishiroError {
         match self {
             Self::ValidationFailed { message, .. } => {
                 write!(formatter, "validation failed: {message}")
+            }
+            Self::WorkspaceSelectionRequired { .. } => {
+                formatter.write_str("multiple workspaces permit this operation")
+            }
+            Self::WorkspaceAccessDenied => {
+                formatter.write_str("no workspace permits this operation")
             }
             Self::NotFound { message } => write!(formatter, "not found: {message}"),
             Self::ScopeInsufficient { message, .. } => {
@@ -165,6 +192,8 @@ pub(crate) fn mcp_internal(error: impl Into<BoxError>) -> rmcp::ErrorData {
 pub enum YorishiroErrorCode {
     /// 422 Unprocessable Entity — the request body does not conform to the expected schema.
     ValidationFailed,
+    WorkspaceSelectionRequired,
+    AccessDenied,
     /// 404 Not Found — the requested resource does not exist.
     NotFound,
     /// 403 Forbidden — the authenticated principal lacks the required scope or role.
@@ -204,6 +233,8 @@ impl YorishiroErrorCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ValidationFailed => "validation_failed",
+            Self::WorkspaceSelectionRequired => "workspace_selection_required",
+            Self::AccessDenied => "access_denied",
             Self::NotFound => "not_found",
             Self::ScopeInsufficient => "scope_insufficient",
             Self::Conflict => "conflict",
@@ -224,11 +255,11 @@ impl YorishiroErrorCode {
     #[must_use]
     pub const fn http_status(self) -> axum::http::StatusCode {
         match self {
-            Self::ValidationFailed | Self::RelationTypeMismatch => {
-                axum::http::StatusCode::UNPROCESSABLE_ENTITY
-            }
+            Self::ValidationFailed
+            | Self::RelationTypeMismatch
+            | Self::WorkspaceSelectionRequired => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             Self::NotFound => axum::http::StatusCode::NOT_FOUND,
-            Self::ScopeInsufficient => axum::http::StatusCode::FORBIDDEN,
+            Self::ScopeInsufficient | Self::AccessDenied => axum::http::StatusCode::FORBIDDEN,
             Self::Conflict => axum::http::StatusCode::CONFLICT,
             Self::Unauthenticated => axum::http::StatusCode::UNAUTHORIZED,
             Self::MaintenanceReadOnly => axum::http::StatusCode::LOCKED,
@@ -245,6 +276,8 @@ impl YorishiroErrorCode {
     pub const fn description(self) -> &'static str {
         match self {
             Self::ValidationFailed => "The request body does not conform to the expected schema",
+            Self::WorkspaceSelectionRequired => "Select one of the permitted workspaces",
+            Self::AccessDenied => "No workspace permits this operation",
             Self::NotFound => "The requested resource does not exist",
             Self::ScopeInsufficient => "Insufficient permissions for the requested operation",
             Self::Conflict => "The request conflicts with an existing resource",
@@ -286,6 +319,10 @@ impl YorishiroError {
     pub const fn code(&self) -> Option<YorishiroErrorCode> {
         match self {
             Self::ValidationFailed { .. } => Some(YorishiroErrorCode::ValidationFailed),
+            Self::WorkspaceSelectionRequired { .. } => {
+                Some(YorishiroErrorCode::WorkspaceSelectionRequired)
+            }
+            Self::WorkspaceAccessDenied => Some(YorishiroErrorCode::AccessDenied),
             Self::NotFound { .. } => Some(YorishiroErrorCode::NotFound),
             Self::ScopeInsufficient { .. } => Some(YorishiroErrorCode::ScopeInsufficient),
             Self::Conflict { .. } => Some(YorishiroErrorCode::Conflict),
@@ -311,9 +348,28 @@ impl YorishiroError {
     /// The error code, HTTP status, and description all come from `YorishiroErrorCode`, so error definitions have one source.
     ///
     /// Internal errors are logged here; the caller should not log them again.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match defines the REST and MCP error envelopes"
+    )]
     #[must_use]
     pub fn into_http_parts(self) -> (axum::http::StatusCode, serde_json::Value) {
         match self {
+            Self::WorkspaceSelectionRequired { workspaces } => (
+                YorishiroErrorCode::WorkspaceSelectionRequired.http_status(),
+                serde_json::json!({"error": {
+                    "code": YorishiroErrorCode::WorkspaceSelectionRequired.as_str(),
+                    "message": "multiple workspaces permit this operation",
+                    "details": workspaces.iter().map(|id| serde_json::json!({
+                        "field": "workspace_id",
+                        "problem": id.to_string(),
+                        "code": ValidationErrorCode::Other,
+                    })).collect::<Vec<_>>(),
+                    "hint": "select a workspace with workspace_id or X-Workspace-Id; use discover_workspaces to see workspace names",
+                }}),
+            ),
+            Self::WorkspaceAccessDenied => YorishiroErrorCode::AccessDenied
+                .message_response("no workspace permits this operation"),
             Self::ValidationFailed {
                 message,
                 details,

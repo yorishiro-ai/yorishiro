@@ -249,7 +249,7 @@ impl YorishiroMcpServer {
         };
 
         let records =
-            match entity_relations::list_for_actor(&self.app_context().db, &actor, query).await {
+            match entity_relations::list_for_actor(self.app_context(), &actor, query).await {
                 Ok(value) => value,
                 Err(err) => return Ok(err_to_tool_result(err)),
             };

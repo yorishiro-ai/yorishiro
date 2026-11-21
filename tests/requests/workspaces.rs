@@ -532,11 +532,12 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
             .json(&serde_json::json!({"user_name":"denied","password":"workspace-bound-key"}))
             .await
             .assert_status(StatusCode::FORBIDDEN);
+        let administrator = super::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
         let tenant_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
             &ctx.db,
             tenant.tenant_id,
             yorishiro::models::api_keys::ApiKeyScope::Migration,
-            Some(tenant.owner_id),
+            Some(administrator),
             false,
             "workspace-admin-test",
         )

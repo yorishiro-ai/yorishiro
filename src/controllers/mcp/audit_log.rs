@@ -23,7 +23,7 @@ pub(crate) struct AuditLogArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = audit_requirement(),
-        description = "List the selected workspace's paginated audit history (requires audit_log_list IAM permission and the independent audit grant; administration does not grant audit access)"
+        description = "List paginated audit history across permitted workspaces, or narrow to a selected workspace (requires audit_log_list IAM permission and the independent audit grant)"
     )]
     pub(crate) async fn list_audit_log(
         &self,
@@ -49,7 +49,7 @@ impl YorishiroMcpServer {
             Ok(page) => page,
             Err(error) => return Ok(err_to_tool_result(error)),
         };
-        match crate::models::api_key_audit_log::list_for_actor(&self.app_context().db, &actor, page)
+        match crate::models::api_key_audit_log::list_for_actor(self.app_context(), &actor, page)
             .await
         {
             Ok(records) => ok_json(crate::controllers::audit_log::render_records(

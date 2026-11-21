@@ -23,7 +23,7 @@ async fn list_columns(
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<ColumnPreference>>, ApiError> {
     let stored =
-        entity_column_preferences::list_for_actor(&ctx.db, &verified.ctx, page.try_into()?).await?;
+        entity_column_preferences::list_for_actor(&ctx, &verified.ctx, page.try_into()?).await?;
     Ok(Json(stored))
 }
 

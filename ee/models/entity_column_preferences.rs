@@ -22,6 +22,7 @@ pub const MAX_VISIBLE_COLUMNS: usize = 12;
 #[derive(Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct ColumnPreference {
+    pub(crate) workspace_id: Uuid,
     pub(crate) entity_type: String,
     /// Field names from the schema, in the order they are displayed.
     /// A name the schema no longer defines stays here and is skipped when rendering, so a schema change does not have to know about display settings.
@@ -32,6 +33,7 @@ fn to_preference(
     model: crate::models::_entities::entity_column_preferences::Model,
 ) -> ColumnPreference {
     ColumnPreference {
+        workspace_id: model.workspace_id,
         entity_type: model.entity_type,
         columns: serde_json::from_value(model.columns).unwrap_or_default(),
     }
@@ -56,18 +58,13 @@ pub(crate) async fn list(
 }
 
 pub(crate) async fn list_for_actor(
-    db: &sea_orm::DatabaseConnection,
+    ctx: &loco_rs::app::AppContext,
     actor: &crate::models::api_keys::AuthContext,
     page: ListParams,
 ) -> Result<Vec<ColumnPreference>, YorishiroError> {
-    let txn = crate::db::begin_write(db).await.internal()?;
-    let workspaces = crate::models::iam::access::permitted_workspaces(
-        &txn,
-        actor,
-        crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam::policy::Action::EntityColumnsGet,
-    )
-    .await?;
+    use crate::models::iam::{access::read_workspaces, policy::Action};
+    let workspaces = read_workspaces(&ctx.db, actor, Action::EntityColumnsGet).await?;
+    let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
     let records = if let [workspace] = workspaces.as_slice() {
         list(&txn, *workspace, page).await?
     } else {
@@ -139,6 +136,7 @@ pub(crate) async fn set(
         .internal()?;
 
     Ok(ColumnPreference {
+        workspace_id,
         entity_type: entity_type.to_string(),
         columns: columns.to_vec(),
     })

@@ -24,7 +24,7 @@ async fn list_upstream_changes(
     verified: Verified<ReadScope>,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<UpstreamChange>>, ApiError> {
-    let changes = origin_model::list_for_actor(&ctx.db, &verified.ctx, page.try_into()?).await?;
+    let changes = origin_model::list_for_actor(&ctx, &verified.ctx, page.try_into()?).await?;
     Ok(Json(changes))
 }
 

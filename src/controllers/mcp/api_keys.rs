@@ -27,7 +27,7 @@ pub(crate) struct ApiKeyArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (X-Workspace-Id required for workspace operations) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and credential_create IAM permission with a tenant-scoped credential)"
+        description = "Issue an API key and return its secret once. Select a workspace to bind the key, or set tenant_scoped for an unbound key. Requires a tenant-scoped issuer with read scope and credential_create permission. Issued keys retain their requested grants and binding."
     )]
     pub(crate) async fn create_api_key(
         &self,

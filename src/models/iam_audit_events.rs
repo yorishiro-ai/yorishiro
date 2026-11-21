@@ -74,22 +74,3 @@ pub(crate) async fn record(
     .internal()?;
     Ok(())
 }
-
-pub(crate) async fn record_assumption(
-    txn: &DatabaseTransaction,
-    actor: &AuthContext,
-    detail: serde_json::Value,
-) -> Result<(), YorishiroError> {
-    ActiveModel {
-        tenant_id: Set(actor.tenant_id),
-        user_id: Set(actor.user_id),
-        api_key_id: Set(actor.api_key_id),
-        action: Set("role_assume".to_owned()),
-        detail: Set(detail),
-        ..Default::default()
-    }
-    .insert(txn)
-    .await
-    .internal()?;
-    Ok(())
-}

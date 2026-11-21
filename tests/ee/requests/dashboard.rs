@@ -77,7 +77,7 @@ async fn tenant_overview_returns_usage_and_members_for_the_owner() {
             .get("/api/tenant/overview")
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
             .await
-            .assert_status(axum::http::StatusCode::OK);
+            .assert_status(axum::http::StatusCode::FORBIDDEN);
 
         let response = request
             .get("/api/tenant/overview")

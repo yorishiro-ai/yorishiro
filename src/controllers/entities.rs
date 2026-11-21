@@ -86,7 +86,7 @@ async fn list_entities(
 ) -> Result<Json<Vec<EntityRecord>>, ApiError> {
     let query = params.try_into()?;
 
-    let records = entity_entities::list_for_actor(&ctx.db, &actor, query).await?;
+    let records = entity_entities::list_for_actor(&ctx, &actor, query).await?;
     Ok(Json(records))
 }
 

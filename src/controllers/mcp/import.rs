@@ -72,7 +72,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),description = "Poll a queued JSON Lines import (requires schema scope)")]
+        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),description = "Poll a queued JSON Lines import by ID (requires schema scope and import_job_get IAM permission)")]
     pub(crate) async fn import_job_status(
         &self,
         Parameters(args): Parameters<ImportJobArgs>,
@@ -83,7 +83,7 @@ impl YorishiroMcpServer {
             super::VerifyOutcome::Verified(actor) => actor,
             super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        let authorized = match super::authorize::Authorized::for_target(
+        let mut authorized = match super::authorize::Authorized::for_target(
             self.app_context(),
             &actor,
             required,
@@ -94,6 +94,12 @@ impl YorishiroMcpServer {
             Ok(authorized) => authorized,
             Err(error) => return Ok(err_to_tool_result(error)),
         };
+        if let Err(error) = authorized
+            .require_action(crate::models::iam::policy::Action::ImportJobGet)
+            .await
+        {
+            return Ok(err_to_tool_result(error));
+        }
         match crate::models::queue_job_lifecycles::bulk_job_status(
             authorized.txn(),
             authorized.workspace_id(),

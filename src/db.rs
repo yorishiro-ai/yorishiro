@@ -460,6 +460,41 @@ pub async fn begin_workspace(
         .internal()
 }
 
+/// Opens a read-only PostgreSQL transaction for an already authorized set of workspaces.
+pub(crate) async fn begin_workspace_list(
+    ctx: &loco_rs::app::AppContext,
+    tenant_id: Uuid,
+    workspaces: &[Uuid],
+) -> Result<DatabaseTransaction, crate::YorishiroError> {
+    use crate::error::ResultExt;
+
+    if ctx.is_sqlite() {
+        return ctx.db.begin().await.internal();
+    }
+    let handle = ctx
+        .shared_store
+        .get::<DbHandle>()
+        .ok_or_else(|| crate::YorishiroError::Internal("DbHandle missing".into()))?;
+    let txn = handle
+        .tenant
+        .orm
+        .begin_with_config(None, Some(sea_orm::AccessMode::ReadOnly))
+        .await
+        .internal()?;
+    txn.execute_raw(Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        "SELECT set_config('app.current_tenant', $1, true), set_config('app.current_workspace', $2, true), set_config('app.workspace_list', ($3::uuid[])::text, true)",
+        [
+            tenant_id.to_string().into(),
+            Uuid::nil().to_string().into(),
+            workspaces.to_vec().into(),
+        ],
+    ))
+    .await
+    .internal()?;
+    Ok(txn)
+}
+
 /// Begins a read-modify-write transaction, acquiring SQLite's writer reservation before reads.
 /// Other backends retain their normal transaction semantics.
 pub(crate) async fn begin_write(db: &DatabaseConnection) -> Result<DatabaseTransaction, DbErr> {

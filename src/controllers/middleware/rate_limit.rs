@@ -72,6 +72,10 @@ impl RateLimiter {
     ///
     /// A single request larger than the whole window is still admitted, once: rejecting it would make that query permanently impossible rather than merely expensive, and the bucket is left exhausted so the next one waits.
     pub(crate) fn allow_cost(&self, key: &str, cost: u32) -> bool {
+        self.allow_batch(&[key.to_owned()], cost)
+    }
+
+    fn allow_batch(&self, keys: &[String], cost: u32) -> bool {
         let mut buckets = self.buckets.lock().expect("rate limiter mutex poisoned");
         let now = Instant::now();
 
@@ -82,15 +86,24 @@ impl RateLimiter {
             buckets.retain(|_, (start, _)| now.duration_since(*start) < window);
         }
 
-        let entry = buckets.entry(key.to_string()).or_insert((now, 0));
-        if now.duration_since(entry.0) >= self.window {
-            *entry = (now, 0);
+        if keys.iter().any(|key| {
+            buckets.get(key).is_some_and(|(start, used)| {
+                now.duration_since(*start) < self.window
+                    && *used > 0
+                    && used.saturating_add(cost) > self.max_requests
+            })
+        }) {
+            return false;
         }
-        let was_empty = entry.1 == 0;
-        entry.1 = entry.1.saturating_add(cost);
-        let allowed = entry.1 <= self.max_requests || was_empty;
+        for key in keys {
+            let entry = buckets.entry(key.clone()).or_insert((now, 0));
+            if now.duration_since(entry.0) >= self.window {
+                *entry = (now, 0);
+            }
+            entry.1 = entry.1.saturating_add(cost);
+        }
         drop(buckets);
-        allowed
+        true
     }
 }
 
@@ -107,16 +120,26 @@ pub fn charge_search_tokens(
     workspace_id: uuid::Uuid,
     query_text: &str,
 ) -> Result<(), crate::error::YorishiroError> {
+    charge_workspace_search_tokens(limiter, &[workspace_id], query_text)
+}
+
+pub(crate) fn charge_workspace_search_tokens(
+    limiter: &RateLimiter,
+    workspaces: &[uuid::Uuid],
+    query_text: &str,
+) -> Result<(), crate::error::YorishiroError> {
     let tokens = u32::try_from(query_text.len().div_ceil(4)).unwrap_or(u32::MAX);
-    if limiter.allow_cost(&workspace_id.to_string(), tokens) {
+    let keys: Vec<_> = workspaces.iter().map(ToString::to_string).collect();
+    if limiter.allow_batch(&keys, tokens) {
         return Ok(());
     }
 
-    tracing::warn!(%workspace_id, tokens, "search token budget exhausted");
+    tracing::warn!(tokens, "search token budget exhausted");
     Err(crate::error::YorishiroError::ValidationFailed {
-        message: "this workspace has spent its search token budget for the minute".to_string(),
+        message: "a requested workspace has spent its search token budget for the minute"
+            .to_string(),
         details: vec![],
-        hint: "retry shortly, or raise settings.rate_limit.search_tokens_per_minute".to_string(),
+        hint: "retry shortly or select a workspace with remaining search budget".to_string(),
     })
 }
 

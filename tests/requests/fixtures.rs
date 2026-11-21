@@ -193,6 +193,19 @@ pub(crate) async fn issue_api_key(
 }
 
 pub(crate) async fn issue_tenant_key(ctx: &AppContext, tenant_id: Uuid, user_id: Uuid) -> String {
+    use sea_orm::EntityTrait;
+    if yorishiro::models::iam_tenant_roots::Entity::find_by_id(tenant_id)
+        .one(&ctx.db)
+        .await
+        .expect("check test principal")
+        .is_some_and(|root| root.user_id == user_id)
+    {
+        return tenancy::issue_login_key(&ctx.db, user_id, None, Some(tenant_id))
+            .await
+            .expect("issue root session")
+            .0
+            .plaintext;
+    }
     api_keys::Entity::create_tenant_api_key(
         &ctx.db,
         tenant_id,

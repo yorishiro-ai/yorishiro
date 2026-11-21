@@ -116,6 +116,35 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
         assert_eq!(own.status_code(), StatusCode::OK);
+        let root = fixtures::issue_tenant_key(&ctx, tenant_id, user_id).await;
+        request
+            .get(&path)
+            .add_header("Authorization", format!("Bearer {root}"))
+            .await
+            .assert_status_ok();
+        let txn = ctx.db.begin().await.unwrap();
+        let ungranted = yorishiro::models::tenancy::register_member(
+            &txn,
+            tenant_id,
+            &fixtures::unique_email("import-status"),
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+        let ungranted = fixtures::issue_tenant_key(&ctx, tenant_id, ungranted.id).await;
+        request
+            .get(&path)
+            .add_header("Authorization", format!("Bearer {ungranted}"))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        request
+            .get(&path)
+            .add_header("Authorization", format!("Bearer {ungranted}"))
+            .add_header("x-workspace-id", workspace_id.to_string())
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
         let foreign = request
             .get(&path)
             .add_header("Authorization", format!("Bearer {other_key}"))

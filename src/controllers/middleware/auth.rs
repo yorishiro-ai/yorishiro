@@ -74,7 +74,8 @@ pub trait Authenticator: Send + Sync {
     ) -> Result<AuthContext, YorishiroError>;
 }
 
-/// This crate's own rule: a workspace-scoped key resolves to the workspace recorded on it, and a tenant-scoped key resolves the workspace named in the `WORKSPACE_HEADER` request header, when present, without selecting a workspace implicitly.
+/// Authentication preserves a key's binding or the requested workspace.
+/// When neither is set, each operation decides whether to span or infer workspaces.
 pub(crate) struct DefaultAuthenticator;
 
 /// Reads the workspace a request asks a tenant-scoped key to act on.

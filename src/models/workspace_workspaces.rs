@@ -179,6 +179,17 @@ pub(crate) use operations::{
     delete_workspace, get_workspace, get_workspace_tenant, workspace_count_lock_key,
 };
 
+pub(crate) fn ids_for_tenant(tenant_id: Uuid) -> sea_orm::sea_query::SelectStatement {
+    use sea_orm::QueryTrait;
+
+    use crate::models::_entities::workspace_workspaces::Column;
+    Entity::find()
+        .select_only()
+        .column(Column::Id)
+        .filter(Column::TenantId.eq(tenant_id))
+        .into_query()
+}
+
 /// A workspace summary returned by tenancy lookups and signup.
 #[derive(Clone, Serialize, sea_orm::FromQueryResult)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -408,7 +419,10 @@ pub(crate) async fn get_for_actor(
             workspace_id,
         },
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        crate::models::iam::access::hide_inferred_resource(actor.workspace_id.is_none(), error)
+    })?;
     Ok(workspace)
 }
 

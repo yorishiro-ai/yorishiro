@@ -11,6 +11,7 @@ pub(crate) struct Authorized {
     txn: DatabaseTransaction,
     identity: sea_orm::DatabaseConnection,
     authorization: Option<DatabaseTransaction>,
+    inferred_resource: bool,
     required: ApiKeyScope,
     workspace_id: uuid::Uuid,
 }
@@ -23,8 +24,14 @@ impl Authorized {
         target: crate::models::iam::access::WorkspaceTarget,
     ) -> Result<Self, YorishiroError> {
         auth::require_scope(actor, required)?;
+        let inferred_resource = target.inferred_resource(actor);
         let mut actor = actor.clone();
-        let workspace_id = target.resolve(&app.db, &actor, required).await?;
+        let workspace_id = target
+            .resolve(&app.db, &actor, required)
+            .await
+            .map_err(|error| {
+                crate::models::iam::access::hide_inferred_resource(inferred_resource, error)
+            })?;
         actor.workspace_id = Some(workspace_id);
         let (ctx, txn) = auth::RequestAuth::new(app)
             .begin(actor, required >= ApiKeyScope::Write)
@@ -34,6 +41,7 @@ impl Authorized {
             txn,
             identity: app.db.clone(),
             authorization: None,
+            inferred_resource,
             required,
             workspace_id,
         })
@@ -69,7 +77,10 @@ impl Authorized {
             self.required,
             action,
         )
-        .await?;
+        .await
+        .map_err(|error| {
+            crate::models::iam::access::hide_inferred_resource(self.inferred_resource, error)
+        })?;
         Ok(())
     }
 

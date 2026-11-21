@@ -48,7 +48,7 @@ impl YorishiroMcpServer {
                 crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
             };
         match entity_column_preferences::list_for_actor(
-            &self.app_context().db,
+            self.app_context(),
             &actor,
             crate::models::pagination::ListParams::new(args.limit, args.offset),
         )

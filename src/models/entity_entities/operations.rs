@@ -255,36 +255,18 @@ pub async fn list(
     workspace_id: Uuid,
     query: ListEntitiesQuery,
 ) -> Result<Vec<EntityRecord>, YorishiroError> {
-    list_workspaces(conn, &[workspace_id], query).await
+    list_workspaces(conn, &[workspace_id], None, query).await
 }
 
 pub(crate) async fn list_for_actor(
-    db: &DatabaseConnection,
+    ctx: &loco_rs::app::AppContext,
     actor: &crate::models::api_keys::AuthContext,
     query: ListEntitiesQuery,
 ) -> Result<Vec<EntityRecord>, YorishiroError> {
-    use crate::models::iam::{
-        access::IamEvaluation,
-        policy::{Action, Resource},
-    };
-    let txn = crate::db::begin_write(db).await.internal()?;
-    let evaluation =
-        IamEvaluation::load(&txn, actor, crate::models::api_keys::ApiKeyScope::Read).await?;
-    let workspaces = if let Some(workspace_id) = actor.workspace_id {
-        evaluation
-            .require(
-                Action::EntityList,
-                Resource::Workspace {
-                    tenant_id: actor.tenant_id,
-                    workspace_id,
-                },
-            )
-            .await?;
-        vec![workspace_id]
-    } else {
-        evaluation.workspace_ids(Action::EntityList).await?
-    };
-    let records = list_workspaces(&txn, &workspaces, query).await?;
+    use crate::models::iam::{access::read_workspaces, policy::Action};
+    let workspaces = read_workspaces(&ctx.db, actor, Action::EntityList).await?;
+    let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
+    let records = list_workspaces(&txn, &workspaces, Some(actor.tenant_id), query).await?;
     txn.commit().await.internal()?;
     Ok(records)
 }
@@ -294,6 +276,7 @@ pub(crate) async fn get_for_actor(
     actor: &crate::models::api_keys::AuthContext,
     id: Uuid,
 ) -> Result<EntityRecord, YorishiroError> {
+    let inferred = actor.workspace_id.is_none();
     let mut actor = actor.clone();
     actor.workspace_id = Some(super::workspace_for_actor(&ctx.db, &actor, id).await?);
     let txn = crate::db::begin_workspace(ctx, actor.tenant_id, actor.require_workspace()?).await?;
@@ -304,7 +287,8 @@ pub(crate) async fn get_for_actor(
         crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::EntityGet,
     )
-    .await?;
+    .await
+    .map_err(|error| crate::models::iam::access::hide_inferred_resource(inferred, error))?;
     get(&txn, actor.require_workspace()?, id).await
 }
 
@@ -346,6 +330,7 @@ pub(crate) async fn update_for_actor(
     actor: &crate::models::api_keys::AuthContext,
     mut input: UpdateEntityInput,
 ) -> Result<EntityRecord, YorishiroError> {
+    let inferred = actor.workspace_id.is_none();
     let mut actor = actor.clone();
     actor.workspace_id = Some(super::workspace_for_actor(&ctx.db, &actor, input.id).await?);
     let workspace_id = actor.require_workspace()?;
@@ -357,7 +342,8 @@ pub(crate) async fn update_for_actor(
         crate::models::api_keys::ApiKeyScope::Write,
         crate::models::iam::policy::Action::EntityUpdate,
     )
-    .await?;
+    .await
+    .map_err(|error| crate::models::iam::access::hide_inferred_resource(inferred, error))?;
     input.updated_by = actor.user_id;
     let record = update(&txn, workspace_id, input).await?;
     crate::workers::embedding_sync::enqueue_after_write(ctx, workspace_id, record.id, &txn).await?;
@@ -373,6 +359,7 @@ pub(crate) async fn delete_for_actor(
     actor: &crate::models::api_keys::AuthContext,
     id: Uuid,
 ) -> Result<(), YorishiroError> {
+    let inferred = actor.workspace_id.is_none();
     let mut actor = actor.clone();
     actor.workspace_id = Some(super::workspace_for_actor(&ctx.db, &actor, id).await?);
     let workspace_id = actor.require_workspace()?;
@@ -384,7 +371,8 @@ pub(crate) async fn delete_for_actor(
         crate::models::api_keys::ApiKeyScope::Write,
         crate::models::iam::policy::Action::EntityDelete,
     )
-    .await?;
+    .await
+    .map_err(|error| crate::models::iam::access::hide_inferred_resource(inferred, error))?;
     delete(&txn, workspace_id, id).await?;
     txn.commit().await.internal()?;
     if let Some(authorization) = authorization {
@@ -396,6 +384,7 @@ pub(crate) async fn delete_for_actor(
 async fn list_workspaces(
     conn: &impl ConnectionTrait,
     workspaces: &[Uuid],
+    tenant_id: Option<Uuid>,
     query: ListEntitiesQuery,
 ) -> Result<Vec<EntityRecord>, YorishiroError> {
     use sea_orm::sea_query::extension::postgres::PgExpr;
@@ -403,6 +392,11 @@ async fn list_workspaces(
     use crate::models::_entities::entity_entities::Column;
 
     let mut select = Entity::find().filter(Column::WorkspaceId.is_in(workspaces.iter().copied()));
+    if let Some(tenant_id) = tenant_id {
+        select = select.filter(Column::WorkspaceId.in_subquery(
+            crate::models::workspace_workspaces::ids_for_tenant(tenant_id),
+        ));
+    }
     if let Some(entity_type) = query.entity_type {
         select = select.filter(Column::EntityType.eq(entity_type));
     }

@@ -241,11 +241,11 @@ impl YorishiroMcpServer {
             Err(err) => return Ok(err_to_tool_result(err)),
         };
 
-        let records =
-            match entity_entities::list_for_actor(&self.app_context().db, &actor, query).await {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let records = match entity_entities::list_for_actor(self.app_context(), &actor, query).await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         ok_json(records)
     }
 

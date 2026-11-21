@@ -90,7 +90,7 @@ impl Entity {
         scope: ApiKeyScope,
     ) -> Result<CreatedTenantApiKey, YorishiroError> {
         crate::models::iam::access::require_key_attribution(txn, tenant_id, Some(user_id)).await?;
-        let (prefix, plaintext) = generate_key();
+        let (prefix, plaintext) = super::generate_key_with_prefix(super::LOGIN_KEY_PREFIX);
         let inserted = ActiveModel {
             tenant_id: ActiveValue::Set(tenant_id),
             workspace_id: ActiveValue::Set(None),
@@ -103,39 +103,6 @@ impl Entity {
             expires_at: ActiveValue::Set(Some(
                 (crate::data::time::now() + chrono::Duration::hours(LOGIN_SESSION_HOURS)).into(),
             )),
-            ..Default::default()
-        }
-        .insert(txn)
-        .await
-        .internal()?;
-        Ok(CreatedTenantApiKey {
-            id: inserted.id,
-            plaintext,
-        })
-    }
-
-    pub(crate) async fn create_role_session(
-        txn: &sea_orm::DatabaseTransaction,
-        tenant_id: Uuid,
-        user_id: Option<Uuid>,
-        role_id: Uuid,
-        scope: ApiKeyScope,
-        role_name: &str,
-        expires_at: chrono::DateTime<chrono::FixedOffset>,
-    ) -> Result<CreatedTenantApiKey, YorishiroError> {
-        crate::models::iam::access::require_key_attribution(txn, tenant_id, user_id).await?;
-        let (prefix, plaintext) = generate_key();
-        let inserted = ActiveModel {
-            tenant_id: ActiveValue::Set(tenant_id),
-            workspace_id: ActiveValue::Set(None),
-            user_id: ActiveValue::Set(user_id),
-            role_id: ActiveValue::Set(Some(role_id)),
-            key_hash: ActiveValue::Set(hash_key(&plaintext)),
-            key_prefix: ActiveValue::Set(prefix),
-            name: ActiveValue::Set(validate_key_name(&format!("role:{role_name}"))?),
-            scope: ActiveValue::Set(scope.as_db_str().to_string()),
-            audit: ActiveValue::Set(false),
-            expires_at: ActiveValue::Set(Some(expires_at)),
             ..Default::default()
         }
         .insert(txn)

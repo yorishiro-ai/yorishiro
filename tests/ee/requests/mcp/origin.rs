@@ -116,7 +116,10 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             },
         )
         .await;
-        let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
+        let administrator =
+            crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await;
+        let read_key =
+            issue_api_key(&ctx, workspace_id, administrator, ApiKeyScope::Read, false).await;
 
         let library_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant_id, owner_id).await;

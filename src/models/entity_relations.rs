@@ -284,44 +284,15 @@ pub async fn delete(
     }
 }
 
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
-pub(crate) async fn list(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    query: ListRelationsQuery,
-) -> Result<Vec<RelationRecord>, YorishiroError> {
-    list_workspaces(conn, &[workspace_id], query).await
-}
-
 pub(crate) async fn list_for_actor(
-    db: &DatabaseConnection,
+    ctx: &loco_rs::app::AppContext,
     actor: &crate::models::api_keys::AuthContext,
     query: ListRelationsQuery,
 ) -> Result<Vec<RelationRecord>, YorishiroError> {
-    use crate::models::iam::{
-        access::IamEvaluation,
-        policy::{Action, Resource},
-    };
-    let txn = crate::db::begin_write(db).await.internal()?;
-    let evaluation =
-        IamEvaluation::load(&txn, actor, crate::models::api_keys::ApiKeyScope::Read).await?;
-    let workspaces = if let Some(workspace_id) = actor.workspace_id {
-        evaluation
-            .require(
-                Action::RelationList,
-                Resource::Workspace {
-                    tenant_id: actor.tenant_id,
-                    workspace_id,
-                },
-            )
-            .await?;
-        let result = list(&txn, workspace_id, query).await?;
-        txn.commit().await.internal()?;
-        return Ok(result);
-    } else {
-        evaluation.workspace_ids(Action::RelationList).await?
-    };
-    let records = list_workspaces(&txn, &workspaces, query).await?;
+    use crate::models::iam::{access::read_workspaces, policy::Action};
+    let workspaces = read_workspaces(&ctx.db, actor, Action::RelationList).await?;
+    let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
+    let records = list_workspaces(&txn, &workspaces, actor.tenant_id, query).await?;
     txn.commit().await.internal()?;
     Ok(records)
 }
@@ -329,11 +300,16 @@ pub(crate) async fn list_for_actor(
 async fn list_workspaces(
     conn: &impl ConnectionTrait,
     workspaces: &[Uuid],
+    tenant_id: Uuid,
     query: ListRelationsQuery,
 ) -> Result<Vec<RelationRecord>, YorishiroError> {
     use crate::models::_entities::entity_relations::Column;
 
-    let mut select = Entity::find().filter(Column::WorkspaceId.is_in(workspaces.iter().copied()));
+    let mut select = Entity::find()
+        .filter(Column::WorkspaceId.is_in(workspaces.iter().copied()))
+        .filter(Column::WorkspaceId.in_subquery(
+            crate::models::workspace_workspaces::ids_for_tenant(tenant_id),
+        ));
     if let Some(source_id) = query.source_id {
         select = select.filter(Column::SourceId.eq(source_id));
     }
@@ -349,6 +325,7 @@ async fn list_workspaces(
 
     select
         .order_by_desc(Column::CreatedAt)
+        .order_by_desc(Column::Id)
         .limit(query.page.limit())
         .offset(query.page.offset())
         .all(conn)

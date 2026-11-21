@@ -35,6 +35,7 @@ use crate::models::entity_entities::EntityRecord;
 const DEFAULT_SEARCH_LIMIT: i64 = 10;
 pub(crate) const MIN_SEARCH_LIMIT: i64 = 1;
 pub(crate) const MAX_SEARCH_LIMIT: i64 = 200;
+const MAX_SEARCH_WORKSPACES: usize = 8;
 
 /// Candidates the index materializes per search before original-coordinate reranking.
 const ANN_CANDIDATE_LIMIT: i64 = 1000;
@@ -86,18 +87,35 @@ pub(crate) async fn ensure_available(
     Ok(())
 }
 
-pub(crate) async fn search_text(
+async fn search_text(
     ctx: &loco_rs::app::AppContext,
     actor: &crate::models::api_keys::AuthContext,
     text: &str,
     query: SearchQuery,
+    deployment_vector: &mut Option<Vec<f32>>,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
     let tenant_id = actor.tenant_id;
     let workspace_id = actor.require_workspace()?;
-    authorize_search(ctx, actor).await?;
-    // Wait for the worker without holding a workspace connection.
+    let revision = super::workspace_workspaces::embedding_revision(&ctx.db, workspace_id).await?;
+    let uses_deployment_provider = crate::workspace_embedding_metadata(&ctx.db, workspace_id)
+        .await?
+        .is_none();
+    // Matching model names are not enough to share a vector across independently configured providers.
     let vector =
-        crate::workers::query_embedding::embed_query(ctx, tenant_id, workspace_id, text).await?;
+        if let (true, Some(vector)) = (uses_deployment_provider, deployment_vector.as_ref()) {
+            vector.clone()
+        } else {
+            // Wait for the worker without holding a workspace connection.
+            crate::workers::query_embedding::embed_query(ctx, tenant_id, workspace_id, text).await?
+        };
+    if super::workspace_workspaces::embedding_revision(&ctx.db, workspace_id).await? != revision {
+        return Err(YorishiroError::Conflict {
+            message: "workspace embedding configuration changed during search; retry".into(),
+        });
+    }
+    if uses_deployment_provider && deployment_vector.is_none() {
+        *deployment_vector = Some(vector.clone());
+    }
     check_query_width(&ctx.db, workspace_id, vector.len()).await?;
     let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id).await?;
     let _authorization = super::iam::access::authorize_workspace_action(
@@ -118,29 +136,32 @@ pub(crate) async fn search_for_actor(
     query: SearchQuery,
     limiter: &crate::controllers::middleware::rate_limit::RateLimiter,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
-    let workspaces = {
-        let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-        super::iam::access::permitted_workspaces(
-            &txn,
-            actor,
-            super::api_keys::ApiKeyScope::Read,
-            super::iam::policy::Action::Search,
-        )
-        .await?
-    };
+    let workspaces =
+        super::iam::access::read_workspaces(&ctx.db, actor, super::iam::policy::Action::Search)
+            .await?;
+    if workspaces.len() > MAX_SEARCH_WORKSPACES {
+        return Err(YorishiroError::ValidationFailed {
+            message: format!(
+                "cross-workspace search is limited to {MAX_SEARCH_WORKSPACES} workspaces"
+            ),
+            details: vec![],
+            hint: "select a workspace with workspace_id or x-workspace-id".into(),
+        });
+    }
     for &workspace_id in &workspaces {
         ensure_available(&ctx.db, workspace_id).await?;
-        crate::controllers::middleware::rate_limit::charge_search_tokens(
-            limiter,
-            workspace_id,
-            text,
-        )?;
     }
+    crate::controllers::middleware::rate_limit::charge_workspace_search_tokens(
+        limiter,
+        &workspaces,
+        text,
+    )?;
     let mut ranked = Vec::new();
+    let mut deployment_vector = None;
     for workspace_id in workspaces {
         let mut selected = actor.clone();
         selected.workspace_id = Some(workspace_id);
-        for (rank, hit) in search_text(ctx, &selected, text, query.clone())
+        for (rank, hit) in search_text(ctx, &selected, text, query.clone(), &mut deployment_vector)
             .await?
             .into_iter()
             .enumerate()
@@ -155,24 +176,6 @@ pub(crate) async fn search_for_actor(
         .take(usize::try_from(query.limit.clamp(MIN_SEARCH_LIMIT, MAX_SEARCH_LIMIT)).internal()?)
         .map(|(_, hit)| hit)
         .collect())
-}
-
-pub(crate) async fn authorize_search(
-    ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
-) -> Result<(), YorishiroError> {
-    let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-    super::iam::access::require_iam_action(
-        &txn,
-        actor,
-        super::api_keys::ApiKeyScope::Read,
-        super::iam::policy::Action::Search,
-        super::iam::policy::Resource::Workspace {
-            tenant_id: actor.tenant_id,
-            workspace_id: actor.require_workspace()?,
-        },
-    )
-    .await
 }
 
 #[derive(Debug, Clone, Serialize)]

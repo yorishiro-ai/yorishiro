@@ -22,6 +22,39 @@ use crate::controllers::mcp::compose_tool_routers;
 struct ManagementToolPolicy;
 
 impl McpToolPolicy for ManagementToolPolicy {
+    fn accepts_workspace_selection(&self, name: &str) -> bool {
+        crate::controllers::mcp::policy::workspace_selection_tool(name)
+            || matches!(
+                name,
+                "confirm_inference_proposals"
+                    | "create_schema_fork"
+                    | "delete_embedding_provider"
+                    | "delete_llm_provider"
+                    | "delete_schema_fork"
+                    | "discard_inference_proposals"
+                    | "get_embedding_provider"
+                    | "get_inference_confirmation"
+                    | "get_inference_job"
+                    | "get_llm_provider"
+                    | "get_schema_fork"
+                    | "get_worker_class"
+                    | "infer_fill"
+                    | "list_entity_columns"
+                    | "list_inference_proposals"
+                    | "list_schema_forks"
+                    | "list_upstream_changes"
+                    | "merge_apply"
+                    | "merge_preview"
+                    | "reject_inference_proposals"
+                    | "reset_entity_columns"
+                    | "set_embedding_provider"
+                    | "set_entity_columns"
+                    | "set_llm_provider"
+                    | "set_worker_class"
+                    | "update_schema_fork"
+            )
+    }
+
     fn read_only(&self, name: &str) -> bool {
         crate::controllers::mcp::policy::read_only_tool(name)
             || matches!(

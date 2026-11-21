@@ -69,18 +69,18 @@ pub(crate) async fn delete_schema(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [SchemaSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_list"] ))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas", description = "List schemas across permitted workspaces when none is selected.", params(("X-Workspace-Id" = Option<Uuid>, Header), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [SchemaSummary]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_list"] ))), tag = "community"))]
 pub(crate) async fn list_schemas(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<SchemaSummary>>, ApiError> {
     crate::controllers::middleware::auth::require_scope(&actor, ApiKeyScope::Read)?;
-    let summaries = schema_schemas::list_for_actor(&ctx.db, &actor, page.try_into()?).await?;
+    let summaries = schema_schemas::list_for_actor(&ctx, &actor, page.try_into()?).await?;
     Ok(Json(summaries))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas", request_body = super::openapi::CreateSchemaRequest, responses((status = 201, body = CreateSchemaResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_create"] ))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas", request_body = super::openapi::CreateSchemaRequest, params(("X-Workspace-Id" = Option<Uuid>, Header)), responses((status = 201, body = CreateSchemaResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_create"] ))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

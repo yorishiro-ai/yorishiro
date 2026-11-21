@@ -514,7 +514,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             &ctx.db,
             tenant.tenant_id,
             api_keys::ApiKeyScope::Migration,
-            Some(tenant.owner_id),
+            Some(administrator),
             true,
             "initial-admin",
         )
@@ -535,7 +535,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         let record = created.json::<Value>();
         assert!(record["workspace_id"].is_null(), "response: {record:?}");
         assert_eq!(record["scope"], "write");
-        assert_eq!(record["effective_scope"], "migration");
+        assert_eq!(record["effective_scope"], "write");
         assert_eq!(record["tenant_id"], tenant.tenant_id.to_string());
 
         // A non-admin member cannot issue tenant-scoped keys.
@@ -619,7 +619,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .await.assert_status(StatusCode::OK);
         request.get(&format!("/api/workspaces/{}", inaccessible.id))
             .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
-            .await.assert_status(StatusCode::FORBIDDEN);
+            .await.assert_status(StatusCode::NOT_FOUND);
         let listed = request.get("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
             .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())

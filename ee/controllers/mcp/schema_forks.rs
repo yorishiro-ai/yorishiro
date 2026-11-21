@@ -34,9 +34,10 @@ pub(crate) struct UpdateForkArgs {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_schema_forks)]
 impl YorishiroMcpServer {
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "List schema forks owned by the selected workspace (requires read scope and schema_fork_list IAM permission); source visibility does not authorize changing the source workspace")]
+    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "List schema forks across permitted workspaces, or narrow to a selected workspace (requires read scope and schema_fork_list IAM permission)")]
     pub(crate) async fn list_schema_forks(
         &self,
+        Parameters(page): Parameters<crate::dtos::iam::ListIam>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = match crate::controllers::mcp::verify(
@@ -49,7 +50,13 @@ impl YorishiroMcpServer {
             crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
             crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
-        match model::list_for_actor(self.app_context(), &actor).await {
+        match model::list_for_actor(
+            self.app_context(),
+            &actor,
+            crate::models::pagination::ListParams::new(page.limit, page.offset),
+        )
+        .await
+        {
             Ok(records) => ok_json(records),
             Err(error) => Ok(err_to_tool_result(error)),
         }

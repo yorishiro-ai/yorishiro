@@ -47,18 +47,21 @@ pub fn routes() -> Routes {
         .add("/api/import-jobs/{job_id}", get(import_job_status))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/import-jobs/{job_id}", params(("job_id" = uuid::Uuid, Path)), responses((status = 200, body = crate::models::queue_job_lifecycles::BulkJobStatus), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"]))), tag = "community"))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/import-jobs/{job_id}", params(("job_id" = uuid::Uuid, Path), ("X-Workspace-Id" = Option<uuid::Uuid>, Header)), responses((status = 200, body = crate::models::queue_job_lifecycles::BulkJobStatus), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["import_job_get"]))), tag = "community"))]
 async fn import_job_status(
     State(ctx): State<AppContext>,
     verified: Verified<SchemaScope>,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
-    let authorized = Authorized::<SchemaScope>::for_target(
+    let mut authorized = Authorized::<SchemaScope>::for_target(
         &ctx,
         verified.ctx,
         crate::models::iam::access::WorkspaceTarget::Job(id),
     )
     .await?;
+    authorized
+        .require_action(crate::models::iam::policy::Action::ImportJobGet)
+        .await?;
     Ok(Json(
         crate::models::queue_job_lifecycles::bulk_job_status(
             authorized.txn(),

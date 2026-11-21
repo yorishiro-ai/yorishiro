@@ -56,7 +56,7 @@ impl YorishiroMcpServer {
             };
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         let changes = match crate::edition::ee::models::schema_schemas::list_for_actor(
-            &self.app_context().db,
+            self.app_context(),
             &actor,
             page,
         )

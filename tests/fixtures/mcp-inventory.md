@@ -64,66 +64,6 @@ Input schema:
 }
 ```
 
-### `assume_role`
-
-Assume an IAM role for a temporary credential shown once; the role trust policy and a role_assume permission must both allow it, and the session is evaluated by the role's policies alone (requires read scope; the tenant root and role sessions cannot assume roles)
-
-Input schema:
-
-```json
-{
-  "$defs": {
-    "ApiKeyScope": {
-      "description": "Permission level held by an API key.\nDeclaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.\nThe wire form matches the DB `scope` column ('read'/'write'/'schema'/'migration').",
-      "oneOf": [
-        {
-          "enum": [
-            "read",
-            "write",
-            "schema"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "migration",
-          "description": "Running a batch migration, and switching maintenance mode.\nAbove `schema` because both act on data already stored.",
-          "type": "string"
-        }
-      ]
-    }
-  },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "duration_seconds": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "role_id": {
-      "format": "uuid",
-      "type": "string"
-    },
-    "scope": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/ApiKeyScope"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    }
-  },
-  "required": [
-    "role_id"
-  ],
-  "type": "object"
-}
-```
-
 ### `attach_group_policy`
 
 Attach group policy in the current tenant (requires read scope and IAM permission)
@@ -146,34 +86,6 @@ Input schema:
   },
   "required": [
     "group_id",
-    "policy_id"
-  ],
-  "type": "object"
-}
-```
-
-### `attach_role_policy`
-
-Attach a managed policy to a role, at most 20 per role (requires read scope and role_policy_attach IAM permission)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "policy_id": {
-      "format": "uuid",
-      "type": "string"
-    },
-    "role_id": {
-      "format": "uuid",
-      "type": "string"
-    }
-  },
-  "required": [
-    "role_id",
     "policy_id"
   ],
   "type": "object"
@@ -223,7 +135,7 @@ Input schema:
 
 ### `create_api_key`
 
-Issue an API key and return its secret once; workspace-bound by default, tenant-scoped (X-Workspace-Id required for workspace operations) when tenant_scoped is true, which also requires a tenant-scoped issuing credential; cannot exceed issuer scope, audit grant or expiry (requires read scope and credential_create IAM permission with a tenant-scoped credential)
+Issue an API key and return its secret once. Select a workspace to bind the key, or set tenant_scoped for an unbound key. Requires a tenant-scoped issuer with read scope and credential_create permission. Issued keys retain their requested grants and binding.
 
 Input schema:
 
@@ -278,7 +190,7 @@ Input schema:
     },
     "tenant_scoped": {
       "default": false,
-      "description": "Issue a tenant-scoped key (no workspace binding, `X-Workspace-Id` for workspace operations) instead of a workspace-bound one.\nRequires CredentialCreate IAM permission and a tenant-scoped issuing credential.",
+      "description": "Issue a tenant-scoped key without a workspace binding.\nRequires CredentialCreate IAM permission and a tenant-scoped issuing credential.",
       "type": "boolean"
     }
   },
@@ -361,40 +273,6 @@ Input schema:
   "required": [
     "name",
     "document"
-  ],
-  "type": "object"
-}
-```
-
-### `create_iam_role`
-
-Create a tenant IAM role with a trust policy naming who may assume it (requires read scope and role_create IAM permission)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "max_session_seconds": {
-      "description": "Longest session, in seconds, a caller can request: 3600 to 43200, default 3600.",
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "name": {
-      "type": "string"
-    },
-    "trust_policy": {
-      "description": "`{\"statements\":[{\"effect\":\"allow\",\"principals\":[{\"type\":\"user\",\"user_id\":\"…\"}]}]}`.\nPrincipal types are `tenant`, `user`, `group` and `service_key`; an explicit deny wins over an allow."
-    }
-  },
-  "required": [
-    "name",
-    "trust_policy"
   ],
   "type": "object"
 }
@@ -647,29 +525,6 @@ Input schema:
 }
 ```
 
-### `delete_iam_role`
-
-Delete a tenant IAM role and revoke every session assumed from it (requires read scope and role_delete IAM permission)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "role_id": {
-      "format": "uuid",
-      "type": "string"
-    }
-  },
-  "required": [
-    "role_id"
-  ],
-  "type": "object"
-}
-```
-
 ### `delete_relation`
 
 Delete a relation (requires write scope and relation_delete IAM permission)
@@ -781,34 +636,6 @@ Input schema:
   },
   "required": [
     "group_id",
-    "policy_id"
-  ],
-  "type": "object"
-}
-```
-
-### `detach_role_policy`
-
-Detach a managed policy from a role (requires read scope and role_policy_detach IAM permission)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "policy_id": {
-      "format": "uuid",
-      "type": "string"
-    },
-    "role_id": {
-      "format": "uuid",
-      "type": "string"
-    }
-  },
-  "required": [
-    "role_id",
     "policy_id"
   ],
   "type": "object"
@@ -1093,29 +920,6 @@ Input schema:
 }
 ```
 
-### `get_iam_role`
-
-Get a tenant IAM role (requires read scope and role_get IAM permission)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "role_id": {
-      "format": "uuid",
-      "type": "string"
-    }
-  },
-  "required": [
-    "role_id"
-  ],
-  "type": "object"
-}
-```
-
 ### `get_relation`
 
 Get a single relation by ID (requires read scope and relation_get IAM permission)
@@ -1284,7 +1088,7 @@ Input schema:
 
 ### `import_job_status`
 
-Poll a queued JSON Lines import (requires schema scope)
+Poll a queued JSON Lines import by ID (requires schema scope and import_job_get IAM permission)
 
 Input schema:
 
@@ -1341,7 +1145,7 @@ Input schema:
 
 ### `list_audit_log`
 
-List the selected workspace's paginated audit history (requires audit_log_list IAM permission and the independent audit grant; administration does not grant audit access)
+List paginated audit history across permitted workspaces, or narrow to a selected workspace (requires audit_log_list IAM permission and the independent audit grant)
 
 Input schema:
 
@@ -1584,73 +1388,6 @@ Input schema:
 }
 ```
 
-### `list_iam_role_policies`
-
-List the managed policies attached to a role (requires read scope and role_policy_list IAM permission)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "limit": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "offset": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "role_id": {
-      "format": "uuid",
-      "type": "string"
-    }
-  },
-  "required": [
-    "role_id"
-  ],
-  "type": "object"
-}
-```
-
-### `list_iam_roles`
-
-List tenant IAM roles with bounded pagination (requires read scope and role_list IAM permission)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "limit": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "offset": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
-    }
-  },
-  "type": "object"
-}
-```
-
 ### `list_iam_user_policies`
 
 List tenant IAM user policies with bounded pagination (requires read scope and IAM permission)
@@ -1778,7 +1515,7 @@ Input schema:
 
 ### `list_schemas`
 
-List summaries of all schemas registered for the workspace (all versions, including archived). Use this to discover what schemas exist (requires read scope and schema_list IAM permission)
+List schema summaries across permitted workspaces, or narrow to a selected workspace. Includes archived versions and each row's workspace ID (requires read scope and schema_list IAM permission)
 
 Input schema:
 
@@ -2378,43 +2115,6 @@ Input schema:
 }
 ```
 
-### `update_iam_role`
-
-Update a tenant IAM role's name, trust policy or maximum session length (requires read scope and role_update IAM permission)
-
-Input schema:
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "max_session_seconds": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "name": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "role_id": {
-      "format": "uuid",
-      "type": "string"
-    },
-    "trust_policy": true
-  },
-  "required": [
-    "role_id"
-  ],
-  "type": "object"
-}
-```
-
 ### `update_template_library_item`
 
 Update an owned tenant template; existing workspace schema versions are unchanged (requires read scope and template_library_update IAM permission)
@@ -2984,13 +2684,30 @@ Input schema:
 
 ### `list_schema_forks`
 
-List schema forks owned by the selected workspace (requires read scope and schema_fork_list IAM permission); source visibility does not authorize changing the source workspace
+List schema forks across permitted workspaces, or narrow to a selected workspace (requires read scope and schema_fork_list IAM permission)
 
 Input schema:
 
 ```json
 {
-  "properties": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "offset": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
   "type": "object"
 }
 ```

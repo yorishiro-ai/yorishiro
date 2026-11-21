@@ -86,7 +86,7 @@ pub(crate) async fn list_relations(
 ) -> Result<Json<Vec<RelationRecord>>, ApiError> {
     let query = params.try_into()?;
 
-    let records = entity_relations::list_for_actor(&ctx.db, &actor, query).await?;
+    let records = entity_relations::list_for_actor(&ctx, &actor, query).await?;
     Ok(Json(records))
 }
 

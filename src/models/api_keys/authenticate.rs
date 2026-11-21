@@ -63,7 +63,6 @@ impl Entity {
             &db.identity_connection(),
             row.workspace_id,
             row.tenant_id,
-            row.id,
             requested_workspace,
         )
         .await?;
@@ -81,8 +80,7 @@ impl Entity {
 
     /// Chooses which workspace a verified credential acts on.
     ///
-    /// Non-root workspace-scoped keys cannot select a different workspace.
-    /// Root credentials may select any workspace in their tenant.
+    /// Workspace-scoped keys cannot select a different workspace.
     /// A tenant-scoped key acts on the requested workspace when it belongs to the same tenant, or has no workspace.
     ///
     /// # Errors
@@ -91,13 +89,9 @@ impl Entity {
         conn: &impl ConnectionTrait,
         key_workspace: Option<Uuid>,
         tenant_id: Uuid,
-        key_id: Uuid,
         requested: Option<Uuid>,
     ) -> Result<Option<Uuid>, YorishiroError> {
-        let root = Model::is_root_credential(conn, key_id).await?;
-        if let Some(workspace_id) = key_workspace
-            && !root
-        {
+        if let Some(workspace_id) = key_workspace {
             if let Some(requested) = requested
                 && requested != workspace_id
             {
@@ -125,7 +119,7 @@ impl Entity {
             }
             return Ok(Some(requested));
         }
-        Ok(key_workspace)
+        Ok(None)
     }
 
     /// SQLite equivalent of [`Self::authenticate`], for a deployment with no `DbHandle` (see `Hooks::after_context`).
@@ -145,14 +139,9 @@ impl Entity {
         let key = Self::find_sqlite_auth_context(conn, hash_key(presented_key))
             .await?
             .ok_or(YorishiroError::Unauthenticated)?;
-        let workspace_id = Self::resolve_key_workspace(
-            conn,
-            key.workspace_id,
-            key.tenant_id,
-            key.id,
-            requested_workspace,
-        )
-        .await?;
+        let workspace_id =
+            Self::resolve_key_workspace(conn, key.workspace_id, key.tenant_id, requested_workspace)
+                .await?;
         AuthContext {
             api_key_id: key.id,
             workspace_id,

@@ -114,6 +114,7 @@ pub struct Authorized<R> {
     txn: sea_orm::DatabaseTransaction,
     identity: sea_orm::DatabaseConnection,
     authorization: Option<sea_orm::DatabaseTransaction>,
+    inferred_resource: bool,
     _scope: PhantomData<R>,
 }
 
@@ -127,7 +128,10 @@ impl<R> Authorized<R> {
         R: RequiredScope,
     {
         auth::require_scope(&actor, R::SCOPE)?;
-        actor.workspace_id = Some(target.resolve(&app.db, &actor, R::SCOPE).await?);
+        let inferred_resource = target.inferred_resource(&actor);
+        actor.workspace_id = Some(target.resolve(&app.db, &actor, R::SCOPE).await.map_err(
+            |error| crate::models::iam::access::hide_inferred_resource(inferred_resource, error),
+        )?);
         let (ctx, txn) = auth::RequestAuth::new(app)
             .begin(actor, R::SCOPE >= ApiKeyScope::Write)
             .await?;
@@ -136,6 +140,7 @@ impl<R> Authorized<R> {
             txn,
             identity: app.db.clone(),
             authorization: None,
+            inferred_resource,
             _scope: PhantomData,
         })
     }
@@ -180,7 +185,10 @@ impl<R> Authorized<R> {
             R::SCOPE,
             action,
         )
-        .await?;
+        .await
+        .map_err(|error| {
+            crate::models::iam::access::hide_inferred_resource(self.inferred_resource, error)
+        })?;
         Ok(())
     }
 }
@@ -209,6 +217,7 @@ where
             txn,
             identity: app_ctx.db.clone(),
             authorization: None,
+            inferred_resource: false,
             _scope: PhantomData,
         })
     }
@@ -226,7 +235,7 @@ impl AuditAuthorized {
         &self,
         page: crate::models::pagination::ListParams,
     ) -> Result<Vec<crate::models::_entities::api_key_audit_log::Model>, ApiError> {
-        crate::models::api_key_audit_log::list_for_actor(&self.app_ctx.db, &self.ctx, page)
+        crate::models::api_key_audit_log::list_for_actor(&self.app_ctx, &self.ctx, page)
             .await
             .map_err(ApiError)
     }

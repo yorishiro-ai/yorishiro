@@ -13,7 +13,7 @@ async fn entity_column_tools_match_rest_and_enforce_write_scope() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let session = initialize(&request).await;
         let saved = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"set_entity_columns","arguments":{"entity_type":"note","columns":["title","body"]}})).await;
-        assert_eq!(tool_result_json(&saved), json!({"entity_type":"note","columns":["title","body"]}));
+        assert_eq!(tool_result_json(&saved), json!({"workspace_id":tenant.workspace_id,"entity_type":"note","columns":["title","body"]}));
         let listed = mcp_call(&request, &session, &tenant.api_key, 3, "tools/call", json!({"name":"list_entity_columns","arguments":{}})).await;
         let http_response = request.get("/api/workspace/entity-columns").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
         http_response.assert_status_ok();

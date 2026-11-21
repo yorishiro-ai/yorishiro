@@ -68,7 +68,7 @@ async fn audit_tool_preserves_independent_grant_and_rest_parity() {
         for (key, expected) in [
             (&without_audit, false),
             (&audit_key, true),
-            (&tenant.api_key, true),
+            (&tenant.api_key, false),
         ] {
             let capabilities = mcp_call(
                 &request,

@@ -151,9 +151,7 @@ impl YorishiroMcpServer {
     }
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "List summaries of all schemas registered for the workspace (all \
-                           versions, including archived). Use this to discover what schemas \
-                           exist (requires read scope and schema_list IAM permission)"
+        description = "List schema summaries across permitted workspaces, or narrow to a selected workspace. Includes archived versions and each row's workspace ID (requires read scope and schema_list IAM permission)"
     )]
     pub(crate) async fn list_schemas(
         &self,
@@ -171,11 +169,11 @@ impl YorishiroMcpServer {
             super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        let summaries =
-            match schema_schemas::list_for_actor(&self.app_context().db, &actor, page).await {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let summaries = match schema_schemas::list_for_actor(self.app_context(), &actor, page).await
+        {
+            Ok(value) => value,
+            Err(err) => return Ok(err_to_tool_result(err)),
+        };
         ok_json(summaries)
     }
 

@@ -5,7 +5,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Alias, Asterisk, Expr, Func, Query};
 use sea_orm::{
     ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait,
-    QueryFilter, QueryOrder,
+    QueryFilter, QueryOrder, QuerySelect,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -39,21 +39,25 @@ pub(crate) async fn workspace_for_actor(
 pub(crate) async fn list_for_actor(
     ctx: &loco_rs::app::AppContext,
     actor: &crate::models::api_keys::AuthContext,
+    page: crate::models::pagination::ListParams,
 ) -> Result<Vec<ForkRecord>, YorishiroError> {
-    let txn = crate::db::begin_write(&ctx.db).await.internal()?;
-    let workspaces = crate::models::iam::access::permitted_workspaces(
-        &txn,
-        actor,
-        crate::models::api_keys::ApiKeyScope::Read,
-        crate::models::iam::policy::Action::SchemaForkList,
-    )
-    .await?;
-    let mut records = Vec::new();
-    for workspace in workspaces {
-        let scoped = crate::db::begin_workspace(ctx, actor.tenant_id, workspace).await?;
-        records.extend(list(&scoped, actor.tenant_id, workspace).await?);
+    use crate::models::iam::{access::read_workspaces, policy::Action};
+    let workspaces = read_workspaces(&ctx.db, actor, Action::SchemaForkList).await?;
+    let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
+    let rows = Entity::find()
+        .filter(Column::TenantId.eq(actor.tenant_id))
+        .filter(Column::WorkspaceId.is_in(workspaces))
+        .order_by_asc(Column::CreatedAt)
+        .order_by_asc(Column::Id)
+        .limit(page.limit())
+        .offset(page.offset())
+        .all(&txn)
+        .await
+        .internal()?;
+    let mut records = Vec::with_capacity(rows.len());
+    for row in rows {
+        records.push(to_record(&txn, row).await?);
     }
-    records.sort_by_key(|record| (record.created_at, record.id));
     txn.commit().await.internal()?;
     Ok(records)
 }

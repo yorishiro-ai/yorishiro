@@ -3,7 +3,7 @@
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope, Verified};
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use loco_rs::app::AppContext;
 use loco_rs::controller::Routes;
@@ -15,8 +15,11 @@ use crate::edition::ee::models::workspace_schema_forks as model;
 async fn list(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
+    Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<model::ForkRecord>>, ApiError> {
-    Ok(Json(model::list_for_actor(&ctx, &verified.ctx).await?))
+    Ok(Json(
+        model::list_for_actor(&ctx, &verified.ctx, page.try_into()?).await?,
+    ))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schema-forks/{fork_id}", params(("fork_id" = Uuid, Path)), responses((status = 200, body = crate::edition::ee::controllers::openapi::ForkRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_fork_get"]))), tag = "enterprise"))]

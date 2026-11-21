@@ -60,18 +60,8 @@ pub(crate) async fn workspace_for_actor(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("entity was not found"))?;
-    let tenant =
-        crate::models::workspace_workspaces::get_workspace_tenant(conn, entity.workspace_id)
-            .await?;
-    if tenant != actor.tenant_id
-        || actor
-            .workspace_id
-            .is_some_and(|selected| selected != entity.workspace_id)
-    {
-        return Err(YorishiroError::not_found("entity was not found"));
-    }
-    Ok(entity.workspace_id)
+        .ok_or_else(|| YorishiroError::not_found("resource was not found"))?;
+    crate::models::iam::access::check_workspace_target(conn, actor, entity.workspace_id).await
 }
 pub use operations::{count, create, delete, get, list, update};
 pub use snapshots::undo_job;

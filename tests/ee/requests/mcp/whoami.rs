@@ -38,7 +38,7 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
         .await;
         let identity = tool_result_json(&result);
         assert_eq!(identity, rest.json::<Value>());
-        assert_eq!(identity["scope"], "migration");
+        assert_eq!(identity["scope"], "read");
         assert_eq!(identity["audit"], true);
         assert_eq!(identity["identity_kind"], "user");
         assert!(identity.get("workspace_access").is_none());
@@ -58,13 +58,13 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
         )
         .await;
         let grants = tool_result_json(&grants);
-        assert_eq!(grants["scopes"], json!(["read", "write", "schema", "migration"]));
+        assert_eq!(grants["scopes"], json!(["read"]));
         assert_eq!(grants["audit"], true);
-        assert_eq!(grants["tenant_root"], true);
+        assert_eq!(grants["tenant_root"], false);
         let postgres = ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres;
         assert_eq!(grants["constraints"]["database_backend"], if postgres { "postgres" } else { "sqlite" });
         assert_eq!(grants["constraints"]["row_level_security"], postgres);
-        assert_eq!(grants["constraints"]["workspace_key_retargeting"], true);
+        assert_eq!(grants["constraints"]["workspace_key_retargeting"], false);
         assert_eq!(grants["constraints"]["tenant_key_target_header"], "X-Workspace-Id");
         assert_eq!(grants["constraints"]["discovery_authorizes_requests"], false);
         let inventory = mcp_call(&request, &session, &key, 4, "tools/list", json!({})).await;
@@ -75,12 +75,12 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
             let capability = tools.iter().find(|entry| entry["name"] == tool["name"])
                 .expect("every visible tool has a capability");
             assert_eq!(capability["required_scope"], tool["_meta"]["yorishiro/required_scope"]);
-            assert_eq!(capability["scope_satisfied"], true);
+            assert_eq!(capability["scope_satisfied"], capability["required_scope"] == "read");
         }
         let denied = mcp_call(&request, &session, &key, 5, "tools/call",
             json!({"name":"create_entity","arguments":{"schema_name":"missing","entity_type":"missing","data":{}}})).await;
         assert_eq!(denied["result"]["isError"], true);
-        assert_ne!(denied["result"]["structuredContent"]["error"]["code"], "scope_insufficient");
+        assert_eq!(denied["result"]["structuredContent"]["error"]["code"], "scope_insufficient");
     })
     .await;
 }

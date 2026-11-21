@@ -15,7 +15,18 @@ pub struct YorishiroMcpServer {
 }
 
 impl YorishiroMcpServer {
-    fn advertised_tool(mut tool: rmcp::model::Tool) -> rmcp::model::Tool {
+    fn accepts_workspace_selection(&self, tool: &rmcp::model::Tool) -> bool {
+        self.tool_policy.accepts_workspace_selection(&tool.name)
+            && tool
+                .input_schema
+                .get("properties")
+                .is_none_or(|properties| properties.get("workspace_id").is_none())
+    }
+
+    fn advertised_tool(&self, mut tool: rmcp::model::Tool) -> rmcp::model::Tool {
+        if !self.accepts_workspace_selection(&tool) {
+            return tool;
+        }
         let schema = Arc::make_mut(&mut tool.input_schema);
         let properties = schema
             .entry("properties")
@@ -95,16 +106,20 @@ pub fn scope_requirement(scope: ApiKeyScope) -> rmcp::model::MetaObject {
 impl ServerHandler for YorishiroMcpServer {
     async fn call_tool(
         &self,
-        request: CallToolRequestParams,
+        mut request: CallToolRequestParams,
         mut context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         if !self.tool_policy.allows(&self.ctx, request.name.as_ref()) {
             return Err(ErrorData::invalid_params("tool not found", None));
         }
-        if let Some(workspace) = request
-            .arguments
-            .as_ref()
-            .and_then(|args| args.get("workspace_id"))
+        if self
+            .tool_router
+            .get(&request.name)
+            .is_some_and(|tool| self.accepts_workspace_selection(tool))
+            && let Some(workspace) = request
+                .arguments
+                .as_mut()
+                .and_then(|args| args.remove("workspace_id"))
         {
             let workspace = workspace
                 .as_str()
@@ -115,8 +130,15 @@ impl ServerHandler for YorishiroMcpServer {
                     .map_err(crate::error::mcp_internal)?;
                 if parts
                     .headers
-                    .get(crate::models::api_keys::WORKSPACE_HEADER)
-                    .is_some_and(|header| header != value)
+                    .get_all(crate::models::api_keys::WORKSPACE_HEADER)
+                    .iter()
+                    .any(|header| {
+                        header
+                            .to_str()
+                            .ok()
+                            .and_then(|header| uuid::Uuid::parse_str(header.trim()).ok())
+                            != Some(workspace)
+                    })
                 {
                     return Err(ErrorData::invalid_params(
                         "workspace_id conflicts with x-workspace-id",
@@ -152,7 +174,7 @@ impl ServerHandler for YorishiroMcpServer {
             .tool_router
             .list_all()
             .into_iter()
-            .map(Self::advertised_tool)
+            .map(|tool| self.advertised_tool(tool))
             .collect();
         tools.retain(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()));
         std::future::ready(Ok(ListToolsResult {
@@ -172,7 +194,7 @@ impl ServerHandler for YorishiroMcpServer {
         self.tool_router
             .get(name)
             .cloned()
-            .map(Self::advertised_tool)
+            .map(|tool| self.advertised_tool(tool))
     }
 
     fn get_info(&self) -> ServerConfig {
@@ -184,7 +206,7 @@ impl ServerHandler for YorishiroMcpServer {
              Select a workspace with the `workspace_id` tool argument or `X-Workspace-Id` header. \
              Without selection, lists and search span permitted workspaces, resource IDs resolve their workspace, \
              and destination operations select a workspace only when exactly one is permitted. \
-             Tenant root accounts have all permissions within their tenant regardless of key scope or binding.",
+             Tenant root sign-in sessions have full tenant access; issued keys retain their grants and bindings.",
         )
     }
 }
