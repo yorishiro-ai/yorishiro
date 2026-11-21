@@ -9,7 +9,6 @@ use std::sync::Arc;
 use axum::extract::{ConnectInfo, FromRef, FromRequestParts};
 use axum::http::request::Parts;
 use loco_rs::app::AppContext;
-use uuid::Uuid;
 
 use crate::controllers::middleware::auth;
 use crate::error::YorishiroError;
@@ -115,10 +114,37 @@ pub struct Authorized<R> {
     txn: sea_orm::DatabaseTransaction,
     identity: sea_orm::DatabaseConnection,
     authorization: Option<sea_orm::DatabaseTransaction>,
+    inferred_resource: bool,
     _scope: PhantomData<R>,
 }
 
 impl<R> Authorized<R> {
+    pub(crate) async fn for_target(
+        app: &AppContext,
+        mut actor: api_keys::AuthContext,
+        target: crate::models::iam::access::WorkspaceTarget,
+    ) -> Result<Self, ApiError>
+    where
+        R: RequiredScope,
+    {
+        auth::require_scope(&actor, R::SCOPE)?;
+        let inferred_resource = target.inferred_resource(&actor);
+        actor.workspace_id = Some(target.resolve(&app.db, &actor, R::SCOPE).await.map_err(
+            |error| crate::models::iam::access::hide_inferred_resource(inferred_resource, error),
+        )?);
+        let (ctx, txn) = auth::RequestAuth::new(app)
+            .begin(actor, R::SCOPE >= ApiKeyScope::Write)
+            .await?;
+        Ok(Self {
+            ctx,
+            txn,
+            identity: app.db.clone(),
+            authorization: None,
+            inferred_resource,
+            _scope: PhantomData,
+        })
+    }
+
     #[must_use]
     pub const fn txn(&self) -> &sea_orm::DatabaseTransaction {
         &self.txn
@@ -159,7 +185,10 @@ impl<R> Authorized<R> {
             R::SCOPE,
             action,
         )
-        .await?;
+        .await
+        .map_err(|error| {
+            crate::models::iam::access::hide_inferred_resource(self.inferred_resource, error)
+        })?;
         Ok(())
     }
 }
@@ -188,6 +217,7 @@ where
             txn,
             identity: app_ctx.db.clone(),
             authorization: None,
+            inferred_resource: false,
             _scope: PhantomData,
         })
     }
@@ -198,18 +228,14 @@ where
 pub(crate) struct AuditAuthorized {
     app_ctx: AppContext,
     pub ctx: api_keys::AuthContext,
-    txn: Arc<tokio::sync::Mutex<sea_orm::DatabaseTransaction>>,
-    _authorization: Option<sea_orm::DatabaseTransaction>,
 }
 
 impl AuditAuthorized {
     pub(crate) async fn records(
         &self,
-        workspace_id: Uuid,
         page: crate::models::pagination::ListParams,
     ) -> Result<Vec<crate::models::_entities::api_key_audit_log::Model>, ApiError> {
-        let txn = self.txn.lock().await;
-        crate::models::api_key_audit_log::list_for_workspace(&*txn, workspace_id, page)
+        crate::models::api_key_audit_log::list_for_actor(&self.app_ctx, &self.ctx, page)
             .await
             .map_err(ApiError)
     }
@@ -232,25 +258,11 @@ where
         let app_ctx = AppContext::from_ref(state);
 
         let headers = auth::header_pairs(&parts.headers).map_err(ApiError)?;
-        let (ctx, txn) = auth::RequestAuth::new(&app_ctx)
-            .authorize_audit(presented_key, &headers)
+        let ctx = auth::RequestAuth::new(&app_ctx)
+            .verify_audit(presented_key, &headers)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
-        let authorization = crate::models::iam::access::authorize_workspace_action(
-            &txn,
-            &app_ctx.db,
-            &ctx,
-            ApiKeyScope::Read,
-            crate::models::iam::policy::Action::AuditLogList,
-        )
-        .await?;
-
-        Ok(Self {
-            app_ctx,
-            ctx,
-            txn: Arc::new(tokio::sync::Mutex::new(txn)),
-            _authorization: authorization,
-        })
+        Ok(Self { app_ctx, ctx })
     }
 }
 

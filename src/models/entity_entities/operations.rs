@@ -255,11 +255,148 @@ pub async fn list(
     workspace_id: Uuid,
     query: ListEntitiesQuery,
 ) -> Result<Vec<EntityRecord>, YorishiroError> {
+    list_workspaces(conn, &[workspace_id], None, query).await
+}
+
+pub(crate) async fn list_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+    query: ListEntitiesQuery,
+) -> Result<Vec<EntityRecord>, YorishiroError> {
+    use crate::models::iam::{access::read_workspaces, policy::Action};
+    let workspaces = read_workspaces(&ctx.db, actor, Action::EntityList).await?;
+    let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
+    let records = list_workspaces(&txn, &workspaces, Some(actor.tenant_id), query).await?;
+    txn.commit().await.internal()?;
+    Ok(records)
+}
+
+pub(crate) async fn get_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<EntityRecord, YorishiroError> {
+    let inferred = actor.workspace_id.is_none();
+    let mut actor = actor.clone();
+    actor.workspace_id = Some(super::workspace_for_actor(&ctx.db, &actor, id).await?);
+    let txn = crate::db::begin_workspace(ctx, actor.tenant_id, actor.require_workspace()?).await?;
+    let _authorization = crate::models::iam::access::authorize_workspace_action(
+        &txn,
+        &ctx.db,
+        &actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::policy::Action::EntityGet,
+    )
+    .await
+    .map_err(|error| crate::models::iam::access::hide_inferred_resource(inferred, error))?;
+    get(&txn, actor.require_workspace()?, id).await
+}
+
+pub(crate) async fn create_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+    input: CreateEntityInput,
+) -> Result<EntityRecord, YorishiroError> {
+    use crate::models::{
+        api_keys::ApiKeyScope,
+        iam::{access, policy::Action},
+    };
+    let mut actor = actor.clone();
+    let workspace_id =
+        access::select_workspace(&ctx.db, &actor, ApiKeyScope::Write, Action::EntityCreate).await?;
+    actor.workspace_id = Some(workspace_id);
+    let quotas = crate::data::quotas::for_tenant(ctx, actor.tenant_id).await?;
+    let txn = crate::db::begin_workspace_write(ctx, actor.tenant_id, workspace_id).await?;
+    let authorization = access::authorize_workspace_action(
+        &txn,
+        &ctx.db,
+        &actor,
+        ApiKeyScope::Write,
+        Action::EntityCreate,
+    )
+    .await?;
+    let record =
+        create_with_quota(&txn, workspace_id, input, actor.user_id, quotas.entities).await?;
+    crate::workers::embedding_sync::enqueue_after_write(ctx, workspace_id, record.id, &txn).await?;
+    txn.commit().await.internal()?;
+    if let Some(authorization) = authorization {
+        authorization.commit().await.internal()?;
+    }
+    Ok(record)
+}
+
+pub(crate) async fn update_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+    mut input: UpdateEntityInput,
+) -> Result<EntityRecord, YorishiroError> {
+    let inferred = actor.workspace_id.is_none();
+    let mut actor = actor.clone();
+    actor.workspace_id = Some(super::workspace_for_actor(&ctx.db, &actor, input.id).await?);
+    let workspace_id = actor.require_workspace()?;
+    let txn = crate::db::begin_workspace_write(ctx, actor.tenant_id, workspace_id).await?;
+    let authorization = crate::models::iam::access::authorize_workspace_action(
+        &txn,
+        &ctx.db,
+        &actor,
+        crate::models::api_keys::ApiKeyScope::Write,
+        crate::models::iam::policy::Action::EntityUpdate,
+    )
+    .await
+    .map_err(|error| crate::models::iam::access::hide_inferred_resource(inferred, error))?;
+    input.updated_by = actor.user_id;
+    let record = update(&txn, workspace_id, input).await?;
+    crate::workers::embedding_sync::enqueue_after_write(ctx, workspace_id, record.id, &txn).await?;
+    txn.commit().await.internal()?;
+    if let Some(authorization) = authorization {
+        authorization.commit().await.internal()?;
+    }
+    Ok(record)
+}
+
+pub(crate) async fn delete_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<(), YorishiroError> {
+    let inferred = actor.workspace_id.is_none();
+    let mut actor = actor.clone();
+    actor.workspace_id = Some(super::workspace_for_actor(&ctx.db, &actor, id).await?);
+    let workspace_id = actor.require_workspace()?;
+    let txn = crate::db::begin_workspace_write(ctx, actor.tenant_id, workspace_id).await?;
+    let authorization = crate::models::iam::access::authorize_workspace_action(
+        &txn,
+        &ctx.db,
+        &actor,
+        crate::models::api_keys::ApiKeyScope::Write,
+        crate::models::iam::policy::Action::EntityDelete,
+    )
+    .await
+    .map_err(|error| crate::models::iam::access::hide_inferred_resource(inferred, error))?;
+    delete(&txn, workspace_id, id).await?;
+    txn.commit().await.internal()?;
+    if let Some(authorization) = authorization {
+        authorization.commit().await.internal()?;
+    }
+    Ok(())
+}
+
+async fn list_workspaces(
+    conn: &impl ConnectionTrait,
+    workspaces: &[Uuid],
+    tenant_id: Option<Uuid>,
+    query: ListEntitiesQuery,
+) -> Result<Vec<EntityRecord>, YorishiroError> {
     use sea_orm::sea_query::extension::postgres::PgExpr;
 
     use crate::models::_entities::entity_entities::Column;
 
-    let mut select = Entity::find().filter(Column::WorkspaceId.eq(workspace_id));
+    let mut select = Entity::find().filter(Column::WorkspaceId.is_in(workspaces.iter().copied()));
+    if let Some(tenant_id) = tenant_id {
+        select = select.filter(Column::WorkspaceId.in_subquery(
+            crate::models::workspace_workspaces::ids_for_tenant(tenant_id),
+        ));
+    }
     if let Some(entity_type) = query.entity_type {
         select = select.filter(Column::EntityType.eq(entity_type));
     }
@@ -277,6 +414,7 @@ pub async fn list(
 
     let select = select
         .order_by_desc(Column::CreatedAt)
+        .order_by_desc(Column::Id)
         .limit(query.page.limit())
         .offset(query.page.offset());
 

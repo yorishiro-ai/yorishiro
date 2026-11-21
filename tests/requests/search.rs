@@ -78,6 +78,90 @@ fn titles(hits: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+#[tokio::test]
+async fn unselected_search_combines_workspaces_and_explicit_selection_narrows_results() {
+    let (provider, _server, _) = keyword_provider(768).await;
+    boot_with_query_worker(provider.clone(), |request, ctx| async move {
+        let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let administrator = super::fixtures::create_iam_administrator(&ctx, first.tenant_id).await;
+        let key = super::fixtures::issue_tenant_key(&ctx, first.tenant_id, administrator).await;
+        let response = request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"name":"second-search"}))
+            .await;
+        response.assert_status(StatusCode::CREATED);
+        let second = TestTenant {
+            tenant_id: first.tenant_id,
+            owner_id: first.owner_id,
+            api_key: key.clone(),
+            workspace_id: response.json::<serde_json::Value>()["id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap(),
+        };
+        embedded_notes(&ctx, &first, provider.as_ref(), &["alpha first"]).await;
+        embedded_notes(&ctx, &second, provider.as_ref(), &["alpha second"]).await;
+        let response = request
+            .get("/api/search?query_text=alpha&limit=2")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        response.assert_status_ok();
+        let mut actual = titles(&response.json());
+        actual.sort();
+        assert_eq!(actual, ["alpha first", "alpha second"]);
+        let response = request
+            .get("/api/search?query_text=alpha&limit=2")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("x-workspace-id", second.workspace_id.to_string())
+            .await;
+        response.assert_status_ok();
+        assert_eq!(titles(&response.json()), ["alpha second"]);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn unavailable_workspace_does_not_spend_the_search_budget_of_another() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+
+    let overrides = [("settings.rate_limit.search_tokens_per_minute", 1.into())];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
+        let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let root = super::fixtures::issue_tenant_key(&ctx, first.tenant_id, first.owner_id).await;
+        let response = request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .json(&serde_json::json!({"name":"unavailable-search"}))
+            .await;
+        response.assert_status(StatusCode::CREATED);
+        let unavailable: uuid::Uuid =
+            serde_json::from_value(response.json::<serde_json::Value>()["id"].clone()).unwrap();
+        yorishiro::models::workspace_workspaces::ActiveModel {
+            id: Set(unavailable),
+            embedding_reindexing: Set(true),
+            ..Default::default()
+        }
+        .update(&ctx.db)
+        .await
+        .unwrap();
+        let response = request
+            .get("/api/search?query_text=abc")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .await;
+        response.assert_status(StatusCode::SERVICE_UNAVAILABLE);
+        assert!(response.text().contains("reindexed"));
+        let response = request
+            .get("/api/search?query_text=abc")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .add_header("x-workspace-id", first.workspace_id.to_string())
+            .await;
+        assert_ne!(response.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+    })
+    .await;
+}
+
 /// Opt-in live-provider smoke test using only configured credentials and synthetic documents.
 #[tokio::test]
 #[ignore = "requires an explicitly configured live OpenAI-compatible embedding endpoint"]

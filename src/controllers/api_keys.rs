@@ -2,7 +2,7 @@
 
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use loco_rs::app::AppContext;
@@ -34,8 +34,12 @@ pub(crate) fn render_grant(
 pub(crate) async fn create(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
+    headers: HeaderMap,
     Json(body): Json<CreateApiKeyRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    body.validate_workspace_selection(
+        headers.contains_key(crate::models::api_keys::WORKSPACE_HEADER),
+    )?;
     let scope = body.scope.unwrap_or(ApiKeyScope::Read);
     crate::models::iam::access::require_key_grant(&ctx.db, &auth, scope, body.audit).await?;
     let created = if body.tenant_scoped {

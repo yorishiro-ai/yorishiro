@@ -131,6 +131,10 @@ impl Entity {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "validation, revocation and replacement share one transaction"
+    )]
     pub(crate) async fn rotate(
         db: &DatabaseConnection,
         actor: &AuthContext,
@@ -158,12 +162,31 @@ impl Entity {
                 message: "only an active key can be rotated; issue a new key instead".into(),
             });
         }
+        if old.is_login_session() {
+            return Err(YorishiroError::Conflict {
+                message: "login sessions cannot be rotated; sign in again".into(),
+            });
+        }
+        if old.role_id.is_some() {
+            return Err(YorishiroError::Conflict {
+                message: "legacy role credentials cannot be rotated".into(),
+            });
+        }
+        let root_session = Model::is_root_credential(&txn, actor.api_key_id).await?;
+        if !root_session && old.user_id != actor.user_id {
+            return Err(YorishiroError::ScopeInsufficient {
+                message: "only a root sign-in session can rotate another principal's key".into(),
+                hint: "rotate your own key or ask the tenant root".into(),
+            });
+        }
         let issuer_binding = Self::find_by_id(actor.api_key_id)
             .one(&txn)
             .await
             .internal()?
             .ok_or(YorishiroError::Unauthenticated)?;
-        if issuer_binding.workspace_id.is_some() && old.workspace_id != issuer_binding.workspace_id
+        if issuer_binding.workspace_id.is_some()
+            && old.workspace_id != issuer_binding.workspace_id
+            && !root_session
         {
             return Err(YorishiroError::ScopeInsufficient {
                 message: "replacement target exceeds the issuing key's binding".into(),
@@ -174,7 +197,8 @@ impl Entity {
         let scope = stored_scope(&old.scope)?;
         let current = Model::current_context(&txn, actor).await?;
         crate::models::iam::access::require_key_grant(&txn, &current, scope, old.audit).await?;
-        if let Some(limit) = issuer_binding.expires_at
+        if !root_session
+            && let Some(limit) = issuer_binding.expires_at
             && old.expires_at.is_none_or(|expiry| expiry > limit)
         {
             return Err(YorishiroError::ScopeInsufficient {

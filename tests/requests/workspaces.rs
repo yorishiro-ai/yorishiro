@@ -532,11 +532,12 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
             .json(&serde_json::json!({"user_name":"denied","password":"workspace-bound-key"}))
             .await
             .assert_status(StatusCode::FORBIDDEN);
+        let administrator = super::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
         let tenant_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
             &ctx.db,
             tenant.tenant_id,
             yorishiro::models::api_keys::ApiKeyScope::Migration,
-            Some(tenant.owner_id),
+            Some(administrator),
             false,
             "workspace-admin-test",
         )
@@ -572,11 +573,14 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
             .json(&serde_json::json!({"role":"viewer"}))
             .await
             .assert_status(StatusCode::NO_CONTENT);
-        request
-            .delete(&format!("/api/workspaces/{sibling_id}"))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
+        let bound_admin = issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            administrator,
+            yorishiro::models::api_keys::ApiKeyScope::Migration,
+            false,
+        )
+        .await;
         super::fixtures::grant_workspace(
             &ctx,
             sibling_id.parse().unwrap(),
@@ -593,6 +597,17 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
             .json(&serde_json::json!({"role":"admin"}))
             .await
             .assert_status(StatusCode::FORBIDDEN);
+        let sibling_path = format!("/api/workspaces/{sibling_id}");
+        request
+            .delete(&sibling_path)
+            .add_header("Authorization", format!("Bearer {bound_admin}"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        request
+            .delete(&sibling_path)
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
         request
             .delete(&path)
             .add_header("Authorization", format!("Bearer {key}"))

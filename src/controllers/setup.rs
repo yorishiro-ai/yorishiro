@@ -16,7 +16,6 @@ use loco_rs::controller::Routes;
 use crate::controllers::ApiError;
 use crate::dtos::setup::{SetupRequest, SetupResponse, SetupStatusResponse};
 use crate::error::YorishiroError;
-use crate::models::api_keys::{ApiKeyScope, IdentityApiKeys};
 use crate::models::{tenancy, tenant_tenants};
 
 fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
@@ -55,17 +54,8 @@ async fn setup(
         body.display_name.as_deref(),
     )
     .await?;
-    // Operator bootstrap issues the first audit-reading key; later grants require an authorized issuer.
-    // The scope is the top of the credential ladder, independent of IAM permissions.
-    let created = IdentityApiKeys::create_tenant_api_key(
-        &ctx.db,
-        account.tenant_id,
-        ApiKeyScope::Migration,
-        Some(account.user_id),
-        true,
-        "initial-admin",
-    )
-    .await?;
+    let (created, _, _) =
+        tenancy::issue_login_key(&ctx.db, account.user_id, None, Some(account.tenant_id)).await?;
 
     Ok((
         StatusCode::CREATED,

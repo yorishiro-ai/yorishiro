@@ -1,5 +1,6 @@
 //! Entity model: records, the embedding-sync token reads, and the operations in its submodules (CRUD, migration, snapshots, validation).
 
+use crate::error::{ResultExt, YorishiroError};
 use chrono::{DateTime, Utc};
 use sea_orm::ExprTrait;
 use sea_orm::QuerySelect;
@@ -41,7 +42,27 @@ impl std::fmt::Debug for Model {
 
 pub(crate) use migration::fill_defaults;
 pub use migration::{drift, migration_dry_run};
+pub(crate) use operations::create_for_actor;
 pub(crate) use operations::create_with_quota;
+pub(crate) use operations::get_for_actor;
+pub(crate) use operations::list_for_actor;
+pub(crate) use operations::{delete_for_actor, update_for_actor};
+
+pub(crate) async fn workspace_for_actor(
+    conn: &impl ConnectionTrait,
+    actor: &crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<Uuid, YorishiroError> {
+    if let Some(workspace_id) = actor.workspace_id {
+        return Ok(workspace_id);
+    }
+    let entity = Entity::find_by_id(id)
+        .one(conn)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found("resource was not found"))?;
+    crate::models::iam::access::check_workspace_target(conn, actor, entity.workspace_id).await
+}
 pub use operations::{count, create, delete, get, list, update};
 pub use snapshots::undo_job;
 pub use snapshots::{delete_snapshot, snapshot};

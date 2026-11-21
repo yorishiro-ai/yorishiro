@@ -84,8 +84,14 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let target = create_workspace(&ctx, tenant_id, "target").await;
         let target_key =
             fixtures::issue_api_key(&ctx, target.id, owner_id, ApiKeyScope::Schema, false).await;
-        let read_key =
-            fixtures::issue_api_key(&ctx, target.id, owner_id, ApiKeyScope::Read, false).await;
+        let read_key = fixtures::issue_api_key(
+            &ctx,
+            target.id,
+            fixtures::create_iam_administrator(&ctx, tenant_id).await,
+            ApiKeyScope::Read,
+            false,
+        )
+        .await;
 
         let denied = request
             .post("/api/schema-forks")

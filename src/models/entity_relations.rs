@@ -80,6 +80,19 @@ pub(crate) fn parse_relation_status(value: &str) -> Result<RelationStatus, Yoris
     })
 }
 
+pub(crate) async fn workspace_for_actor(
+    db: &impl ConnectionTrait,
+    actor: &crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<Uuid, YorishiroError> {
+    let record = Entity::find_by_id(id)
+        .one(db)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found("relation was not found"))?;
+    crate::models::iam::access::check_workspace_target(db, actor, record.workspace_id).await
+}
+
 pub struct CreateRelationInput {
     pub source_id: Uuid,
     pub target_id: Uuid,
@@ -271,15 +284,32 @@ pub async fn delete(
     }
 }
 
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.
-pub(crate) async fn list(
+pub(crate) async fn list_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+    query: ListRelationsQuery,
+) -> Result<Vec<RelationRecord>, YorishiroError> {
+    use crate::models::iam::{access::read_workspaces, policy::Action};
+    let workspaces = read_workspaces(&ctx.db, actor, Action::RelationList).await?;
+    let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
+    let records = list_workspaces(&txn, &workspaces, actor.tenant_id, query).await?;
+    txn.commit().await.internal()?;
+    Ok(records)
+}
+
+async fn list_workspaces(
     conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
+    workspaces: &[Uuid],
+    tenant_id: Uuid,
     query: ListRelationsQuery,
 ) -> Result<Vec<RelationRecord>, YorishiroError> {
     use crate::models::_entities::entity_relations::Column;
 
-    let mut select = Entity::find().filter(Column::WorkspaceId.eq(workspace_id));
+    let mut select = Entity::find()
+        .filter(Column::WorkspaceId.is_in(workspaces.iter().copied()))
+        .filter(Column::WorkspaceId.in_subquery(
+            crate::models::workspace_workspaces::ids_for_tenant(tenant_id),
+        ));
     if let Some(source_id) = query.source_id {
         select = select.filter(Column::SourceId.eq(source_id));
     }
@@ -295,6 +325,7 @@ pub(crate) async fn list(
 
     select
         .order_by_desc(Column::CreatedAt)
+        .order_by_desc(Column::Id)
         .limit(query.page.limit())
         .offset(query.page.offset())
         .all(conn)

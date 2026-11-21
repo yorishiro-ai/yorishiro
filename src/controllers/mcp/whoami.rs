@@ -40,8 +40,9 @@ impl YorishiroMcpServer {
                     "constraints": {
                         "database_backend": capabilities.database_backend,
                         "row_level_security": capabilities.row_level_security,
-                        "workspace_key_retargeting": false,
+                        "workspace_key_retargeting": capabilities.tenant_root,
                         "tenant_key_target_header": "X-Workspace-Id",
+                        "workspace_selection_argument": "workspace_id",
                         "discovery_authorizes_requests": false,
                         "authorization_model": "tenant_iam",
                     },

@@ -208,14 +208,16 @@ pub async fn discover_workspaces(
         .internal()?
         .ok_or(YorishiroError::Unauthenticated)?;
     if let Some(user_id) = current.user_id {
+        let root = crate::models::api_keys::Model::is_root_credential(conn, key.id).await?;
         let (_, workspaces) = login_options(conn, user_id).await?;
         return Ok(workspaces
             .into_iter()
             .filter(|workspace| {
                 workspace.tenant_id == current.tenant_id
-                    && key
-                        .workspace_id
-                        .is_none_or(|id| id == workspace.workspace_id)
+                    && (root
+                        || key
+                            .workspace_id
+                            .is_none_or(|id| id == workspace.workspace_id))
             })
             .collect());
     }

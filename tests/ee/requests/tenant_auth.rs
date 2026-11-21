@@ -31,7 +31,7 @@ async fn a_workspace_scoped_key_still_works_on_a_base_route() {
     .await;
 }
 
-/// Tenant keys need a workspace only for workspace-scoped operations.
+/// Tenant keys may omit workspace selection for IAM-filtered lists and search.
 #[tokio::test]
 #[expect(
     clippy::too_many_lines,
@@ -45,9 +45,9 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         let TestTenant {
             tenant_id,
             workspace_id,
-            owner_id: user_id,
             ..
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let user_id = crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await;
 
         // create_tenant_api_key reads tenant_tenants and tenant_memberships, neither granted to yorishiro_app (see tenant_tenants's migration doc comment), so it runs on the identity pool (the migration/admin role), not the RLS-scoped tenant pool.
         let db = ctx.shared_store.get::<DbHandle>().unwrap();
@@ -138,17 +138,17 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         let tenant_identity = missing_target.json::<serde_json::Value>();
         assert!(tenant_identity["workspace_id"].is_null());
         assert!(tenant_identity.get("workspace_access").is_none());
-        assert_eq!(tenant_identity["tenant_root"], true);
+        assert_eq!(tenant_identity["tenant_root"], false);
         request
             .get("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .await
-            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+            .assert_status(StatusCode::OK);
         request
             .get("/api/search?query_text=test")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .await
-            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+            .assert_status(StatusCode::SERVICE_UNAVAILABLE);
         request
             .get("/api/tenants/current")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
@@ -217,8 +217,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             .json(&serde_json::json!({"jsonrpc":"2.0", "id":4, "method":"tools/call", "params":{"name":"list_schemas","arguments":{}}}))
             .await;
         let body = super::mcp::rpc_body(&response.text());
-        assert_eq!(body["result"]["isError"], true, "{body}");
-        assert!(body.to_string().contains("x-workspace-id"), "{body}");
+        assert_eq!(body["result"]["isError"], false, "{body}");
         let response = request
             .post("/mcp")
             .add_header("Accept", "application/json, text/event-stream")
@@ -229,7 +228,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             .await;
         let body = super::mcp::rpc_body(&response.text());
         assert_eq!(body["result"]["isError"], true, "{body}");
-        assert!(body.to_string().contains("x-workspace-id"), "{body}");
+        assert!(!body.to_string().contains("x-workspace-id"), "{body}");
     })
     .await;
 }

@@ -18,11 +18,17 @@ async fn scope_rejection_does_not_touch_a_key_but_a_read_does() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant {
             workspace_id,
-            owner_id,
+            tenant_id,
             ..
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let key =
-            fixtures::issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
+        let key = fixtures::issue_api_key(
+            &ctx,
+            workspace_id,
+            fixtures::create_iam_administrator(&ctx, tenant_id).await,
+            ApiKeyScope::Read,
+            false,
+        )
+        .await;
         let before = Entity::list_for_workspace(
             &ctx.db,
             workspace_id,
@@ -103,9 +109,18 @@ async fn workspace_bound_issuer_cannot_rotate_another_workspaces_key() {
         )
         .await
         .unwrap();
+        let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let issuer = fixtures::issue_api_key(
+            &ctx,
+            tenant.workspace_id,
+            administrator,
+            api_keys::ApiKeyScope::Migration,
+            false,
+        )
+        .await;
         request
             .post(&format!("/api/api-keys/{}/rotate", target.id))
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {issuer}"))
             .await
             .assert_status(StatusCode::FORBIDDEN);
         request
@@ -121,10 +136,11 @@ async fn workspace_bound_issuer_cannot_rotate_another_workspaces_key() {
 async fn delegated_expiry_cannot_outlive_the_issuing_key() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator).await;
         let owner = format!("Bearer {tenant_key}");
         let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
-        let issued = request.post("/api/api-keys").add_header("Authorization",&owner).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
+        let issued = request.post("/api/api-keys").add_header("Authorization",&owner)
             .json(&serde_json::json!({"name":"short-admin","tenant_scoped":true,"expires_at":expiry})).await;
         issued.assert_status(StatusCode::CREATED);
         let issued = issued.json::<Value>();
@@ -304,7 +320,8 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         assert_ne!(timezone, "UTC", "test must boot with a non-default zone");
         let timezone = timezone.parse::<chrono_tz::Tz>().unwrap();
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let owner_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let owner_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator).await;
 
         assert_eq!(
             request.get("/api/api-keys").await.status_code(),
@@ -482,9 +499,12 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         // A workspace-bound key cannot mint a tenant-scoped one.
+        let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let bound = fixtures::issue_api_key(&ctx, tenant.workspace_id, administrator,
+            api_keys::ApiKeyScope::Migration, false).await;
         let denied = request
             .post("/api/api-keys")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {bound}"))
             .json(&serde_json::json!({"name": "from-bound", "tenant_scoped": true}))
             .await;
         denied.assert_status(StatusCode::FORBIDDEN);
@@ -494,17 +514,15 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             &ctx.db,
             tenant.tenant_id,
             api_keys::ApiKeyScope::Migration,
-            Some(tenant.owner_id),
+            Some(administrator),
             true,
             "initial-admin",
         )
         .await
         .expect("bootstrap tenant-scoped key");
-        // A tenant-scoped key names its workspace per request; the shared test tenant can hold several.
         let created = request
             .post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
-            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({
                 "name": "tenant-scoped",
                 "scope": "write",
@@ -583,7 +601,6 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .await.assert_status(StatusCode::NO_CONTENT);
         request.post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
-            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"denied-member", "tenant_scoped":true}))
             .await.assert_status(StatusCode::FORBIDDEN);
 
@@ -599,7 +616,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .await.assert_status(StatusCode::OK);
         request.get(&format!("/api/workspaces/{}", inaccessible.id))
             .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
-            .await.assert_status(StatusCode::FORBIDDEN);
+            .await.assert_status(StatusCode::NOT_FOUND);
         let listed = request.get("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
             .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
@@ -610,11 +627,10 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
 
         let read_issuer = api_keys::Entity::create_tenant_api_key(
             &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Read,
-            Some(tenant.owner_id), false, "read-tenant-issuer",
+            Some(administrator), false, "read-tenant-issuer",
         ).await.unwrap();
         request.post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", read_issuer.plaintext))
-            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"denied-escalation", "scope":"write", "tenant_scoped":true}))
             .await.assert_status(StatusCode::FORBIDDEN);
 
@@ -627,13 +643,11 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         for requested in [Value::Null, serde_json::json!(expiry + chrono::Duration::hours(1))] {
             request.post("/api/api-keys")
                 .add_header("Authorization", format!("Bearer {}", read_issuer.plaintext))
-                .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
                 .json(&serde_json::json!({"name":"denied-expiry", "tenant_scoped":true, "expires_at":requested}))
                 .await.assert_status(StatusCode::FORBIDDEN);
         }
         request.post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", read_issuer.plaintext))
-            .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"capped-expiry", "tenant_scoped":true, "expires_at":expiry - chrono::Duration::minutes(1)}))
             .await.assert_status(StatusCode::CREATED);
 

@@ -14,10 +14,26 @@ pub(crate) struct CreateApiKeyRequest {
     #[serde(default)]
     pub(crate) audit: bool,
     #[expect(clippy::doc_markdown, reason = "MCP exposes this description verbatim")]
-    /// Issue a tenant-scoped key (no workspace binding, `X-Workspace-Id` for workspace operations) instead of a workspace-bound one.
+    /// Issue a tenant-scoped key without a workspace binding.
     /// Requires CredentialCreate IAM permission and a tenant-scoped issuing credential.
     #[serde(default)]
     pub(crate) tenant_scoped: bool,
+}
+
+impl CreateApiKeyRequest {
+    pub(crate) fn validate_workspace_selection(
+        &self,
+        selected: bool,
+    ) -> Result<(), crate::YorishiroError> {
+        if self.tenant_scoped && selected {
+            return Err(crate::YorishiroError::ValidationFailed {
+                message: "tenant_scoped cannot be combined with a workspace selector".into(),
+                details: vec![],
+                hint: "omit the workspace selector for an unbound key".into(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize)]

@@ -20,12 +20,12 @@ async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let key = api_keys::Entity::create_tenant_api_key(
-            &ctx.db, target.tenant_id, api_keys::ApiKeyScope::Read, Some(target.owner_id), false, "retirement-owner",
+        let (key, _, scope) = yorishiro::models::tenancy::issue_login_key(
+            &ctx.db, target.owner_id, None, Some(target.tenant_id),
         ).await.unwrap();
         let actor = api_keys::AuthContext {
             api_key_id: key.id, workspace_id: None, tenant_id: target.tenant_id,
-            user_id: Some(target.owner_id), scope: api_keys::ApiKeyScope::Read, audit: false,
+            user_id: Some(target.owner_id), scope, audit: false,
         };
         let job_id = uuid::Uuid::now_v7();
         jobs::Entity::record_enqueue(&ctx.db, jobs::Enqueue {

@@ -5,7 +5,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Alias, Asterisk, Expr, Func, Query};
 use sea_orm::{
     ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait,
-    QueryFilter, QueryOrder,
+    QueryFilter, QueryOrder, QuerySelect,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -19,6 +19,48 @@ use crate::models::schema_schemas::metaschema::{
 use crate::models::_entities::schema_schemas::Column as SchemaColumn;
 use crate::models::_entities::workspace_schema_fork_heads as fork_heads;
 pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Column, Entity, Model};
+
+pub(crate) async fn workspace_for_actor(
+    db: &impl ConnectionTrait,
+    actor: &crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<Uuid, YorishiroError> {
+    if let Some(workspace_id) = actor.workspace_id {
+        return Ok(workspace_id);
+    }
+    let fork = Entity::find_by_id(id)
+        .one(db)
+        .await
+        .internal()?
+        .ok_or_else(|| YorishiroError::not_found("schema fork was not found"))?;
+    crate::models::iam::access::check_workspace_target(db, actor, fork.workspace_id).await
+}
+
+pub(crate) async fn list_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
+    page: crate::models::pagination::ListParams,
+) -> Result<Vec<ForkRecord>, YorishiroError> {
+    use crate::models::iam::{access::read_workspaces, policy::Action};
+    let workspaces = read_workspaces(&ctx.db, actor, Action::SchemaForkList).await?;
+    let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
+    let rows = Entity::find()
+        .filter(Column::TenantId.eq(actor.tenant_id))
+        .filter(Column::WorkspaceId.is_in(workspaces))
+        .order_by_asc(Column::CreatedAt)
+        .order_by_asc(Column::Id)
+        .limit(page.limit())
+        .offset(page.offset())
+        .all(&txn)
+        .await
+        .internal()?;
+    let mut records = Vec::with_capacity(rows.len());
+    for row in rows {
+        records.push(to_record(&txn, row).await?);
+    }
+    txn.commit().await.internal()?;
+    Ok(records)
+}
 
 #[derive(Clone, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

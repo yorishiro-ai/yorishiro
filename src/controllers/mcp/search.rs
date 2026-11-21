@@ -11,7 +11,6 @@ use serde_json::Value;
 
 use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::controllers::extractors::search_token_limiter;
-use crate::controllers::middleware::rate_limit::charge_search_tokens;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::search;
 
@@ -58,27 +57,18 @@ impl YorishiroMcpServer {
             limit: args.limit.unwrap_or(default.limit),
         };
 
-        let workspace_id = match auth_ctx.require_workspace() {
-            Ok(id) => id,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(err) = search::authorize_search(self.app_context(), &auth_ctx).await {
-            return Ok(err_to_tool_result(err));
-        }
-        if let Err(err) = search::ensure_available(&self.app_context().db, workspace_id).await {
-            return Ok(err_to_tool_result(err));
-        }
         let limiter = match search_token_limiter(self.app_context()).map_err(|err| err.0) {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),
         };
-        // Charged before embedding, same as the REST adapter: the budget bounds embedding work, and this tool does exactly as much of it as `GET /api/search`.
-        if let Err(err) = charge_search_tokens(&limiter, workspace_id, &args.query_text) {
-            return Ok(err_to_tool_result(err));
-        }
-
-        let hits = match search::search_text(self.app_context(), &auth_ctx, &args.query_text, query)
-            .await
+        let hits = match search::search_for_actor(
+            self.app_context(),
+            &auth_ctx,
+            &args.query_text,
+            query,
+            &limiter,
+        )
+        .await
         {
             Ok(value) => value,
             Err(err) => return Ok(err_to_tool_result(err)),

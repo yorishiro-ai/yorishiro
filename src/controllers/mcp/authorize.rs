@@ -11,11 +11,41 @@ pub(crate) struct Authorized {
     txn: DatabaseTransaction,
     identity: sea_orm::DatabaseConnection,
     authorization: Option<DatabaseTransaction>,
+    inferred_resource: bool,
     required: ApiKeyScope,
     workspace_id: uuid::Uuid,
 }
 
 impl Authorized {
+    pub(crate) async fn for_target(
+        app: &AppContext,
+        actor: &AuthContext,
+        required: ApiKeyScope,
+        target: crate::models::iam::access::WorkspaceTarget,
+    ) -> Result<Self, YorishiroError> {
+        auth::require_scope(actor, required)?;
+        let inferred_resource = target.inferred_resource(actor);
+        let mut actor = actor.clone();
+        let workspace_id = target
+            .resolve(&app.db, &actor, required)
+            .await
+            .map_err(|error| {
+                crate::models::iam::access::hide_inferred_resource(inferred_resource, error)
+            })?;
+        actor.workspace_id = Some(workspace_id);
+        let (ctx, txn) = auth::RequestAuth::new(app)
+            .begin(actor, required >= ApiKeyScope::Write)
+            .await?;
+        Ok(Self {
+            ctx,
+            txn,
+            identity: app.db.clone(),
+            authorization: None,
+            inferred_resource,
+            required,
+            workspace_id,
+        })
+    }
     pub(crate) const fn txn(&self) -> &DatabaseTransaction {
         &self.txn
     }
@@ -47,7 +77,10 @@ impl Authorized {
             self.required,
             action,
         )
-        .await?;
+        .await
+        .map_err(|error| {
+            crate::models::iam::access::hide_inferred_resource(self.inferred_resource, error)
+        })?;
         Ok(())
     }
 
@@ -58,16 +91,6 @@ impl Authorized {
     pub(crate) const fn workspace_id(&self) -> uuid::Uuid {
         self.workspace_id
     }
-}
-
-/// `authorize` splits its outcome into two kinds rather than a single failure case: a protocol-level failure (`Err`) and a scope-insufficient business outcome (`Ok` variant).
-/// The former is a dead end an agent can't usefully retry (missing/invalid API key); the latter is information an agent can act on.
-///
-/// Handlers match on this directly rather than through a macro, so the `return` that ends the call on a denial is visible where it happens.
-/// It cannot collapse into the `Err` side of the handler's own `Result`: `rmcp`'s `ToolRouter` fixes every tool's function type to `Result<CallToolResponse, ErrorData>` (`rmcp-3.4.0`, `handler/server/router/tool.rs:202`), and `ErrorData` is the protocol-level failure, which is not what a denial is.
-pub(crate) enum AuthzOutcome {
-    Authorized(Authorized),
-    ScopeDenied(CallToolResult),
 }
 
 /// A connection-less version of `Authorized`: only authenticates and verifies scope, without opening a transaction.
@@ -93,72 +116,7 @@ pub(super) fn header_error(error: YorishiroError) -> ErrorData {
     }
 }
 
-/// The sole entry point for every tool handler.
-/// Because there is no other way to obtain a `DatabaseTransaction`, forgetting the scope check is structurally impossible.
-///
-/// Shares `RequestAuth::authorize` with the REST adapter's `Authorized<R>` extractor; this just routes its result into the MCP protocol's two failure shapes (`ErrorData` at the protocol level, `CallToolResult` at the tool-result level).
-pub(crate) async fn authorize(
-    ctx: &AppContext,
-    parts: &Parts,
-    required: ApiKeyScope,
-) -> Result<AuthzOutcome, ErrorData> {
-    let presented_key = extract_bearer_key(parts)?;
-    let headers = auth::header_pairs(&parts.headers).map_err(header_error)?;
-
-    let request_auth = auth::RequestAuth::new(ctx);
-    let current = match request_auth.resolve(presented_key, &headers).await {
-        Ok(current) => current,
-        Err(error @ YorishiroError::ScopeInsufficient { .. }) => {
-            return Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(error)));
-        }
-        Err(YorishiroError::Unauthenticated) => {
-            return Err(ErrorData::invalid_request("authentication failed", None));
-        }
-        // A well-formed request with a value the credential cannot use (such as a malformed `x-workspace-id`) is the client's, not the server's, failure.
-        Err(YorishiroError::ValidationFailed { message, .. }) => {
-            return Err(ErrorData::invalid_params(message, None));
-        }
-        Err(error) => return Err(crate::error::mcp_internal(error)),
-    };
-    if let Err(error) = auth::require_scope(&current, required) {
-        return Ok(AuthzOutcome::ScopeDenied(scope_denied(
-            error,
-            required,
-            current.scope,
-        )));
-    }
-    let workspace_id = match current.require_workspace() {
-        Ok(workspace_id) => workspace_id,
-        Err(error) => return Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(error))),
-    };
-    let identity = ctx.db.clone();
-    match request_auth
-        .begin(current, required >= ApiKeyScope::Write)
-        .await
-    {
-        Ok((ctx, txn)) => Ok(AuthzOutcome::Authorized(Authorized {
-            ctx,
-            txn,
-            identity,
-            authorization: None,
-            required,
-            workspace_id,
-        })),
-        Err(err @ YorishiroError::ScopeInsufficient { .. }) => {
-            Ok(AuthzOutcome::ScopeDenied(err_to_tool_result(err)))
-        }
-        Err(YorishiroError::Unauthenticated) => {
-            Err(ErrorData::invalid_request("authentication failed", None))
-        }
-        Err(YorishiroError::ValidationFailed { message, .. }) => {
-            Err(ErrorData::invalid_params(message, None))
-        }
-        Err(err) => Err(crate::error::mcp_internal(err)),
-    }
-}
-
-/// Connection-less counterpart to `authorize`, used by tools that must run a slow operation (embedding generation) before touching the database.
-/// See `RequestAuth::verify`.
+/// Authenticates and checks scope before resolving an operation target.
 pub(crate) async fn verify(
     ctx: &AppContext,
     parts: &Parts,

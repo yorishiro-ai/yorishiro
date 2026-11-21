@@ -60,7 +60,7 @@ pub(super) async fn provider_tools_keep_secrets_private_and_match_rest(
             &ctx.db,
             tenant.workspace_id,
             ApiKeyScope::Read,
-            Some(tenant.owner_id),
+            Some(crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await),
             false,
         )
         .await

@@ -60,7 +60,7 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
         let grants = tool_result_json(&grants);
         assert_eq!(grants["scopes"], json!(["read"]));
         assert_eq!(grants["audit"], true);
-        assert_eq!(grants["tenant_root"], true);
+        assert_eq!(grants["tenant_root"], false);
         let postgres = ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Postgres;
         assert_eq!(grants["constraints"]["database_backend"], if postgres { "postgres" } else { "sqlite" });
         assert_eq!(grants["constraints"]["row_level_security"], postgres);
@@ -79,8 +79,8 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
         }
         let denied = mcp_call(&request, &session, &key, 5, "tools/call",
             json!({"name":"create_entity","arguments":{"schema_name":"missing","entity_type":"missing","data":{}}})).await;
-        let create = tools.iter().find(|entry| entry["name"] == "create_entity").unwrap();
-        assert_eq!(create["required_scope"], denied["result"]["structuredContent"]["error"]["required_scope"]);
+        assert_eq!(denied["result"]["isError"], true);
+        assert_eq!(denied["result"]["structuredContent"]["error"]["code"], "scope_insufficient");
     })
     .await;
 }

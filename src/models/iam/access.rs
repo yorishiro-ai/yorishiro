@@ -1,7 +1,7 @@
 //! Cross-table authorization decisions shared by every transport.
 //! Credential verification and table mutations remain in their owning models.
 
-use sea_orm::{ConnectionTrait, DatabaseTransaction};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, TransactionTrait};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -30,6 +30,113 @@ pub(crate) async fn authorize_workspace_action(
     Ok(authorization)
 }
 
+pub(crate) async fn check_workspace_target(
+    db: &impl ConnectionTrait,
+    actor: &AuthContext,
+    workspace_id: Uuid,
+) -> Result<Uuid, YorishiroError> {
+    let tenant =
+        crate::models::workspace_workspaces::get_workspace_tenant(db, workspace_id).await?;
+    if tenant != actor.tenant_id
+        || actor
+            .workspace_id
+            .is_some_and(|selected| selected != workspace_id)
+    {
+        return Err(YorishiroError::not_found("resource was not found"));
+    }
+    Ok(workspace_id)
+}
+
+pub(crate) enum WorkspaceTarget {
+    Workspace(Uuid),
+    Job(Uuid),
+    SnapshotJob(Uuid),
+    Schema(Uuid),
+    Relation(Uuid),
+    Permission(crate::models::iam::policy::Action),
+}
+
+impl WorkspaceTarget {
+    pub(crate) const fn inferred_resource(&self, actor: &AuthContext) -> bool {
+        actor.workspace_id.is_none() && !matches!(self, Self::Permission(_))
+    }
+
+    pub(crate) async fn resolve(
+        self,
+        db: &sea_orm::DatabaseConnection,
+        actor: &AuthContext,
+        scope: ApiKeyScope,
+    ) -> Result<Uuid, YorishiroError> {
+        if let Some(workspace_id) = actor.workspace_id {
+            return Ok(workspace_id);
+        }
+        match self {
+            Self::SnapshotJob(id) => {
+                use crate::models::_entities::entity_snapshots::{Column, Entity};
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+                let workspaces = Entity::find()
+                    .select_only()
+                    .column(Column::WorkspaceId)
+                    .distinct()
+                    .filter(Column::JobId.eq(id))
+                    .into_tuple::<Uuid>()
+                    .all(db)
+                    .await
+                    .internal()?;
+                let permitted =
+                    read_workspaces(db, actor, crate::models::iam::policy::Action::MigrationUndo)
+                        .await?
+                        .into_iter()
+                        .collect::<std::collections::HashSet<_>>();
+                let matching: Vec<_> = workspaces
+                    .into_iter()
+                    .filter(|workspace| permitted.contains(workspace))
+                    .collect();
+                match matching.as_slice() {
+                    [workspace] => Ok(*workspace),
+                    [] => Err(YorishiroError::not_found("snapshot job was not found")),
+                    _ => Err(YorishiroError::WorkspaceSelectionRequired {
+                        workspaces: matching,
+                    }),
+                }
+            }
+            Self::Job(id) => {
+                use sea_orm::EntityTrait;
+                let record = crate::models::queue_job_lifecycles::Entity::find_by_id(id)
+                    .one(db)
+                    .await
+                    .internal()?
+                    .ok_or_else(|| YorishiroError::not_found("job was not found"))?;
+                let workspace = record
+                    .workspace_id
+                    .ok_or_else(|| YorishiroError::not_found("workspace job was not found"))?;
+                check_workspace_target(db, actor, workspace).await
+            }
+            Self::Workspace(id) => check_workspace_target(db, actor, id).await,
+            Self::Schema(id) => {
+                crate::models::schema_schemas::workspace_for_actor(db, actor, id).await
+            }
+            Self::Relation(id) => {
+                crate::models::entity_relations::workspace_for_actor(db, actor, id).await
+            }
+            Self::Permission(action) => select_workspace(db, actor, scope, action).await,
+        }
+    }
+}
+
+pub(crate) fn hide_inferred_resource(inferred: bool, error: YorishiroError) -> YorishiroError {
+    if inferred
+        && matches!(
+            error,
+            YorishiroError::ScopeInsufficient { .. } | YorishiroError::NotFound { .. }
+        )
+    {
+        YorishiroError::not_found("resource was not found")
+    } else {
+        error
+    }
+}
+
 pub(crate) async fn require_iam_action(
     txn: &DatabaseTransaction,
     actor: &AuthContext,
@@ -43,35 +150,106 @@ pub(crate) async fn require_iam_action(
         .await
 }
 
+pub(crate) async fn select_workspace(
+    db: &sea_orm::DatabaseConnection,
+    actor: &AuthContext,
+    scope: ApiKeyScope,
+    action: crate::models::iam::policy::Action,
+) -> Result<Uuid, YorishiroError> {
+    if let Some(workspace) = actor.workspace_id {
+        return Ok(workspace);
+    }
+    let txn = db.begin().await.internal()?;
+    let evaluation = IamEvaluation::load(&txn, actor, scope).await?;
+    let workspaces = evaluation.workspace_ids(action).await?;
+    txn.commit().await.internal()?;
+    match workspaces.as_slice() {
+        [workspace] => Ok(*workspace),
+        [] => Err(YorishiroError::WorkspaceAccessDenied),
+        _ => Err(YorishiroError::WorkspaceSelectionRequired { workspaces }),
+    }
+}
+
+pub(crate) async fn read_workspaces(
+    db: &sea_orm::DatabaseConnection,
+    actor: &AuthContext,
+    action: crate::models::iam::policy::Action,
+) -> Result<Vec<Uuid>, YorishiroError> {
+    let txn = db.begin().await.internal()?;
+    let evaluation = IamEvaluation::load(&txn, actor, ApiKeyScope::Read).await?;
+    if action == crate::models::iam::policy::Action::AuditLogList {
+        require_audit(&evaluation.current)?;
+    }
+    let workspaces = evaluation.selected_or_allowed(action).await?;
+    txn.commit().await.internal()?;
+    Ok(workspaces)
+}
+
 pub(crate) struct IamEvaluation<'a> {
     txn: &'a DatabaseTransaction,
     current: AuthContext,
     bound_workspace_id: Option<Uuid>,
     root: bool,
+    root_session: bool,
     policies: Vec<crate::models::iam::policy::Policy>,
 }
 
 impl<'a> IamEvaluation<'a> {
+    async fn selected_or_allowed(
+        &self,
+        action: crate::models::iam::policy::Action,
+    ) -> Result<Vec<Uuid>, YorishiroError> {
+        if let Some(workspace_id) = self.current.workspace_id {
+            self.require(
+                action,
+                crate::models::iam::policy::Resource::Workspace {
+                    tenant_id: self.current.tenant_id,
+                    workspace_id,
+                },
+            )
+            .await?;
+            Ok(vec![workspace_id])
+        } else {
+            self.workspace_ids(action).await
+        }
+    }
+    pub(crate) async fn workspace_ids(
+        &self,
+        action: crate::models::iam::policy::Action,
+    ) -> Result<Vec<Uuid>, YorishiroError> {
+        use crate::models::_entities::workspace_workspaces::{Column, Entity};
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+        let workspaces = Entity::find()
+            .filter(Column::TenantId.eq(self.current.tenant_id))
+            .order_by_asc(Column::Id)
+            .all(self.txn)
+            .await
+            .internal()?;
+        let mut allowed = Vec::new();
+        for workspace in workspaces {
+            match self
+                .require_with_owner(
+                    action,
+                    crate::models::iam::policy::Resource::Workspace {
+                        tenant_id: self.current.tenant_id,
+                        workspace_id: workspace.id,
+                    },
+                    true,
+                )
+                .await
+            {
+                Ok(()) => allowed.push(workspace.id),
+                Err(YorishiroError::ScopeInsufficient { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(allowed)
+    }
+
     pub(crate) async fn load(
         txn: &'a DatabaseTransaction,
         actor: &AuthContext,
         required: ApiKeyScope,
-    ) -> Result<Self, YorishiroError> {
-        Self::load_with(txn, actor, required, false).await
-    }
-
-    pub(crate) async fn load_for_assumption(
-        txn: &'a DatabaseTransaction,
-        actor: &AuthContext,
-    ) -> Result<Self, YorishiroError> {
-        Self::load_with(txn, actor, ApiKeyScope::Read, true).await
-    }
-
-    async fn load_with(
-        txn: &'a DatabaseTransaction,
-        actor: &AuthContext,
-        required: ApiKeyScope,
-        assumption: bool,
     ) -> Result<Self, YorishiroError> {
         use crate::models::iam::policy::Policy;
         use sea_orm::EntityTrait;
@@ -84,40 +262,13 @@ impl<'a> IamEvaluation<'a> {
             .await
             .internal()?
             .ok_or(YorishiroError::Unauthenticated)?;
-        let mut credential = current.clone();
-        credential.scope = ApiKeyScope::from_db_str(&key.scope)
-            .ok_or_else(|| YorishiroError::Internal("unknown api key scope in database".into()))?;
-        require_scope(&credential, required)?;
-        if assumption && key.role_id.is_some() {
-            return Err(YorishiroError::ScopeInsufficient {
-                message: "a role session cannot assume another role".into(),
-                hint: "assume the role with the original credential".into(),
-            });
-        }
-        let mut root = false;
-        let documents = if let Some(role_id) = key.role_id {
-            // A role session is evaluated by the role's policies alone; a deleted role leaves nothing to evaluate.
-            crate::models::iam_policies::Model::for_role(txn, current.tenant_id, role_id).await?
-        } else if let Some(user_id) = current.user_id {
-            root =
-                crate::models::iam_tenant_roots::Model::contains(txn, current.tenant_id, user_id)
-                    .await?;
-            if assumption && root {
-                return Err(YorishiroError::ScopeInsufficient {
-                    message: "the tenant root cannot assume roles".into(),
-                    hint: "the root already holds every permission".into(),
-                });
-            }
-            if root {
-                Vec::new()
-            } else {
-                crate::models::iam_policies::Model::for_user(txn, current.tenant_id, user_id)
-                    .await?
-            }
-        } else if assumption {
+        require_scope(&current, required)?;
+        let user_id = current.user_id.ok_or(YorishiroError::Unauthenticated)?;
+        let root = key.has_root_principal(txn).await?;
+        let documents = if root {
             Vec::new()
         } else {
-            return Err(YorishiroError::Unauthenticated);
+            crate::models::iam_policies::Model::for_user(txn, current.tenant_id, user_id).await?
         };
         let mut policies = Vec::with_capacity(documents.len());
         for document in documents {
@@ -129,6 +280,7 @@ impl<'a> IamEvaluation<'a> {
         }
         Ok(Self {
             txn,
+            root_session: key.is_login_session() && root,
             current,
             bound_workspace_id: key.workspace_id,
             root,
@@ -140,6 +292,15 @@ impl<'a> IamEvaluation<'a> {
         &self,
         action: crate::models::iam::policy::Action,
         target: crate::models::iam::policy::Resource,
+    ) -> Result<(), YorishiroError> {
+        self.require_with_owner(action, target, false).await
+    }
+
+    async fn require_with_owner(
+        &self,
+        action: crate::models::iam::policy::Action,
+        target: crate::models::iam::policy::Resource,
+        tenant_owns_workspace: bool,
     ) -> Result<(), YorishiroError> {
         use crate::models::iam::policy::{Policy, Resource};
         if !action.applies_to(target) {
@@ -182,19 +343,29 @@ impl<'a> IamEvaluation<'a> {
                     .is_none_or(|id| id == workspace_id)
                 && self.bound_workspace_id.is_none_or(|id| id == workspace_id) =>
             {
-                let owner = crate::models::workspace_workspaces::get_workspace_tenant(
-                    self.txn,
-                    workspace_id,
-                )
-                .await?;
-                if owner != tenant_id {
+                if !tenant_owns_workspace
+                    && crate::models::workspace_workspaces::get_workspace_tenant(
+                        self.txn,
+                        workspace_id,
+                    )
+                    .await?
+                        != tenant_id
+                {
                     return Err(YorishiroError::Unauthenticated);
                 }
                 Some(workspace_id)
             }
             _ => return Err(YorishiroError::Unauthenticated),
         };
-        if self.root {
+        if self.root_session
+            || (self.root
+                && workspace.is_some()
+                && (!matches!(
+                    action,
+                    crate::models::iam::policy::Action::WorkspaceUpdate
+                        | crate::models::iam::policy::Action::WorkspaceDelete
+                ) || self.current.scope.satisfies(ApiKeyScope::Migration)))
+        {
             return Ok(());
         }
         if Policy::allows(
@@ -254,13 +425,7 @@ pub async fn identity(
         .ok_or(YorishiroError::Unauthenticated)?;
     let stored_scope = ApiKeyScope::from_db_str(&key.scope)
         .ok_or_else(|| YorishiroError::Internal("unknown api key scope in database".into()))?;
-    let tenant_root = match current.user_id {
-        Some(user_id) => {
-            crate::models::iam_tenant_roots::Model::contains(conn, current.tenant_id, user_id)
-                .await?
-        }
-        None => false,
-    };
+    let tenant_root = key.is_login_session() && key.has_root_principal(conn).await?;
     Ok(AccessIdentity {
         current,
         workspace_name: workspace.map(|workspace| workspace.name),

@@ -30,7 +30,6 @@ async fn tenant_key_issuance_rechecks_authority_after_waiting_for_policy_detachm
         let issue = async {
             request.post("/api/api-keys")
                 .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
-                .add_header(api_keys::WORKSPACE_HEADER, tenant.workspace_id.to_string())
                 .json(&serde_json::json!({"name":"must-not-exist", "scope":"read", "tenant_scoped":true})).await
         };
         let demote = async {

@@ -21,9 +21,10 @@ async fn template_update_rejects_a_revoked_previously_authenticated_actor() {
             .json(&serde_json::json!({"name":format!("fenced-{}",uuid::Uuid::new_v4()),"definition":note_definition()})).await;
         created.assert_status(StatusCode::CREATED);
         let id = created.json::<serde_json::Value>()["id"].as_str().unwrap().parse().unwrap();
-        let key = api_keys::Entity::create_tenant_api_key(&ctx.db, tenant.tenant_id, ApiKeyScope::Read, Some(tenant.owner_id), false, "template-admin").await.unwrap();
+        let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let key = api_keys::Entity::create_tenant_api_key(&ctx.db, tenant.tenant_id, ApiKeyScope::Read, Some(administrator), false, "template-admin").await.unwrap();
         let actor = api_keys::AuthContext { api_key_id:key.id, workspace_id:None,
-            tenant_id:tenant.tenant_id, user_id:Some(tenant.owner_id), scope:ApiKeyScope::Read, audit:false };
+            tenant_id:tenant.tenant_id, user_id:Some(administrator), scope:ApiKeyScope::Read, audit:false };
         template_templates::update_as(&ctx.db, &actor, id, UpdateTemplateInput {
             name: None, description: Some("before-revocation".into()), definition: None, tags: None, locale: None,
         }).await.unwrap();

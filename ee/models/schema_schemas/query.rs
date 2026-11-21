@@ -3,8 +3,8 @@
 //! The query alone: what to do about a change is `models::schema_schemas`'s, which decides whether a merge is safe and what it would produce.
 //!
 //! Owns no table.
-//! `schema_schemas` and `template_templates` are both base's; both are read here on `ctx.db` (the migration/admin connection), since `template_templates` carries no GRANT to `yorishiro_app` and a request's RLS-scoped connection cannot see it at all.
-//! That does not make this base's: the endpoint it serves is enterprise, and an edition is decided by what a feature is rather than by which tables it reads.
+//! The control plane joins template metadata to page the candidates.
+//! Workspace schema definitions are only loaded on the RLS-scoped connection.
 
 use super::merge;
 use crate::error::{ResultExt, YorishiroError};
@@ -13,13 +13,13 @@ use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 use crate::models::schema_schemas::{SchemaOriginStatus, SchemaStatus, UpstreamChange};
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder,
-    QuerySelect,
+    ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder, QuerySelect,
 };
 use uuid::Uuid;
 
 #[derive(FromQueryResult)]
 struct Row {
+    workspace_id: Uuid,
     schema_id: Uuid,
     schema_name: String,
     version: i32,
@@ -27,8 +27,6 @@ struct Row {
     template_name: String,
     changed_at: DateTime<Utc>,
     origin_updated_at: Option<DateTime<Utc>>,
-    schema_definition: sea_orm::prelude::Json,
-    origin_snapshot: Option<sea_orm::prelude::Json>,
     template_definition: sea_orm::prelude::Json,
 }
 
@@ -43,14 +41,18 @@ struct Row {
 /// The explicit `origin_updated_at IS NULL` state is the source of truth.
 /// It survives local schema versioning and is cleared only by a successful merge acknowledgement.
 /// Reads both definitions in one joined ORM query before computing the merge summary.
-pub(crate) async fn list_with_upstream_changes(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
+pub(crate) async fn list_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: &crate::models::api_keys::AuthContext,
     page: ListParams,
 ) -> Result<Vec<UpstreamChange>, YorishiroError> {
     use crate::models::_entities::{schema_schemas as schema, template_templates as template};
+    use crate::models::iam::{access::read_workspaces, policy::Action};
+    use std::collections::HashMap;
+    let workspaces = read_workspaces(&ctx.db, actor, Action::SchemaUpstreamList).await?;
     let rows = schema::Entity::find()
         .select_only()
+        .column(schema::Column::WorkspaceId)
         .column_as(schema::Column::Id, "schema_id")
         .column_as(schema::Column::Name, "schema_name")
         .column(schema::Column::Version)
@@ -58,8 +60,6 @@ pub(crate) async fn list_with_upstream_changes(
         .column_as(template::Column::Name, "template_name")
         .column_as(template::Column::UpdatedAt, "changed_at")
         .column(schema::Column::OriginUpdatedAt)
-        .column_as(schema::Column::Definition, "schema_definition")
-        .column(schema::Column::OriginSnapshot)
         .column_as(template::Column::Definition, "template_definition")
         .join(
             JoinType::InnerJoin,
@@ -68,24 +68,38 @@ pub(crate) async fn list_with_upstream_changes(
                 .to(template::Column::Id)
                 .into(),
         )
-        .filter(schema::Column::WorkspaceId.eq(workspace_id))
+        .filter(schema::Column::WorkspaceId.is_in(workspaces.iter().copied()))
+        .filter(schema::Column::TenantId.eq(actor.tenant_id))
         .filter(schema::Column::Status.eq(SchemaStatus::Active.as_db_str()))
         .filter(schema::Column::OriginStatus.eq(SchemaOriginStatus::Linked.as_db_str()))
         .filter(schema::Column::OriginUpdatedAt.is_null())
         .order_by_desc(template::Column::UpdatedAt)
+        .order_by_asc(schema::Column::Id)
         .limit(page.limit())
         .offset(page.offset())
         .into_model::<Row>()
-        .all(conn)
+        .all(&ctx.db)
         .await
         .internal()?;
+    let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
+    let mut schemas: HashMap<_, _> = schema::Entity::find()
+        .filter(schema::Column::TenantId.eq(actor.tenant_id))
+        .filter(schema::Column::Id.is_in(rows.iter().map(|row| row.schema_id)))
+        .all(&txn)
+        .await
+        .internal()?
+        .into_iter()
+        .map(|schema| (schema.id, schema))
+        .collect();
+    txn.commit().await.internal()?;
 
     rows.into_iter()
-        .map(|row| {
-            let schema_definition: MetaSchemaDefinition =
-                serde_json::from_value(row.schema_definition)
-                    .map_err(|err| YorishiroError::Internal(err.into()))?;
-            let base: MetaSchemaDefinition = row
+        .filter_map(|row| schemas.remove(&row.schema_id).map(|schema| (row, schema)))
+        .filter(|(row, schema)| schema.origin_template_id == Some(row.template_id))
+        .map(|(row, schema)| {
+            let schema_definition: MetaSchemaDefinition = serde_json::from_value(schema.definition)
+                .map_err(|err| YorishiroError::Internal(err.into()))?;
+            let base: MetaSchemaDefinition = schema
                 .origin_snapshot
                 .ok_or_else(|| YorishiroError::Internal("linked schema has no merge base".into()))
                 .and_then(|value| {
@@ -97,6 +111,7 @@ pub(crate) async fn list_with_upstream_changes(
                     .map_err(|err| YorishiroError::Internal(err.into()))?;
             let summary = merge::three_way(&base, &template_definition, &schema_definition).summary;
             Ok(UpstreamChange {
+                workspace_id: row.workspace_id,
                 schema_id: row.schema_id,
                 schema_name: row.schema_name,
                 version: row.version,

@@ -3,7 +3,7 @@
 //! This overlays base's own `/api/schemas` namespace, since merging a schema is a schema operation from the client's side, not an administrative one like the dashboard or Stripe.
 //!
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope};
+use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope, Verified};
 use crate::models::schema_schemas::UpstreamChange;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -21,20 +21,10 @@ use crate::edition::ee::models::schema_schemas::MergePlan;
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/upstream-changes", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [UpstreamChange]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_upstream_list"]))), tag = "enterprise"))]
 async fn list_upstream_changes(
     State(ctx): State<AppContext>,
-    mut authorized: Authorized<ReadScope>,
+    verified: Verified<ReadScope>,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<UpstreamChange>>, ApiError> {
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaUpstreamList)
-        .await?;
-
-    // Upstream joins templates through the identity pool under the retained IAM fence.
-    let changes = origin_model::list_with_upstream_changes(
-        &ctx.db,
-        authorized.ctx.require_workspace()?,
-        page.try_into()?,
-    )
-    .await?;
+    let changes = origin_model::list_for_actor(&ctx, &verified.ctx, page.try_into()?).await?;
     Ok(Json(changes))
 }
 
@@ -42,9 +32,15 @@ async fn list_upstream_changes(
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/{schema_id}/merge-preview", params(("schema_id" = Uuid, Path)), responses((status = 200, body = MergePlan), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_merge_preview"]))), tag = "enterprise"))]
 async fn merge_preview(
     State(ctx): State<AppContext>,
-    mut authorized: Authorized<ReadScope>,
+    verified: Verified<ReadScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<Json<MergePlan>, ApiError> {
+    let mut authorized = Authorized::<ReadScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
+    )
+    .await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaMergePreview)
         .await?;
@@ -66,9 +62,15 @@ async fn merge_preview(
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/{schema_id}/merge", params(("schema_id" = Uuid, Path)), responses((status = 201, body = MergeResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_merge_apply"]))), tag = "enterprise"))]
 async fn merge_apply(
     State(ctx): State<AppContext>,
-    mut authorized: Authorized<SchemaScope>,
+    verified: Verified<SchemaScope>,
     Path(schema_id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<MergeResponse>), ApiError> {
+    let mut authorized = Authorized::<SchemaScope>::for_target(
+        &ctx,
+        verified.ctx,
+        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
+    )
+    .await?;
     authorized
         .require_action(crate::models::iam::policy::Action::SchemaMergeApply)
         .await?;

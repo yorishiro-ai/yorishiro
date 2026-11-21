@@ -131,6 +131,22 @@ pub(crate) async fn grant_iam_administrator(
     .expect("attach fixture administrator policy");
 }
 
+pub(crate) async fn create_iam_administrator(ctx: &AppContext, tenant_id: Uuid) -> Uuid {
+    let txn = ctx.db.begin().await.expect("begin administrator setup");
+    let user = tenancy::register_member(
+        &txn,
+        tenant_id,
+        &unique_email("administrator"),
+        "hunter2-hunter2",
+        None,
+    )
+    .await
+    .expect("create administrator");
+    grant_iam_administrator(&txn, tenant_id, user.id).await;
+    txn.commit().await.expect("commit administrator setup");
+    user.id
+}
+
 /// Arguments for shared tenant/workspace/owner setup.
 pub(crate) struct TenantArgs {
     /// Tenant name. Defaults to a unique name.
@@ -177,6 +193,19 @@ pub(crate) async fn issue_api_key(
 }
 
 pub(crate) async fn issue_tenant_key(ctx: &AppContext, tenant_id: Uuid, user_id: Uuid) -> String {
+    use sea_orm::EntityTrait;
+    if yorishiro::models::iam_tenant_roots::Entity::find_by_id(tenant_id)
+        .one(&ctx.db)
+        .await
+        .expect("check test principal")
+        .is_some_and(|root| root.user_id == user_id)
+    {
+        return tenancy::issue_login_key(&ctx.db, user_id, None, Some(tenant_id))
+            .await
+            .expect("issue root session")
+            .0
+            .plaintext;
+    }
     api_keys::Entity::create_tenant_api_key(
         &ctx.db,
         tenant_id,

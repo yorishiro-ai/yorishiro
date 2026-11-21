@@ -1,4 +1,4 @@
-//! REST routes for IAM: policies, groups, roles, their attachments and the audit log.
+//! REST routes for IAM policies, groups, their attachments and the audit log.
 
 use axum::{Json, extract::State, http::StatusCode, routing::post};
 use loco_rs::{app::AppContext, controller::Routes};
@@ -144,15 +144,6 @@ pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
         super::openapi::route_inventory::path_doc(__path_list_audit),
         super::openapi::route_inventory::path_doc(__path_create_group),
         super::openapi::route_inventory::path_doc(__path_create_policy),
-        super::openapi::route_inventory::path_doc(__path_create_role),
-        super::openapi::route_inventory::path_doc(__path_list_iam_roles),
-        super::openapi::route_inventory::path_doc(__path_get_iam_role),
-        super::openapi::route_inventory::path_doc(__path_update_role),
-        super::openapi::route_inventory::path_doc(__path_delete_role),
-        super::openapi::route_inventory::path_doc(__path_list_iam_role_policies),
-        super::openapi::route_inventory::path_doc(__path_attach_role_policy),
-        super::openapi::route_inventory::path_doc(__path_detach_role_policy),
-        super::openapi::route_inventory::path_doc(__path_assume_role),
     ]
 }
 
@@ -198,22 +189,6 @@ pub(crate) fn routes() -> Routes {
                 .get(get_iam_group),
         )
         .add("/policies", post(create_policy).get(list_iam_policies))
-        .add("/roles", post(create_role).get(list_iam_roles))
-        .add(
-            "/roles/{role_id}",
-            axum::routing::put(update_role)
-                .delete(delete_role)
-                .get(get_iam_role),
-        )
-        .add(
-            "/roles/{role_id}/policies",
-            axum::routing::get(list_iam_role_policies),
-        )
-        .add(
-            "/roles/{role_id}/policies/{policy_id}",
-            axum::routing::put(attach_role_policy).delete(detach_role_policy),
-        )
-        .add("/roles/{role_id}/assume", post(assume_role))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/iam/groups/{group_id}/members/{user_id}", params(("group_id" = uuid::Uuid, Path), ("user_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404), (status = 409)), security(("bearer_auth" = [])), tag = "community"))]
@@ -368,144 +343,4 @@ async fn get_iam_policy(
             .await?
             .into(),
     ))
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/iam/roles", request_body = crate::dtos::iam::CreateRole, responses((status = 201, body = crate::dtos::iam::RoleRecord), (status = 403), (status = 409), (status = 422)), security(("bearer_auth" = [])), tag = "community"))]
-async fn create_role(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    Json(input): Json<crate::dtos::iam::CreateRole>,
-) -> Result<(StatusCode, Json<crate::dtos::iam::RoleRecord>), ApiError> {
-    let role = crate::models::iam_roles::Model::create_as(
-        &ctx.db,
-        &actor,
-        crate::models::iam_roles::CreateRole {
-            name: input.name,
-            trust_policy: input.trust_policy,
-            max_session_seconds: input.max_session_seconds,
-        },
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(role.into())))
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/roles", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<crate::dtos::iam::RoleRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
-async fn list_iam_roles(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    axum::extract::Query(input): axum::extract::Query<crate::dtos::iam::ListIam>,
-) -> Result<Json<Vec<crate::dtos::iam::RoleRecord>>, ApiError> {
-    let rows = crate::models::iam_roles::Model::list_as(
-        &ctx.db,
-        &actor,
-        crate::models::pagination::ListParams::new(input.limit, input.offset),
-    )
-    .await?;
-    Ok(Json(rows.into_iter().map(Into::into).collect()))
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/roles/{role_id}", params(("role_id" = uuid::Uuid, Path)), responses((status = 200, body = crate::dtos::iam::RoleRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
-async fn get_iam_role(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
-) -> Result<Json<crate::dtos::iam::RoleRecord>, ApiError> {
-    Ok(Json(
-        crate::models::iam_roles::Model::get_as(&ctx.db, &actor, id)
-            .await?
-            .into(),
-    ))
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/iam/roles/{role_id}", params(("role_id" = uuid::Uuid, Path)), request_body = crate::dtos::iam::UpdateRole, responses((status = 200, body = crate::dtos::iam::RoleRecord), (status = 403), (status = 404), (status = 409), (status = 422)), security(("bearer_auth" = [])), tag = "community"))]
-async fn update_role(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
-    Json(input): Json<crate::dtos::iam::UpdateRole>,
-) -> Result<Json<crate::dtos::iam::RoleRecord>, ApiError> {
-    Ok(Json(
-        crate::models::iam_roles::Model::update_as(
-            &ctx.db,
-            &actor,
-            id,
-            crate::models::iam_roles::UpdateRole {
-                name: input.name,
-                trust_policy: input.trust_policy,
-                max_session_seconds: input.max_session_seconds,
-            },
-        )
-        .await?
-        .into(),
-    ))
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/iam/roles/{role_id}", params(("role_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
-async fn delete_role(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
-) -> Result<StatusCode, ApiError> {
-    crate::models::iam_roles::Model::delete_as(&ctx.db, &actor, id).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/roles/{role_id}/policies", params(("role_id" = uuid::Uuid, Path), ("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<crate::dtos::iam::RolePolicyRecord>), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
-async fn list_iam_role_policies(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    axum::extract::Path(role_id): axum::extract::Path<uuid::Uuid>,
-    axum::extract::Query(input): axum::extract::Query<crate::dtos::iam::ListIam>,
-) -> Result<Json<Vec<crate::dtos::iam::RolePolicyRecord>>, ApiError> {
-    let rows = crate::models::iam_role_policy_attachments::Model::list_as(
-        &ctx.db,
-        &actor,
-        role_id,
-        crate::models::pagination::ListParams::new(input.limit, input.offset),
-    )
-    .await?;
-    Ok(Json(rows.into_iter().map(Into::into).collect()))
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/iam/roles/{role_id}/policies/{policy_id}", params(("role_id" = uuid::Uuid, Path), ("policy_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404), (status = 409)), security(("bearer_auth" = [])), tag = "community"))]
-async fn attach_role_policy(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    axum::extract::Path((role_id, policy_id)): axum::extract::Path<(uuid::Uuid, uuid::Uuid)>,
-) -> Result<StatusCode, ApiError> {
-    crate::models::iam_role_policy_attachments::Model::add_as(&ctx.db, &actor, role_id, policy_id)
-        .await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/iam/roles/{role_id}/policies/{policy_id}", params(("role_id" = uuid::Uuid, Path), ("policy_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
-async fn detach_role_policy(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    axum::extract::Path((role_id, policy_id)): axum::extract::Path<(uuid::Uuid, uuid::Uuid)>,
-) -> Result<StatusCode, ApiError> {
-    crate::models::iam_role_policy_attachments::Model::remove_as(
-        &ctx.db, &actor, role_id, policy_id,
-    )
-    .await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// Assumes the role and returns a temporary credential, shown once.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/iam/roles/{role_id}/assume", params(("role_id" = uuid::Uuid, Path)), request_body = crate::dtos::iam::AssumeRoleRequest, responses((status = 201, body = crate::models::iam_roles::RoleSession), (status = 403), (status = 404), (status = 422)), security(("bearer_auth" = [])), tag = "community"))]
-async fn assume_role(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
-    Json(input): Json<crate::dtos::iam::AssumeRoleRequest>,
-) -> Result<(StatusCode, Json<crate::models::iam_roles::RoleSession>), ApiError> {
-    let session = crate::models::iam_roles::Model::assume_as(
-        &ctx.db,
-        &actor,
-        id,
-        input.scope,
-        input.duration_seconds,
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(session)))
 }

@@ -5,7 +5,6 @@ use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{ReadScope, Verified, search_token_limiter};
-use crate::controllers::middleware::rate_limit::charge_search_tokens;
 use crate::dtos::search::SearchEntitiesParams;
 use crate::models::search::{self, SearchHit};
 
@@ -23,13 +22,9 @@ pub(crate) async fn search_entities(
         limit: params.limit.unwrap_or(default.limit),
     };
 
-    let workspace_id = verified.ctx.require_workspace()?;
-    search::authorize_search(&ctx, &verified.ctx).await?;
-    search::ensure_available(&ctx.db, workspace_id).await?;
     let limiter = search_token_limiter(&ctx)?;
-    charge_search_tokens(&limiter, workspace_id, &params.query_text)?;
-
-    let hits = search::search_text(&ctx, &verified.ctx, &params.query_text, query).await?;
+    let hits =
+        search::search_for_actor(&ctx, &verified.ctx, &params.query_text, query, &limiter).await?;
     Ok(Json(hits))
 }
 

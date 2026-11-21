@@ -15,6 +15,8 @@ use crate::models::db_enum::db_enum;
 const KEY_PREFIX_LENGTH: usize = 12;
 const KEY_SECRET_LENGTH: usize = 48;
 const LOGIN_SESSION_HOURS: i64 = 12;
+// Ordinary key prefixes contain only random alphanumerics after `ysr_`.
+const LOGIN_KEY_PREFIX: &str = "ysr_login-";
 
 /// The request header that names which workspace a tenant-scoped key acts on.
 pub const WORKSPACE_HEADER: &str = "x-workspace-id";
@@ -37,6 +39,42 @@ pub struct KeyGrant {
 }
 
 impl Model {
+    pub(crate) async fn is_root_credential(
+        conn: &impl ConnectionTrait,
+        id: Uuid,
+    ) -> Result<bool, YorishiroError> {
+        let key = Entity::find_by_id(id)
+            .one(conn)
+            .await
+            .internal()?
+            .filter(Self::is_active)
+            .ok_or(YorishiroError::Unauthenticated)?;
+        if !key.is_login_session() {
+            return Ok(false);
+        }
+        key.has_root_principal(conn).await
+    }
+
+    pub(crate) fn is_login_session(&self) -> bool {
+        self.role_id.is_none() && self.key_prefix.starts_with(LOGIN_KEY_PREFIX)
+    }
+
+    pub(crate) async fn has_root_principal(
+        &self,
+        conn: &impl ConnectionTrait,
+    ) -> Result<bool, YorishiroError> {
+        if self.role_id.is_some() {
+            return Ok(false);
+        }
+        match self.user_id {
+            Some(user_id) => {
+                crate::models::iam_tenant_roots::Model::contains(conn, self.tenant_id, user_id)
+                    .await
+            }
+            None => Ok(false),
+        }
+    }
+
     pub(crate) fn is_active(&self) -> bool {
         self.revoked_at.is_none()
             && self
@@ -56,11 +94,14 @@ impl Model {
                 key.is_active()
                     && key.tenant_id == presented.tenant_id
                     && key.user_id == presented.user_id
-                    && key
-                        .workspace_id
-                        .is_none_or(|id| Some(id) == presented.workspace_id)
             })
             .ok_or(YorishiroError::Unauthenticated)?;
+        if key
+            .workspace_id
+            .is_some_and(|id| Some(id) != presented.workspace_id)
+        {
+            return Err(YorishiroError::Unauthenticated);
+        }
         if let Some(workspace_id) = presented.workspace_id {
             let tenant =
                 crate::models::workspace_workspaces::get_workspace_tenant(conn, workspace_id)
@@ -181,28 +222,43 @@ pub struct AuthContext {
 impl AuthContext {
     /// Requests already authenticated may finish; later authentications read the committed membership.
     pub(crate) async fn with_current_membership(
-        self,
+        mut self,
         conn: &impl ConnectionTrait,
     ) -> Result<Self, YorishiroError> {
+        let key = Entity::find_by_id(self.api_key_id)
+            .one(conn)
+            .await
+            .internal()?
+            .filter(|key| {
+                key.is_active()
+                    && key.role_id.is_none()
+                    && key.tenant_id == self.tenant_id
+                    && key.user_id == self.user_id
+            })
+            .ok_or(YorishiroError::Unauthenticated)?;
         crate::models::tenant_tenants::Model::require_active(conn, self.tenant_id).await?;
         if let Some(user_id) = self.user_id
             && !crate::models::tenant_memberships::is_member(conn, self.tenant_id, user_id).await?
         {
             return Err(YorishiroError::Unauthenticated);
         }
+        if key.is_login_session() && key.has_root_principal(conn).await? {
+            self.scope = ApiKeyScope::Migration;
+            self.audit = true;
+        }
         Ok(self)
     }
 
-    /// Requires an explicitly selected workspace.
+    /// Requires the authorization or authentication flow to have resolved a workspace.
     ///
     /// # Errors
     /// Rejects tenant-only contexts.
     pub fn require_workspace(&self) -> Result<Uuid, YorishiroError> {
         self.workspace_id
             .ok_or_else(|| YorishiroError::ValidationFailed {
-                message: format!("this operation requires {WORKSPACE_HEADER}"),
+                message: "this operation requires a workspace".into(),
                 details: Vec::new(),
-                hint: "select a workspace or use a workspace-bound key".into(),
+                hint: format!("select a workspace with workspace_id or {WORKSPACE_HEADER}"),
             })
     }
 }
@@ -236,7 +292,11 @@ pub fn hash_key(raw: &str) -> Vec<u8> {
 
 /// Generates the shared credential format; only the hash is persisted.
 pub(crate) fn generate_key() -> (String, String) {
-    let prefix = format!("ysr_{}", loco_rs::hash::random_string(KEY_PREFIX_LENGTH));
+    generate_key_with_prefix("ysr_")
+}
+
+fn generate_key_with_prefix(kind: &str) -> (String, String) {
+    let prefix = format!("{kind}{}", loco_rs::hash::random_string(KEY_PREFIX_LENGTH));
     let secret = loco_rs::hash::random_string(KEY_SECRET_LENGTH);
     let plaintext = format!("{prefix}_{secret}");
     (prefix, plaintext)

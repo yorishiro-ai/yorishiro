@@ -6,9 +6,49 @@ use super::{
 
 pub trait McpToolPolicy: Send + Sync {
     fn allows(&self, ctx: &AppContext, name: &str) -> bool;
+    fn accepts_workspace_selection(&self, name: &str) -> bool {
+        workspace_selection_tool(name)
+    }
     fn read_only(&self, name: &str) -> bool {
         read_only_tool(name)
     }
+}
+
+pub(crate) fn workspace_selection_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "archive_schema"
+            | "create_api_key"
+            | "create_entity"
+            | "create_relation"
+            | "create_schema"
+            | "delete_entity"
+            | "delete_relation"
+            | "delete_schema"
+            | "export_jsonl"
+            | "fill_defaults"
+            | "get_active_schema"
+            | "get_entity"
+            | "get_entity_drift"
+            | "get_entity_type_json_schema"
+            | "get_relation"
+            | "get_schema_by_id"
+            | "import_job_status"
+            | "import_jsonl"
+            | "list_audit_log"
+            | "list_entities"
+            | "list_relations"
+            | "list_schemas"
+            | "migration_dry_run"
+            | "migration_job_status"
+            | "recall_context"
+            | "reindex_workspace"
+            | "search_entities"
+            | "set_relation_status"
+            | "undo_migration_job"
+            | "update_entity"
+            | "whoami"
+    )
 }
 
 /// The policy a deployment gets when it does not choose one: every registered tool is listed and callable.
@@ -91,9 +131,6 @@ pub(crate) fn read_only_tool(name: &str) -> bool {
             | "list_iam_group_policies"
             | "list_iam_groups"
             | "list_iam_policies"
-            | "list_iam_roles"
-            | "get_iam_role"
-            | "list_iam_role_policies"
             | "list_iam_user_policies"
             | "list_members"
             | "list_relations"

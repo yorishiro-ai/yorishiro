@@ -49,6 +49,400 @@ async fn create_workspace(request: &loco_rs::TestServer, api_key: &str) -> uuid:
 }
 
 #[tokio::test]
+async fn legacy_role_credentials_are_rejected_even_when_attributed_to_root() {
+    use crate::requests::fixtures::{TenantArgs, TestTenant};
+    use yorishiro::models::api_keys::{self, ApiKeyScope};
+
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let legacy = api_keys::Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            Some(tenant.owner_id),
+            false,
+        )
+        .await
+        .unwrap();
+        api_keys::ActiveModel {
+            id: Set(legacy.id),
+            role_id: Set(Some(uuid::Uuid::new_v4())),
+            ..Default::default()
+        }
+        .update(&ctx.db)
+        .await
+        .unwrap();
+        request
+            .get("/api/whoami")
+            .add_header("Authorization", format!("Bearer {}", legacy.plaintext))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn unselected_lists_do_not_expose_workspaces_without_iam_grants() {
+    use crate::requests::fixtures;
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant = fixtures::TestTenant::create(&request, &ctx, fixtures::TenantArgs::default()).await;
+        let root = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let other_workspace = create_workspace(&request, &root).await;
+        for workspace in [tenant.workspace_id, other_workspace] {
+            request.post("/api/schemas")
+                .add_header("Authorization", format!("Bearer {root}"))
+                .add_header("x-workspace-id", workspace.to_string())
+                .json(&serde_json::json!({"template_id":"general-notes"}))
+                .await.assert_status(StatusCode::CREATED);
+        }
+        let response = request.get("/api/schemas")
+            .add_header("Authorization", format!("Bearer {root}")).await;
+        response.assert_status_ok();
+        assert_eq!(response.json::<Vec<serde_json::Value>>().len(), 2);
+        let mut entities = Vec::new();
+        for title in ["private source", "private target"] {
+            let response = request.post("/api/entities")
+                .add_header("Authorization", format!("Bearer {root}"))
+                .add_header("x-workspace-id", tenant.workspace_id.to_string())
+                .json(&serde_json::json!({"schema_name":"general-notes","entity_type":"note","data":{"title":title}}))
+                .await;
+            response.assert_status(StatusCode::CREATED);
+            entities.push(response.json::<serde_json::Value>()["id"].clone());
+        }
+        request.post("/api/relations")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .add_header("x-workspace-id", tenant.workspace_id.to_string())
+            .json(&serde_json::json!({"source_id":entities[0],"target_id":entities[1],"relation_type":"references","properties":{}}))
+            .await.assert_status(StatusCode::CREATED);
+        for (path, count) in [("/api/entities", 2), ("/api/relations", 1)] {
+            let response = request.get(path)
+                .add_header("Authorization", format!("Bearer {root}")).await;
+            response.assert_status_ok();
+            assert_eq!(response.json::<Vec<serde_json::Value>>().len(), count);
+        }
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(
+            &txn, tenant.tenant_id, &fixtures::unique_email("no-grants"), "hunter2-hunter2", None,
+        ).await.unwrap();
+        txn.commit().await.unwrap();
+        let key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, member.id).await;
+        for path in ["/api/schemas", "/api/entities", "/api/relations", "/api/search?query_text=private"] {
+            let response = request.get(path).add_header("Authorization", format!("Bearer {key}")).await;
+            response.assert_status_ok();
+            assert_eq!(response.json::<serde_json::Value>(), serde_json::json!([]));
+        }
+        let entity_path = format!("/api/entities/{}", entities[0].as_str().unwrap());
+        request.get(&entity_path).add_header("Authorization", format!("Bearer {key}"))
+            .await.assert_status(StatusCode::NOT_FOUND);
+        request.get(&entity_path).add_header("Authorization", format!("Bearer {key}"))
+            .add_header("x-workspace-id", tenant.workspace_id.to_string())
+            .await.assert_status(StatusCode::FORBIDDEN);
+        let policy = request.post("/api/iam/policies")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .json(&serde_json::json!({"name":"one-workspace","document":{"statements":[{
+                "effect":"allow","actions":["schema_list"],"resources":[{
+                    "type":"workspace","tenant_id":tenant.tenant_id,"workspace_id":tenant.workspace_id
+                }]
+            }]}})).await;
+        policy.assert_status(StatusCode::CREATED);
+        let policy = policy.json::<serde_json::Value>();
+        request.put(&format!("/api/iam/users/{}/policies/{}", member.id, policy["id"].as_str().unwrap()))
+            .add_header("Authorization", format!("Bearer {root}")).await.assert_status(StatusCode::NO_CONTENT);
+        let response = request.get("/api/schemas")
+            .add_header("Authorization", format!("Bearer {key}")).await;
+        response.assert_status_ok();
+        let rows = response.json::<Vec<serde_json::Value>>();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["workspace_id"], tenant.workspace_id.to_string());
+        request.post("/api/entities")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"schema_name":"general-notes","entity_type":"note","data":{"title":"denied"}}))
+            .await.assert_status(StatusCode::FORBIDDEN);
+    }).await;
+}
+
+#[tokio::test]
+async fn entity_creation_selects_the_only_authorized_workspace() {
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant = crate::requests::fixtures::TestTenant::create(
+            &request, &ctx, crate::requests::fixtures::TenantArgs::default(),
+        ).await;
+        request.post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"template_id":"general-notes"}))
+            .await.assert_status(StatusCode::CREATED);
+        let administrator = crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator).await;
+        let input = serde_json::json!({"schema_name":"general-notes","entity_type":"note","data":{"title":"implicit"}});
+        let created = request.post("/api/entities")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&input).await;
+        created.assert_status(StatusCode::CREATED);
+        assert_eq!(created.json::<serde_json::Value>()["workspace_id"], tenant.workspace_id.to_string());
+        create_workspace(&request, &key).await;
+        request.post("/api/entities")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&input).await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    }).await;
+}
+
+#[tokio::test]
+async fn relation_operations_resolve_the_source_and_relation_workspaces() {
+    use crate::requests::fixtures;
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant = fixtures::TestTenant::create(&request, &ctx, fixtures::TenantArgs::default()).await;
+        let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator).await;
+        request.post("/api/schemas").add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"template_id":"general-notes"})).await.assert_status(StatusCode::CREATED);
+        let mut ids = Vec::new();
+        for title in ["source", "target"] {
+            let response = request.post("/api/entities").add_header("Authorization", format!("Bearer {key}"))
+                .json(&serde_json::json!({"schema_name":"general-notes","entity_type":"note","data":{"title":title}})).await;
+            response.assert_status(StatusCode::CREATED);
+            ids.push(response.json::<serde_json::Value>()["id"].clone());
+        }
+        create_workspace(&request, &key).await;
+        let relation = request.post("/api/relations").add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"source_id":ids[0],"target_id":ids[1],"relation_type":"references","properties":{}})).await;
+        relation.assert_status(StatusCode::CREATED);
+        let id = relation.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let path = format!("/api/relations/{id}");
+        request.get(&path).add_header("Authorization", format!("Bearer {key}")).await.assert_status_ok();
+        request.put(&format!("{path}/status")).add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"status":"archived"})).await.assert_status_ok();
+        request.delete(&path).add_header("Authorization", format!("Bearer {key}"))
+            .await.assert_status(StatusCode::NO_CONTENT);
+    }).await;
+}
+
+#[tokio::test]
+async fn schema_ids_resolve_the_workspace_and_creation_refuses_ambiguity() {
+    use crate::requests::fixtures;
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant =
+            fixtures::TestTenant::create(&request, &ctx, fixtures::TenantArgs::default()).await;
+        let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator).await;
+        let created = request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"template_id":"general-notes"}))
+            .await;
+        created.assert_status(StatusCode::CREATED);
+        let id = created.json::<serde_json::Value>()["schema"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let txn = ctx.db.begin().await.unwrap();
+        let member = yorishiro::models::tenancy::register_member(
+            &txn,
+            tenant.tenant_id,
+            &fixtures::unique_email("schema-no-grant"),
+            "hunter2-hunter2",
+            None,
+        )
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+        let denied = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, member.id).await;
+        request
+            .get(&format!("/api/schemas/{id}"))
+            .add_header("Authorization", format!("Bearer {denied}"))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        let other = create_workspace(&request, &key).await;
+        request
+            .get(&format!("/api/schemas/{id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status_ok();
+        request
+            .get(&format!("/api/schemas/{id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("x-workspace-id", other.to_string())
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"template_id":"general-notes"}))
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        request
+            .post(&format!("/api/schemas/{id}/archive"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status_ok();
+        request
+            .delete(&format!("/api/schemas/{id}"))
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await
+            .assert_status(StatusCode::CONFLICT);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one account history compares root sessions with restricted and delegated credentials over REST and MCP"
+)]
+async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
+    use yorishiro::models::api_keys::{ApiKeyScope, Entity};
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
+        let key = Entity::create_api_key(
+            &ctx.db,
+            tenant.workspace_id,
+            ApiKeyScope::Read,
+            Some(tenant.owner_id),
+            false,
+        )
+        .await
+        .unwrap()
+        .plaintext;
+        let root =
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
+        let named_login = request.post("/api/api-keys")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .json(&serde_json::json!({"name":"login","tenant_scoped":true,"scope":"read"}))
+            .await;
+        named_login.assert_status(StatusCode::CREATED);
+        let named_login = named_login.json::<serde_json::Value>();
+        request.post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {}", named_login["full_key"].as_str().unwrap()))
+            .json(&serde_json::json!({"name":"denied"}))
+            .await.assert_status(StatusCode::FORBIDDEN);
+        request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"name":"denied"}))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        let response = request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .json(&serde_json::json!({"name":"root-created"}))
+            .await;
+        response.assert_status(StatusCode::CREATED);
+        let workspace = response.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        request
+            .get("/api/schemas")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("x-workspace-id", &workspace)
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"template_id":"general-notes"}))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .add_header("x-workspace-id", &workspace)
+            .json(&serde_json::json!({"template_id":"general-notes"}))
+            .await
+            .assert_status(StatusCode::CREATED);
+        request
+            .get("/api/audit-log")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .add_header("x-workspace-id", &workspace)
+            .await
+            .assert_status_ok();
+        let initialized = request
+            .post("/mcp")
+            .add_header("Accept", "application/json, text/event-stream")
+            .json(
+                &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+                    "protocolVersion":"2025-03-26","capabilities":{},
+                    "clientInfo":{"name":"root-test","version":"1"}
+                }}),
+            )
+            .await;
+        initialized.assert_status_ok();
+        let session = initialized.headers()["mcp-session-id"].to_str().unwrap();
+        let result = iam_mcp_call(
+            &request,
+            session,
+            &root,
+            "list_schemas",
+            serde_json::json!({"workspace_id":workspace}),
+        )
+        .await;
+        assert_ne!(result["result"]["isError"], true, "{result}");
+        assert!(result.get("error").is_none(), "{result}");
+        let result = iam_mcp_call(
+            &request,
+            session,
+            &root,
+            "list_schemas",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_ne!(result["result"]["isError"], true, "{result}");
+        assert!(result.get("error").is_none(), "{result}");
+        let administrator =
+            crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let delegated =
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator)
+                .await;
+        let result = iam_mcp_call(
+            &request,
+            session,
+            &delegated,
+            "list_schemas",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_ne!(result["result"]["isError"], true, "{result}");
+        assert!(result.get("error").is_none(), "{result}");
+        let response = request
+            .get("/api/schemas")
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .await;
+        response.assert_status_ok();
+        assert_eq!(response.json::<Vec<serde_json::Value>>().len(), 1);
+        request.get("/api/relations")
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status_ok();
+        request.post("/api/entities")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .add_header("x-workspace-id", &workspace)
+            .json(&serde_json::json!({"schema_name":"general-notes","entity_type":"note","data":{"title":"visible"}}))
+            .await.assert_status(StatusCode::CREATED);
+        let response = request.get("/api/entities")
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .await;
+        response.assert_status_ok();
+        assert_eq!(response.json::<Vec<serde_json::Value>>().len(), 1);
+        let id = response.json::<Vec<serde_json::Value>>()[0]["id"].as_str().unwrap().to_owned();
+        request.get(&format!("/api/entities/{id}"))
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status_ok();
+        request.put(&format!("/api/entities/{id}"))
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .json(&serde_json::json!({"data":{"title":"updated"}}))
+            .await.assert_status_ok();
+        request.delete(&format!("/api/entities/{id}"))
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .await.assert_status(StatusCode::NO_CONTENT);
+    })
+    .await;
+}
+
+#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the same credentials and audit history are needed to compare denied, rolled-back, and committed IAM mutations across REST and MCP"
@@ -97,7 +491,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].action, "group_create");
             let tenant_id = body["tenant_id"].as_str().unwrap().parse().unwrap();
-            let user_id = body["user_id"].as_str().unwrap().parse().unwrap();
+            let user_id = crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await;
             let audit_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
                 &ctx.db,
                 tenant_id,
@@ -236,7 +630,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .get("/api/schemas")
                 .add_header("Authorization", format!("Bearer {api_key}"))
                 .await
-                .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+                .assert_status(StatusCode::OK);
             let whoami = request
                 .get("/api/whoami")
                 .add_header("Authorization", format!("Bearer {api_key}"))
@@ -277,7 +671,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 assert_eq!(chosen["workspace_id"], second_id.to_string());
             }
 
-            let user_id: uuid::Uuid = identity["user_id"].as_str().unwrap().parse().unwrap();
+            let user_id = crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await;
             let scoped_key = yorishiro::models::api_keys::Entity::create_api_key(
                 &ctx.db,
                 workspace_id,
@@ -390,7 +784,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .await.assert_status(StatusCode::FORBIDDEN);
             request.get(&format!("/api/workspaces/{workspace_id}"))
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
-                .await.assert_status(StatusCode::FORBIDDEN);
+                .await.assert_status(StatusCode::NOT_FOUND);
             request.post("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"name":"implicit-denied"})).await.assert_status(StatusCode::FORBIDDEN);
@@ -610,6 +1004,12 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert_eq!(bound["result"]["isError"], true, "{bound}");
             request.post("/api/iam/groups").add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"name":"group-allowed"})).await.assert_status(StatusCode::CREATED);
+            request.delete(&member_path).add_header("Authorization", format!("Bearer {api_key}"))
+                .await.assert_status(StatusCode::NO_CONTENT);
+            request.post("/api/iam/groups").add_header("Authorization", format!("Bearer {}", user_key.plaintext))
+                .json(&serde_json::json!({"name":"removed-from-group"})).await.assert_status(StatusCode::FORBIDDEN);
+            request.put(&member_path).add_header("Authorization", format!("Bearer {api_key}"))
+                .await.assert_status(StatusCode::NO_CONTENT);
             let deny = request.post("/api/iam/policies").add_header("Authorization", format!("Bearer {api_key}"))
                 .json(&serde_json::json!({"name":"deny-group-create","document":{"statements":[{
                     "effect":"deny","actions":["group_create", "template_library_create", "template_library_update", "template_library_delete", "template_library_fork", "workspace_create"],"resources":[{"type":"tenant","tenant_id":tenant_id}]
@@ -636,7 +1036,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert_eq!(denied_workspace["result"]["isError"], true, "{denied_workspace}");
             request.get(&workspace_path)
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
-                .await.assert_status(StatusCode::FORBIDDEN);
+                .await.assert_status(StatusCode::NOT_FOUND);
             let denied_detail = iam_mcp_call(&request, &session, &user_key.plaintext,
                 "get_workspace", serde_json::json!({"workspace_id":workspace_id})).await;
             assert_eq!(denied_detail["result"]["isError"], true, "{denied_detail}");
@@ -735,179 +1135,4 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .json(&serde_json::json!({"name":"deleted-denied"})).await.assert_status(StatusCode::FORBIDDEN);
         })
         .await;
-}
-
-#[tokio::test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "the same human and role session compare inherited permissions as role policies and their attachments change"
-)]
-async fn role_sessions_are_evaluated_by_the_role_policies_alone() {
-    let overrides = [crate::requests::max_tenants(1)];
-    boot_request_with::<App, _, _>(&overrides, |request, _ctx| async move {
-        macro_rules! bearer {
-            ($key:expr, $builder:expr) => {
-                $builder.add_header("Authorization", format!("Bearer {}", $key))
-            };
-        }
-        let response = request
-            .post("/setup")
-            .json(&serde_json::json!({
-                "email": "owner@example.com",
-                "password": "hunter2-hunter2",
-            }))
-            .await;
-        assert_eq!(response.status_code(), 201, "{}", response.text());
-        let body: serde_json::Value = response.json();
-        let root_key = body["api_key"].as_str().unwrap().to_string();
-        let workspace_id = create_workspace(&request, &root_key).await.to_string();
-        let identity = bearer!(root_key, request.get("/api/whoami"))
-            .await
-            .json::<serde_json::Value>();
-        let tenant_id = identity["tenant_id"].as_str().unwrap().to_string();
-
-        let user = bearer!(root_key, request.post("/api/members/users"))
-            .json(&serde_json::json!({"user_name": "role-user", "password": "role-user-password"}))
-            .await;
-        user.assert_status(StatusCode::CREATED);
-        let user_id = user.json::<serde_json::Value>()["user_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let login = request
-            .post("/auth/tenant/login")
-            .add_header("x-tenant-id", &tenant_id)
-            .json(&serde_json::json!({"user_name": "role-user", "password": "role-user-password"}))
-            .await;
-        login.assert_status_ok();
-        let user_key = login.json::<serde_json::Value>()["api_key"]
-            .as_str()
-            .unwrap()
-            .to_string();
-
-        let role_policy = bearer!(root_key, request.post("/api/iam/policies"))
-            .json(
-                &serde_json::json!({"name": "role-workspace-reader", "document": {"statements": [
-                    {"effect": "allow", "actions": ["workspace_get"],
-                     "resources": [{"type": "all_workspaces", "tenant_id": tenant_id}]}]}}),
-            )
-            .await;
-        role_policy.assert_status(StatusCode::CREATED);
-        let role_policy_id = role_policy.json::<serde_json::Value>()["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let trust = |effect: &str| {
-            serde_json::json!({"statements": [
-                {"effect": effect, "principals": [{"type": "user", "user_id": user_id}]}]})
-        };
-        let role = bearer!(root_key, request.post("/api/iam/roles"))
-            .json(&serde_json::json!({"name": "workspace-reader", "trust_policy": trust("allow")}))
-            .await;
-        role.assert_status(StatusCode::CREATED);
-        let role_id = role.json::<serde_json::Value>()["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        bearer!(
-            root_key,
-            request.put(&format!(
-                "/api/iam/roles/{role_id}/policies/{role_policy_id}"
-            ))
-        )
-        .await
-        .assert_status(StatusCode::NO_CONTENT);
-        let assume = format!("/api/iam/roles/{role_id}/assume");
-
-        bearer!(user_key, request.post(&assume))
-            .json(&serde_json::json!({}))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-
-        let user_policy = bearer!(root_key, request.post("/api/iam/policies"))
-            .json(
-                &serde_json::json!({"name": "user-assume-and-tenant", "document": {"statements": [
-                    {"effect": "allow", "actions": ["role_assume"],
-                     "resources": [{"type": "role", "tenant_id": tenant_id, "role_id": role_id}]},
-                    {"effect": "allow", "actions": ["tenant_get"],
-                     "resources": [{"type": "tenant", "tenant_id": tenant_id}]}]}}),
-            )
-            .await;
-        user_policy.assert_status(StatusCode::CREATED);
-        let user_policy_id = user_policy.json::<serde_json::Value>()["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        bearer!(
-            root_key,
-            request.put(&format!(
-                "/api/iam/users/{user_id}/policies/{user_policy_id}"
-            ))
-        )
-        .await
-        .assert_status(StatusCode::NO_CONTENT);
-
-        let denied_trust = serde_json::json!({"statements": [
-                {"effect": "allow", "principals": [{"type": "tenant"}]},
-                {"effect": "deny", "principals": [{"type": "user", "user_id": user_id}]}]});
-        bearer!(root_key, request.put(&format!("/api/iam/roles/{role_id}")))
-            .json(&serde_json::json!({"trust_policy": denied_trust}))
-            .await
-            .assert_status_ok();
-        bearer!(user_key, request.post(&assume))
-            .json(&serde_json::json!({}))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-        bearer!(root_key, request.put(&format!("/api/iam/roles/{role_id}")))
-            .json(&serde_json::json!({"trust_policy": trust("allow")}))
-            .await
-            .assert_status_ok();
-
-        for seconds in [60, 50_000] {
-            bearer!(user_key, request.post(&assume))
-                .json(&serde_json::json!({"duration_seconds": seconds}))
-                .await
-                .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
-        }
-        let session = bearer!(user_key, request.post(&assume))
-            .json(&serde_json::json!({}))
-            .await;
-        session.assert_status(StatusCode::CREATED);
-        let session = session.json::<serde_json::Value>();
-        let session_key = session["plaintext"].as_str().unwrap().to_string();
-
-        let workspace = format!("/api/workspaces/{workspace_id}");
-        bearer!(session_key, request.get(&workspace))
-            .await
-            .assert_status_ok();
-        bearer!(session_key, request.get("/api/tenants/current"))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-        bearer!(user_key, request.get("/api/tenants/current"))
-            .await
-            .assert_status_ok();
-        bearer!(user_key, request.get(&workspace))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-
-        bearer!(session_key, request.post(&assume))
-            .json(&serde_json::json!({}))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-        bearer!(root_key, request.post(&assume))
-            .json(&serde_json::json!({}))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-
-        bearer!(
-            root_key,
-            request.delete(&format!("/api/iam/roles/{role_id}"))
-        )
-        .await
-        .assert_status(StatusCode::NO_CONTENT);
-        bearer!(session_key, request.get(&workspace))
-            .await
-            .assert_status(StatusCode::UNAUTHORIZED);
-    })
-    .await;
 }
