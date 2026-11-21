@@ -135,7 +135,7 @@ Input schema:
 
 ### `create_api_key`
 
-Issue an API key and return its secret once. Select a workspace to bind the key, or set tenant_scoped for an unbound key. Requires a tenant-scoped issuer with read scope and credential_create permission. Issued keys retain their requested grants and binding.
+Issue an API key and return its secret once. Select a workspace to bind the key, or set tenant_scoped without a workspace selector for an unbound key. Requires a tenant-scoped issuer with read scope and credential_create permission. The new key cannot exceed the issuer's effective scope or audit grant. An expiring issuer must supply expires_at no later than its own expiration, except for a root sign-in session.
 
 Input schema:
 

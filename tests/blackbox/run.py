@@ -158,8 +158,10 @@ class App:
                     "owned PostgreSQL URL and signed EE licence are required")
             self.environment = "test"
             self.secrets.extend([database, licence])
+            # Match the PostgreSQL test jobs' pool acquisition timeout during the concurrent MCP burst.
             self.env.update(DATABASE_URL=database, QUEUE_URL=database, LOCO_ENV=self.environment,
-                            YORISHIRO_LICENSE_KEY=licence, YORISHIRO_MAX_TENANTS="0")
+                            DB_CONNECT_TIMEOUT="5000", YORISHIRO_LICENSE_KEY=licence,
+                            YORISHIRO_MAX_TENANTS="0")
         config = self.directory / "config"
         config.mkdir()
         self.env["LOCO_CONFIG_FOLDER"] = str(config)
@@ -1318,6 +1320,23 @@ def workspace_key_lifecycle(app):
     app.secrets.append(bound_rest["full_key"])
     from datetime import UTC, datetime, timedelta
     expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    conflicting = {"name": "conflicting-selection", "tenant_scoped": True}
+    selector_header = {"X-Workspace-Id": app.workspace}
+    app.rest("POST", "/api/api-keys", conflicting, status=422, key=tenant_key, headers=selector_header)
+    rejection = tenant_client.call("create_api_key", {**conflicting, "workspace_id": app.workspace}, error=True)
+    require(rejection["result"]["structuredContent"]["error"]["code"] == "validation_failed",
+            "MCP accepted incompatible key selectors")
+    request_id = 101000
+    status, _, text = app.http("POST", "/mcp", {
+        "jsonrpc": "2.0", "id": request_id, "method": "tools/call",
+        "params": {"name": "create_api_key", "arguments": conflicting},
+    }, tenant_key, {**selector_header, "Accept": "application/json, text/event-stream",
+                    "MCP-Session-Id": tenant_client.session, "MCP-Protocol-Version": tenant_client.version},
+        rpc_id=request_id)
+    require(status == 200 and rpc_document(text, request_id)["result"]["structuredContent"]["error"]["code"]
+            == "validation_failed", "MCP header did not reject incompatible key selectors")
+    require(all(row["name"] != conflicting["name"] for row in tenant_client.call("list_api_keys")["keys"]),
+            "contradictory key request issued a credential")
     created = tenant_client.call("create_api_key", {"name": "mcp-issued", "scope": "read", "tenant_scoped": True,
                                                     "expires_at": expiry})
     app.secrets.append(created["full_key"])

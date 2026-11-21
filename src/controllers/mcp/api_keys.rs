@@ -27,7 +27,7 @@ pub(crate) struct ApiKeyArgs {
 impl YorishiroMcpServer {
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Issue an API key and return its secret once. Select a workspace to bind the key, or set tenant_scoped for an unbound key. Requires a tenant-scoped issuer with read scope and credential_create permission. Issued keys retain their requested grants and binding."
+        description = "Issue an API key and return its secret once. Select a workspace to bind the key, or set tenant_scoped without a workspace selector for an unbound key. Requires a tenant-scoped issuer with read scope and credential_create permission. The new key cannot exceed the issuer's effective scope or audit grant. An expiring issuer must supply expires_at no later than its own expiration, except for a root sign-in session."
     )]
     pub(crate) async fn create_api_key(
         &self,
@@ -44,6 +44,13 @@ impl YorishiroMcpServer {
             VerifyOutcome::Verified(auth) => auth,
             VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         };
+        if let Err(error) = args.validate_workspace_selection(
+            parts
+                .headers
+                .contains_key(crate::models::api_keys::WORKSPACE_HEADER),
+        ) {
+            return Ok(err_to_tool_result(error));
+        }
         let created = if args.tenant_scoped {
             IdentityApiKeys::create_delegated_tenant_api_key(
                 &self.app_context().db,

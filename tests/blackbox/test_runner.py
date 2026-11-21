@@ -226,6 +226,7 @@ class ArgumentTests(unittest.TestCase):
                     app = run.App(args, directory)
                     self.assertEqual(app.environment, "test")
                     self.assertEqual(app.env["DATABASE_URL"], "postgres://owned/db")
+                    self.assertEqual(app.env["DB_CONNECT_TIMEOUT"], "5000")
                     self.assertEqual(app.env["YORISHIRO_LICENSE_KEY"], "signed")
                 else:
                     with self.assertRaisesRegex(AssertionError, "signed EE licence"):

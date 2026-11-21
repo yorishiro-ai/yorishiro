@@ -20,6 +20,22 @@ pub(crate) struct CreateApiKeyRequest {
     pub(crate) tenant_scoped: bool,
 }
 
+impl CreateApiKeyRequest {
+    pub(crate) fn validate_workspace_selection(
+        &self,
+        selected: bool,
+    ) -> Result<(), crate::YorishiroError> {
+        if self.tenant_scoped && selected {
+            return Err(crate::YorishiroError::ValidationFailed {
+                message: "tenant_scoped cannot be combined with a workspace selector".into(),
+                details: vec![],
+                hint: "omit the workspace selector for an unbound key".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct ApiKeyRecord {
