@@ -286,7 +286,12 @@ jobs:
         with:
           container: ${{ job.services.db.id }}
       - name: Run the tests
-        run: make test-${{ matrix.database }} EDITION=${{ matrix.edition }}
+        run: |
+          # Bound concurrent database setup and teardown without changing the worker races inside each test.
+          if [[ '${{ matrix.name }}' == 'ee-postgres' ]]; then
+            export RUST_TEST_THREADS=2
+          fi
+          make test-${{ matrix.database }} EDITION=${{ matrix.edition }}
       - name: Test signed Stripe webhooks
         if: matrix.name == 'ee-postgres'
         env:
