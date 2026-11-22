@@ -1,17 +1,15 @@
 use axum::Json;
 use axum::extract::State;
-use axum::routing::get;
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 
 use crate::controllers::extractors::AuthContext;
+use crate::controllers::openapi::Routes;
 use crate::dtos::whoami::WhoAmIResponse;
 
 /// Returns the current credential's identity and selected target.
 ///
 /// # Errors
 /// Rejects stale credentials or invalid target bindings and propagates lookup failures.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/whoami", responses((status = 200, body = WhoAmIResponse), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
 async fn whoami(
     State(app): State<AppContext>,
     AuthContext(ctx): AuthContext,
@@ -23,11 +21,13 @@ async fn whoami(
     ))
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![super::openapi::route_inventory::path_doc(__path_whoami)]
-}
-
 pub(crate) fn routes() -> Routes {
-    Routes::new().prefix("api/whoami").add("/", get(whoami))
+    Routes::new().prefix("api/whoami").add(
+        "/",
+        aide::axum::routing::get_with(whoami, |op| {
+            op.tag("community")
+                .security_requirement("bearer_auth")
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+        }),
+    )
 }

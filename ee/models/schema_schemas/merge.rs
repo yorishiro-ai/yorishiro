@@ -15,8 +15,7 @@ use crate::models::schema_schemas::MergeDiffSummary;
 use crate::models::schema_schemas::metaschema::{EntityTypeDef, FieldDef, MetaSchemaDefinition};
 
 /// What should happen to one field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MergeVerdict {
     /// Upstream added it and the workspace has nothing by that name.
@@ -34,8 +33,7 @@ pub enum MergeVerdict {
 }
 
 /// One field's classification.
-#[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Clone, Serialize, schemars::JsonSchema)]
 pub struct FieldMerge {
     pub entity_type: String,
     pub field: String,
@@ -45,8 +43,7 @@ pub struct FieldMerge {
 }
 
 /// The classification of every field that is not identical across the three.
-#[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Clone, Serialize, schemars::JsonSchema)]
 pub struct MergePlan {
     pub fields: Vec<FieldMerge>,
     pub(crate) summary: MergeDiffSummary,

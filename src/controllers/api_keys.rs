@@ -3,14 +3,12 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::IntoResponse;
-use axum::routing::{delete, get, post};
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
+use crate::controllers::openapi::Routes;
 use crate::dtos::api_keys::{
     ApiKeyRecord, CreateApiKeyRequest, CreateApiKeyResponse, ListApiKeysResponse,
 };
@@ -30,13 +28,12 @@ pub(crate) fn render_grant(
     grant
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/api-keys", request_body = CreateApiKeyRequest, responses((status = 201, body = CreateApiKeyResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["credential_create"]))), tag = "community"))]
 pub(crate) async fn create(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     headers: HeaderMap,
     Json(body): Json<CreateApiKeyRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<impl aide::axum::IntoApiResponse, ApiError> {
     body.validate_workspace_selection(
         headers.contains_key(crate::models::api_keys::WORKSPACE_HEADER),
     )?;
@@ -76,7 +73,6 @@ pub(crate) async fn create(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/api-keys", responses((status = 200, body = ListApiKeysResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["credential_list"]))), tag = "community"))]
 pub(crate) async fn list(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -98,41 +94,100 @@ pub(crate) async fn list(
     Ok(Json(ListApiKeysResponse { keys: records }))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/api-keys/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "API key revoked"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["credential_revoke"]))), tag = "community"))]
 pub(crate) async fn revoke(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<StatusCode, ApiError> {
     IdentityApiKeys::revoke_for_tenant(&ctx.db, &auth, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_create),
-        super::openapi::route_inventory::path_doc(__path_list),
-        super::openapi::route_inventory::path_doc(__path_revoke),
-        super::openapi::route_inventory::path_doc(__path_rotate),
-    ]
-}
-
 pub(crate) fn routes() -> Routes {
     Routes::new()
         .prefix("api/api-keys")
-        .add("/", post(create))
-        .add("/", get(list))
-        .add("/{id}", delete(revoke))
-        .add("/{id}/rotate", post(rotate))
+        .add(
+            "/",
+            aide::axum::routing::post_with(create, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["credential_create"]),
+                    ))
+                    .response::<201, Json<CreateApiKeyResponse>>()
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/",
+            aide::axum::routing::get_with(list, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["credential_list"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::delete_with(revoke, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["credential_revoke"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("API key revoked"))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}/rotate",
+            aide::axum::routing::post_with(rotate, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["credential_rotate"]),
+                    ))
+                    .response::<201, Json<CreateApiKeyResponse>>()
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                    .response::<409, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/api-keys/{id}/rotate", params(("id" = Uuid, Path)), responses((status = 201, body = CreateApiKeyResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["credential_rotate"]))), tag = "community"))]
 async fn rotate(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Path(id): Path<Uuid>,
-) -> Result<impl IntoResponse, ApiError> {
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
+) -> Result<impl aide::axum::IntoApiResponse, ApiError> {
     let created = IdentityApiKeys::rotate(&ctx.db, &auth, id).await?;
     Ok((
         StatusCode::CREATED,

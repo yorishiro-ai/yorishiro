@@ -8,12 +8,10 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::routing::{get, post};
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
+use crate::controllers::openapi::Routes;
 use crate::dtos::setup::{SetupRequest, SetupResponse, SetupStatusResponse};
 use crate::error::YorishiroError;
 use crate::models::{tenancy, tenant_tenants};
@@ -25,7 +23,6 @@ fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
         .ok_or_else(|| YorishiroError::Internal("tenant cap policy missing".into()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/setup/status", responses((status = 200, body = SetupStatusResponse)), security(()), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -38,14 +35,13 @@ async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusRespons
     Ok(Json(SetupStatusResponse { setup_required }))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/setup", request_body = SetupRequest, responses((status = 201, body = SetupResponse), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn setup(
     State(ctx): State<AppContext>,
     Json(body): Json<SetupRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<(StatusCode, Json<SetupResponse>), ApiError> {
     let account = tenancy::setup_first_account(
         &ctx.db,
         max_tenants(&ctx)?,
@@ -68,17 +64,21 @@ async fn setup(
     ))
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_status),
-        super::openapi::route_inventory::path_doc(__path_setup),
-    ]
-}
-
 pub(crate) fn routes() -> Routes {
     Routes::new()
         .prefix("setup")
-        .add("/", post(setup))
-        .add("/status", get(status))
+        .add(
+            "/",
+            aide::axum::routing::post_with(setup, |op| {
+                op.tag("community")
+                    .response::<201, Json<SetupResponse>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                    .response::<409, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/status",
+            aide::axum::routing::get_with(status, |op| op.tag("community")),
+        )
 }

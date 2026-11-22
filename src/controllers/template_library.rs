@@ -3,14 +3,12 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::routing::{get, post, put};
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
+use crate::controllers::openapi::Routes;
 use crate::dtos::template_library::{
     CreateTemplateRequest, ForkTemplateRequest, UpdateTemplateRequest,
 };
@@ -18,7 +16,6 @@ use crate::models::template_templates::{
     self, CreateTemplateInput, TemplateRecord, UpdateTemplateInput,
 };
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/template-library", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [TemplateRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_list"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -31,20 +28,18 @@ async fn list_templates(
     Ok(Json(templates))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_get"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn get_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<Json<TemplateRecord>, ApiError> {
     let template = template_templates::get_as(&ctx.db, &auth, id).await?;
     Ok(Json(template))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/template-library", request_body = CreateTemplateRequest, responses((status = 201, body = TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_create"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -52,7 +47,7 @@ async fn create_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Json(body): Json<CreateTemplateRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<impl aide::axum::IntoApiResponse, ApiError> {
     let template = template_templates::create_as(
         &ctx.db,
         &auth,
@@ -69,14 +64,13 @@ async fn create_template(
     Ok((StatusCode::CREATED, Json(template)))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), request_body = UpdateTemplateRequest, responses((status = 200, body = TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_update"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn update_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<UpdateTemplateRequest>,
 ) -> Result<Json<TemplateRecord>, ApiError> {
     let template = template_templates::update_as(
@@ -95,49 +89,115 @@ async fn update_template(
     Ok(Json(template))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Template deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_delete"]))), tag = "community"))]
 pub(crate) async fn delete_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<StatusCode, ApiError> {
     template_templates::delete_as(&ctx.db, &auth, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/template-library/{id}/fork", params(("id" = Uuid, Path)), request_body = ForkTemplateRequest, responses((status = 201, body = TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_fork"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn fork_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<ForkTemplateRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<impl aide::axum::IntoApiResponse, ApiError> {
     let template = template_templates::fork_as(&ctx.db, &auth, id, body.name).await?;
     Ok((StatusCode::CREATED, Json(template)))
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_list_templates),
-        super::openapi::route_inventory::path_doc(__path_get_template),
-        super::openapi::route_inventory::path_doc(__path_create_template),
-        super::openapi::route_inventory::path_doc(__path_update_template),
-        super::openapi::route_inventory::path_doc(__path_delete_template),
-        super::openapi::route_inventory::path_doc(__path_fork_template),
-    ]
 }
 
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/template-library")
-        .add("/", get(list_templates))
-        .add("/", post(create_template))
-        .add("/{id}", get(get_template))
-        .add("/{id}", put(update_template))
-        .add("/{id}", axum::routing::delete(delete_template))
-        .add("/{id}/fork", post(fork_template))
+        .add(
+            "/",
+            aide::axum::routing::get_with(list_templates, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["template_library_list"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/",
+            aide::axum::routing::post_with(create_template, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["template_library_create"]),
+                    ))
+                    .response::<201, Json<TemplateRecord>>()
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::get_with(get_template, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["template_library_get"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::put_with(update_template, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["template_library_update"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::delete_with(delete_template, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["template_library_delete"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("Template deleted"))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}/fork",
+            aide::axum::routing::post_with(fork_template, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["template_library_fork"]),
+                    ))
+                    .response::<201, Json<TemplateRecord>>()
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
 }

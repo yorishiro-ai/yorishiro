@@ -4,12 +4,12 @@
 //!
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope, Verified};
+use crate::controllers::openapi::Routes;
 use crate::models::schema_schemas::UpstreamChange;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 use uuid::Uuid;
 
 use crate::edition::ee::dtos::origin::MergeResponse;
@@ -18,7 +18,6 @@ use crate::edition::ee::models::schema_schemas as origin;
 use crate::edition::ee::models::schema_schemas::MergePlan;
 
 /// `GET /api/schemas/upstream-changes`: schemas whose origin template has moved on.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/upstream-changes", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [UpstreamChange]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_upstream_list"]))), tag = "enterprise"))]
 async fn list_upstream_changes(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
@@ -29,11 +28,12 @@ async fn list_upstream_changes(
 }
 
 /// `GET /api/schemas/{schema_id}/merge-preview`: what following the template would do.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/{schema_id}/merge-preview", params(("schema_id" = Uuid, Path)), responses((status = 200, body = MergePlan), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_merge_preview"]))), tag = "enterprise"))]
 async fn merge_preview(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
-    Path(schema_id): Path<Uuid>,
+    Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
+        crate::dtos::common::SchemaIdPath<Uuid>,
+    >,
 ) -> Result<Json<MergePlan>, ApiError> {
     let mut authorized = Authorized::<ReadScope>::for_target(
         &ctx,
@@ -59,11 +59,12 @@ async fn merge_preview(
 }
 
 /// `POST /api/schemas/{schema_id}/merge`: write the merged definition as the next version.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/{schema_id}/merge", params(("schema_id" = Uuid, Path)), responses((status = 201, body = MergeResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_merge_apply"]))), tag = "enterprise"))]
 async fn merge_apply(
     State(ctx): State<AppContext>,
     verified: Verified<SchemaScope>,
-    Path(schema_id): Path<Uuid>,
+    Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
+        crate::dtos::common::SchemaIdPath<Uuid>,
+    >,
 ) -> Result<(StatusCode, Json<MergeResponse>), ApiError> {
     let mut authorized = Authorized::<SchemaScope>::for_target(
         &ctx,
@@ -94,25 +95,61 @@ async fn merge_apply(
     ))
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![
-        crate::controllers::openapi::route_inventory::path_doc(__path_list_upstream_changes),
-        crate::controllers::openapi::route_inventory::path_doc(__path_merge_preview),
-        crate::controllers::openapi::route_inventory::path_doc(__path_merge_apply),
-    ]
-}
-
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/schemas")
         .add(
             "/upstream-changes",
-            axum::routing::get(list_upstream_changes),
+            aide::axum::routing::get_with(list_upstream_changes, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_upstream_list"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
         )
         .add(
             "/{schema_id}/merge-preview",
-            axum::routing::get(merge_preview),
+            aide::axum::routing::get_with(merge_preview, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_merge_preview"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
         )
-        .add("/{schema_id}/merge", axum::routing::post(merge_apply))
+        .add(
+            "/{schema_id}/merge",
+            aide::axum::routing::post_with(merge_apply, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_merge_apply"]),
+                    ))
+                    .response::<201, Json<MergeResponse>>()
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
 }

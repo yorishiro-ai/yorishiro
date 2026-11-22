@@ -82,9 +82,8 @@ crate::models::db_enum::db_enum! {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "openapi", schema(as = InferenceProposalResponse))]
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+#[schemars(rename = "InferenceProposalResponse")]
 pub struct ProposalRecord {
     pub id: Uuid,
     pub job_id: Uuid,
@@ -118,9 +117,8 @@ impl TryFrom<Model> for ProposalRecord {
     }
 }
 
-#[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "openapi", schema(as = ProposalConfirmResponse))]
+#[derive(Clone, Serialize, schemars::JsonSchema)]
+#[schemars(rename = "ProposalConfirmResponse")]
 pub struct ConfirmReport {
     pub job_id: Uuid,
     pub confirmed: i64,
@@ -128,9 +126,8 @@ pub struct ConfirmReport {
     pub invalid: i64,
 }
 
-#[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "openapi", schema(as = ProposalActionResponse))]
+#[derive(Clone, Serialize, schemars::JsonSchema)]
+#[schemars(rename = "ProposalActionResponse")]
 pub struct ProposalActionReport {
     pub job_id: Uuid,
     pub changed: i64,

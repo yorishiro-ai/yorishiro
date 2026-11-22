@@ -9,7 +9,7 @@ use loco_rs::{
     app::{AppContext, Hooks, Initializer},
     boot::{BootResult, StartMode, create_app},
     config::Config,
-    controller::{AppRoutes, Routes},
+    controller::AppRoutes,
     environment::Environment,
     task::Tasks,
 };
@@ -117,91 +117,32 @@ impl RouteMounts {
             .guard_credentials("/auth/root/login")
             .guard_credentials("/auth/tenant/login");
 
-        macro_rules! mount {
-            ($routes:expr $(, $docs:expr)?) => {{
-                mounts.mount($routes);
-                $(
-                    #[cfg(feature = "openapi")]
-                    mounts.document($docs);
-                )?
-            }};
-        }
-
-        mount!(
-            controllers::audit_log::routes(),
-            controllers::audit_log::openapi_docs()
-        );
-        mount!(
-            controllers::api_keys::routes(),
-            controllers::api_keys::openapi_docs()
-        );
-        mount!(
-            controllers::auth::routes(),
-            controllers::auth::openapi_docs()
-        );
-        mount!(
-            controllers::entities::routes(),
-            controllers::entities::openapi_docs()
-        );
-        mount!(controllers::entities::migration_routes());
-        mount!(
-            controllers::export::routes(),
-            controllers::export::openapi_docs()
-        );
-        mount!(
-            controllers::import::routes(),
-            controllers::import::openapi_docs()
-        );
-        mount!(controllers::iam::routes(), controllers::iam::openapi_docs());
-        mount!(
-            controllers::members::routes(),
-            controllers::members::openapi_docs()
-        );
-        mount!(
-            controllers::tenants::routes(),
-            controllers::tenants::openapi_docs()
-        );
-        mount!(
-            controllers::relations::routes(),
-            controllers::relations::openapi_docs()
-        );
-        mount!(
-            controllers::schemas::routes(),
-            controllers::schemas::openapi_docs()
-        );
-        mount!(
-            controllers::schemas::template_routes(),
-            controllers::schemas::template_openapi_docs()
-        );
-        mount!(
-            controllers::search::routes(),
-            controllers::search::openapi_docs()
-        );
-        mount!(
-            controllers::setup::routes(),
-            controllers::setup::openapi_docs()
-        );
-        mount!(
-            controllers::template_library::routes(),
-            controllers::template_library::openapi_docs()
-        );
-        mount!(
-            controllers::whoami::routes(),
-            controllers::whoami::openapi_docs()
-        );
-        mount!(
-            controllers::users::routes(),
-            controllers::users::openapi_docs()
-        );
-        mount!(
-            controllers::workspaces::routes(),
-            controllers::workspaces::openapi_docs()
-        );
+        mounts.mount(controllers::audit_log::routes());
+        mounts.mount(controllers::api_keys::routes());
+        mounts.mount(controllers::auth::routes());
+        mounts.mount(controllers::entities::routes());
+        mounts.mount(controllers::entities::migration_routes());
+        mounts.mount(controllers::export::routes());
+        mounts.mount(controllers::import::routes());
+        mounts.mount(controllers::iam::routes());
+        mounts.mount(controllers::members::routes());
+        mounts.mount(controllers::tenants::routes());
+        mounts.mount(controllers::relations::routes());
+        mounts.mount(controllers::schemas::routes());
+        mounts.mount(controllers::schemas::template_routes());
+        mounts.mount(controllers::search::routes());
+        mounts.mount(controllers::setup::routes());
+        mounts.mount(controllers::template_library::routes());
+        mounts.mount(controllers::whoami::routes());
+        mounts.mount(controllers::users::routes());
+        mounts.mount(controllers::workspaces::routes());
         mounts
     }
 
     /// Registers a route group with Loco and records its operations in the inventory.
-    pub(crate) fn mount(&mut self, routes: Routes) -> &mut Self {
+    pub(crate) fn mount(&mut self, routes: controllers::openapi::Routes) -> &mut Self {
+        let controllers::openapi::Routes { routes, api } = routes;
+        controllers::openapi::merge_api(&mut self.inventory.api, api);
         let group = AppRoutes::empty().add_route(routes.clone());
         self.inventory.add_group(&group, RouteClass::Public);
         let current = std::mem::replace(&mut self.app_routes, AppRoutes::empty());
@@ -212,16 +153,6 @@ impl RouteMounts {
     /// Applies the per-IP credential rate limit to `path`, which must be reachable without a bearer token.
     pub(crate) fn guard_credentials(&mut self, path: &'static str) -> &mut Self {
         self.credential_paths.push(path);
-        self
-    }
-
-    /// Records the `OpenAPI` documents of the group mounted last.
-    #[cfg(feature = "openapi")]
-    pub(crate) fn document(
-        &mut self,
-        docs: impl IntoIterator<Item = controllers::openapi::route_inventory::RouteDoc>,
-    ) -> &mut Self {
-        self.inventory.add_docs(docs);
         self
     }
 

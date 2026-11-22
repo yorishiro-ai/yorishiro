@@ -2,20 +2,13 @@
 //!
 //! It checks that each public route has `OpenAPI` documentation and that anything left undocumented is an explicitly allowed exclusion.
 
-#[cfg(feature = "openapi")]
-use super::swagger::implementation::openapi_method;
 use axum::http::Method;
 use loco_rs::controller::AppRoutes;
-#[cfg(feature = "openapi")]
-use utoipa::openapi::path::{HttpMethod, Operation};
-#[cfg(feature = "openapi")]
-use utoipa::openapi::{RefOr, Schema};
 
 /// Whether a route is part of the public REST contract or an implementation endpoint.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RouteClass {
     Public,
-    #[cfg(feature = "openapi")]
     Infrastructure,
 }
 
@@ -25,7 +18,6 @@ pub struct RouteEntry {
     pub path: String,
     pub method: Method,
     pub operation_id: String,
-    #[cfg(feature = "openapi")]
     pub class: RouteClass,
 }
 
@@ -34,33 +26,7 @@ pub struct RouteEntry {
 pub struct RouteInventory {
     pub entries: Vec<RouteEntry>,
     pub exclusions: Vec<InfrastructureExclusion>,
-    #[cfg(feature = "openapi")]
-    pub(crate) docs: Vec<RouteDoc>,
-}
-
-/// `OpenAPI` metadata emitted next to the handler that serves an operation.
-#[cfg(feature = "openapi")]
-#[derive(Clone)]
-pub struct RouteDoc {
-    pub(crate) path: String,
-    pub(crate) methods: Vec<HttpMethod>,
-    pub(crate) operation: Operation,
-    pub(crate) schemas: Vec<(String, RefOr<Schema>)>,
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn path_doc<P>(_: P) -> RouteDoc
-where
-    P: utoipa::Path + utoipa::__dev::SchemaReferences,
-{
-    let mut schemas = Vec::new();
-    <P as utoipa::__dev::SchemaReferences>::schemas(&mut schemas);
-    RouteDoc {
-        path: P::path(),
-        methods: P::methods(),
-        operation: P::operation(),
-        schemas,
-    }
+    pub(crate) api: aide::openapi::OpenApi,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -71,8 +37,6 @@ pub struct InfrastructureExclusion {
 
 impl RouteInventory {
     pub(crate) fn add_group(&mut self, routes: &AppRoutes, class: RouteClass) {
-        #[cfg(not(feature = "openapi"))]
-        let _ = class;
         for route in routes.collect() {
             for method in route.actions {
                 let operation_id = operation_id(&method, &route.uri);
@@ -80,16 +44,10 @@ impl RouteInventory {
                     path: route.uri.clone(),
                     method,
                     operation_id,
-                    #[cfg(feature = "openapi")]
                     class,
                 });
             }
         }
-    }
-
-    #[cfg(feature = "openapi")]
-    pub(crate) fn add_docs(&mut self, docs: impl IntoIterator<Item = RouteDoc>) {
-        self.docs.extend(docs);
     }
 
     pub(crate) fn add_infrastructure(&mut self, routes: &AppRoutes) {
@@ -101,14 +59,12 @@ impl RouteInventory {
                     path: route.uri.clone(),
                     method: method.clone(),
                     operation_id: operation_id(&method, &route.uri),
-                    #[cfg(feature = "openapi")]
                     class: RouteClass::Infrastructure,
                 });
             }
         }
     }
 
-    #[cfg(feature = "openapi")]
     pub fn public(&self) -> impl Iterator<Item = &RouteEntry> {
         self.entries
             .iter()
@@ -140,39 +96,20 @@ impl RouteInventory {
             );
         }
 
-        #[cfg(feature = "openapi")]
-        {
-            let mut docs = std::collections::HashSet::new();
-            for doc in &self.docs {
-                for method in &doc.methods {
-                    assert!(
-                        docs.insert((doc.path.clone(), method.clone())),
-                        "duplicate OpenAPI metadata: {}",
-                        doc.path,
-                    );
-                }
-            }
-            for entry in self.public() {
-                assert!(
-                    self.docs.iter().any(|doc| {
-                        doc.path == entry.path
-                            && doc.methods.contains(&openapi_method(&entry.method))
-                    }),
-                    "missing OpenAPI metadata for {} {}",
-                    entry.method,
-                    entry.path
-                );
-            }
-            for doc in &self.docs {
-                assert!(
-                    self.public().any(|entry| {
-                        doc.path == entry.path
-                            && doc.methods.contains(&openapi_method(&entry.method))
-                    }),
-                    "OpenAPI metadata has no composed route: {}",
-                    doc.path
-                );
-            }
+        for entry in self.public() {
+            assert!(
+                self.api
+                    .paths
+                    .as_ref()
+                    .and_then(|paths| paths.paths.get(&entry.path))
+                    .and_then(|item| item.as_item())
+                    .is_some_and(|path| path
+                        .iter()
+                        .any(|(method, _)| method == entry.method.as_str().to_ascii_lowercase())),
+                "missing OpenAPI metadata for {} {}",
+                entry.method,
+                entry.path
+            );
         }
     }
 

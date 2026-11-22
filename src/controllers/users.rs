@@ -1,14 +1,13 @@
 use axum::Json;
 use axum::extract::State;
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{ReadScope, Verified};
+use crate::controllers::openapi::Routes;
 use crate::dtos::users::{UpdateUserRequest, UserRecord};
 use crate::models::user_users;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/users/me", responses((status = 200, body = UserRecord), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 async fn get_current_user(
     State(ctx): State<AppContext>,
     actor: Verified<ReadScope>,
@@ -19,7 +18,6 @@ async fn get_current_user(
     )))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/users/me", request_body = UpdateUserRequest, responses((status = 200, body = UserRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 async fn update_current_user(
     State(ctx): State<AppContext>,
     actor: Verified<ReadScope>,
@@ -32,16 +30,31 @@ async fn update_current_user(
 }
 
 pub(crate) fn routes() -> Routes {
-    Routes::new().prefix("api/users").add(
-        "/me",
-        axum::routing::get(get_current_user).put(update_current_user),
-    )
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_get_current_user),
-        super::openapi::route_inventory::path_doc(__path_update_current_user),
-    ]
+    Routes::new()
+        .prefix("api/users")
+        .add(
+            "/me",
+            aide::axum::routing::get_with(get_current_user, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/me",
+            aide::axum::routing::put_with(update_current_user, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<409, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
 }

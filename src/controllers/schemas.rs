@@ -3,14 +3,13 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::{delete, get, post};
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{AuthContext, Authorized, ReadScope, SchemaScope, Verified};
+use crate::controllers::openapi::Routes;
 use crate::data::templates::{self, TemplateSummary};
 use crate::dtos::schemas::{CreateSchemaRequest, CreateSchemaResponse};
 use crate::error::YorishiroError;
@@ -19,11 +18,12 @@ use crate::models::schema_schemas::metaschema::{self, MetaSchemaDefinition};
 use crate::models::schema_schemas::{self, SchemaRecord, SchemaSummary};
 use crate::models::template_templates;
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/{schema_id}/archive", params(("schema_id" = Uuid, Path)), responses((status = 200, body = SchemaRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_archive"] ))), tag = "community"))]
 pub(crate) async fn archive_schema(
     State(ctx): State<AppContext>,
     verified: Verified<SchemaScope>,
-    Path(schema_id): Path<Uuid>,
+    Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
+        crate::dtos::common::SchemaIdPath<Uuid>,
+    >,
 ) -> Result<Json<SchemaRecord>, ApiError> {
     let mut authorized = Authorized::<SchemaScope>::for_target(
         &ctx,
@@ -44,11 +44,12 @@ pub(crate) async fn archive_schema(
     Ok(Json(schema))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/schemas/{schema_id}", params(("schema_id" = Uuid, Path)), responses((status = 204, description = "Schema version deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_delete"] ))), tag = "community"))]
 pub(crate) async fn delete_schema(
     State(ctx): State<AppContext>,
     verified: Verified<SchemaScope>,
-    Path(schema_id): Path<Uuid>,
+    Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
+        crate::dtos::common::SchemaIdPath<Uuid>,
+    >,
 ) -> Result<StatusCode, ApiError> {
     let mut authorized = Authorized::<SchemaScope>::for_target(
         &ctx,
@@ -69,7 +70,6 @@ pub(crate) async fn delete_schema(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas", description = "List schemas across permitted workspaces when none is selected.", params(("X-Workspace-Id" = Option<Uuid>, Header), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [SchemaSummary]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_list"] ))), tag = "community"))]
 pub(crate) async fn list_schemas(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -80,7 +80,6 @@ pub(crate) async fn list_schemas(
     Ok(Json(summaries))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas", request_body = super::openapi::CreateSchemaRequest, params(("X-Workspace-Id" = Option<Uuid>, Header)), responses((status = 201, body = CreateSchemaResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_create"] ))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -137,14 +136,13 @@ async fn create_schema(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/active/{name}", params(("name" = String, Path)), responses((status = 200, body = SchemaRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_get"] ))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn get_active_schema(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
-    Path(name): Path<String>,
+    Path(crate::dtos::common::NamePath { name }): Path<crate::dtos::common::NamePath<String>>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
     let mut authorized = Authorized::<ReadScope>::for_target(
         &ctx,
@@ -162,11 +160,12 @@ async fn get_active_schema(
     Ok(Json(record))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/{schema_id}", params(("schema_id" = Uuid, Path)), responses((status = 200, body = SchemaRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_get"] ))), tag = "community"))]
 pub(crate) async fn get_schema_by_id(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
-    Path(schema_id): Path<Uuid>,
+    Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
+        crate::dtos::common::SchemaIdPath<Uuid>,
+    >,
 ) -> Result<Json<SchemaRecord>, ApiError> {
     let mut authorized = Authorized::<ReadScope>::for_target(
         &ctx,
@@ -182,30 +181,29 @@ pub(crate) async fn get_schema_by_id(
     Ok(Json(record))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/templates", responses((status = 200, body = [TemplateSummary]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 pub(crate) async fn list_templates(
     _verified: Verified<ReadScope>,
 ) -> Result<Json<Vec<TemplateSummary>>, ApiError> {
     Ok(Json(templates::list_templates()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/templates/{id}", params(("id" = String, Path)), responses((status = 200, body = super::openapi::JsonSchema), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn get_template(
     _verified: Verified<ReadScope>,
-    Path(id): Path<String>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<String>>,
 ) -> Result<Json<MetaSchemaDefinition>, ApiError> {
     let definition = templates::get_template(&id)?;
     Ok(Json(definition))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schemas/active/{name}/entity-types/{entity_type}/json-schema", params(("name" = String, Path), ("entity_type" = String, Path)), responses((status = 200, body = super::openapi::JsonSchema), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_get"] ))), tag = "community"))]
 pub(crate) async fn get_entity_type_json_schema(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
-    Path((name, entity_type)): Path<(String, String)>,
+    Path(crate::dtos::common::NameEntityTypePath { name, entity_type }): Path<
+        crate::dtos::common::NameEntityTypePath<String, String>,
+    >,
 ) -> Result<Json<Value>, ApiError> {
     let mut authorized = Authorized::<ReadScope>::for_target(
         &ctx,
@@ -236,45 +234,166 @@ pub(crate) async fn get_entity_type_json_schema(
     )))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep route registration and aide metadata together"
+)]
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/schemas")
-        .add("/", get(list_schemas))
-        .add("/", post(create_schema))
-        .add("/active/{name}", get(get_active_schema))
-        .add("/{schema_id}", get(get_schema_by_id))
-        .add("/{schema_id}", delete(delete_schema))
-        .add("/{schema_id}/archive", post(archive_schema))
+        .add(
+            "/",
+            aide::axum::routing::get_with(list_schemas, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_list"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/",
+            aide::axum::routing::post_with(create_schema, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_create"]),
+                    ))
+                    .response::<201, Json<CreateSchemaResponse>>()
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<409, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/active/{name}",
+            aide::axum::routing::get_with(get_active_schema, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_get"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{schema_id}",
+            aide::axum::routing::get_with(get_schema_by_id, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_get"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{schema_id}",
+            aide::axum::routing::delete_with(delete_schema, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_delete"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("Schema version deleted"))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                    .response::<409, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{schema_id}/archive",
+            aide::axum::routing::post_with(archive_schema, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_archive"]),
+                    ))
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
         .add(
             "/active/{name}/entity-types/{entity_type}/json-schema",
-            get(get_entity_type_json_schema),
+            aide::axum::routing::get_with(get_entity_type_json_schema, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_get"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
         )
 }
 
 pub(crate) fn template_routes() -> Routes {
     Routes::new()
         .prefix("api/templates")
-        .add("/", get(list_templates))
-        .add("/{id}", get(get_template))
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_list_schemas),
-        super::openapi::route_inventory::path_doc(__path_create_schema),
-        super::openapi::route_inventory::path_doc(__path_archive_schema),
-        super::openapi::route_inventory::path_doc(__path_delete_schema),
-        super::openapi::route_inventory::path_doc(__path_get_active_schema),
-        super::openapi::route_inventory::path_doc(__path_get_schema_by_id),
-        super::openapi::route_inventory::path_doc(__path_get_entity_type_json_schema),
-    ]
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn template_openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_list_templates),
-        super::openapi::route_inventory::path_doc(__path_get_template),
-    ]
+        .add(
+            "/",
+            aide::axum::routing::get_with(list_templates, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::get_with(get_template, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
 }

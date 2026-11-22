@@ -27,14 +27,13 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 /// A row from the tenant's DB-backed template library, with `definition` parsed.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct TemplateRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,
     pub description: Option<String>,
-    #[cfg_attr(feature = "openapi", schema(value_type = serde_json::Value))]
+    #[schemars(with = "serde_json::Value")]
     pub definition: MetaSchemaDefinition,
     pub tags: Vec<String>,
     pub locale: Option<String>,

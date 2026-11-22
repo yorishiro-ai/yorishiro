@@ -2,16 +2,15 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope, Verified};
+use crate::controllers::openapi::Routes;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 use uuid::Uuid;
 
 use crate::edition::ee::models::workspace_schema_forks as model;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schema-forks", responses((status = 200, body = [crate::edition::ee::controllers::openapi::ForkRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_fork_list"]))), tag = "enterprise"))]
 async fn list(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
@@ -22,11 +21,10 @@ async fn list(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/schema-forks/{fork_id}", params(("fork_id" = Uuid, Path)), responses((status = 200, body = crate::edition::ee::controllers::openapi::ForkRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["schema_fork_get"]))), tag = "enterprise"))]
 async fn get(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
-    Path(fork_id): Path<Uuid>,
+    Path(crate::dtos::common::ForkIdPath { fork_id }): Path<crate::dtos::common::ForkIdPath<Uuid>>,
 ) -> Result<Json<model::ForkRecord>, ApiError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
         model::workspace_for_actor(&ctx.db, &verified.ctx, fork_id).await?,
@@ -46,7 +44,6 @@ async fn get(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schema-forks", request_body = crate::edition::ee::controllers::openapi::CreateForkRequest, responses((status = 201, body = crate::edition::ee::controllers::openapi::ForkRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_fork_create"]))), tag = "enterprise"))]
 async fn create(
     State(ctx): State<AppContext>,
     verified: Verified<SchemaScope>,
@@ -70,11 +67,10 @@ async fn create(
     Ok((StatusCode::CREATED, Json(fork)))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/schema-forks/{fork_id}", params(("fork_id" = Uuid, Path)), request_body = crate::edition::ee::controllers::openapi::UpdateForkRequest, responses((status = 200, body = crate::edition::ee::controllers::openapi::ForkRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_fork_update"]))), tag = "enterprise"))]
 async fn update(
     State(ctx): State<AppContext>,
     verified: Verified<SchemaScope>,
-    Path(fork_id): Path<Uuid>,
+    Path(crate::dtos::common::ForkIdPath { fork_id }): Path<crate::dtos::common::ForkIdPath<Uuid>>,
     Json(input): Json<model::UpdateInput>,
 ) -> Result<Json<model::ForkRecord>, ApiError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
@@ -96,11 +92,10 @@ async fn update(
     Ok(Json(fork))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/schema-forks/{fork_id}", params(("fork_id" = Uuid, Path)), responses((status = 204, description = "Schema fork deleted"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["schema_fork_delete"]))), tag = "enterprise"))]
 async fn delete(
     State(ctx): State<AppContext>,
     verified: Verified<SchemaScope>,
-    Path(fork_id): Path<Uuid>,
+    Path(crate::dtos::common::ForkIdPath { fork_id }): Path<crate::dtos::common::ForkIdPath<Uuid>>,
 ) -> Result<StatusCode, ApiError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
         model::workspace_for_actor(&ctx.db, &verified.ctx, fork_id).await?,
@@ -120,23 +115,94 @@ async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![
-        crate::controllers::openapi::route_inventory::path_doc(__path_list),
-        crate::controllers::openapi::route_inventory::path_doc(__path_create),
-        crate::controllers::openapi::route_inventory::path_doc(__path_get),
-        crate::controllers::openapi::route_inventory::path_doc(__path_update),
-        crate::controllers::openapi::route_inventory::path_doc(__path_delete),
-    ]
-}
-
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/schema-forks")
-        .add("", axum::routing::get(list).post(create))
+        .add(
+            "",
+            aide::axum::routing::get_with(list, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_fork_list"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "",
+            aide::axum::routing::post_with(create, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_fork_create"]),
+                    ))
+                    .response::<201, Json<model::ForkRecord>>()
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
         .add(
             "/{fork_id}",
-            axum::routing::get(get).put(update).delete(delete),
+            aide::axum::routing::get_with(get, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_fork_get"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{fork_id}",
+            aide::axum::routing::put_with(update, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_fork_update"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{fork_id}",
+            aide::axum::routing::delete_with(delete, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["schema_fork_delete"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("Schema fork deleted"))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
         )
 }

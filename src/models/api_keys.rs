@@ -22,8 +22,7 @@ const LOGIN_KEY_PREFIX: &str = "ysr_login-";
 pub const WORKSPACE_HEADER: &str = "x-workspace-id";
 
 /// Secret-free grant metadata for credential administration.
-#[derive(serde::Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(serde::Serialize, schemars::JsonSchema)]
 pub struct KeyGrant {
     pub state: KeyState,
     pub expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,
@@ -185,8 +184,7 @@ db_enum! {
     /// Permission level held by an API key.
     /// Declaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.
     /// The wire form matches the DB `scope` column ('read'/'write'/'schema'/'migration').
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, schemars::JsonSchema)]
-    #[schemars(rename_all = "lowercase")]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     pub enum ApiKeyScope {
         Read = "read",
         Write = "write",

@@ -2,7 +2,6 @@ use serde::Deserialize;
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct CreateTenantUserRequest {
     /// Unique within the tenant: 1 to 64 letters, digits, `.`, `_` or `-`.
     pub(crate) user_name: String,
@@ -13,7 +12,7 @@ pub(crate) struct CreateTenantUserRequest {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(schemars::JsonSchema)]
 pub(crate) struct ResetTenantUserPasswordRequest {
     /// At least 12 characters. Every key issued to the user is revoked.
     pub(crate) password: String,

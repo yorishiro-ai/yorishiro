@@ -5,13 +5,13 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::middleware::auth::require_scope;
+use crate::controllers::openapi::Routes;
 use crate::error::YorishiroError;
 use crate::models::api_keys::ApiKeyScope;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 
 use crate::edition::ee::controllers::middleware::auth as authz;
 use crate::edition::ee::dtos::inference::{
@@ -29,11 +29,10 @@ use crate::edition::ee::models::workspace_llm_keys;
 /// The worker rechecks the credential and IAM policy before inference and proposal storage.
 ///
 /// Poll for completion via `GET /api/inference-jobs/{job_id}`.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/schemas/active/{name}/infer-fill", params(("name" = String, Path)), responses((status = 200, body = InferFillResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody), (status = 503, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["inference_create"]))), tag = "enterprise"))]
 async fn infer_fill(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Path(name): Path<String>,
+    Path(crate::dtos::common::NamePath { name }): Path<crate::dtos::common::NamePath<String>>,
 ) -> Result<Json<InferFillResponse>, ApiError> {
     // Gate before authentication so unlicensed requests all receive the same 404.
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
@@ -53,11 +52,10 @@ async fn infer_fill(
 ///
 /// Requires authentication and read scope, and only returns a job belonging to the
 /// authenticated workspace.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/{job_id}", params(("job_id" = String, Path)), responses((status = 200, body = InferJobStatusResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["inference_job_get"]))), tag = "enterprise"))]
 async fn infer_job_status(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Path(job_id): Path<String>,
+    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<String>>,
 ) -> Result<Json<InferJobStatusResponse>, ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
@@ -87,20 +85,88 @@ async fn infer_job_status(
 /// The two groups also sit under different prefixes: credentials belong with the workspace's other
 /// settings, while the inference call itself extends the schema routes it fills against.
 pub fn routes() -> Routes {
-    Routes::new().prefix("api/workspace").add(
-        "/llm-key",
-        axum::routing::put(set_llm_key)
-            .get(get_llm_key)
-            .delete(delete_llm_key),
-    )
+    Routes::new()
+        .prefix("api/workspace")
+        .add(
+            "/llm-key",
+            aide::axum::routing::put_with(set_llm_key, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["llm_provider_update"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("LLM credentials saved"))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/llm-key",
+            aide::axum::routing::get_with(get_llm_key, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["llm_provider_get"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/llm-key",
+            aide::axum::routing::delete_with(delete_llm_key, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["llm_provider_delete"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("LLM credentials removed"))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
 }
 
 /// The route this module's licence gate covers: the server calls an LLM here, which is what makes
 /// it an enterprise feature. See [`routes`] for why the two groups are separate.
 pub fn gated_routes() -> Routes {
-    Routes::new()
-        .prefix("api/schemas")
-        .add("/active/{name}/infer-fill", axum::routing::post(infer_fill))
+    Routes::new().prefix("api/schemas").add(
+        "/active/{name}/infer-fill",
+        aide::axum::routing::post_with(infer_fill, |op| {
+            op.tag("enterprise")
+                .security_requirement("bearer_auth")
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["schema"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["inference_create"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<503, Json<crate::controllers::openapi::ApiErrorBody>>()
+        }),
+    )
 }
 
 /// `GET /api/inference-jobs/{job_id}`
@@ -109,25 +175,129 @@ pub fn gated_routes() -> Routes {
 /// `migration_routes()` (`api/migration-jobs/{job_id}/undo`): a dedicated prefix for
 /// async-job polling, under the licence gate because results include workspace
 /// activity counts that reveal whether a workspace has data to infer.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep route registration and aide metadata together"
+)]
 pub fn inference_job_status_routes() -> Routes {
     Routes::new()
         .prefix("api/inference-jobs")
-        .add("/{job_id}", axum::routing::get(infer_job_status))
-        .add("/{job_id}/proposals", axum::routing::get(list_proposals))
-        .add("/{job_id}/confirm", axum::routing::post(confirm_proposals))
-        .add("/{job_id}/reject", axum::routing::post(reject_proposals))
-        .add("/{job_id}/discard", axum::routing::post(discard_proposals))
+        .add(
+            "/{job_id}",
+            aide::axum::routing::get_with(infer_job_status, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["inference_job_get"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{job_id}/proposals",
+            aide::axum::routing::get_with(list_proposals, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["inference_proposal_list"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{job_id}/confirm",
+            aide::axum::routing::post_with(confirm_proposals, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["inference_confirm"]),
+                    ))
+                    .response::<202, Json<crate::dtos::jobs::QueuedJobResponse>>()
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<409, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{job_id}/reject",
+            aide::axum::routing::post_with(reject_proposals, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["inference_reject"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{job_id}/discard",
+            aide::axum::routing::post_with(discard_proposals, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["inference_discard"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
         .add(
             "/confirmations/{job_id}",
-            axum::routing::get(confirmation_status),
+            aide::axum::routing::get_with(confirmation_status, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["inference_confirmation_get"]),
+                    ))
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
         )
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/confirmations/{job_id}", params(("job_id" = uuid::Uuid, Path)), responses((status = 200, body = crate::models::queue_job_lifecycles::BulkJobStatus), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["inference_confirmation_get"]))), tag = "enterprise"))]
 async fn confirmation_status(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Path(job_id): Path<uuid::Uuid>,
+    Path(crate::dtos::common::JobIdPath { job_id }): Path<
+        crate::dtos::common::JobIdPath<uuid::Uuid>,
+    >,
 ) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
     let auth = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth, ApiKeyScope::Schema)?;
@@ -141,11 +311,10 @@ fn parse_job_id(job_id: &str) -> Result<uuid::Uuid, YorishiroError> {
 }
 
 /// `GET /api/inference-jobs/{job_id}/proposals`
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/inference-jobs/{job_id}/proposals", params(("job_id" = String, Path)), responses((status = 200, body = [crate::edition::ee::controllers::openapi::InferenceProposalResponse]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["inference_proposal_list"]))), tag = "enterprise"))]
 async fn list_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Path(job_id): Path<String>,
+    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<String>>,
 ) -> Result<Json<Vec<inference_proposals::ProposalRecord>>, ApiError> {
     let auth = authz::authenticate_workspace(&ctx, &headers).await?;
     Ok(Json(
@@ -153,11 +322,10 @@ async fn list_proposals(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/reject", params(("job_id" = String, Path)), responses((status = 200, body = crate::edition::ee::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["inference_reject"]))), tag = "enterprise"))]
 async fn reject_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Path(job_id): Path<String>,
+    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<String>>,
 ) -> Result<Json<inference_proposals::ProposalActionReport>, ApiError> {
     let auth = authz::authenticate_workspace(&ctx, &headers).await?;
     Ok(Json(
@@ -165,11 +333,10 @@ async fn reject_proposals(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/discard", params(("job_id" = String, Path)), responses((status = 200, body = crate::edition::ee::controllers::openapi::ProposalActionResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["inference_discard"]))), tag = "enterprise"))]
 async fn discard_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Path(job_id): Path<String>,
+    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<String>>,
 ) -> Result<Json<inference_proposals::ProposalActionReport>, ApiError> {
     let auth = authz::authenticate_workspace(&ctx, &headers).await?;
     Ok(Json(
@@ -179,11 +346,10 @@ async fn discard_proposals(
 
 /// Enqueues confirmation with `inference_confirm` on the selected workspace and schema scope.
 /// The worker rechecks the credential and IAM policy before applying proposals.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/inference-jobs/{job_id}/confirm", params(("job_id" = String, Path)), responses((status = 202, body = crate::dtos::jobs::QueuedJobResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 409, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["inference_confirm"]))), tag = "enterprise"))]
 async fn confirm_proposals(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Path(job_id): Path<String>,
+    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<String>>,
 ) -> Result<(StatusCode, Json<crate::dtos::jobs::QueuedJobResponse>), ApiError> {
     let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     let job_id = parse_job_id(&job_id)?;
@@ -196,7 +362,6 @@ async fn confirm_proposals(
 }
 
 /// `PUT /api/workspace/llm-key`
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspace/llm-key", request_body = crate::edition::ee::controllers::openapi::LlmKeyRequest, responses((status = 204, description = "LLM credentials saved"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["llm_provider_update"]))), tag = "enterprise"))]
 async fn set_llm_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -216,7 +381,6 @@ async fn set_llm_key(
 }
 
 /// `GET /api/workspace/llm-key`
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspace/llm-key", responses((status = 200, body = crate::edition::ee::controllers::openapi::LlmKeyResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["llm_provider_get"]))), tag = "enterprise"))]
 async fn get_llm_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -230,7 +394,6 @@ async fn get_llm_key(
 }
 
 /// `DELETE /api/workspace/llm-key`
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspace/llm-key", responses((status = 204, description = "LLM credentials removed"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["llm_provider_delete"]))), tag = "enterprise"))]
 async fn delete_llm_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -239,33 +402,4 @@ async fn delete_llm_key(
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
     workspace_llm_keys::clear_as(&ctx.db, &auth_ctx).await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![
-        crate::controllers::openapi::route_inventory::path_doc(__path_set_llm_key),
-        crate::controllers::openapi::route_inventory::path_doc(__path_get_llm_key),
-        crate::controllers::openapi::route_inventory::path_doc(__path_delete_llm_key),
-    ]
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn gated_openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![crate::controllers::openapi::route_inventory::path_doc(
-        __path_infer_fill,
-    )]
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn job_status_openapi_docs()
--> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![
-        crate::controllers::openapi::route_inventory::path_doc(__path_infer_job_status),
-        crate::controllers::openapi::route_inventory::path_doc(__path_list_proposals),
-        crate::controllers::openapi::route_inventory::path_doc(__path_confirm_proposals),
-        crate::controllers::openapi::route_inventory::path_doc(__path_confirmation_status),
-        crate::controllers::openapi::route_inventory::path_doc(__path_reject_proposals),
-        crate::controllers::openapi::route_inventory::path_doc(__path_discard_proposals),
-    ]
 }

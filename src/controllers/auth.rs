@@ -5,25 +5,16 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::post;
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
+use crate::controllers::openapi::Routes;
 use crate::dtos::auth::{
     LoginResponse, RootLoginRequest, SignupRequest, SignupResponse, TenantLoginRequest,
 };
 use crate::error::YorishiroError;
 use crate::models::{tenancy, user_users};
 
-#[cfg_attr(feature = "openapi", utoipa::path(
-    post,
-    path = "/auth/signup",
-    request_body = SignupRequest,
-    responses((status = 201, body = SignupResponse), (status = 422, body = super::openapi::ApiErrorBody)),
-    security(()),
-    tag = "community"
-))]
 /// Creates a brand-new tenant whose root is the caller; there is no workspace yet.
 ///
 /// The new tenant can be managed using a tenant-scoped login key.
@@ -59,7 +50,6 @@ async fn signup(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/root/login", request_body = RootLoginRequest, responses((status = 200, body = LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
 async fn root_login(
     State(ctx): State<AppContext>,
     Json(body): Json<RootLoginRequest>,
@@ -70,7 +60,6 @@ async fn root_login(
     finish_login(&ctx, user, None).await
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/tenant/login", params(("x-tenant-id" = uuid::Uuid, Header)), request_body = TenantLoginRequest, responses((status = 200, body = LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
 async fn tenant_login(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -111,19 +100,39 @@ async fn finish_login(
     }))
 }
 
+/// # Panics
+/// Panics if the static tenant header metadata is invalid.
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("auth")
-        .add("/signup", post(signup))
-        .add("/root/login", post(root_login))
-        .add("/tenant/login", post(tenant_login))
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_signup),
-        super::openapi::route_inventory::path_doc(__path_root_login),
-        super::openapi::route_inventory::path_doc(__path_tenant_login),
-    ]
+        .add(
+            "/signup",
+            aide::axum::routing::post_with(signup, |op| {
+                op.tag("community")
+                    .response::<201, Json<SignupResponse>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/root/login",
+            aide::axum::routing::post_with(root_login, |op| {
+                op.tag("community")
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/tenant/login",
+            aide::axum::routing::post_with(tenant_login, |op| {
+                op.tag("community")
+                    .with(|mut op| {
+                        op.inner_mut().parameters.push(aide::openapi::ReferenceOr::Item(
+                            serde_json::from_value(serde_json::json!({"in": "header", "name": "x-tenant-id", "required": true, "schema": {"type": "string", "format": "uuid"}})).expect("tenant login header"),
+                        ));
+                        op
+                    })
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
 }

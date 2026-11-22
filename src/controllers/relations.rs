@@ -3,25 +3,22 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::routing::{delete, get, post, put};
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{AuthContext, Authorized, ReadScope, Verified, WriteScope};
+use crate::controllers::openapi::Routes;
 use crate::dtos::relations::{
     CreateRelationRequest, ListRelationsParams, SetRelationStatusRequest,
 };
 use crate::models::entity_relations::{self, RelationRecord};
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/relations", request_body = CreateRelationRequest, responses((status = 201, body = RelationRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"])), ("x-yorishiro-required-actions" = json!(["relation_create"]))), tag = "community"))]
 pub(crate) async fn create_relation(
     State(ctx): State<AppContext>,
     verified: Verified<WriteScope>,
     Json(body): Json<CreateRelationRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<(StatusCode, Json<RelationRecord>), ApiError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
         crate::models::entity_entities::workspace_for_actor(&ctx.db, &verified.ctx, body.source_id)
             .await?,
@@ -37,11 +34,10 @@ pub(crate) async fn create_relation(
     Ok((StatusCode::CREATED, Json(record)))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/relations/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = RelationRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["relation_get"]))), tag = "community"))]
 pub(crate) async fn get_relation(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<Json<RelationRecord>, ApiError> {
     let mut authorized = Authorized::<ReadScope>::for_target(
         &ctx,
@@ -57,11 +53,10 @@ pub(crate) async fn get_relation(
     Ok(Json(record))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/relations/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Relation deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"])), ("x-yorishiro-required-actions" = json!(["relation_delete"]))), tag = "community"))]
 pub(crate) async fn delete_relation(
     State(ctx): State<AppContext>,
     verified: Verified<WriteScope>,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<StatusCode, ApiError> {
     let mut authorized = Authorized::<WriteScope>::for_target(
         &ctx,
@@ -78,7 +73,6 @@ pub(crate) async fn delete_relation(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/relations", params(("source_id" = Option<Uuid>, Query), ("target_id" = Option<Uuid>, Query), ("relation_type" = Option<String>, Query), ("status" = Option<entity_relations::RelationStatus>, Query), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [RelationRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["relation_list"]))), tag = "community"))]
 pub(crate) async fn list_relations(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -90,11 +84,10 @@ pub(crate) async fn list_relations(
     Ok(Json(records))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/relations/{id}/status", params(("id" = Uuid, Path)), request_body = SetRelationStatusRequest, responses((status = 200, body = RelationRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["write"])), ("x-yorishiro-required-actions" = json!(["relation_update"]))), tag = "community"))]
 pub(crate) async fn set_relation_status(
     State(ctx): State<AppContext>,
     verified: Verified<WriteScope>,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<SetRelationStatusRequest>,
 ) -> Result<Json<RelationRecord>, ApiError> {
     let mut authorized = Authorized::<WriteScope>::for_target(
@@ -120,23 +113,95 @@ pub(crate) async fn set_relation_status(
     Ok(Json(record))
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_create_relation),
-        super::openapi::route_inventory::path_doc(__path_get_relation),
-        super::openapi::route_inventory::path_doc(__path_delete_relation),
-        super::openapi::route_inventory::path_doc(__path_list_relations),
-        super::openapi::route_inventory::path_doc(__path_set_relation_status),
-    ]
-}
-
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/relations")
-        .add("/", post(create_relation))
-        .add("/", get(list_relations))
-        .add("/{id}", get(get_relation))
-        .add("/{id}", delete(delete_relation))
-        .add("/{id}/status", put(set_relation_status))
+        .add(
+            "/",
+            aide::axum::routing::post_with(create_relation, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["write"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["relation_create"]),
+                    ))
+                    .response::<201, Json<RelationRecord>>()
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/",
+            aide::axum::routing::get_with(list_relations, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["relation_list"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::get_with(get_relation, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["relation_get"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::delete_with(delete_relation, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["write"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["relation_delete"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("Relation deleted"))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}/status",
+            aide::axum::routing::put_with(set_relation_status, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["write"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["relation_update"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
 }

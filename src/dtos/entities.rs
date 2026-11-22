@@ -4,36 +4,31 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-#[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct CreateEntityRequest {
     pub schema_name: String,
     pub entity_type: String,
     pub data: Value,
 }
 
-#[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub(crate) struct FillDefaultsRequest {
     pub(crate) schema_name: String,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct FillDefaultsResponse {
     pub(crate) schema_name: String,
     pub(crate) job_id: Uuid,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct UndoResponse {
     pub(crate) job_id: Uuid,
     pub(crate) snapshot_job_id: Uuid,
 }
 
-#[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub(crate) struct UpdateEntityRequest {
     pub(crate) data: Value,
     /// The entity's `updated_at` as the client read it; a mismatch is refused with a 409 conflict.
@@ -41,7 +36,7 @@ pub(crate) struct UpdateEntityRequest {
     pub(crate) expected_updated_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct ListEntitiesParams {
     pub entity_type: Option<String>,
     /// JSON-encoded containment filter, e.g. `{"status":"active"}`.
@@ -75,8 +70,7 @@ impl TryFrom<ListEntitiesParams> for entity_entities::ListEntitiesQuery {
     }
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct ReindexResponse {
     /// The job ID assigned by the queue provider.
     pub(crate) job_id: String,

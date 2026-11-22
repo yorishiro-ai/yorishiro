@@ -1,19 +1,17 @@
+use axum::extract::Path;
 use axum::http::StatusCode;
-use axum::routing::post;
 use axum::{Json, extract::State};
-use axum::{extract::Path, routing::get};
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, SchemaScope, Verified};
+use crate::controllers::openapi::Routes;
 use crate::dtos::jobs::QueuedJobResponse;
 
 /// Line-delimited JSON import in the same format `GET /api/export.jsonl` produces: one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 /// Requires `SchemaScope` (rather than `WriteScope`) since an import can create schemas, which is itself a schema-scope-only operation elsewhere in the API.
 ///
 /// Accepted imports run all-or-nothing on a worker; poll `/api/import-jobs/{job_id}` for completion.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/import.jsonl", request_body(content = String, content_type = "application/x-ndjson"), responses((status = 202, body = QueuedJobResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["import_create"]))), tag = "community"))]
 pub(crate) async fn import_jsonl(
     State(ctx): State<AppContext>,
     verified: Verified<SchemaScope>,
@@ -33,25 +31,51 @@ pub(crate) async fn import_jsonl(
     Ok((StatusCode::ACCEPTED, Json(QueuedJobResponse { job_id })))
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_import_jsonl),
-        super::openapi::route_inventory::path_doc(__path_import_job_status),
-    ]
-}
-
 pub fn routes() -> Routes {
     Routes::new()
-        .add("/api/import.jsonl", post(import_jsonl))
-        .add("/api/import-jobs/{job_id}", get(import_job_status))
+        .add(
+            "/api/import.jsonl",
+            aide::axum::routing::post_with(import_jsonl, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["import_create"]),
+                    ))
+                    .response::<202, Json<QueuedJobResponse>>()
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/api/import-jobs/{job_id}",
+            aide::axum::routing::get_with(import_job_status, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["import_job_get"]),
+                    ))
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/import-jobs/{job_id}", params(("job_id" = uuid::Uuid, Path), ("X-Workspace-Id" = Option<uuid::Uuid>, Header)), responses((status = 200, body = crate::models::queue_job_lifecycles::BulkJobStatus), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["import_job_get"]))), tag = "community"))]
 async fn import_job_status(
     State(ctx): State<AppContext>,
     verified: Verified<SchemaScope>,
-    Path(id): Path<uuid::Uuid>,
+    Path(crate::dtos::common::JobIdPath { job_id: id }): Path<
+        crate::dtos::common::JobIdPath<uuid::Uuid>,
+    >,
 ) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
     let mut authorized = Authorized::<SchemaScope>::for_target(
         &ctx,

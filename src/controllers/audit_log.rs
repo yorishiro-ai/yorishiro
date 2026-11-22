@@ -4,29 +4,26 @@
 
 use axum::Json;
 use axum::extract::Query;
-use axum::routing::get;
-use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuditAuthorized;
+use crate::controllers::openapi::Routes;
 
-#[derive(serde::Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(serde::Serialize, schemars::JsonSchema)]
 pub struct AuditLogRecord {
     pub id: uuid::Uuid,
     pub workspace_id: uuid::Uuid,
     pub tenant_id: uuid::Uuid,
-    #[cfg_attr(feature = "openapi", schema(nullable = true))]
+
     pub api_key_id: Option<uuid::Uuid>,
-    #[cfg_attr(feature = "openapi", schema(nullable = true))]
+
     pub user_id: Option<uuid::Uuid>,
     pub action: crate::models::api_key_audit_log::AuditAction,
     pub detail: serde_json::Value,
-    #[cfg_attr(feature = "openapi", schema(format = DateTime))]
+    #[schemars(with = "chrono::DateTime<chrono::Utc>")]
     pub created_at: String,
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/audit-log", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [AuditLogRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-grants" = json!(["audit"])), ("x-yorishiro-required-actions" = json!(["audit_log_list"]))), tag = "community"))]
 pub(crate) async fn list_audit_log(
     authorized: AuditAuthorized,
     Query(page): Query<crate::dtos::common::PageParams>,
@@ -57,15 +54,22 @@ pub(crate) fn render_records(
         .collect()
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![super::openapi::route_inventory::path_doc(
-        __path_list_audit_log,
-    )]
-}
-
 pub fn routes() -> Routes {
-    Routes::new()
-        .prefix("api/audit-log")
-        .add("/", get(list_audit_log))
+    Routes::new().prefix("api/audit-log").add(
+        "/",
+        aide::axum::routing::get_with(list_audit_log, |op| {
+            op.tag("community")
+                .security_requirement("bearer_auth")
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-grants",
+                    serde_json::json!(["audit"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["audit_log_list"]),
+                ))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
+        }),
+    )
 }

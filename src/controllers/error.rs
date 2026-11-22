@@ -19,3 +19,7 @@ impl IntoResponse for ApiError {
         (status, Json(body)).into_response()
     }
 }
+
+impl aide::OperationOutput for ApiError {
+    type Inner = ();
+}

@@ -3,15 +3,13 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
-use axum::routing::get;
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 
 use crate::controllers::ApiError;
+use crate::controllers::openapi::Routes;
 use crate::edition::ee::dtos::dashboard::TenantOverview;
 use crate::edition::ee::models::tenant_tenants;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenant/overview", responses((status = 200, body = TenantOverview), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_get", "tenant_user_list"]))), tag = "enterprise"))]
 async fn tenant_overview(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -23,14 +21,22 @@ async fn tenant_overview(
 }
 
 pub fn routes() -> Routes {
-    Routes::new()
-        .prefix("api/tenant")
-        .add("/overview", get(tenant_overview))
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![crate::controllers::openapi::route_inventory::path_doc(
-        __path_tenant_overview,
-    )]
+    Routes::new().prefix("api/tenant").add(
+        "/overview",
+        aide::axum::routing::get_with(tenant_overview, |op| {
+            op.tag("enterprise")
+                .security_requirement("bearer_auth")
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["tenant_get", "tenant_user_list"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+        }),
+    )
 }

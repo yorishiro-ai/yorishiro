@@ -3,20 +3,17 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::routing::{delete, get, post};
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
+use crate::controllers::openapi::Routes;
 use crate::dtos::workspaces::{CreateWorkspaceRequest, WorkspaceDetail};
 use crate::models::tenancy;
 use crate::models::workspace_workspaces;
 use crate::models::workspace_workspaces::WorkspaceRecord;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_list", "workspace_get"]))), tag = "community"))]
 pub(crate) async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -32,7 +29,6 @@ pub(crate) async fn list_workspaces(
     Ok(Json(records))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = CreateWorkspaceRequest, responses((status = 201, body = WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_create"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -40,7 +36,7 @@ async fn create_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Json(body): Json<CreateWorkspaceRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<axum::response::Response, ApiError> {
     let workspace = tenancy::create_workspace_in_context(
         &ctx,
         &auth,
@@ -49,28 +45,29 @@ async fn create_workspace(
         body.schema_id,
     )
     .await?;
-    Ok((StatusCode::CREATED, Json(workspace)))
+    Ok(axum::response::IntoResponse::into_response((
+        StatusCode::CREATED,
+        Json(workspace),
+    )))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), extensions(("x-yorishiro-required-actions" = json!(["workspace_get"]))), tag = "community"))]
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn get_workspace(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<Json<WorkspaceDetail>, ApiError> {
     Ok(Json(
         workspace_workspaces::detail_for_actor(&ctx, &actor, id).await?,
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), request_body = crate::dtos::workspaces::UpdateWorkspaceRequest, responses((status = 200, body = WorkspaceRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_update"]))), tag = "community"))]
 async fn update_workspace(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<crate::dtos::workspaces::UpdateWorkspaceRequest>,
 ) -> Result<Json<WorkspaceRecord>, ApiError> {
     Ok(Json(
@@ -78,35 +75,21 @@ async fn update_workspace(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Workspace deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, description = "Last workspace or referenced by schema forks", body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_delete"]))), tag = "community"))]
 pub(crate) async fn delete_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<StatusCode, ApiError> {
     tenancy::delete_workspace_as(&ctx.db, &auth, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_list_workspaces),
-        super::openapi::route_inventory::path_doc(__path_create_workspace),
-        super::openapi::route_inventory::path_doc(__path_get_workspace),
-        super::openapi::route_inventory::path_doc(__path_update_workspace),
-        super::openapi::route_inventory::path_doc(__path_delete_workspace),
-        super::openapi::route_inventory::path_doc(__path_grant_member),
-        super::openapi::route_inventory::path_doc(__path_list_members),
-        super::openapi::route_inventory::path_doc(__path_revoke_member),
-    ]
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}/members/{user_id}", params(("id" = Uuid, Path), ("user_id" = Uuid, Path)), request_body = crate::dtos::workspaces::GrantWorkspaceMemberRequest, responses((status = 204, description = "Direct workspace grant saved"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_update"]))), tag = "community"))]
 async fn grant_member(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path((id, user_id)): Path<(Uuid, Uuid)>,
+    Path(crate::dtos::common::IdUserIdPath { id, user_id }): Path<
+        crate::dtos::common::IdUserIdPath<Uuid, Uuid>,
+    >,
     Json(body): Json<crate::dtos::workspaces::GrantWorkspaceMemberRequest>,
 ) -> Result<StatusCode, ApiError> {
     crate::models::workspace_memberships::Model::grant_as(&ctx.db, &actor, id, user_id, body.role)
@@ -114,36 +97,152 @@ async fn grant_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}/members/{user_id}", params(("id" = Uuid, Path), ("user_id" = Uuid, Path)), responses((status = 204, description = "Direct workspace grant and bound credentials revoked"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_update"]))), tag = "community"))]
 async fn revoke_member(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path((id, user_id)): Path<(Uuid, Uuid)>,
+    Path(crate::dtos::common::IdUserIdPath { id, user_id }): Path<
+        crate::dtos::common::IdUserIdPath<Uuid, Uuid>,
+    >,
 ) -> Result<StatusCode, ApiError> {
     crate::models::workspace_memberships::Model::revoke_as(&ctx.db, &actor, id, user_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}/members", params(("id" = Uuid, Path)), responses((status = 200, body = [crate::dtos::workspaces::WorkspaceMemberRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_get"]))), tag = "community"))]
 async fn list_members(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<Json<Vec<crate::dtos::workspaces::WorkspaceMemberRecord>>, ApiError> {
     Ok(Json(
         crate::models::workspace_memberships::Model::list_as(&ctx.db, &actor, id).await?,
     ))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep route registration and aide metadata together"
+)]
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/workspaces")
-        .add("/", get(list_workspaces))
-        .add("/", post(create_workspace))
-        .add("/{id}", get(get_workspace))
-        .add("/{id}", axum::routing::put(update_workspace))
-        .add("/{id}", delete(delete_workspace))
-        .add("/{id}/members/{user_id}", axum::routing::put(grant_member))
-        .add("/{id}/members/{user_id}", delete(revoke_member))
-        .add("/{id}/members", get(list_members))
+        .add(
+            "/",
+            aide::axum::routing::get_with(list_workspaces, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["workspace_list", "workspace_get"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/",
+            aide::axum::routing::post_with(create_workspace, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["workspace_create"]),
+                    ))
+                    .response::<201, Json<WorkspaceRecord>>()
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::get_with(get_workspace, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["workspace_get"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::put_with(update_workspace, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["workspace_update"]),
+                    ))
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::delete_with(delete_workspace, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["workspace_delete"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("Workspace deleted"))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                    .response::<409, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}/members/{user_id}",
+            aide::axum::routing::put_with(grant_member, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["workspace_update"]),
+                    ))
+                    .response_with::<204, (), _>(|op| {
+                        op.description("Direct workspace grant saved")
+                    })
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}/members/{user_id}",
+            aide::axum::routing::delete_with(revoke_member, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["workspace_update"]),
+                    ))
+                    .response_with::<204, (), _>(|op| {
+                        op.description("Direct workspace grant and bound credentials revoked")
+                    })
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}/members",
+            aide::axum::routing::get_with(list_members, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["workspace_get"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
 }

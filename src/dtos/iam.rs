@@ -32,8 +32,7 @@ pub(crate) struct ListAudit {
     pub offset: Option<i64>,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct AuditRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
@@ -59,7 +58,6 @@ impl From<crate::models::iam_audit_events::Model> for AuditRecord {
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CreateGroup {
     pub name: String,
@@ -79,15 +77,13 @@ pub(crate) struct GroupId {
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CreatePolicy {
     pub name: String,
     pub document: serde_json::Value,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct GroupRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
@@ -104,8 +100,7 @@ impl From<crate::models::iam_groups::Model> for GroupRecord {
     }
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct PolicyRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
@@ -159,8 +154,7 @@ pub(crate) struct ListUserPolicies {
     pub offset: Option<i64>,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct GroupMemberRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
@@ -178,8 +172,7 @@ impl From<crate::models::iam_group_memberships::Model> for GroupMemberRecord {
     }
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct UserPolicyRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
@@ -197,8 +190,7 @@ impl From<crate::models::iam_user_policy_attachments::Model> for UserPolicyRecor
     }
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct GroupPolicyRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,

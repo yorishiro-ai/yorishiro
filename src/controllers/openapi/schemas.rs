@@ -2,44 +2,20 @@
 //!
 //! These types intentionally mirror the serialized HTTP wire format rather than domain models.
 
-use serde_json::Value;
-use utoipa::ToSchema;
+use schemars::JsonSchema as Schema;
 
 use crate::error::ValidationDetail;
 
-#[derive(ToSchema)]
+#[derive(Schema)]
 pub struct ApiErrorBody {
     pub error: ApiErrorDetail,
 }
 
-#[derive(ToSchema)]
+#[derive(Schema)]
 pub struct ApiErrorDetail {
     pub code: String,
     pub message: String,
-    #[schema(nullable = true)]
     pub details: Option<Vec<ValidationDetail>>,
-    #[schema(nullable = true)]
     pub hint: Option<String>,
-    #[schema(nullable = true)]
     pub retry_after_seconds: Option<u32>,
 }
-
-#[derive(ToSchema)]
-pub struct JsonSchemaDefinition {
-    pub name: String,
-    #[schema(nullable = true)]
-    pub description: Option<String>,
-    #[schema(value_type = Object)]
-    pub entity_types: Value,
-    #[schema(required = false, value_type = Object)]
-    pub relation_types: Value,
-}
-
-#[derive(ToSchema)]
-#[serde(untagged)]
-pub enum CreateSchemaRequest {
-    Definition(JsonSchemaDefinition),
-    Template { template_id: String },
-}
-
-pub type JsonSchema = Value;

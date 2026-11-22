@@ -86,7 +86,7 @@ harness = false
 [features]
 default = ["enterprise"]
 # The community edition: build it with `--no-default-features --features community`.
-community = ["openapi"]
+community = []
 # The enterprise edition is the community edition plus the `ee/` overlay.
 enterprise = [
   "community",
@@ -95,7 +95,6 @@ enterprise = [
   "dep:jsonwebtoken",
 ]
 stripe-tests = ["enterprise"]
-openapi = ["dep:utoipa", "dep:utoipa-swagger-ui"]
 
 [workspace.dependencies]
 sea-orm-migration = { version = "2.0.4", features = [
@@ -144,7 +143,7 @@ aws-lc-rs = "1.19.0"
 ipnet = { version = "2.12.2", features = ["serde"] }
 jsonschema = { version = "0.61.2" }
 rmcp = { version = "3.9.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
-schemars = { version = "1.2.3", features = ["uuid1"] }
+schemars = { version = "1.2.3", features = ["uuid1", "chrono04"] }
 # OpenAI-compatible embedding and inference clients use HTTP.
 reqwest.workspace = true
 # The local embedding provider runs multilingual-e5-base in process.
@@ -162,8 +161,8 @@ jsonwebtoken = { version = "12.0.0", features = ["aws_lc_rs"], optional = true }
 base64 = { version = "0.23.1", optional = true }        # OAuth/PKCE encoding (ee/services/oauth.rs)
 
 # OpenAPI is shared by both editions.
-utoipa = { version = "6.0.0", features = ["axum_extras", "uuid", "chrono"], optional = true }
-utoipa-swagger-ui = { version = "10.0.2", features = ["axum"], optional = true }
+aide = { version = "0.16.0-alpha.4", features = ["axum-json", "axum-query", "swagger"] }
+tower = "0.5.3"
 
 serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 
