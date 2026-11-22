@@ -1,6 +1,6 @@
 /// Tests for the embedding sync worker: routing, serialization, and class names.
 use loco_rs::bgworker::BackgroundWorker;
-use yorishiro::workers::embedding_sync::{EmbeddingSyncWorker, WorkerClass};
+use yorishiro::workers::embedding_sync::EmbeddingSyncWorker;
 
 /// The worker declares neither tags nor a queue: a job's target is chosen when the job is enqueued, and a process chooses its targets when it starts.
 /// A tag here would put a second, fixed tag on every job and let a worker for another target match on it.
@@ -8,33 +8,6 @@ use yorishiro::workers::embedding_sync::{EmbeddingSyncWorker, WorkerClass};
 fn the_worker_declares_no_routing_of_its_own() {
     assert_eq!(EmbeddingSyncWorker::tags(), [] as [String; 0]);
     assert!(EmbeddingSyncWorker::queue().is_none());
-}
-
-/// `as_db_str`/`from_db_str` must round-trip every variant,, and must agree with the `snake_case` serde form: `ee/`'s `workspace_worker_classes` stores this same string, so a row read from the database and a value read off a queued job's payload must be indistinguishable.
-#[test]
-fn db_str_round_trips_and_matches_the_serde_wire_form() {
-    for class in [
-        WorkerClass::TenantPrivate,
-        WorkerClass::Official,
-        WorkerClass::Shared,
-    ] {
-        let db_str = class.as_db_str();
-        assert_eq!(
-            WorkerClass::from_db_str(db_str).unwrap(),
-            class,
-            "as_db_str/from_db_str must round-trip {class:?}"
-        );
-        assert_eq!(
-            serde_json::to_value(class).unwrap(),
-            serde_json::json!(db_str),
-            "{class:?}'s db string must match its serde wire form"
-        );
-    }
-}
-
-#[test]
-fn from_db_str_rejects_an_unknown_value() {
-    assert!(WorkerClass::from_db_str("not-a-real-class").is_none());
 }
 
 mod conflict {

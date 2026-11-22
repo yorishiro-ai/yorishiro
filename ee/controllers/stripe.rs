@@ -119,10 +119,10 @@ async fn stripe_webhook(
 /// # Panics
 /// Panics if the static webhook metadata is invalid.
 pub fn routes() -> Routes {
-    Routes::new().prefix("api/stripe").add(
+    Routes::new().tag("enterprise").prefix("api/stripe").add(
         "/webhook",
         aide::axum::routing::post_with(stripe_webhook, |op| {
-            op.tag("enterprise")
+            op
                 .with(|mut op| {
                     op.inner_mut().parameters.push(aide::openapi::ReferenceOr::Item(
                         serde_json::from_value(serde_json::json!({"in": "header", "name": "Stripe-Signature", "required": true, "schema": {"type": "string"}})).expect("Stripe signature header"),

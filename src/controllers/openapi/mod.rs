@@ -12,6 +12,25 @@ use axum::{body::Body, extract::Request, response::IntoResponse, routing::Route}
 use loco_rs::app::AppContext;
 use tower::{Layer, Service};
 
+/// The standard `ApiErrorBody` response for each status.
+pub(crate) fn error_responses(
+    ctx: &mut aide::generate::GenContext,
+    operation: &mut aide::openapi::Operation,
+    statuses: &[u16],
+) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
+    <axum::Json<ApiErrorBody> as aide::OperationOutput>::operation_response(ctx, operation)
+        .into_iter()
+        .flat_map(|response| {
+            statuses.iter().map(move |status| {
+                (
+                    Some(aide::openapi::StatusCode::Code(*status)),
+                    response.clone(),
+                )
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn extension(
     name: &'static str,
     value: serde_json::Value,
@@ -26,8 +45,9 @@ pub(crate) fn extension(
 /// Keeps Loco's route groups and aide's inferred contract in one registration.
 #[derive(Default)]
 pub struct Routes {
-    pub(crate) routes: loco_rs::controller::Routes,
+    pub(crate) loco: loco_rs::controller::Routes,
     pub(crate) api: OpenApi,
+    tag: Option<&'static str>,
 }
 
 impl Routes {
@@ -36,9 +56,16 @@ impl Routes {
         Self::default()
     }
 
+    /// Tags every operation registered after this call.
+    #[must_use]
+    pub const fn tag(mut self, tag: &'static str) -> Self {
+        self.tag = Some(tag);
+        self
+    }
+
     #[must_use]
     pub fn prefix(mut self, prefix: &str) -> Self {
-        self.routes = self.routes.prefix(prefix);
+        self.loco = self.loco.prefix(prefix);
         self
     }
 
@@ -47,7 +74,7 @@ impl Routes {
     /// Panics if aide cannot assemble the registered operation.
     pub fn add(mut self, uri: &str, method: ApiMethodRouter<AppContext>) -> Self {
         let prefix = self
-            .routes
+            .loco
             .prefix
             .as_deref()
             .unwrap_or_default()
@@ -63,34 +90,22 @@ impl Routes {
         let _ = ApiRouter::new()
             .api_route(path, method.clone())
             .finish_api(&mut api);
+        if let Some(tag) = self.tag {
+            for operation in operations_mut(&mut api) {
+                operation.tags.push(tag.into());
+            }
+        }
         merge_api(&mut self.api, api);
-        self.routes = self.routes.add(uri, method.into());
+        self.loco = self.loco.add(uri, method.into());
         self
     }
 
     #[must_use]
     pub fn licensed(mut self) -> Self {
-        if let Some(paths) = &mut self.api.paths {
-            for path in paths
-                .paths
-                .values_mut()
-                .filter_map(|path| path.as_item_mut())
-            {
-                for operation in [
-                    &mut path.get,
-                    &mut path.post,
-                    &mut path.put,
-                    &mut path.delete,
-                    &mut path.patch,
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    operation
-                        .extensions
-                        .insert("x-yorishiro-licence-required".into(), true.into());
-                }
-            }
+        for operation in operations_mut(&mut self.api) {
+            operation
+                .extensions
+                .insert("x-yorishiro-licence-required".into(), true.into());
         }
         self
     }
@@ -104,7 +119,7 @@ impl Routes {
         <L::Service as Service<Request<Body>>>::Error: Into<std::convert::Infallible> + 'static,
         <L::Service as Service<Request<Body>>>::Future: Send + 'static,
     {
-        self.routes = self.routes.layer(layer);
+        self.loco = self.loco.layer(layer);
         self
     }
 }
@@ -127,4 +142,21 @@ pub(crate) fn merge_api(target: &mut OpenApi, source: OpenApi) {
             .schemas
             .extend(components.schemas);
     }
+}
+
+fn operations_mut(api: &mut OpenApi) -> impl Iterator<Item = &mut aide::openapi::Operation> {
+    api.paths
+        .iter_mut()
+        .flat_map(|paths| paths.paths.values_mut())
+        .filter_map(|path| path.as_item_mut())
+        .flat_map(|path| {
+            [
+                &mut path.get,
+                &mut path.post,
+                &mut path.put,
+                &mut path.delete,
+                &mut path.patch,
+            ]
+        })
+        .flatten()
 }

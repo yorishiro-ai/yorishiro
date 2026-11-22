@@ -300,7 +300,56 @@ where
     }
 }
 
-impl aide::OperationInput for AuthContext {}
-impl<R> aide::OperationInput for Authorized<R> {}
-impl<R> aide::OperationInput for Verified<R> {}
-impl aide::OperationInput for AuditAuthorized {}
+/// Documents what every authenticating extractor does: the bearer scheme and, where the type names one, the scope.
+pub(crate) fn document_authentication(
+    _: &mut aide::generate::GenContext,
+    operation: &mut aide::openapi::Operation,
+    scope: Option<ApiKeyScope>,
+) {
+    let requirement = std::iter::once(("bearer_auth".to_owned(), Vec::new())).collect();
+    if !operation.security.contains(&requirement) {
+        operation.security.push(requirement);
+    }
+    if let Some(scope) = scope {
+        operation.extensions.insert(
+            "x-yorishiro-required-scopes".into(),
+            serde_json::json!([scope.as_db_str()]),
+        );
+    }
+}
+
+impl aide::OperationInput for AuthContext {
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        document_authentication(ctx, operation, None);
+    }
+}
+
+impl aide::OperationInput for AuditAuthorized {
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        document_authentication(ctx, operation, None);
+    }
+}
+
+impl<R: RequiredScope> aide::OperationInput for Authorized<R> {
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        document_authentication(ctx, operation, Some(R::SCOPE));
+    }
+}
+
+impl<R: RequiredScope> aide::OperationInput for Verified<R> {
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        document_authentication(ctx, operation, Some(R::SCOPE));
+    }
+}

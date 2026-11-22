@@ -1,8 +1,9 @@
 //! REST routes for issuing, listing, rotating and revoking API keys.
 
+use crate::controllers::Created;
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 
@@ -60,17 +61,14 @@ pub(crate) async fn create(
         )
         .await?
     };
-    Ok((
-        StatusCode::CREATED,
-        Json(CreateApiKeyResponse {
-            id: created.id,
-            prefix: created.key_prefix,
-            full_key: created.plaintext,
-            name: created.name,
-            created_at: crate::data::time::render(&ctx, &created.created_at),
-            grant: render_grant(&ctx, created.grant),
-        }),
-    ))
+    Ok(Created(CreateApiKeyResponse {
+        id: created.id,
+        prefix: created.key_prefix,
+        full_key: created.plaintext,
+        name: created.name,
+        created_at: crate::data::time::render(&ctx, &created.created_at),
+        grant: render_grant(&ctx, created.grant),
+    }))
 }
 
 pub(crate) async fn list(
@@ -98,87 +96,49 @@ pub(crate) async fn revoke(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     IdentityApiKeys::revoke_for_tenant(&ctx.db, &auth, id).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 pub(crate) fn routes() -> Routes {
     Routes::new()
+        .tag("community")
         .prefix("api/api-keys")
         .add(
             "/",
             aide::axum::routing::post_with(create, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["credential_create"]),
-                    ))
-                    .response::<201, Json<CreateApiKeyResponse>>()
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["credential_create"]),
+                ))
             }),
         )
         .add(
             "/",
             aide::axum::routing::get_with(list, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["credential_list"]),
-                    ))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["credential_list"]),
+                ))
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::delete_with(revoke, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["credential_revoke"]),
-                    ))
-                    .response_with::<204, (), _>(|op| op.description("API key revoked"))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["credential_revoke"]),
+                ))
             }),
         )
         .add(
             "/{id}/rotate",
             aide::axum::routing::post_with(rotate, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["credential_rotate"]),
-                    ))
-                    .response::<201, Json<CreateApiKeyResponse>>()
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
-                    .response::<409, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["credential_rotate"]),
+                ))
             }),
         )
 }
@@ -189,15 +149,12 @@ async fn rotate(
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<impl aide::axum::IntoApiResponse, ApiError> {
     let created = IdentityApiKeys::rotate(&ctx.db, &auth, id).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(CreateApiKeyResponse {
-            id: created.id,
-            prefix: created.key_prefix,
-            full_key: created.plaintext,
-            name: created.name,
-            created_at: crate::data::time::render(&ctx, &created.created_at),
-            grant: render_grant(&ctx, created.grant),
-        }),
-    ))
+    Ok(Created(CreateApiKeyResponse {
+        id: created.id,
+        prefix: created.key_prefix,
+        full_key: created.plaintext,
+        name: created.name,
+        created_at: crate::data::time::render(&ctx, &created.created_at),
+        grant: render_grant(&ctx, created.grant),
+    }))
 }

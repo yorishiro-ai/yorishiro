@@ -2,9 +2,10 @@
 //!
 //! Both run on `ctx.db` (Loco's own connection, migration role, no RLS scope), same as the admin CLI tasks: no tenant/workspace context exists yet for RLS to scope by.
 
+use crate::controllers::Created;
 use axum::Json;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
@@ -24,7 +25,7 @@ use crate::models::{tenancy, user_users};
 async fn signup(
     State(ctx): State<AppContext>,
     Json(body): Json<SignupRequest>,
-) -> Result<(StatusCode, Json<SignupResponse>), ApiError> {
+) -> Result<Created<SignupResponse>, ApiError> {
     let max_tenants = ctx
         .shared_store
         .get::<crate::data::tenant_policy::TenantCap>()
@@ -39,15 +40,12 @@ async fn signup(
     )
     .await?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(SignupResponse {
-            user_id: user.id,
-            email: user.root_email(),
-            tenant_id,
-            workspaces: vec![],
-        }),
-    ))
+    Ok(Created(SignupResponse {
+        user_id: user.id,
+        email: user.root_email(),
+        tenant_id,
+        workspaces: vec![],
+    }))
 }
 
 async fn root_login(
@@ -103,36 +101,26 @@ async fn finish_login(
 /// # Panics
 /// Panics if the static tenant header metadata is invalid.
 pub fn routes() -> Routes {
-    Routes::new()
+    Routes::new().tag("community")
         .prefix("auth")
         .add(
             "/signup",
-            aide::axum::routing::post_with(signup, |op| {
-                op.tag("community")
-                    .response::<201, Json<SignupResponse>>()
-                    .response::<422, Json<super::openapi::ApiErrorBody>>()
-            }),
+            aide::axum::routing::post(signup),
         )
         .add(
             "/root/login",
-            aide::axum::routing::post_with(root_login, |op| {
-                op.tag("community")
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-            }),
+            aide::axum::routing::post(root_login),
         )
         .add(
             "/tenant/login",
             aide::axum::routing::post_with(tenant_login, |op| {
-                op.tag("community")
+                op
                     .with(|mut op| {
                         op.inner_mut().parameters.push(aide::openapi::ReferenceOr::Item(
                             serde_json::from_value(serde_json::json!({"in": "header", "name": "x-tenant-id", "required": true, "schema": {"type": "string", "format": "uuid"}})).expect("tenant login header"),
                         ));
                         op
                     })
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
             }),
         )
 }

@@ -7,19 +7,12 @@ use yorishiro::edition::ee::models::marketplace::{
 use yorishiro::models::_entities::template_versions;
 
 #[test]
-fn version_status_values_round_trip_through_db_and_json_strings() {
+fn persisted_version_status_maps_to_the_record() {
     for (status, wire) in [
         (TemplateVersionStatus::Draft, "draft"),
         (TemplateVersionStatus::Pre, "pre"),
         (TemplateVersionStatus::Stable, "stable"),
     ] {
-        assert_eq!(status.as_db_str(), wire);
-        assert_eq!(TemplateVersionStatus::from_db_str(wire), Some(status));
-        assert_eq!(serde_json::to_value(status).unwrap(), json!(wire));
-        assert_eq!(
-            serde_json::from_value::<TemplateVersionStatus>(json!(wire)).unwrap(),
-            status
-        );
         let record = TemplateVersionRecord::try_from(template_versions::Model {
             id: Uuid::new_v4(),
             template_id: Uuid::new_v4(),

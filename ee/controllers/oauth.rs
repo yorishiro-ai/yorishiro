@@ -161,41 +161,30 @@ fn login_failure_redirect(clear_cookie: String) -> Response {
 
 pub fn routes() -> Routes {
     Routes::new()
+        .tag("enterprise")
         .prefix("auth/oauth")
-        .add(
-            "/status",
-            aide::axum::routing::get_with(status, |op| {
-                op.tag("enterprise")
-                    .response::<500, Json<crate::controllers::openapi::ApiErrorBody>>()
-            }),
-        )
+        .add("/status", aide::axum::routing::get(status))
         .add(
             "/authorize",
             aide::axum::routing::get_with(authorize, |op| {
-                op.tag("enterprise")
-                    .response_with::<302, (), _>(|op| {
-                        op.description("Redirects to the configured identity provider")
-                    })
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<500, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.response_with::<302, (), _>(|op| {
+                    op.description("Redirects to the configured identity provider")
+                })
             }),
         )
         .add(
             "/callback",
             aide::axum::routing::get_with(callback, |op| {
-                op.tag("enterprise")
-                    .response_with::<302, (), _>(|op| {
-                        op.description("Redirects to the application login result")
-                    })
-                    .response::<400, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response_with::<403, (), _>(|op| {
-                        op.description("Account recovery or selected workspace access denied")
-                    })
-                    .response_with::<422, (), _>(|op| {
-                        op.description("Workspace selection required or invalid provider claims")
-                    })
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<500, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.response_with::<302, (), _>(|op| {
+                    op.description("Redirects to the application login result")
+                })
+                .response::<400, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response_with::<403, (), _>(|op| {
+                    op.description("Account recovery or selected workspace access denied")
+                })
+                .response_with::<422, (), _>(|op| {
+                    op.description("Workspace selection required or invalid provider claims")
+                })
             }),
         )
 }

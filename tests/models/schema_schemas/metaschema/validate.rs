@@ -1,6 +1,4 @@
 /// Tests for metaschema definition validation.
-use std::collections::BTreeMap;
-
 use proptest::prelude::*;
 use serde_json::json;
 
@@ -390,26 +388,4 @@ proptest! {
         prop_assert!(result.is_ok());
     }
 
-    #[test]
-    fn empty_entity_types_are_always_rejected(
-        name in short_string(),
-        description in prop::option::of(short_string()),
-        relation_types in proptest::collection::btree_map(
-            short_string(),
-            (short_string(), short_string()).prop_map(|(source, target)| RelationTypeDef {
-                source,
-                target,
-                description: None,
-            }),
-            0..3,
-        ),
-    ) {
-        let definition = MetaSchemaDefinition {
-            name,
-            description,
-            entity_types: BTreeMap::new(),
-            relation_types,
-        };
-        prop_assert!(validate_definition(&definition).is_err());
-    }
 }

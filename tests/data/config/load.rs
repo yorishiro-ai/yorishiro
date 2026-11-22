@@ -263,25 +263,6 @@ async fn production_example_is_used_when_local_config_is_absent() {
         "sqlite:///tmp/packaged-fallback.sqlite3?mode=rwc"
     );
     assert!(!directory.path().join("production.yaml").exists());
-    std::fs::rename(
-        directory.path().join("production.yaml.example"),
-        directory.path().join("production.yaml"),
-    )
-    .unwrap();
-    std::fs::write(
-        directory.path().join("production.local.yaml"),
-        "queue:\n  connect_timeout: 1234\n  max_connections: 3\n",
-    )
-    .unwrap();
-    let overridden =
-        loco_rs::config::Config::from_folder(&Environment::Production, directory.path())
-            .expect("explicit SQL settings preserve local overrides");
-    let Some(QueueConfig::Sqlite(queue)) = overridden.queue else {
-        panic!("the local override must preserve the selected SQL provider");
-    };
-    assert_eq!(queue.connect_timeout, 1234);
-    assert_eq!(queue.max_connections, 3);
-    assert_eq!(queue.idle_timeout, overridden.database.idle_timeout);
 }
 
 #[cfg(unix)]

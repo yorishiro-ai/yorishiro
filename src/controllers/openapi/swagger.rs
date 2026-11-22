@@ -59,7 +59,6 @@ pub mod implementation {
                 operation.parameters.push(aide::openapi::ReferenceOr::Item(
                     serde_json::from_value(serde_json::json!({"name": "X-Workspace-Id", "in": "header", "required": false, "description": description, "schema": {"type": "string", "format": "uuid"}})).expect("workspace header"),
                 ));
-                operation.responses.get_or_insert_with(Default::default).responses.entry(aide::openapi::StatusCode::Code(403)).or_insert_with(|| aide::openapi::ReferenceOr::Item(serde_json::from_value(serde_json::json!({"description": "The credential is not authorized for this operation or workspace.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiErrorBody"}}}})).expect("authorization response")));
             }
         }
         components.security_schemes.insert(

@@ -6,36 +6,33 @@
 use crate::controllers::ApiError;
 use crate::controllers::middleware::auth::require_scope;
 use crate::controllers::openapi::Routes;
+use crate::edition::ee::controllers::middleware::auth::WorkspaceAuthenticated;
 use crate::error::YorishiroError;
 use crate::models::api_keys::ApiKeyScope;
 use axum::Json;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
 
-use crate::edition::ee::controllers::middleware::auth as authz;
 use crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest;
 use crate::edition::ee::models::workspace_embedding_keys::{self, EmbeddingKeyDescription};
 
 /// `PUT /api/workspace/embedding-key`
 async fn set_embedding_key(
     State(ctx): State<AppContext>,
-    headers: HeaderMap,
+    WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
     Json(body): Json<SetEmbeddingKeyRequest>,
-) -> Result<StatusCode, ApiError> {
-    let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
+) -> Result<axum::response::NoContent, ApiError> {
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
 
     workspace_embedding_keys::configure(&ctx, &auth_ctx, body).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 /// `GET /api/workspace/embedding-key`
 async fn get_embedding_key(
     State(ctx): State<AppContext>,
-    headers: HeaderMap,
+    WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
 ) -> Result<Json<EmbeddingKeyDescription>, ApiError> {
-    let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
     require_scope(&auth_ctx, ApiKeyScope::Read)?;
     let described = workspace_embedding_keys::describe_as(&ctx.db, &auth_ctx)
         .await?
@@ -48,70 +45,42 @@ async fn get_embedding_key(
 /// `DELETE /api/workspace/embedding-key`
 async fn delete_embedding_key(
     State(ctx): State<AppContext>,
-    headers: HeaderMap,
-) -> Result<StatusCode, ApiError> {
-    let auth_ctx = authz::authenticate_workspace(&ctx, &headers).await?;
+    WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
+) -> Result<axum::response::NoContent, ApiError> {
     require_scope(&auth_ctx, ApiKeyScope::Schema)?;
     workspace_embedding_keys::remove(&ctx, &auth_ctx).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 pub fn routes() -> Routes {
     Routes::new()
+        .tag("enterprise")
         .prefix("api/workspace")
         .add(
             "/embedding-key",
             aide::axum::routing::put_with(set_embedding_key, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["embedding_provider_update"]),
-                    ))
-                    .response_with::<204, (), _>(|op| op.description("Embedding provider saved"))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["embedding_provider_update"]),
+                ))
             }),
         )
         .add(
             "/embedding-key",
             aide::axum::routing::get_with(get_embedding_key, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["embedding_provider_get"]),
-                    ))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["embedding_provider_get"]),
+                ))
             }),
         )
         .add(
             "/embedding-key",
             aide::axum::routing::delete_with(delete_embedding_key, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["embedding_provider_delete"]),
-                    ))
-                    .response_with::<204, (), _>(|op| op.description("Embedding provider removed"))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["embedding_provider_delete"]),
+                ))
             }),
         )
 }

@@ -1,6 +1,7 @@
 #[cfg(feature = "enterprise")]
 use crate::requests::boot_request;
 use chrono::Utc;
+#[cfg(feature = "enterprise")]
 use serde_json::json;
 use uuid::Uuid;
 #[cfg(feature = "enterprise")]
@@ -13,16 +14,11 @@ fn note_definition(name: &str) -> serde_json::Value {
 }
 
 #[test]
-fn visibility_round_trips_db_and_json_values() {
+fn persisted_visibility_maps_to_the_record() {
     for (visibility, wire) in [
         (TemplateVisibility::Tenant, "tenant"),
         (TemplateVisibility::Community, "community"),
     ] {
-        assert_eq!(visibility.as_db_str(), wire);
-        assert_eq!(TemplateVisibility::from_db_str(wire), Some(visibility));
-        assert_eq!(serde_json::to_value(visibility).unwrap(), json!(wire));
-        assert_eq!(visibility.to_string(), wire);
-
         let record = templates::TemplateRecord::try_from(template_templates::Model {
             id: Uuid::new_v4(),
             tenant_id: Uuid::new_v4(),

@@ -31,30 +31,8 @@ async fn update_current_user(
 
 pub(crate) fn routes() -> Routes {
     Routes::new()
+        .tag("community")
         .prefix("api/users")
-        .add(
-            "/me",
-            aide::axum::routing::get_with(get_current_user, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-            }),
-        )
-        .add(
-            "/me",
-            aide::axum::routing::put_with(update_current_user, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<409, Json<super::openapi::ApiErrorBody>>()
-            }),
-        )
+        .add("/me", aide::axum::routing::get(get_current_user))
+        .add("/me", aide::axum::routing::put(update_current_user))
 }
