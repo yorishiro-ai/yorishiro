@@ -2,8 +2,7 @@ use crate::models::api_keys::ApiKeyScope;
 use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct WhoAmIResponse {
     pub(crate) workspace_id: Option<Uuid>,
     pub(crate) tenant_id: Uuid,

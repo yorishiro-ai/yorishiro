@@ -17,8 +17,7 @@ use super::ExportRecord;
 /// Outcome of a successful import: how many records of each kind were inserted.
 //
 // The caller supplies an RLS-scoped transaction and commits only after all records and embedding jobs succeed; an error rolls back on drop.
-#[derive(Clone, Default, Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Clone, Default, Serialize, schemars::JsonSchema)]
 pub struct ImportResult {
     pub schemas: u64,
     pub entities: u64,

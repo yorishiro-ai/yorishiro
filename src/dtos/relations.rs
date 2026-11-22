@@ -3,8 +3,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
-#[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct CreateRelationRequest {
     pub source_id: Uuid,
     pub target_id: Uuid,
@@ -12,7 +11,7 @@ pub struct CreateRelationRequest {
     pub properties: Option<Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct ListRelationsParams {
     pub source_id: Option<Uuid>,
     pub target_id: Option<Uuid>,
@@ -24,8 +23,7 @@ pub struct ListRelationsParams {
     pub page: crate::dtos::common::PageParams,
 }
 
-#[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub(crate) struct SetRelationStatusRequest {
     /// `active`, `deprecated` or `archived`.
     pub(crate) status: RelationStatus,

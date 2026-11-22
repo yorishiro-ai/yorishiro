@@ -19,9 +19,8 @@ use crate::edition::ee::services::inference::InferenceConfig;
 /// What a workspace has configured, without the key itself.
 ///
 /// `api_key` is deliberately absent rather than masked: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
-#[derive(Clone, Serialize, sea_orm::FromQueryResult)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "openapi", schemars(rename = "LlmKeyResponse"))]
+#[derive(Clone, Serialize, sea_orm::FromQueryResult, schemars::JsonSchema)]
+#[schemars(rename = "LlmKeyResponse")]
 pub(crate) struct LlmKeyDescription {
     pub(crate) base_url: String,
     pub(crate) model: String,

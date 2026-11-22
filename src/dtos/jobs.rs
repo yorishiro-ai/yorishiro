@@ -3,8 +3,7 @@
 use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct QueuedJobResponse {
     pub(crate) job_id: Uuid,
 }

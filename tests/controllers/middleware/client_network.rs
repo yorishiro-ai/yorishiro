@@ -21,7 +21,6 @@ async fn configured_network_blocks_all_public_transports_from_the_same_peer() {
 }
 
 #[tokio::test]
-#[cfg(feature = "openapi")]
 async fn allowed_peer_reaches_docs_but_still_needs_an_api_key() {
     let hosts = (
         "settings.http_allowed_networks",

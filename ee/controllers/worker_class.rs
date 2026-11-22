@@ -5,13 +5,13 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::middleware::auth::require_scope;
+use crate::controllers::openapi::Routes;
 use crate::error::YorishiroError;
 use crate::models::api_keys::ApiKeyScope;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 
 use crate::edition::ee::controllers::middleware::auth as authz;
 use crate::edition::ee::dtos::worker_class::SetWorkerClassRequest;
@@ -20,14 +20,6 @@ use crate::edition::ee::models::workspace_worker_classes::{self, WorkerClassAssi
 /// `PUT /api/workspace/worker-class`
 /// Requires the destination tag in `settings.worker_targets` and a separately running worker serving that tag.
 /// The deployment declaration does not guarantee that the worker is currently online.
-#[cfg(feature = "openapi")]
-fn set_worker_class_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/workspace/worker-class",
-        axum::http::Method::PUT,
-        || serde_json::json!({"tags": ["enterprise"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::edition::ee::controllers::openapi::WorkerClassRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["schema"]), "x-yorishiro-required-actions" :  serde_json::json!(["worker_class_update"]), "responses": {"204": serde_json::json!({"description": "Worker class saved"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}}),
-    )
-}
 async fn set_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -40,14 +32,6 @@ async fn set_worker_class(
 }
 
 /// `GET /api/workspace/worker-class`
-#[cfg(feature = "openapi")]
-fn get_worker_class_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/workspace/worker-class",
-        axum::http::Method::GET,
-        || serde_json::json!({"tags": ["enterprise"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["worker_class_get"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::edition::ee::controllers::openapi::WorkerClassResponse>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}}),
-    )
-}
 async fn get_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -63,14 +47,6 @@ async fn get_worker_class(
 }
 
 /// `DELETE /api/workspace/worker-class`
-#[cfg(feature = "openapi")]
-fn delete_worker_class_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/workspace/worker-class",
-        axum::http::Method::DELETE,
-        || serde_json::json!({"tags": ["enterprise"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["schema"]), "x-yorishiro-required-actions" :  serde_json::json!(["worker_class_delete"]), "responses": {"204": serde_json::json!({"description": "Worker class reset"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}}),
-    )
-}
 async fn delete_worker_class(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -81,20 +57,62 @@ async fn delete_worker_class(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![
-        set_worker_class_doc(),
-        get_worker_class_doc(),
-        delete_worker_class_doc(),
-    ]
-}
-
 pub fn routes() -> Routes {
-    Routes::new().prefix("api/workspace").add(
-        "/worker-class",
-        axum::routing::put(set_worker_class)
-            .get(get_worker_class)
-            .delete(delete_worker_class),
-    )
+    Routes::new()
+        .prefix("api/workspace")
+        .add(
+            "/worker-class",
+            aide::axum::routing::put_with(set_worker_class, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["worker_class_update"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("Worker class saved"))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/worker-class",
+            aide::axum::routing::get_with(get_worker_class, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["worker_class_get"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/worker-class",
+            aide::axum::routing::delete_with(delete_worker_class, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["worker_class_delete"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("Worker class reset"))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
 }

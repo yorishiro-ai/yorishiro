@@ -22,8 +22,7 @@ const LOGIN_KEY_PREFIX: &str = "ysr_login-";
 pub const WORKSPACE_HEADER: &str = "x-workspace-id";
 
 /// Secret-free grant metadata for credential administration.
-#[derive(serde::Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(serde::Serialize, schemars::JsonSchema)]
 pub struct KeyGrant {
     pub state: KeyState,
     pub expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,

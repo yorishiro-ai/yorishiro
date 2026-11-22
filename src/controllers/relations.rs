@@ -3,32 +3,22 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::routing::{delete, get, post, put};
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{AuthContext, Authorized, ReadScope, Verified, WriteScope};
+use crate::controllers::openapi::Routes;
 use crate::dtos::relations::{
     CreateRelationRequest, ListRelationsParams, SetRelationStatusRequest,
 };
 use crate::models::entity_relations::{self, RelationRecord};
 
-#[cfg(feature = "openapi")]
-fn create_relation_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/relations",
-        axum::http::Method::POST,
-        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<CreateRelationRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["write"]), "x-yorishiro-required-actions" :  serde_json::json!(["relation_create"]), "responses": {"201": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<RelationRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
-    )
-}
 pub(crate) async fn create_relation(
     State(ctx): State<AppContext>,
     verified: Verified<WriteScope>,
     Json(body): Json<CreateRelationRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<(StatusCode, Json<RelationRecord>), ApiError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
         crate::models::entity_entities::workspace_for_actor(&ctx.db, &verified.ctx, body.source_id)
             .await?,
@@ -44,18 +34,10 @@ pub(crate) async fn create_relation(
     Ok((StatusCode::CREATED, Json(record)))
 }
 
-#[cfg(feature = "openapi")]
-fn get_relation_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/relations/{id}",
-        axum::http::Method::GET,
-        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["relation_get"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<RelationRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
-    )
-}
 pub(crate) async fn get_relation(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<Json<RelationRecord>, ApiError> {
     let mut authorized = Authorized::<ReadScope>::for_target(
         &ctx,
@@ -71,18 +53,10 @@ pub(crate) async fn get_relation(
     Ok(Json(record))
 }
 
-#[cfg(feature = "openapi")]
-fn delete_relation_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/relations/{id}",
-        axum::http::Method::DELETE,
-        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["write"]), "x-yorishiro-required-actions" :  serde_json::json!(["relation_delete"]), "responses": {"204": serde_json::json!({"description": "Relation deleted"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
-    )
-}
 pub(crate) async fn delete_relation(
     State(ctx): State<AppContext>,
     verified: Verified<WriteScope>,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<StatusCode, ApiError> {
     let mut authorized = Authorized::<WriteScope>::for_target(
         &ctx,
@@ -99,14 +73,6 @@ pub(crate) async fn delete_relation(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg(feature = "openapi")]
-fn list_relations_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/relations",
-        axum::http::Method::GET,
-        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["relation_list"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<RelationRecord>>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "source_id", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}, {"name": "target_id", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}, {"name": "relation_type", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<String>()}, {"name": "status", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<entity_relations::RelationStatus>()}, {"name": "page", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}, {"name": "page_size", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}]}),
-    )
-}
 pub(crate) async fn list_relations(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -118,18 +84,10 @@ pub(crate) async fn list_relations(
     Ok(Json(records))
 }
 
-#[cfg(feature = "openapi")]
-fn set_relation_status_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/relations/{id}/status",
-        axum::http::Method::PUT,
-        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<SetRelationStatusRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["write"]), "x-yorishiro-required-actions" :  serde_json::json!(["relation_update"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<RelationRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
-    )
-}
 pub(crate) async fn set_relation_status(
     State(ctx): State<AppContext>,
     verified: Verified<WriteScope>,
-    Path(id): Path<Uuid>,
+    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<SetRelationStatusRequest>,
 ) -> Result<Json<RelationRecord>, ApiError> {
     let mut authorized = Authorized::<WriteScope>::for_target(
@@ -155,23 +113,95 @@ pub(crate) async fn set_relation_status(
     Ok(Json(record))
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        create_relation_doc(),
-        get_relation_doc(),
-        delete_relation_doc(),
-        list_relations_doc(),
-        set_relation_status_doc(),
-    ]
-}
-
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/relations")
-        .add("/", post(create_relation))
-        .add("/", get(list_relations))
-        .add("/{id}", get(get_relation))
-        .add("/{id}", delete(delete_relation))
-        .add("/{id}/status", put(set_relation_status))
+        .add(
+            "/",
+            aide::axum::routing::post_with(create_relation, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["write"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["relation_create"]),
+                    ))
+                    .response::<201, Json<RelationRecord>>()
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/",
+            aide::axum::routing::get_with(list_relations, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["relation_list"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::get_with(get_relation, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["relation_get"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}",
+            aide::axum::routing::delete_with(delete_relation, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["write"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["relation_delete"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("Relation deleted"))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/{id}/status",
+            aide::axum::routing::put_with(set_relation_status, |op| {
+                op.tag("community")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["write"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["relation_update"]),
+                    ))
+                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+            }),
+        )
 }

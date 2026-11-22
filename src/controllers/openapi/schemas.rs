@@ -3,7 +3,6 @@
 //! These types intentionally mirror the serialized HTTP wire format rather than domain models.
 
 use schemars::JsonSchema as Schema;
-use serde_json::Value;
 
 use crate::error::ValidationDetail;
 
@@ -20,22 +19,3 @@ pub struct ApiErrorDetail {
     pub hint: Option<String>,
     pub retry_after_seconds: Option<u32>,
 }
-
-#[derive(Schema)]
-pub struct JsonSchemaDefinition {
-    pub name: String,
-    pub description: Option<String>,
-    #[schemars(with = "Value")]
-    pub entity_types: Value,
-    #[schemars(with = "Value")]
-    pub relation_types: Value,
-}
-
-#[derive(Schema)]
-#[serde(untagged)]
-pub enum CreateSchemaRequest {
-    Definition(JsonSchemaDefinition),
-    Template { template_id: String },
-}
-
-pub type JsonSchema = Value;

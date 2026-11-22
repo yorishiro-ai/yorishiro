@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub(crate) struct DisableTenantRequest {
     /// Explicitly confirms the authenticated administrator's tenant UUID.
     pub(crate) confirmed_tenant_id: Uuid,
@@ -19,8 +19,7 @@ pub(crate) struct UpdateTenantRequest {
     pub(crate) max_workspaces: Option<i32>,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct TenantRecord {
     pub(crate) id: Uuid,
     pub(crate) name: String,

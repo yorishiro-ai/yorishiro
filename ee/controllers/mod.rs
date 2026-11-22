@@ -16,4 +16,3 @@ pub mod worker_class;
 // Shared by every handler.
 pub mod mcp;
 pub mod middleware;
-pub mod openapi;

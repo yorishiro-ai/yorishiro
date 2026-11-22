@@ -86,7 +86,7 @@ harness = false
 [features]
 default = ["enterprise"]
 # The community edition: build it with `--no-default-features --features community`.
-community = ["openapi"]
+community = []
 # The enterprise edition is the community edition plus the `ee/` overlay.
 enterprise = [
   "community",
@@ -95,7 +95,6 @@ enterprise = [
   "dep:jsonwebtoken",
 ]
 stripe-tests = ["enterprise"]
-openapi = ["dep:aide"]
 
 [workspace.dependencies]
 sea-orm-migration = { version = "2.0.4", features = [
@@ -162,7 +161,8 @@ jsonwebtoken = { version = "12.0.0", features = ["aws_lc_rs"], optional = true }
 base64 = { version = "0.23.1", optional = true }        # OAuth/PKCE encoding (ee/services/oauth.rs)
 
 # OpenAPI is shared by both editions.
-aide = { version = "0.16.0-alpha.4", features = ["axum", "swagger"], optional = true }
+aide = { version = "0.16.0-alpha.4", features = ["axum-json", "axum-query", "swagger"] }
+tower = "0.5.3"
 
 serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 

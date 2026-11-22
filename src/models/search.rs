@@ -178,8 +178,7 @@ pub(crate) async fn search_for_actor(
         .collect())
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct SearchHit {
     pub entity: EntityRecord,
     /// Cosine distance (PostgreSQL `<=>` or sqlite-vec cosine distance).

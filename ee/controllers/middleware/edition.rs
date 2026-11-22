@@ -170,17 +170,3 @@ pub(crate) async fn licence_gate(
     ))
     .into_response()
 }
-
-/// Marks the `OpenAPI` operations of a route group that `licence_gate` covers.
-#[cfg(feature = "openapi")]
-pub(crate) fn licence_required(
-    mut docs: Vec<crate::controllers::openapi::route_inventory::RouteDoc>,
-) -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    for doc in &mut docs {
-        doc.operation.extensions.insert(
-            "x-yorishiro-licence-required".into(),
-            serde_json::json!(true),
-        );
-    }
-    docs
-}

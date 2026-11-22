@@ -97,8 +97,7 @@ fn require_postgres(conn: &impl ConnectionTrait, what: &str) -> Result<(), Yoris
 }
 
 /// A template as seen from the marketplace, with the aggregates a browser needs to choose one.
-#[derive(Serialize, FromQueryResult)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Serialize, FromQueryResult, schemars::JsonSchema)]
 pub struct MarketplaceListing {
     pub template_id: Uuid,
     pub name: String,
@@ -115,13 +114,12 @@ pub struct MarketplaceListing {
     pub average_rating: Option<f64>,
 }
 
-#[derive(Debug, Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct TemplateVersionRecord {
     pub id: Uuid,
     pub template_id: Uuid,
     pub version: i32,
-    #[cfg_attr(feature = "openapi", schemars(with = "serde_json::Value"))]
+    #[schemars(with = "serde_json::Value")]
     pub definition: Value,
     pub changelog: Option<String>,
     pub status: TemplateVersionStatus,
@@ -250,8 +248,7 @@ impl TryFrom<crate::models::_entities::template_versions::Model> for TemplateVer
     }
 }
 
-#[derive(Serialize, FromQueryResult)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Serialize, FromQueryResult, schemars::JsonSchema)]
 pub struct TemplateReviewRecord {
     pub id: Uuid,
     pub template_id: Uuid,
@@ -322,8 +319,7 @@ const fn default_status() -> TemplateVersionStatus {
     TemplateVersionStatus::Draft
 }
 
-#[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct SubmitReviewRequest {
     pub rating: i16,
     pub comment: Option<String>,

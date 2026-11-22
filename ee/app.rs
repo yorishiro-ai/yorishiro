@@ -121,53 +121,34 @@ pub(crate) fn workers(registry: WorkerRegistry) -> WorkerRegistry {
 pub(crate) fn mount_routes(mounts: &mut RouteMounts, ctx: &AppContext) {
     let gate = axum::middleware::from_fn_with_state(ctx.clone(), edition::licence_gate);
 
-    mounts
-        .mount(controllers::dashboard::routes())
-        .document(controllers::dashboard::openapi_docs());
-    mounts
-        .mount(controllers::embedding::routes())
-        .document(controllers::embedding::openapi_docs());
-    mounts
-        .mount(controllers::entity_columns::routes())
-        .document(controllers::entity_columns::openapi_docs());
-    mounts
-        .mount(controllers::inference::routes())
-        .document(controllers::inference::openapi_docs());
-    mounts
-        .mount(controllers::inference::gated_routes().layer(gate.clone()))
-        .document(edition::licence_required(
-            controllers::inference::gated_openapi_docs(),
-        ));
-    mounts
-        .mount(controllers::inference::inference_job_status_routes().layer(gate.clone()))
-        .document(edition::licence_required(
-            controllers::inference::job_status_openapi_docs(),
-        ));
-    mounts
-        .mount(controllers::marketplace::routes().layer(gate.clone()))
-        .document(edition::licence_required(
-            controllers::marketplace::openapi_docs(),
-        ));
+    mounts.mount(controllers::dashboard::routes());
+    mounts.mount(controllers::embedding::routes());
+    mounts.mount(controllers::entity_columns::routes());
+    mounts.mount(controllers::inference::routes());
+    mounts.mount(
+        controllers::inference::gated_routes()
+            .licensed()
+            .layer(gate.clone()),
+    );
+    mounts.mount(
+        controllers::inference::inference_job_status_routes()
+            .licensed()
+            .layer(gate.clone()),
+    );
+    mounts.mount(
+        controllers::marketplace::routes()
+            .licensed()
+            .layer(gate.clone()),
+    );
     // OAuth status shares the licence gate with login entry points, including when OAuth is unconfigured.
     mounts
-        .mount(controllers::oauth::routes().layer(gate.clone()))
-        .document(edition::licence_required(controllers::oauth::openapi_docs()))
+        .mount(controllers::oauth::routes().licensed().layer(gate.clone()))
         .guard_credentials("/auth/oauth/authorize")
         .guard_credentials("/auth/oauth/callback");
-    mounts
-        .mount(controllers::origin::routes())
-        .document(controllers::origin::openapi_docs());
-    mounts
-        .mount(controllers::schema_forks::routes())
-        .document(controllers::schema_forks::openapi_docs());
-    mounts
-        .mount(controllers::stripe::routes().layer(gate))
-        .document(edition::licence_required(
-            controllers::stripe::openapi_docs(),
-        ));
-    mounts
-        .mount(controllers::worker_class::routes())
-        .document(controllers::worker_class::openapi_docs());
+    mounts.mount(controllers::origin::routes());
+    mounts.mount(controllers::schema_forks::routes());
+    mounts.mount(controllers::stripe::routes().licensed().layer(gate));
+    mounts.mount(controllers::worker_class::routes());
 }
 
 /// Adds origin MCP tools with the same ungated policy as their REST routes.

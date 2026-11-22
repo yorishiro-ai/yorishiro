@@ -6,24 +6,16 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{Authorized, ReadScope, Verified, WriteScope};
+use crate::controllers::openapi::Routes;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 
 use crate::edition::ee::dtos::entity_columns::SetColumnsRequest;
 use crate::edition::ee::models::entity_column_preferences::{self, ColumnPreference};
 
 /// `GET /api/workspace/entity-columns`
-#[cfg(feature = "openapi")]
-fn list_columns_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/workspace/entity-columns",
-        axum::http::Method::GET,
-        || serde_json::json!({"tags": ["enterprise"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["entity_columns_get"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<ColumnPreference>>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "page", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}, {"name": "page_size", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}]}),
-    )
-}
 async fn list_columns(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
@@ -35,18 +27,12 @@ async fn list_columns(
 }
 
 /// `PUT /api/workspace/entity-columns/{entity_type}`
-#[cfg(feature = "openapi")]
-fn set_columns_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/workspace/entity-columns/{entity_type}",
-        axum::http::Method::PUT,
-        || serde_json::json!({"tags": ["enterprise"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<SetColumnsRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["write"]), "x-yorishiro-required-actions" :  serde_json::json!(["entity_columns_update"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<ColumnPreference>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "entity_type", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<String>()}]}),
-    )
-}
 async fn set_columns(
     State(ctx): State<AppContext>,
     verified: Verified<WriteScope>,
-    Path(entity_type): Path<String>,
+    Path(crate::dtos::common::EntityTypePath { entity_type }): Path<
+        crate::dtos::common::EntityTypePath<String>,
+    >,
     Json(body): Json<SetColumnsRequest>,
 ) -> Result<Json<ColumnPreference>, ApiError> {
     let target = crate::models::iam::access::WorkspaceTarget::Permission(
@@ -68,18 +54,12 @@ async fn set_columns(
 }
 
 /// `DELETE /api/workspace/entity-columns/{entity_type}`
-#[cfg(feature = "openapi")]
-fn reset_columns_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/workspace/entity-columns/{entity_type}",
-        axum::http::Method::DELETE,
-        || serde_json::json!({"tags": ["enterprise"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["write"]), "x-yorishiro-required-actions" :  serde_json::json!(["entity_columns_delete"]), "responses": {"204": serde_json::json!({"description": "Column preferences reset"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "entity_type", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<String>()}]}),
-    )
-}
 async fn reset_columns(
     State(ctx): State<AppContext>,
     verified: Verified<WriteScope>,
-    Path(entity_type): Path<String>,
+    Path(crate::dtos::common::EntityTypePath { entity_type }): Path<
+        crate::dtos::common::EntityTypePath<String>,
+    >,
 ) -> Result<StatusCode, ApiError> {
     let target = crate::models::iam::access::WorkspaceTarget::Permission(
         crate::models::iam::policy::Action::EntityColumnsDelete,
@@ -101,14 +81,57 @@ async fn reset_columns(
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/workspace")
-        .add("/entity-columns", axum::routing::get(list_columns))
+        .add(
+            "/entity-columns",
+            aide::axum::routing::get_with(list_columns, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["entity_columns_get"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
         .add(
             "/entity-columns/{entity_type}",
-            axum::routing::put(set_columns).delete(reset_columns),
+            aide::axum::routing::put_with(set_columns, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["write"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["entity_columns_update"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
         )
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![list_columns_doc(), set_columns_doc(), reset_columns_doc()]
+        .add(
+            "/entity-columns/{entity_type}",
+            aide::axum::routing::delete_with(reset_columns, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["write"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["entity_columns_delete"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("Column preferences reset"))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
 }

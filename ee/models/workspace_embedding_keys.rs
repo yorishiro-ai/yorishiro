@@ -91,9 +91,8 @@ pub(crate) async fn resolve(
 /// What a workspace has configured, without the key itself.
 ///
 /// `api_key` is deliberately absent rather than masked, matching `workspace_llm_keys::LlmKeyDescription`: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
-#[derive(Clone, Serialize, sea_orm::FromQueryResult)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "openapi", schemars(rename = "EmbeddingKeyResponse"))]
+#[derive(Clone, Serialize, sea_orm::FromQueryResult, schemars::JsonSchema)]
+#[schemars(rename = "EmbeddingKeyResponse")]
 pub(crate) struct EmbeddingKeyDescription {
     pub(crate) query_instruction: String,
     pub(crate) document_prefix: String,

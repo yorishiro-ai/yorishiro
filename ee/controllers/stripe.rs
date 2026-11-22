@@ -4,10 +4,9 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::post;
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 
+use crate::controllers::openapi::Routes;
 use crate::edition::ee::data::stripe::StripeConfig;
 use crate::edition::ee::models::stripe_events;
 
@@ -73,19 +72,11 @@ pub mod inbound {
 /// Returns 501 without a configured secret, 400 on a missing/invalid signature or malformed body, and 200 once the event has been applied (or was simply not one we act on).
 ///
 /// Returns `impl IntoResponse` with raw status codes rather than going through `ApiError`: Stripe expects plain-text error bodies from webhooks, not the JSON `{"error": {...}}` envelope the rest of this API uses.
-#[cfg(feature = "openapi")]
-fn stripe_webhook_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/stripe/webhook",
-        axum::http::Method::POST,
-        || serde_json::json!({"tags": ["enterprise"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<String>()}}}, "security": [], "responses": {"200": serde_json::json!({"description": "Event accepted"}), "400": serde_json::json!({"description": "Plain-text validation error", "content": {"text/plain": {"schema": crate::controllers::openapi::route_inventory::schema::<String>()}}}), "500": serde_json::json!({"description": "Event processing failed"}), "501": serde_json::json!({"description": "Stripe billing is not configured", "content": {"text/plain": {"schema": crate::controllers::openapi::route_inventory::schema::<String>()}}})}, "parameters": [{"name": "Stripe-Signature", "in": "header", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<String>()}]}),
-    )
-}
 async fn stripe_webhook(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     body: Bytes,
-) -> impl IntoResponse {
+) -> impl aide::axum::IntoApiResponse {
     let Ok(config) = StripeConfig::from_config(&ctx.config) else {
         tracing::error!("invalid initializers.stripe configuration");
         return (
@@ -125,13 +116,33 @@ async fn stripe_webhook(
     }
 }
 
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![stripe_webhook_doc()]
-}
-
+/// # Panics
+/// Panics if the static webhook metadata is invalid.
 pub fn routes() -> Routes {
-    Routes::new()
-        .prefix("api/stripe")
-        .add("/webhook", post(stripe_webhook))
+    Routes::new().prefix("api/stripe").add(
+        "/webhook",
+        aide::axum::routing::post_with(stripe_webhook, |op| {
+            op.tag("enterprise")
+                .with(|mut op| {
+                    op.inner_mut().parameters.push(aide::openapi::ReferenceOr::Item(
+                        serde_json::from_value(serde_json::json!({"in": "header", "name": "Stripe-Signature", "required": true, "schema": {"type": "string"}})).expect("Stripe signature header"),
+                    ));
+                    op
+                })
+                .with(|mut op| {
+                    op.inner_mut().request_body = Some(aide::openapi::ReferenceOr::Item(
+                        serde_json::from_value(serde_json::json!({"required": true, "content": {"application/json": {"schema": {"type": "string"}}}})).expect("raw Stripe event body"),
+                    ));
+                    op
+                })
+                .response_with::<200, (), _>(|op| op.description("Event accepted"))
+                .response_with::<400, String, _>(|op| {
+                    op.description("Plain-text validation error")
+                })
+                .response_with::<500, (), _>(|op| op.description("Event processing failed"))
+                .response_with::<501, String, _>(|op| {
+                    op.description("Stripe billing is not configured")
+                })
+        }),
+    )
 }

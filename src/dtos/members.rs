@@ -12,7 +12,7 @@ pub(crate) struct CreateTenantUserRequest {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub(crate) struct ResetTenantUserPasswordRequest {
     /// At least 12 characters. Every key issued to the user is revoked.
     pub(crate) password: String,

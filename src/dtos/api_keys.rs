@@ -35,8 +35,7 @@ impl CreateApiKeyRequest {
     }
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct ApiKeyRecord {
     pub(crate) id: Uuid,
     pub(crate) prefix: String,
@@ -47,8 +46,7 @@ pub(crate) struct ApiKeyRecord {
     pub(crate) grant: crate::models::api_keys::KeyGrant,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct CreateApiKeyResponse {
     pub(crate) id: Uuid,
     pub(crate) prefix: String,
@@ -59,8 +57,7 @@ pub(crate) struct CreateApiKeyResponse {
     pub(crate) grant: crate::models::api_keys::KeyGrant,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct ListApiKeysResponse {
     pub(crate) keys: Vec<ApiKeyRecord>,
 }

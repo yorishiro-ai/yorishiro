@@ -1,12 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct OAuthStatus {
     pub(crate) enabled: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub(crate) struct CallbackParams {
     pub(crate) code: Option<String>,
     pub(crate) state: Option<String>,

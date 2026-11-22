@@ -299,3 +299,8 @@ where
         })
     }
 }
+
+impl aide::OperationInput for AuthContext {}
+impl<R> aide::OperationInput for Authorized<R> {}
+impl<R> aide::OperationInput for Verified<R> {}
+impl aide::OperationInput for AuditAuthorized {}

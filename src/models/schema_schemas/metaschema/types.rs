@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MetaSchemaDefinition {
     pub name: String,
     #[serde(default)]
@@ -15,14 +15,14 @@ pub struct MetaSchemaDefinition {
     pub relation_types: BTreeMap<String, RelationTypeDef>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EntityTypeDef {
     #[serde(default)]
     pub description: Option<String>,
     pub fields: BTreeMap<String, FieldDef>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RelationTypeDef {
     pub source: String,
     pub target: String,
@@ -30,7 +30,7 @@ pub struct RelationTypeDef {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldTypeName {
     String,
@@ -41,7 +41,7 @@ pub enum FieldTypeName {
     Object,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ArrayItemType {
     String,
@@ -57,7 +57,7 @@ impl std::fmt::Display for ArrayItemType {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ArrayItems {
     pub r#type: ArrayItemType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -66,7 +66,7 @@ pub struct ArrayItems {
 
 /// Field definition using standard JSON Schema keywords.
 /// Unknown `x-` attributes are preserved via `extra` (flattened) so that older clients don't drop fields they don't recognize yet.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FieldDef {
     pub r#type: FieldTypeName,
     #[serde(default)]

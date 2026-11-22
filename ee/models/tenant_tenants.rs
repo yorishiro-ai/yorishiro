@@ -6,8 +6,7 @@ use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFi
 use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Clone, Serialize, schemars::JsonSchema)]
 pub(crate) struct TenantUsage {
     pub(crate) tenant_id: Uuid,
     pub(crate) workspace_count: i64,

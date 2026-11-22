@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub(crate) struct SearchEntitiesParams {
     pub(crate) query_text: String,
     pub(crate) entity_type: Option<String>,

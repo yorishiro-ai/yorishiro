@@ -11,8 +11,7 @@ use crate::models::db_enum::db_enum;
 const HEARTBEAT_INTERVAL_SECONDS: u64 = 60;
 const LEASE_DURATION_MINUTES: i64 = 5;
 
-#[derive(serde::Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct BulkJobStatus {
     job_id: Uuid,
     job_name: String,

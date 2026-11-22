@@ -2,10 +2,6 @@
 //!
 //! It checks that each public route has `OpenAPI` documentation and that anything left undocumented is an explicitly allowed exclusion.
 
-#[cfg(feature = "openapi")]
-use aide::openapi::Operation;
-#[cfg(feature = "openapi")]
-use aide::openapi::SchemaObject;
 use axum::http::Method;
 use loco_rs::controller::AppRoutes;
 
@@ -13,7 +9,6 @@ use loco_rs::controller::AppRoutes;
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RouteClass {
     Public,
-    #[cfg(feature = "openapi")]
     Infrastructure,
 }
 
@@ -23,7 +18,6 @@ pub struct RouteEntry {
     pub path: String,
     pub method: Method,
     pub operation_id: String,
-    #[cfg(feature = "openapi")]
     pub class: RouteClass,
 }
 
@@ -32,67 +26,7 @@ pub struct RouteEntry {
 pub struct RouteInventory {
     pub entries: Vec<RouteEntry>,
     pub exclusions: Vec<InfrastructureExclusion>,
-    #[cfg(feature = "openapi")]
-    pub(crate) docs: Vec<RouteDoc>,
-}
-
-/// `OpenAPI` metadata emitted next to the handler that serves an operation.
-#[cfg(feature = "openapi")]
-#[derive(Clone)]
-pub struct RouteDoc {
-    pub(crate) path: String,
-    pub(crate) methods: Vec<Method>,
-    pub(crate) operation: Operation,
-    pub(crate) schemas: Vec<(String, SchemaObject)>,
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn path_doc(
-    path: &str,
-    method: Method,
-    operation: impl FnOnce() -> serde_json::Value,
-) -> RouteDoc {
-    aide::generate::reset_context();
-    let operation = serde_json::from_value(operation())
-        .unwrap_or_else(|error| panic!("invalid OpenAPI metadata for {method} {path}: {error}"));
-    let schemas = aide::generate::in_context(|ctx| {
-        ctx.schema
-            .take_definitions(true)
-            .into_iter()
-            .map(|(name, value)| {
-                (
-                    name,
-                    SchemaObject {
-                        json_schema: value
-                            .try_into()
-                            .expect("JSON schema must be an object or boolean"),
-                        external_docs: None,
-                        example: None,
-                    },
-                )
-            })
-            .collect()
-    });
-    RouteDoc {
-        path: path.into(),
-        methods: vec![method],
-        operation,
-        schemas,
-    }
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn schema<T: schemars::JsonSchema>() -> serde_json::Value {
-    aide::generate::in_context(|ctx| {
-        let schema = serde_json::to_value(ctx.schema.subschema_for::<T>())
-            .expect("JSON schema must serialize");
-        // OpenAPI schema objects cannot deserialize JSON Schema's boolean shorthand.
-        match schema {
-            serde_json::Value::Bool(true) => serde_json::json!({}),
-            serde_json::Value::Bool(false) => serde_json::json!({"not": {}}),
-            schema => schema,
-        }
-    })
+    pub(crate) api: aide::openapi::OpenApi,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -103,8 +37,6 @@ pub struct InfrastructureExclusion {
 
 impl RouteInventory {
     pub(crate) fn add_group(&mut self, routes: &AppRoutes, class: RouteClass) {
-        #[cfg(not(feature = "openapi"))]
-        let _ = class;
         for route in routes.collect() {
             for method in route.actions {
                 let operation_id = operation_id(&method, &route.uri);
@@ -112,16 +44,10 @@ impl RouteInventory {
                     path: route.uri.clone(),
                     method,
                     operation_id,
-                    #[cfg(feature = "openapi")]
                     class,
                 });
             }
         }
-    }
-
-    #[cfg(feature = "openapi")]
-    pub(crate) fn add_docs(&mut self, docs: impl IntoIterator<Item = RouteDoc>) {
-        self.docs.extend(docs);
     }
 
     pub(crate) fn add_infrastructure(&mut self, routes: &AppRoutes) {
@@ -133,14 +59,12 @@ impl RouteInventory {
                     path: route.uri.clone(),
                     method: method.clone(),
                     operation_id: operation_id(&method, &route.uri),
-                    #[cfg(feature = "openapi")]
                     class: RouteClass::Infrastructure,
                 });
             }
         }
     }
 
-    #[cfg(feature = "openapi")]
     pub fn public(&self) -> impl Iterator<Item = &RouteEntry> {
         self.entries
             .iter()
@@ -172,37 +96,20 @@ impl RouteInventory {
             );
         }
 
-        #[cfg(feature = "openapi")]
-        {
-            let mut docs = std::collections::HashSet::new();
-            for doc in &self.docs {
-                for method in &doc.methods {
-                    assert!(
-                        docs.insert((doc.path.clone(), method.clone())),
-                        "duplicate OpenAPI metadata: {}",
-                        doc.path,
-                    );
-                }
-            }
-            for entry in self.public() {
-                assert!(
-                    self.docs.iter().any(|doc| {
-                        doc.path == entry.path && doc.methods.contains(&entry.method)
-                    }),
-                    "missing OpenAPI metadata for {} {}",
-                    entry.method,
-                    entry.path
-                );
-            }
-            for doc in &self.docs {
-                assert!(
-                    self.public().any(|entry| {
-                        doc.path == entry.path && doc.methods.contains(&entry.method)
-                    }),
-                    "OpenAPI metadata has no composed route: {}",
-                    doc.path
-                );
-            }
+        for entry in self.public() {
+            assert!(
+                self.api
+                    .paths
+                    .as_ref()
+                    .and_then(|paths| paths.paths.get(&entry.path))
+                    .and_then(|item| item.as_item())
+                    .is_some_and(|path| path
+                        .iter()
+                        .any(|(method, _)| method == entry.method.as_str().to_ascii_lowercase())),
+                "missing OpenAPI metadata for {} {}",
+                entry.method,
+                entry.path
+            );
         }
     }
 

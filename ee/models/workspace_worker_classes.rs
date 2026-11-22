@@ -17,9 +17,8 @@ use serde::Serialize;
 use uuid::Uuid;
 
 /// What a workspace has configured, for an endpoint to report.
-#[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "openapi", schemars(rename = "WorkerClassResponse"))]
+#[derive(Clone, Serialize, schemars::JsonSchema)]
+#[schemars(rename = "WorkerClassResponse")]
 pub(crate) struct WorkerClassAssignment {
     pub(crate) worker_class: WorkerClass,
 }

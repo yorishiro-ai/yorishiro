@@ -5,27 +5,19 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::middleware::auth::require_scope;
+use crate::controllers::openapi::Routes;
 use crate::error::YorishiroError;
 use crate::models::api_keys::ApiKeyScope;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use loco_rs::app::AppContext;
-use loco_rs::controller::Routes;
 
 use crate::edition::ee::controllers::middleware::auth as authz;
 use crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest;
 use crate::edition::ee::models::workspace_embedding_keys::{self, EmbeddingKeyDescription};
 
 /// `PUT /api/workspace/embedding-key`
-#[cfg(feature = "openapi")]
-fn set_embedding_key_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/workspace/embedding-key",
-        axum::http::Method::PUT,
-        || serde_json::json!({"tags": ["enterprise"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::edition::ee::controllers::openapi::EmbeddingKeyRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["schema"]), "x-yorishiro-required-actions" :  serde_json::json!(["embedding_provider_update"]), "responses": {"204": serde_json::json!({"description": "Embedding provider saved"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}}),
-    )
-}
 async fn set_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -39,14 +31,6 @@ async fn set_embedding_key(
 }
 
 /// `GET /api/workspace/embedding-key`
-#[cfg(feature = "openapi")]
-fn get_embedding_key_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/workspace/embedding-key",
-        axum::http::Method::GET,
-        || serde_json::json!({"tags": ["enterprise"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["embedding_provider_get"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::edition::ee::controllers::openapi::EmbeddingKeyResponse>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}}),
-    )
-}
 async fn get_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -62,14 +46,6 @@ async fn get_embedding_key(
 }
 
 /// `DELETE /api/workspace/embedding-key`
-#[cfg(feature = "openapi")]
-fn delete_embedding_key_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
-    crate::controllers::openapi::route_inventory::path_doc(
-        "/api/workspace/embedding-key",
-        axum::http::Method::DELETE,
-        || serde_json::json!({"tags": ["enterprise"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["schema"]), "x-yorishiro-required-actions" :  serde_json::json!(["embedding_provider_delete"]), "responses": {"204": serde_json::json!({"description": "Embedding provider removed"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}}),
-    )
-}
 async fn delete_embedding_key(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -81,19 +57,61 @@ async fn delete_embedding_key(
 }
 
 pub fn routes() -> Routes {
-    Routes::new().prefix("api/workspace").add(
-        "/embedding-key",
-        axum::routing::put(set_embedding_key)
-            .get(get_embedding_key)
-            .delete(delete_embedding_key),
-    )
-}
-
-#[cfg(feature = "openapi")]
-pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![
-        set_embedding_key_doc(),
-        get_embedding_key_doc(),
-        delete_embedding_key_doc(),
-    ]
+    Routes::new()
+        .prefix("api/workspace")
+        .add(
+            "/embedding-key",
+            aide::axum::routing::put_with(set_embedding_key, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["embedding_provider_update"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("Embedding provider saved"))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/embedding-key",
+            aide::axum::routing::get_with(get_embedding_key, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["read"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["embedding_provider_get"]),
+                    ))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
+        .add(
+            "/embedding-key",
+            aide::axum::routing::delete_with(delete_embedding_key, |op| {
+                op.tag("enterprise")
+                    .security_requirement("bearer_auth")
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-scopes",
+                        serde_json::json!(["schema"]),
+                    ))
+                    .with(crate::controllers::openapi::extension(
+                        "x-yorishiro-required-actions",
+                        serde_json::json!(["embedding_provider_delete"]),
+                    ))
+                    .response_with::<204, (), _>(|op| op.description("Embedding provider removed"))
+                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+            }),
+        )
 }

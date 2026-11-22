@@ -181,8 +181,7 @@ impl ActiveModelBehavior for ActiveModel {
 /// `created_by`/`updated_by` are absent for entities touched by an unattributed API key.
 //
 // Distinct from the generated `Model` because it excludes `embedding` (stored separately in `entity_embeddings`), so SQLite deserialization does not trip on the PgVector type.
-#[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult, schemars::JsonSchema)]
 pub struct EntityRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,
@@ -318,8 +317,7 @@ pub(crate) struct EntitySnapshot {
 }
 
 /// What undoing a job put back.
-#[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[derive(Clone, Serialize, schemars::JsonSchema)]
 pub struct UndoReport {
     pub job_id: Uuid,
     /// Entities restored to the data they held before.

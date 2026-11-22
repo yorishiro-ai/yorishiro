@@ -9,9 +9,12 @@ use crate::error::YorishiroError;
 /// query-string deserializer maps `?page=&page_size=` into the struct fields, so
 /// all existing API callers work without changes.  The `TryFrom` impl converts to the
 /// internal 0-based offset/limit representation that every list function expects.
-#[derive(Default, serde::Deserialize)]
+#[derive(Default, serde::Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
-pub struct PageParams(pub loco_rs::model::query::PaginationQuery);
+#[schemars(inline)]
+pub struct PageParams(
+    #[schemars(with = "PaginationSchema")] pub loco_rs::model::query::PaginationQuery,
+);
 
 impl TryFrom<PageParams> for crate::models::pagination::ListParams {
     type Error = YorishiroError;
@@ -34,4 +37,90 @@ pub(crate) fn parse_filter_param(
         details: vec![],
         hint: format!("filter must be a JSON object, e.g. {{\"status\":\"active\"}}: {err}"),
     })
+}
+
+#[derive(schemars::JsonSchema)]
+#[schemars(inline)]
+#[expect(
+    dead_code,
+    reason = "Schema projection for Loco's external pagination type"
+)]
+struct PaginationSchema {
+    page: Option<u64>,
+    page_size: Option<u64>,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct EntityTypePath<T0> {
+    pub entity_type: T0,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct ForkIdPath<T0> {
+    pub fork_id: T0,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct GroupIdPath<T0> {
+    pub group_id: T0,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct GroupIdPolicyIdPath<T0, T1> {
+    pub group_id: T0,
+    pub policy_id: T1,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct GroupIdUserIdPath<T0, T1> {
+    pub group_id: T0,
+    pub user_id: T1,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct IdPath<T0> {
+    pub id: T0,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct PolicyIdPath<T> {
+    pub policy_id: T,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct IdUserIdPath<T0, T1> {
+    pub id: T0,
+    pub user_id: T1,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct JobIdPath<T0> {
+    pub job_id: T0,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct NameEntityTypePath<T0, T1> {
+    pub name: T0,
+    pub entity_type: T1,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct NamePath<T0> {
+    pub name: T0,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct SchemaIdPath<T0> {
+    pub schema_id: T0,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct UserIdPath<T0> {
+    pub user_id: T0,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct UserIdPolicyIdPath<T0, T1> {
+    pub user_id: T0,
+    pub policy_id: T1,
 }

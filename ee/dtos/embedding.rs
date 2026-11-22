@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", schemars(rename = "EmbeddingKeyRequest"))]
+#[schemars(rename = "EmbeddingKeyRequest")]
 pub(crate) struct SetEmbeddingKeyRequest {
     pub(crate) base_url: String,
     pub(crate) model: String,
