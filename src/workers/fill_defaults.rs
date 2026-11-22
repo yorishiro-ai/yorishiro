@@ -125,18 +125,17 @@ pub(crate) async fn enqueue_for_actor(
     actor: crate::models::api_keys::AuthContext,
     schema_name: String,
 ) -> Result<Uuid, crate::YorishiroError> {
-    let session = WorkspaceSession::open(
+    WorkspaceSession::run(
         ctx,
         actor,
         crate::models::api_keys::ApiKeyScope::Migration,
         crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::MigrationFillDefaults,
         ),
+        None,
+        async |session| enqueue(ctx, session.txn(), &session.ctx, schema_name).await,
     )
-    .await?;
-    let job_id = enqueue(ctx, session.txn(), &session.ctx, schema_name).await?;
-    session.commit().await?;
-    Ok(job_id)
+    .await
 }
 
 pub(crate) async fn enqueue(

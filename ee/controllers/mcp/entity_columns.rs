@@ -1,6 +1,6 @@
 //! MCP tools for reading and changing which columns the Entities table shows per workspace and entity type.
 
-use crate::controllers::mcp::{render, try_tool, verified};
+use crate::controllers::mcp::{YorishiroMcpServer, ok_json, render, try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -10,7 +10,6 @@ use rmcp::{tool, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::controllers::mcp::{YorishiroMcpServer, ok_json};
 use crate::edition::ee::models::entity_column_preferences;
 use crate::models::api_keys::ApiKeyScope;
 

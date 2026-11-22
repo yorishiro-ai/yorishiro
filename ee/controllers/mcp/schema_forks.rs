@@ -1,6 +1,6 @@
 //! MCP tools for workspace schema forks: listing, creating, updating and deleting a fork of an upstream schema.
 
-use crate::controllers::mcp::{render, try_tool, verified};
+use crate::controllers::mcp::{YorishiroMcpServer, ok_json, render, try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -11,7 +11,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::controllers::mcp::{YorishiroMcpServer, ok_json};
 use crate::edition::ee::models::workspace_schema_forks as model;
 use crate::models::api_keys::ApiKeyScope;
 

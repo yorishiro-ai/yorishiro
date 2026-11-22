@@ -75,6 +75,54 @@ impl WorkspaceSession {
         Ok(session)
     }
 
+    /// Opens a session for `target`, optionally checks `action`, runs a writing `op` and commits.
+    ///
+    /// This is the whole lifecycle of an ordinary write, so REST handlers and MCP tools call one model function each.
+    ///
+    /// # Errors
+    /// Returns the session, authorization, operation or commit error.
+    pub(crate) async fn run<T>(
+        app: &loco_rs::app::AppContext,
+        actor: AuthContext,
+        scope: ApiKeyScope,
+        target: WorkspaceTarget,
+        action: Option<Action>,
+        op: impl AsyncFnOnce(&Self) -> Result<T, YorishiroError>,
+    ) -> Result<T, YorishiroError> {
+        let mut session = Self::open(app, actor, scope, target).await?;
+        if let Some(action) = action {
+            session.require_action(action).await?;
+        }
+        let output = op(&session).await?;
+        session.commit().await?;
+        Ok(output)
+    }
+
+    /// Like [`Self::run`] for a read: nothing is committed, so the transaction rolls back on drop.
+    ///
+    /// # Errors
+    /// Returns the session, authorization or operation error.
+    pub(crate) async fn read<T>(
+        app: &loco_rs::app::AppContext,
+        actor: AuthContext,
+        scope: ApiKeyScope,
+        target: WorkspaceTarget,
+        action: Action,
+        op: impl AsyncFnOnce(&Self) -> Result<T, YorishiroError>,
+    ) -> Result<T, YorishiroError> {
+        let mut session = Self::open(app, actor, scope, target).await?;
+        session.require_action(action).await?;
+        op(&session).await
+    }
+
+    /// The workspace the session is bound to.
+    ///
+    /// # Errors
+    /// Returns an error if the caller has no workspace, which `open` rules out.
+    pub fn workspace_id(&self) -> Result<uuid::Uuid, YorishiroError> {
+        self.ctx.require_workspace()
+    }
+
     pub const fn txn(&self) -> &DatabaseTransaction {
         &self.txn
     }

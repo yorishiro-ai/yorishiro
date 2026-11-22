@@ -563,3 +563,87 @@ async fn neighbor_rows(
     .await
     .internal()
 }
+
+/// Creates a relation in the workspace of its source entity.
+///
+/// # Errors
+/// Returns the session, authorization or insert error.
+pub(crate) async fn create_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    input: CreateRelationInput,
+) -> Result<RelationRecord, YorishiroError> {
+    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
+        entity_entities::workspace_for_actor(&ctx.db, &actor, input.source_id).await?,
+    );
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Write,
+        target,
+        Some(crate::models::iam::policy::Action::RelationCreate),
+        async |session| create(session.txn(), session.workspace_id()?, input).await,
+    )
+    .await
+}
+
+/// Reads one relation.
+///
+/// # Errors
+/// Returns the session, authorization or lookup error.
+pub(crate) async fn get_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<RelationRecord, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::read(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::access::WorkspaceTarget::Relation(id),
+        crate::models::iam::policy::Action::RelationGet,
+        async |session| get(session.txn(), session.workspace_id()?, id).await,
+    )
+    .await
+}
+
+/// Deletes one relation.
+///
+/// # Errors
+/// Returns the session, authorization or delete error.
+pub(crate) async fn delete_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<(), YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Write,
+        crate::models::iam::access::WorkspaceTarget::Relation(id),
+        Some(crate::models::iam::policy::Action::RelationDelete),
+        async |session| delete(session.txn(), session.workspace_id()?, id).await,
+    )
+    .await
+}
+
+/// Changes one relation's status.
+///
+/// # Errors
+/// Returns the session, authorization or update error.
+pub(crate) async fn set_status_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    input: SetRelationStatusInput,
+) -> Result<RelationRecord, YorishiroError> {
+    let id = input.id;
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Write,
+        crate::models::iam::access::WorkspaceTarget::Relation(id),
+        Some(crate::models::iam::policy::Action::RelationUpdate),
+        async |session| set_status(session.txn(), session.workspace_id()?, input).await,
+    )
+    .await
+}

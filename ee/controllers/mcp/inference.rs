@@ -1,7 +1,7 @@
 //! MCP tools for LLM-assisted fill: starting an inference job and reviewing, confirming or rejecting its proposals.
 //! These tools are licence-gated like their REST routes.
 
-use crate::controllers::mcp::{render, verified};
+use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json, render, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -12,7 +12,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::edition::ee::dtos::inference::{
     InferFillResponse, InferFillStatus, InferJobStatusResponse,
 };

@@ -3,7 +3,9 @@
 //! Exposes the three origin operations: list pending upstream changes, preview a merge,
 //! and apply the merge, so MCP clients can discover and act on template updates.
 
-use crate::controllers::mcp::{try_tool, verified};
+use crate::controllers::mcp::{
+    YorishiroMcpServer, err_to_tool_result, ok_json, try_tool, verified,
+};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -15,7 +17,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::api_keys::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]

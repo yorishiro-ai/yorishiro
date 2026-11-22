@@ -1,11 +1,10 @@
-use crate::controllers::mcp::{render, verified};
+use crate::controllers::mcp::{YorishiroMcpServer, render, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
 use rmcp::model::CallToolResult;
 use rmcp::{tool, tool_router};
 
-use crate::controllers::mcp::YorishiroMcpServer;
 use crate::models::api_keys::ApiKeyScope;
 
 #[tool_router(vis = "pub(crate)", router = tool_router_dashboard)]

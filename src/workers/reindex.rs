@@ -208,18 +208,17 @@ pub(crate) async fn enqueue_requested_for_actor(
     ctx: &AppContext,
     actor: crate::models::api_keys::AuthContext,
 ) -> Result<String, crate::YorishiroError> {
-    let session = WorkspaceSession::open(
+    WorkspaceSession::run(
         ctx,
         actor,
         crate::models::api_keys::ApiKeyScope::Migration,
         crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::WorkspaceReindex,
         ),
+        None,
+        async |session| enqueue_requested(ctx, session.txn(), &session.ctx).await,
     )
-    .await?;
-    let job_id = enqueue_requested(ctx, session.txn(), &session.ctx).await?;
-    session.commit().await?;
-    Ok(job_id)
+    .await
 }
 
 pub(crate) async fn enqueue_requested(

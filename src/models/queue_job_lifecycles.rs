@@ -36,18 +36,15 @@ pub(crate) async fn migration_job_status_for_actor(
     actor: crate::models::api_keys::AuthContext,
     id: Uuid,
 ) -> Result<BulkJobStatus, crate::YorishiroError> {
-    let mut session = crate::models::iam::session::WorkspaceSession::open(
+    crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
         crate::models::api_keys::ApiKeyScope::Migration,
         crate::models::iam::access::WorkspaceTarget::Job(id),
+        crate::models::iam::policy::Action::MigrationJobGet,
+        async |session| migration_job_status(session.txn(), session.workspace_id()?, id).await,
     )
-    .await?;
-    session
-        .require_action(crate::models::iam::policy::Action::MigrationJobGet)
-        .await?;
-    let workspace_id = session.ctx.require_workspace()?;
-    migration_job_status(session.txn(), workspace_id, id).await
+    .await
 }
 
 pub(crate) async fn bulk_job_status(

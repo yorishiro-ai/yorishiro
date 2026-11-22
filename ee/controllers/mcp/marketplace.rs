@@ -1,7 +1,9 @@
 //! MCP tools for the template marketplace: browsing, publishing, reviewing, forking and setting visibility.
 //! These tools are licence-gated like their REST routes.
 
-use crate::controllers::mcp::{render, try_tool, verified};
+use crate::controllers::mcp::{
+    YorishiroMcpServer, err_to_tool_result, ok_json, render, try_tool, verified,
+};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -12,7 +14,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::edition::ee::models::marketplace;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::pagination::ListParams;
