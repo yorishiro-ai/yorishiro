@@ -50,6 +50,11 @@ runs:
             else
               cargo build --locked --features enterprise --release --bin yorishiro
             fi
+            sections=$(readelf -SW target/release/yorishiro)
+            if grep -Eq "\.(symtab|debug_[[:alnum:]_]+)[[:space:]]" <<< "$sections"; then
+              echo "Release binary contains static symbols or debug information" >&2
+              exit 1
+            fi
           '
 
     - uses: ./.github/actions/install-nfpm
@@ -79,4 +84,7 @@ runs:
       if: ${{ !cancelled() }}
       with:
         name: binary-linux-${{ inputs.edition }}-${{ inputs.arch }}
-        path: dist/*
+        path: |
+          dist/yorishiro-${{ inputs.edition }}-${{ inputs.version }}-${{ inputs.arch }}.deb
+          dist/yorishiro-${{ inputs.edition }}-${{ inputs.version }}-${{ inputs.arch }}.rpm
+        if-no-files-found: error

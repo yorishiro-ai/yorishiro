@@ -175,3 +175,6 @@ redis.workspace = true
 tempfile = { version = "3.27.0" }
 # Property-based testing (issue #358).
 proptest = "=1.12.0"
+
+[profile.release]
+strip = "symbols"

@@ -45,6 +45,10 @@ Async waits release the task to do other work, but one physical connection still
 
 ## Tests
 
+Run the local development stack with `docker compose -f docker-compose.test.yaml up --build`.
+The Makefile starts the test database or Valkey from the same Compose file when using the default local URLs.
+The separate `docker-compose.yaml` deploys published images and requires a release `TAG` and a production `DATABASE_URL`.
+
 Run the full suite with Rust's default parallel test execution.
 
 Use `make test-sqlite` or `make test-postgres` locally; `EDITION=ce` selects the community edition.
@@ -60,8 +64,10 @@ The Stripe request tests install a test licence state and do not require a Strip
 
 Metaschema validation includes property-based tests for arbitrary schema-shaped definitions and rejection of empty `entity_types`.
 
-The main CI workflow runs for pull requests targeting `develop` only.
-It does not run on pushes, on a schedule, or by manual dispatch.
+The main CI workflow runs when pull requests open, reopen, or receive new commits, and on pushes to `develop`.
+It also supports merge queue checks targeting `develop` if the queue is enabled.
+Licensed checks are not run against fork pull requests or merge queue refs; the full licensed suite runs after merge on `develop`.
+If an external run cannot restore the verified E5 model cache, it still runs the tests that do not require the model.
 
 ## Before you push
 
@@ -78,6 +84,9 @@ Tests need PostgreSQL with `vector` and `pg_trgm` in `template1`, and a non-supe
 ## Git workflow
 
 Branch from `develop`.
+For an independent change, open a single pull request against `develop`.
+For dependent changes in this repository, prefer a [stack of small pull requests](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs).
+GitHub does not support cross-fork stacks, so a regular pull request from a fork is welcome.
 Merge commits preferred.
 User-facing documentation lives in the [wiki](https://github.com/yorishiro-ai/wiki) and is managed separately from code changes.
 

@@ -7,7 +7,6 @@ name: Packaging
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [develop]
     paths:
       - .github/packaging/**
       - .github/docker/**
@@ -15,10 +14,18 @@ on:
       - .github/actions/build-docker/**
       - .github/actions/install-nfpm/**
       - .github/actions/package-tests/**
+      - .github/actions/rust-setup/**
       - .github/workflows/packaging.yml
       - Cargo.toml
       - Cargo.lock
       - Dockerfile
+      - docker-compose.yaml
+      - docker-compose.test.yaml
+      - init-extensions.sql
+      - scripts/init-test-postgres.sql
+      - .dockerignore
+      - patches/**
+      - migration/Cargo.toml
       - rust-toolchain.toml
       - config/production.yaml
       - scripts/release_version.py
@@ -29,7 +36,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

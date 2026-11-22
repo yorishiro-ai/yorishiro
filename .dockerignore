@@ -1,8 +1,15 @@
-.git
-.gitignore
-target
-models
-.cargo-cache
-dist
-tmp
-node_modules
+# Only inputs for the production build and runtime may leave the checkout.
+**
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!.cargo/config.toml
+!src/**/*.rs
+!src/templates/*.json
+!ee/**/*.rs
+!ee/keys/licence-public.pem
+!migration/Cargo.toml
+!migration/src/**/*.rs
+!patches/loco-rs/verify.py
+!patches/loco-rs/patches/**/*.patch
+!config/production.yaml

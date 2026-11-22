@@ -1,0 +1,16 @@
+--- a/src/bgworker/sqlt.rs
++++ b/src/bgworker/sqlt.rs
+@@ -252,6 +252,13 @@
+         self.token.cancel();
+         Ok(())
+     }
++
++    async fn close(&self) -> Result<()> {
++        self.token.cancel();
++        *self.registry.lock().await = JobRegistry::new();
++        self.pool.close().await;
++        Ok(())
++    }
+ }
+ 
+ async fn connect(cfg: &SqliteQueueConfig) -> Result<SqlitePool> {

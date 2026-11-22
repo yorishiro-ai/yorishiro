@@ -1,6 +1,6 @@
-# Builds the runtime image used for distribution and by `docker-compose.yml`.
+# Builds the runtime image published for `docker-compose.yaml`.
 #
-#   docker compose up --build
+#   docker compose -f docker-compose.test.yaml up --build
 #   docker run --rm -e DATABASE_URL=... -e QUEUE_URL=... -e HOST=... yorishiro
 #
 # The default command serves HTTP only.
@@ -36,7 +36,12 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/rustup-in
     && sh /tmp/rustup-init.sh -y --default-toolchain none \
     && rm /tmp/rustup-init.sh \
     && rustup toolchain install --no-self-update
-COPY . .
+COPY Cargo.toml Cargo.lock ./
+COPY .cargo/config.toml .cargo/config.toml
+COPY src/ src/
+COPY ee/ ee/
+COPY migration/ migration/
+COPY patches/loco-rs/ patches/loco-rs/
 RUN python3 patches/loco-rs/verify.py --prepare
 # CE excludes the enterprise overlay at build time.
 # EE still checks the licence at runtime for gated features.
@@ -80,9 +85,7 @@ COPY config/production.yaml /app/config/production.yaml
 WORKDIR /app
 # The production configuration defaults SQLite state to /var/lib/yorishiro.
 # The directory is already created with root:yorishiro 1770 above.
-RUN chown -R yorishiro:yorishiro /app \
-    && mkdir -p /var/lib/yorishiro/state /app/models \
-    && chown -R yorishiro:yorishiro /var/lib/yorishiro/state /app/models
+RUN install -d -o yorishiro -g yorishiro /var/lib/yorishiro/state /app/models
 
 ENV HOME=/home/yorishiro
 ENV LOCO_ENV=production

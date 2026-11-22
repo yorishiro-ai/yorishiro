@@ -4,7 +4,6 @@ set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 grep -q 'COPY config/production.yaml /app/config/production.yaml' "$repo/Dockerfile"
-grep -q 'BINDING: 0.0.0.0' "$repo/docker-compose.yml"
 grep -q '^logger:' "$repo/config/production.yaml"
 grep -q '^server:' "$repo/config/production.yaml"
 grep -q '^database:' "$repo/config/production.yaml"
@@ -12,7 +11,28 @@ grep -q '^queue:' "$repo/config/production.yaml"
 grep -q '^workers:' "$repo/config/production.yaml"
 
 if command -v docker >/dev/null && docker compose version >/dev/null 2>&1; then
-  docker compose -f "$repo/docker-compose.yml" config >/dev/null
+  TAG=v0.0.0 EDITION=ce DATABASE_URL=postgres://example.invalid/yorishiro \
+    docker compose -f "$repo/docker-compose.yaml" config --format json |
+    python3 -c '
+import json
+import sys
+
+services = json.load(sys.stdin)["services"]
+assert set(services) == {"app", "worker", "jobs", "scheduler", "redis"}
+for role in {"app", "worker", "jobs", "scheduler"}:
+    assert services[role]["image"] == "ghcr.io/yorishiro-ai/yorishiro:v0.0.0-ce"
+    assert "build" not in services[role]
+    assert services[role]["environment"]["BINDING"] == "0.0.0.0"
+'
+  docker compose -f "$repo/docker-compose.test.yaml" --profile test config --format json |
+    python3 -c '
+import json
+import sys
+
+config = json.load(sys.stdin)
+assert config["services"]["app"]["build"]["context"]
+assert any(mount["source"] == "test_pgdata" for mount in config["services"]["testdb"]["volumes"])
+'
 fi
 
 if [[ $# -gt 0 ]]; then
@@ -30,6 +50,8 @@ if [[ $# -gt 0 ]]; then
       test -f /app/config/production.yaml
       cmp /app/config/production.yaml /canonical-example.yaml
       test ! -e /app/config/production.local.yaml
+      test "$(find /app -type f)" = /app/config/production.yaml
+      test "$(find /usr/local/bin -type f)" = /usr/local/bin/yorishiro
     '
 
   # Keep runtime probes short and use the disabled provider so no model download is involved.

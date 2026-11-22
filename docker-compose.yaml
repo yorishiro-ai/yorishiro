@@ -1,0 +1,67 @@
+# Deploy a published CE or EE image, not a local build.
+x-yorishiro: &yorishiro
+  image: ghcr.io/yorishiro-ai/yorishiro:${TAG:?Set TAG to a published release tag}-${EDITION:-ee}
+  restart: unless-stopped
+  environment:
+    DATABASE_URL: ${DATABASE_URL:?Set the production PostgreSQL connection URL}
+    YORISHIRO_QUEUE_KIND: Redis
+    QUEUE_URL: redis://redis:6379
+    HOST: ${HOST:-http://localhost:5150}
+    BINDING: 0.0.0.0
+    YORISHIRO_EMBEDDING_PROVIDER: ${YORISHIRO_EMBEDDING_PROVIDER:-local}
+    YORISHIRO_LICENSE_KEY: ${YORISHIRO_LICENSE_KEY:-}
+    YORISHIRO_MAX_TENANTS: ${YORISHIRO_MAX_TENANTS:-1}
+
+services:
+  redis:
+    image: valkey/valkey:9.1.3
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - queuedata:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    <<: *yorishiro
+    ports:
+      - "${LISTEN_ADDRESS:-127.0.0.1}:5150:5150"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *yorishiro
+    command: ["start", "--worker=worker-target:shared"]
+    volumes:
+      - modeldata:/app/models
+    healthcheck:
+      disable: true
+    depends_on:
+      app:
+        condition: service_healthy
+
+  jobs:
+    <<: *yorishiro
+    command: ["start", "--worker=job-target:shared"]
+    healthcheck:
+      disable: true
+    depends_on:
+      app:
+        condition: service_healthy
+
+  scheduler:
+    <<: *yorishiro
+    command: ["scheduler"]
+    healthcheck:
+      disable: true
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  queuedata:
+  modeldata:
