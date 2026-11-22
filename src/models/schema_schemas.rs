@@ -630,3 +630,166 @@ pub async fn create_schema(
 
     Ok((row.try_into()?, diff))
 }
+
+/// What a new schema is created from.
+pub(crate) type CreateSchemaSource = crate::dtos::schemas::CreateSchemaRequest;
+
+/// Archives a schema version.
+///
+/// # Errors
+/// Returns the session, authorization or archive error.
+pub(crate) async fn archive_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    schema_id: Uuid,
+) -> Result<SchemaRecord, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
+        Some(crate::models::iam::policy::Action::SchemaArchive),
+        async |session| archive(session.txn(), session.workspace_id()?, schema_id).await,
+    )
+    .await
+}
+
+/// Deletes an archived schema version nothing references.
+///
+/// # Errors
+/// Returns the session, authorization or delete error.
+pub(crate) async fn delete_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    schema_id: Uuid,
+) -> Result<(), YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
+        Some(crate::models::iam::policy::Action::SchemaDelete),
+        async |session| delete(session.txn(), session.workspace_id()?, schema_id).await,
+    )
+    .await
+}
+
+/// Creates a schema version from a definition or a template.
+///
+/// # Errors
+/// Returns the session, authorization, template-resolution or create error.
+pub(crate) async fn create_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    source: CreateSchemaSource,
+) -> Result<crate::dtos::schemas::CreateSchemaResponse, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::SchemaCreate,
+        ),
+        Some(crate::models::iam::policy::Action::SchemaCreate),
+        async |session| {
+            let tenant_id = session.ctx.tenant_id;
+            // Carried alongside the definition so the schema can record which library template it came from.
+            // A built-in has no row to point at, so it stays None.
+            let mut origin_template_id = None;
+            // What the template said, kept as the merge base.
+            // Only a template body has one: a definition posted inline is not a copy of anything, even when a template of the same name exists.
+            let mut origin_snapshot = None;
+            let definition = match source {
+                CreateSchemaSource::Definition(definition) => definition,
+                CreateSchemaSource::Template { template_id } => {
+                    let (definition, origin) =
+                        crate::models::template_templates::resolve_template_definition(
+                            &ctx.db,
+                            tenant_id,
+                            &template_id,
+                        )
+                        .await?;
+                    origin_template_id = origin;
+                    origin_snapshot = origin.map(|_| definition.clone());
+                    definition
+                }
+            };
+            let (schema, diff) = create_schema(
+                session.txn(),
+                tenant_id,
+                session.workspace_id()?,
+                definition,
+                origin_template_id,
+                origin_snapshot,
+            )
+            .await?;
+            Ok(crate::dtos::schemas::CreateSchemaResponse { schema, diff })
+        },
+    )
+    .await
+}
+
+/// Reads the active version of a schema by name.
+///
+/// # Errors
+/// Returns the session, authorization or lookup error.
+pub(crate) async fn get_active_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    name: &str,
+) -> Result<SchemaRecord, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::read(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::SchemaGet,
+        ),
+        crate::models::iam::policy::Action::SchemaGet,
+        async |session| get_active_schema(session.txn(), session.workspace_id()?, name).await,
+    )
+    .await
+}
+
+/// Reads one schema version by ID.
+///
+/// # Errors
+/// Returns the session, authorization or lookup error.
+pub(crate) async fn get_by_id_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    schema_id: Uuid,
+) -> Result<SchemaRecord, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::read(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
+        crate::models::iam::policy::Action::SchemaGet,
+        async |session| get_by_id(session.txn(), session.workspace_id()?, schema_id).await,
+    )
+    .await
+}
+
+/// The JSON Schema one entity type of the active schema validates against.
+///
+/// # Errors
+/// Returns the lookup error, or not-found when the entity type is not in the schema.
+pub(crate) async fn entity_type_json_schema_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    name: &str,
+    entity_type: &str,
+) -> Result<serde_json::Value, YorishiroError> {
+    let record = get_active_for_actor(ctx, actor, name).await?;
+    let definition = record
+        .definition
+        .entity_types
+        .get(entity_type)
+        .ok_or_else(|| {
+            YorishiroError::not_found(format!(
+                "entity_type '{entity_type}' not found in schema '{name}'"
+            ))
+        })?;
+    Ok(metaschema::entity_type_to_json_schema(definition))
+}

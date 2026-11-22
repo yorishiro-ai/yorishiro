@@ -8,15 +8,13 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{AuthContext, Authorized, ReadScope, SchemaScope, Verified};
+use crate::controllers::extractors::{AuthContext, ReadScope, SchemaScope, Verified};
 use crate::controllers::openapi::Routes;
 use crate::data::templates::{self, TemplateSummary};
 use crate::dtos::schemas::{CreateSchemaRequest, CreateSchemaResponse};
-use crate::error::YorishiroError;
 use crate::models::api_keys::ApiKeyScope;
-use crate::models::schema_schemas::metaschema::{self, MetaSchemaDefinition};
+use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 use crate::models::schema_schemas::{self, SchemaRecord, SchemaSummary};
-use crate::models::template_templates;
 
 pub(crate) async fn archive_schema(
     State(ctx): State<AppContext>,
@@ -25,23 +23,9 @@ pub(crate) async fn archive_schema(
         crate::dtos::common::SchemaIdPath<Uuid>,
     >,
 ) -> Result<Json<SchemaRecord>, ApiError> {
-    let mut authorized = Authorized::<SchemaScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaArchive)
-        .await?;
-    let schema = schema_schemas::archive(
-        authorized.txn(),
-        authorized.ctx.require_workspace()?,
-        schema_id,
-    )
-    .await?;
-    authorized.commit().await?;
-    Ok(Json(schema))
+    Ok(Json(
+        schema_schemas::archive_for_actor(&ctx, verified.ctx, schema_id).await?,
+    ))
 }
 
 pub(crate) async fn delete_schema(
@@ -51,22 +35,7 @@ pub(crate) async fn delete_schema(
         crate::dtos::common::SchemaIdPath<Uuid>,
     >,
 ) -> Result<axum::response::NoContent, ApiError> {
-    let mut authorized = Authorized::<SchemaScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaDelete)
-        .await?;
-    schema_schemas::delete(
-        authorized.txn(),
-        authorized.ctx.require_workspace()?,
-        schema_id,
-    )
-    .await?;
-    authorized.commit().await?;
+    schema_schemas::delete_for_actor(&ctx, verified.ctx, schema_id).await?;
     Ok(axum::response::NoContent)
 }
 
@@ -88,49 +57,9 @@ async fn create_schema(
     verified: Verified<SchemaScope>,
     Json(body): Json<CreateSchemaRequest>,
 ) -> Result<Created<CreateSchemaResponse>, ApiError> {
-    let mut authorized = Authorized::<SchemaScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::SchemaCreate,
-        ),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaCreate)
-        .await?;
-    let tenant_id = authorized.ctx.tenant_id;
-
-    // Carried alongside the definition so the schema can record which library template it came from.
-    // A built-in has no row to point at, so it stays None.
-    let mut origin_template_id = None;
-    // What the template said, kept as the merge base.
-    // Only a template body has one: a definition posted inline is not a copy of anything, even when a template of the same name exists.
-    let mut origin_snapshot = None;
-    let definition = match body {
-        CreateSchemaRequest::Definition(definition) => definition,
-        CreateSchemaRequest::Template { template_id } => {
-            let (definition, origin) =
-                template_templates::resolve_template_definition(&ctx.db, tenant_id, &template_id)
-                    .await?;
-            origin_template_id = origin;
-            origin_snapshot = origin.map(|_| definition.clone());
-            definition
-        }
-    };
-
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let (schema, diff) = schema_schemas::create_schema(
-        authorized.txn(),
-        tenant_id,
-        workspace_id,
-        definition,
-        origin_template_id,
-        origin_snapshot,
-    )
-    .await?;
-    authorized.commit().await?;
-    Ok(Created(CreateSchemaResponse { schema, diff }))
+    Ok(Created(
+        schema_schemas::create_for_actor(&ctx, verified.ctx, body).await?,
+    ))
 }
 
 ///
@@ -141,20 +70,9 @@ async fn get_active_schema(
     verified: Verified<ReadScope>,
     Path(crate::dtos::common::NamePath { name }): Path<crate::dtos::common::NamePath<String>>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
-    let mut authorized = Authorized::<ReadScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::SchemaGet,
-        ),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaGet)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let record = schema_schemas::get_active_schema(authorized.txn(), workspace_id, &name).await?;
-    Ok(Json(record))
+    Ok(Json(
+        schema_schemas::get_active_for_actor(&ctx, verified.ctx, &name).await?,
+    ))
 }
 
 pub(crate) async fn get_schema_by_id(
@@ -164,18 +82,9 @@ pub(crate) async fn get_schema_by_id(
         crate::dtos::common::SchemaIdPath<Uuid>,
     >,
 ) -> Result<Json<SchemaRecord>, ApiError> {
-    let mut authorized = Authorized::<ReadScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaGet)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let record = schema_schemas::get_by_id(authorized.txn(), workspace_id, schema_id).await?;
-    Ok(Json(record))
+    Ok(Json(
+        schema_schemas::get_by_id_for_actor(&ctx, verified.ctx, schema_id).await?,
+    ))
 }
 
 pub(crate) async fn list_templates(
@@ -202,33 +111,10 @@ pub(crate) async fn get_entity_type_json_schema(
         crate::dtos::common::NameEntityTypePath<String, String>,
     >,
 ) -> Result<Json<Value>, ApiError> {
-    let mut authorized = Authorized::<ReadScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::SchemaGet,
-        ),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaGet)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let record = schema_schemas::get_active_schema(authorized.txn(), workspace_id, &name).await?;
-
-    let entity_type_def = record
-        .definition
-        .entity_types
-        .get(&entity_type)
-        .ok_or_else(|| {
-            YorishiroError::not_found(format!(
-                "entity_type '{entity_type}' not found in schema '{name}'"
-            ))
-        })?;
-
-    Ok(Json(metaschema::entity_type_to_json_schema(
-        entity_type_def,
-    )))
+    Ok(Json(
+        schema_schemas::entity_type_json_schema_for_actor(&ctx, verified.ctx, &name, &entity_type)
+            .await?,
+    ))
 }
 
 pub fn routes() -> Routes {

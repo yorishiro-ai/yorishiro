@@ -13,11 +13,11 @@ use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, ok_json};
 use crate::error::YorishiroError;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::schema_schemas;
-use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
+use crate::models::schema_schemas::CreateSchemaSource;
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct GetActiveSchemaArgs {
@@ -64,6 +64,33 @@ pub(crate) struct CreateSchemaArgs {
     pub template_id: Option<String>,
 }
 
+impl TryFrom<CreateSchemaArgs> for CreateSchemaSource {
+    type Error = YorishiroError;
+
+    fn try_from(args: CreateSchemaArgs) -> Result<Self, Self::Error> {
+        match (args.definition, args.template_id) {
+            (Some(_), Some(_)) => Err(YorishiroError::ValidationFailed {
+                message: "definition and template_id are mutually exclusive".into(),
+                details: vec![],
+                hint: "Set exactly one of `definition` or `template_id`".into(),
+            }),
+            (None, None) => Err(YorishiroError::ValidationFailed {
+                message: "one of definition or template_id is required".into(),
+                details: vec![],
+                hint: "Set exactly one of `definition` or `template_id`".into(),
+            }),
+            (Some(definition), None) => serde_json::from_value(definition)
+                .map(Self::Definition)
+                .map_err(|err| YorishiroError::ValidationFailed {
+                    message: format!("invalid schema definition: {err}"),
+                    details: vec![],
+                    hint: "Check the structure of MetaSchemaDefinition (name/description/entity_types/relation_types)".into(),
+                }),
+            (None, Some(template_id)) => Ok(Self::Template { template_id }),
+        }
+    }
+}
+
 #[tool_router(vis = "pub(crate)", router = tool_router_schemas)]
 impl YorishiroMcpServer {
     #[tool(
@@ -75,32 +102,8 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetSchemaByIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("archive_schema")?;
         let actor = verified!(self, parts, "archive_schema");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
-            )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::SchemaArchive)
-                .await
-        );
-
-        match schema_schemas::archive(authorized.txn(), authorized.workspace_id(), args.schema_id)
-            .await
-        {
-            Ok(schema) => {
-                authorized.commit().await?;
-                ok_json(schema)
-            }
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        render(schema_schemas::archive_for_actor(self.app_context(), actor, args.schema_id).await)
     }
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema),
@@ -111,32 +114,11 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetSchemaByIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("delete_schema")?;
         let actor = verified!(self, parts, "delete_schema");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
-            )
-            .await
-        );
         try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::SchemaDelete)
-                .await
+            schema_schemas::delete_for_actor(self.app_context(), actor, args.schema_id).await
         );
-
-        match schema_schemas::delete(authorized.txn(), authorized.workspace_id(), args.schema_id)
-            .await
-        {
-            Ok(()) => {
-                authorized.commit().await?;
-                ok_json(serde_json::json!({ "deleted": true }))
-            }
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        ok_json(serde_json::json!({ "deleted": true }))
     }
     #[tool(
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
@@ -163,30 +145,8 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetActiveSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("get_active_schema")?;
         let actor = verified!(self, parts, "get_active_schema");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Permission(
-                    crate::models::iam::policy::Action::SchemaGet,
-                ),
-            )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::SchemaGet)
-                .await
-        );
-
-        let workspace_id = authorized.workspace_id();
-        let record = try_tool!(
-            schema_schemas::get_active_schema(authorized.txn(), workspace_id, &args.name).await
-        );
-        ok_json(record)
+        render(schema_schemas::get_active_for_actor(self.app_context(), actor, &args.name).await)
     }
 
     #[tool(
@@ -198,28 +158,8 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetSchemaByIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("get_schema_by_id")?;
         let actor = verified!(self, parts, "get_schema_by_id");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
-            )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::SchemaGet)
-                .await
-        );
-
-        let workspace_id = authorized.workspace_id();
-        let record = try_tool!(
-            schema_schemas::get_by_id(authorized.txn(), workspace_id, args.schema_id).await
-        );
-        ok_json(record)
+        render(schema_schemas::get_by_id_for_actor(self.app_context(), actor, args.schema_id).await)
     }
 
     #[tool(
@@ -232,88 +172,9 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("create_schema")?;
         let actor = verified!(self, parts, "create_schema");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Permission(
-                    crate::models::iam::policy::Action::SchemaCreate,
-                ),
-            )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::SchemaCreate)
-                .await
-        );
-
-        let mut origin_template_id = None;
-        let mut origin_snapshot = None;
-
-        let definition: MetaSchemaDefinition = match (args.definition, args.template_id) {
-            (Some(_), Some(_)) => {
-                return Ok(err_to_tool_result(YorishiroError::ValidationFailed {
-                    message: "definition and template_id are mutually exclusive".into(),
-                    details: vec![],
-                    hint: "Set exactly one of `definition` or `template_id`".into(),
-                }));
-            }
-            (None, None) => {
-                return Ok(err_to_tool_result(YorishiroError::ValidationFailed {
-                    message: "one of definition or template_id is required".into(),
-                    details: vec![],
-                    hint: "Set exactly one of `definition` or `template_id`".into(),
-                }));
-            }
-            (Some(definition), None) => match serde_json::from_value(definition) {
-                Ok(definition) => definition,
-                Err(err) => {
-                    return Ok(err_to_tool_result(YorishiroError::ValidationFailed {
-                        message: format!("invalid schema definition: {err}"),
-                        details: vec![],
-                        hint: "Check the structure of MetaSchemaDefinition \
-                               (name/description/entity_types/relation_types)"
-                            .into(),
-                    }));
-                }
-            },
-            (None, Some(template_id)) => {
-                let (definition, origin) = try_tool!(
-                    crate::models::template_templates::resolve_template_definition(
-                        &self.app_context().db,
-                        authorized.auth_context().tenant_id,
-                        &template_id,
-                    )
-                    .await
-                );
-                origin_template_id = origin;
-                origin_snapshot = origin.map(|_| definition.clone());
-                definition
-            }
-        };
-
-        let tenant_id = authorized.auth_context().tenant_id;
-        let workspace_id = authorized.workspace_id();
-        let (record, diff) = try_tool!(
-            schema_schemas::create_schema(
-                authorized.txn(),
-                tenant_id,
-                workspace_id,
-                definition,
-                origin_template_id,
-                origin_snapshot,
-            )
-            .await
-        );
-        authorized.commit().await?;
-        ok_json(serde_json::json!({
-            "schema": record,
-            "diff": diff,
-        }))
+        let source = try_tool!(CreateSchemaSource::try_from(args));
+        render(schema_schemas::create_for_actor(self.app_context(), actor, source).await)
     }
 
     #[tool(
@@ -355,39 +216,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityTypeJsonSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("get_entity_type_json_schema")?;
         let actor = verified!(self, parts, "get_entity_type_json_schema");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
+        render(
+            schema_schemas::entity_type_json_schema_for_actor(
                 self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Permission(
-                    crate::models::iam::policy::Action::SchemaGet,
-                ),
+                actor,
+                &args.schema_name,
+                &args.entity_type,
             )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::SchemaGet)
-                .await
-        );
-
-        let workspace_id = authorized.workspace_id();
-        let record = try_tool!(
-            schema_schemas::get_active_schema(authorized.txn(), workspace_id, &args.schema_name,)
-                .await
-        );
-
-        match record.definition.entity_types.get(&args.entity_type) {
-            Some(entity_type_def) => ok_json(
-                schema_schemas::metaschema::entity_type_to_json_schema(entity_type_def),
-            ),
-            None => Ok(err_to_tool_result(YorishiroError::not_found(format!(
-                "entity_type '{}' not found in schema '{}'",
-                args.entity_type, args.schema_name
-            )))),
-        }
+            .await,
+        )
     }
 }
