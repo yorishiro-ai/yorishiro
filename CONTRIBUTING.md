@@ -64,7 +64,8 @@ The Stripe request tests install a test licence state and do not require a Strip
 
 Metaschema validation includes property-based tests for arbitrary schema-shaped definitions and rejection of empty `entity_types`.
 
-The main CI workflow runs on pull requests, merge queue checks targeting `develop`, and pushes to `develop`.
+The main CI workflow runs when pull requests open, reopen, or receive new commits, and on pushes to `develop`.
+It also supports merge queue checks targeting `develop` if the queue is enabled.
 Licensed checks are not run against fork pull requests or merge queue refs; the full licensed suite runs after merge on `develop`.
 If an external run cannot restore the verified E5 model cache, it still runs the tests that do not require the model.
 
