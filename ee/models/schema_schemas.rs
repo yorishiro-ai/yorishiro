@@ -5,5 +5,5 @@ mod origin;
 mod query;
 
 pub(crate) use merge::MergePlan;
-pub(crate) use origin::{merge_apply, merge_preview};
+pub(crate) use origin::{merge_apply_for_actor, merge_preview_for_actor};
 pub(crate) use query::list_for_actor;

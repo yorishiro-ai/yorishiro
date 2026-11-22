@@ -5,7 +5,7 @@
 //! Reading needs `read`, writing needs `write`: this is a display preference, not schema state, so a key that may create entities may also decide how they are listed.
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{Authorized, ReadScope, Verified, WriteScope};
+use crate::controllers::extractors::{ReadScope, Verified, WriteScope};
 use crate::controllers::openapi::Routes;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -34,22 +34,10 @@ async fn set_columns(
     >,
     Json(body): Json<SetColumnsRequest>,
 ) -> Result<Json<ColumnPreference>, ApiError> {
-    let target = crate::models::iam::access::WorkspaceTarget::Permission(
-        crate::models::iam::policy::Action::EntityColumnsUpdate,
-    );
-    let mut authorized = Authorized::<WriteScope>::for_target(&ctx, verified.ctx, target).await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::EntityColumnsUpdate)
-        .await?;
-    let stored = entity_column_preferences::set(
-        authorized.txn(),
-        authorized.ctx.require_workspace()?,
-        &entity_type,
-        &body.columns,
-    )
-    .await?;
-    authorized.commit().await?;
-    Ok(Json(stored))
+    Ok(Json(
+        entity_column_preferences::set_for_actor(&ctx, verified.ctx, &entity_type, &body.columns)
+            .await?,
+    ))
 }
 
 /// `DELETE /api/workspace/entity-columns/{entity_type}`
@@ -60,20 +48,7 @@ async fn reset_columns(
         crate::dtos::common::EntityTypePath<String>,
     >,
 ) -> Result<axum::response::NoContent, ApiError> {
-    let target = crate::models::iam::access::WorkspaceTarget::Permission(
-        crate::models::iam::policy::Action::EntityColumnsDelete,
-    );
-    let mut authorized = Authorized::<WriteScope>::for_target(&ctx, verified.ctx, target).await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::EntityColumnsDelete)
-        .await?;
-    entity_column_preferences::clear(
-        authorized.txn(),
-        authorized.ctx.require_workspace()?,
-        &entity_type,
-    )
-    .await?;
-    authorized.commit().await?;
+    entity_column_preferences::clear_for_actor(&ctx, verified.ctx, &entity_type).await?;
     Ok(axum::response::NoContent)
 }
 

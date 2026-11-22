@@ -123,6 +123,7 @@ impl WorkspaceSession {
         self.ctx.require_workspace()
     }
 
+    #[must_use]
     pub const fn txn(&self) -> &DatabaseTransaction {
         &self.txn
     }

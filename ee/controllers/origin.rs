@@ -4,7 +4,7 @@
 //!
 use crate::controllers::ApiError;
 use crate::controllers::Created;
-use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope, Verified};
+use crate::controllers::extractors::{ReadScope, SchemaScope, Verified};
 use crate::controllers::openapi::Routes;
 use crate::models::schema_schemas::UpstreamChange;
 use axum::Json;
@@ -35,27 +35,9 @@ async fn merge_preview(
         crate::dtos::common::SchemaIdPath<Uuid>,
     >,
 ) -> Result<Json<MergePlan>, ApiError> {
-    let mut authorized = Authorized::<ReadScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaMergePreview)
-        .await?;
-
-    // Workspace content uses the scoped transaction; templates require the identity pool.
-    let plan = origin::merge_preview(
-        authorized.txn(),
-        &ctx,
-        authorized.ctx.tenant_id,
-        authorized.ctx.require_workspace()?,
-        schema_id,
-    )
-    .await?;
-    // Read-only: rolling back (rather than committing) a transaction that made no writes is equivalent, and dropping it does exactly that.
-    Ok(Json(plan))
+    Ok(Json(
+        origin::merge_preview_for_actor(&ctx, verified.ctx, schema_id).await?,
+    ))
 }
 
 /// `POST /api/schemas/{schema_id}/merge`: write the merged definition as the next version.
@@ -66,30 +48,9 @@ async fn merge_apply(
         crate::dtos::common::SchemaIdPath<Uuid>,
     >,
 ) -> Result<Created<MergeResponse>, ApiError> {
-    let mut authorized = Authorized::<SchemaScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaMergeApply)
-        .await?;
-
-    let (schema, diff, summary) = origin::merge_apply(
-        authorized.txn(),
-        &ctx,
-        authorized.ctx.tenant_id,
-        authorized.ctx.require_workspace()?,
-        schema_id,
-    )
-    .await?;
-    authorized.commit().await?;
-    Ok(Created(MergeResponse {
-        schema,
-        diff,
-        summary,
-    }))
+    Ok(Created(
+        origin::merge_apply_for_actor(&ctx, verified.ctx, schema_id).await?,
+    ))
 }
 
 pub fn routes() -> Routes {

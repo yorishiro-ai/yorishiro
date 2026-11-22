@@ -2,7 +2,6 @@
 //!
 //! `Authorized` also opens the RLS-scoped transaction, so a handler cannot reach tenant data without passing through it.
 
-use crate::models::iam::session::WorkspaceSession;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -102,76 +101,6 @@ impl RequiredScope for SchemaScope {
 pub(crate) struct MigrationScope;
 impl RequiredScope for MigrationScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Migration;
-}
-
-/// An extractor that authenticates, verifies the required scope, and opens the workspace transaction in one call (see [`WorkspaceSession`]).
-///
-/// **A write handler must call `.commit().await?` before returning, or every write it made is silently discarded.**
-pub struct Authorized<R> {
-    session: WorkspaceSession,
-    _scope: PhantomData<R>,
-}
-
-impl<R> std::ops::Deref for Authorized<R> {
-    type Target = WorkspaceSession;
-
-    fn deref(&self) -> &WorkspaceSession {
-        &self.session
-    }
-}
-
-impl<R> std::ops::DerefMut for Authorized<R> {
-    fn deref_mut(&mut self) -> &mut WorkspaceSession {
-        &mut self.session
-    }
-}
-
-impl<R> Authorized<R> {
-    pub(crate) async fn for_target(
-        app: &AppContext,
-        actor: api_keys::AuthContext,
-        target: crate::models::iam::access::WorkspaceTarget,
-    ) -> Result<Self, ApiError>
-    where
-        R: RequiredScope,
-    {
-        Ok(Self {
-            session: WorkspaceSession::open(app, actor, R::SCOPE, target).await?,
-            _scope: PhantomData,
-        })
-    }
-
-    /// # Errors
-    /// Returns an error if the commit fails.
-    pub async fn commit(self) -> Result<(), ApiError> {
-        Ok(self.session.commit().await?)
-    }
-}
-
-impl<S, R> FromRequestParts<S> for Authorized<R>
-where
-    AppContext: FromRef<S>,
-    S: Send + Sync,
-    R: RequiredScope,
-{
-    type Rejection = ApiError;
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let presented_key = extract_bearer_key(parts)?;
-
-        let app_ctx = AppContext::from_ref(state);
-
-        let headers = auth::header_pairs(&parts.headers).map_err(ApiError)?;
-        let session = auth::RequestAuth::new(&app_ctx)
-            .authorize(presented_key, R::SCOPE, &headers)
-            .await
-            .inspect_err(|err| log_auth_rejection(parts, err))?;
-
-        Ok(Self {
-            session,
-            _scope: PhantomData,
-        })
-    }
 }
 
 /// As `Authorized<R>`, but for the `audit` grant rather than a `RequiredScope`.
@@ -284,15 +213,6 @@ impl aide::OperationInput for AuditAuthorized {
         operation: &mut aide::openapi::Operation,
     ) {
         document_authentication(ctx, operation, None);
-    }
-}
-
-impl<R: RequiredScope> aide::OperationInput for Authorized<R> {
-    fn operation_input(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) {
-        document_authentication(ctx, operation, Some(R::SCOPE));
     }
 }
 

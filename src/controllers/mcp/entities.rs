@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, ok_json};
 use crate::dtos::entities::{CreateEntityRequest, FillDefaultsRequest, UpdateEntityRequest};
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::entity_entities;
@@ -166,38 +166,8 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("get_entity_drift")?;
         let actor = verified!(self, parts, "get_entity_drift");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Workspace(
-                    match entity_entities::workspace_for_actor(
-                        &self.app_context().db,
-                        &actor,
-                        args.id
-                    )
-                    .await
-                    {
-                        Ok(id) => id,
-                        Err(error) => return Ok(err_to_tool_result(error)),
-                    },
-                ),
-            )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::EntityDriftGet)
-                .await
-        );
-
-        let workspace_id = authorized.workspace_id();
-        let drift =
-            try_tool!(entity_entities::drift(authorized.txn(), workspace_id, args.id).await);
-        ok_json(drift)
+        render(entity_entities::drift_for_actor(self.app_context(), actor, args.id).await)
     }
 
     #[tool(
@@ -214,30 +184,11 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MigrationDryRunArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("migration_dry_run")?;
         let actor = verified!(self, parts, "migration_dry_run");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Permission(
-                    crate::models::iam::policy::Action::MigrationDryRun,
-                ),
-            )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::MigrationDryRun)
-                .await
-        );
-
-        let workspace_id = authorized.workspace_id();
-        let report = try_tool!(
-            entity_entities::migration_dry_run(authorized.txn(), workspace_id, &args.name).await
-        );
-        ok_json(report)
+        render(
+            entity_entities::migration_dry_run_for_actor(self.app_context(), actor, &args.name)
+                .await,
+        )
     }
 
     #[tool(

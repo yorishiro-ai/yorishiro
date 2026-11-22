@@ -1,4 +1,4 @@
-use crate::controllers::mcp::{try_tool, verified};
+use crate::controllers::mcp::{render, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -10,7 +10,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::YorishiroMcpServer;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::recall::{self, DEFAULT_RECALL_DEPTH, DEFAULT_RECALL_LIMIT};
 
@@ -36,43 +36,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<RecallContextArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("recall_context")?;
         let actor = verified!(self, parts, "recall_context");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Workspace(
-                    match crate::models::entity_entities::workspace_for_actor(
-                        &self.app_context().db,
-                        &actor,
-                        args.entity_id,
-                    )
-                    .await
-                    {
-                        Ok(id) => id,
-                        Err(error) => return Ok(err_to_tool_result(error)),
-                    },
-                ),
-            )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::Recall)
-                .await
-        );
-
-        let workspace_id = authorized.workspace_id();
         let query = recall::RecallQuery {
             limit: args.limit.unwrap_or(DEFAULT_RECALL_LIMIT),
             full: args.full.unwrap_or(false),
             depth: args.depth.unwrap_or(DEFAULT_RECALL_DEPTH),
         };
-        let context = try_tool!(
-            recall::recall_context(authorized.txn(), workspace_id, args.entity_id, query).await
-        );
-        ok_json(context)
+        render(
+            recall::recall_context_for_actor(self.app_context(), actor, args.entity_id, query)
+                .await,
+        )
     }
 }

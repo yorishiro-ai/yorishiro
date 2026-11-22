@@ -157,3 +157,48 @@ pub(crate) async fn clear(
         .internal()?;
     Ok(())
 }
+
+/// Opens the caller's write session and stores the column preference for an entity type.
+///
+/// # Errors
+/// Returns the session, authorization or store error.
+pub(crate) async fn set_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    entity_type: &str,
+    columns: &[String],
+) -> Result<ColumnPreference, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Write,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::EntityColumnsUpdate,
+        ),
+        Some(crate::models::iam::policy::Action::EntityColumnsUpdate),
+        async |session| set(session.txn(), session.workspace_id()?, entity_type, columns).await,
+    )
+    .await
+}
+
+/// Opens the caller's write session and clears the column preference for an entity type.
+///
+/// # Errors
+/// Returns the session, authorization or delete error.
+pub(crate) async fn clear_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    entity_type: &str,
+) -> Result<(), YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Write,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::EntityColumnsDelete,
+        ),
+        Some(crate::models::iam::policy::Action::EntityColumnsDelete),
+        async |session| clear(session.txn(), session.workspace_id()?, entity_type).await,
+    )
+    .await
+}

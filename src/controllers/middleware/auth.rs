@@ -12,7 +12,6 @@ use loco_rs::prelude::async_trait;
 use crate::db::{AppContextBackend, DbHandle};
 use crate::error::YorishiroError;
 use crate::models::api_keys::{ApiKeyScope, AuthContext, Entity, WORKSPACE_HEADER};
-use crate::models::iam::session::WorkspaceSession;
 use uuid::Uuid;
 
 /// Copies readable request headers into the authenticator input shape.
@@ -185,17 +184,6 @@ impl<'a> RequestAuth<'a> {
         require_scope(&ctx, required)?;
         Entity::touch_authenticated(self.app, &ctx).await?;
         Ok(ctx)
-    }
-
-    pub(crate) async fn authorize(
-        &self,
-        key: &str,
-        required: ApiKeyScope,
-        headers: &[(String, String)],
-    ) -> Result<WorkspaceSession, YorishiroError> {
-        let ctx = self.resolve(key, headers).await?;
-        require_scope(&ctx, required)?;
-        WorkspaceSession::begin(self.app, ctx, required).await
     }
 
     pub(crate) async fn verify_audit(

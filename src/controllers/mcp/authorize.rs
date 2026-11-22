@@ -4,62 +4,8 @@ use super::{
     ApiKeyScope, AppContext, AuthContext, CallToolResult, ErrorData, Parts, YorishiroError, auth,
     err_to_tool_result,
 };
-use crate::models::iam::session::WorkspaceSession;
 
-/// The workspace session of a tool call that passed authentication and scope checks, with MCP error mapping.
-pub(crate) struct Authorized {
-    session: WorkspaceSession,
-}
-
-impl std::ops::Deref for Authorized {
-    type Target = WorkspaceSession;
-
-    fn deref(&self) -> &WorkspaceSession {
-        &self.session
-    }
-}
-
-impl std::ops::DerefMut for Authorized {
-    fn deref_mut(&mut self) -> &mut WorkspaceSession {
-        &mut self.session
-    }
-}
-
-impl Authorized {
-    pub(crate) async fn for_target(
-        app: &AppContext,
-        actor: &AuthContext,
-        required: ApiKeyScope,
-        target: crate::models::iam::access::WorkspaceTarget,
-    ) -> Result<Self, YorishiroError> {
-        Ok(Self {
-            session: WorkspaceSession::open(app, actor.clone(), required, target).await?,
-        })
-    }
-
-    /// Commits the transaction.
-    /// Every write handler must call this before returning `Ok`.
-    pub(crate) async fn commit(self) -> Result<(), ErrorData> {
-        self.session
-            .commit()
-            .await
-            .map_err(crate::error::mcp_internal)
-    }
-
-    pub(crate) const fn auth_context(&self) -> &AuthContext {
-        &self.session.ctx
-    }
-
-    pub(crate) const fn workspace_id(&self) -> uuid::Uuid {
-        self.session
-            .ctx
-            .workspace_id
-            .expect("the session resolved its workspace")
-    }
-}
-
-/// A connection-less version of `Authorized`: only authenticates and verifies scope, without opening a transaction.
-/// Tools that do slow work before touching the database (embedding generation) use this instead and call `TenantDb::acquire_for_workspace` afterward.
+/// The outcome of authenticating a tool call and checking its scope, before any transaction is opened.
 pub(crate) enum VerifyOutcome {
     Verified(AuthContext),
     ScopeDenied(CallToolResult),

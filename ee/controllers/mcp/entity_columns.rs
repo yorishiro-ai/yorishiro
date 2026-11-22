@@ -58,37 +58,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SetColumnsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("set_entity_columns")?;
         let actor = verified!(self, parts, "set_entity_columns");
-        let target = crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::EntityColumnsUpdate,
-        );
-        let mut authorized = try_tool!(
-            crate::controllers::mcp::authorize::Authorized::for_target(
+        render(
+            entity_column_preferences::set_for_actor(
                 self.app_context(),
-                &actor,
-                required,
-                target,
-            )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::EntityColumnsUpdate)
-                .await
-        );
-
-        let record = try_tool!(
-            entity_column_preferences::set(
-                authorized.txn(),
-                authorized.workspace_id(),
+                actor,
                 &args.entity_type,
                 &args.columns,
             )
-            .await
-        );
-        authorized.commit().await?;
-        ok_json(record)
+            .await,
+        )
     }
 
     #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write), description = "Reset the selected workspace's entity-table columns for one entity type to schema-derived defaults (requires write scope and entity_columns_delete IAM permission); this removes only the display preference")]
@@ -97,35 +76,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ResetColumnsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("reset_entity_columns")?;
         let actor = verified!(self, parts, "reset_entity_columns");
-        let target = crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::EntityColumnsDelete,
-        );
-        let mut authorized = try_tool!(
-            crate::controllers::mcp::authorize::Authorized::for_target(
+        try_tool!(
+            entity_column_preferences::clear_for_actor(
                 self.app_context(),
-                &actor,
-                required,
-                target,
+                actor,
+                &args.entity_type
             )
             .await
         );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::EntityColumnsDelete)
-                .await
-        );
-
-        try_tool!(
-            entity_column_preferences::clear(
-                authorized.txn(),
-                authorized.workspace_id(),
-                &args.entity_type,
-            )
-            .await
-        );
-        authorized.commit().await?;
         ok_json(serde_json::json!({"reset": true}))
     }
 }

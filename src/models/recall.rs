@@ -172,3 +172,29 @@ pub async fn recall_context(
         truncated,
     })
 }
+
+/// Opens the caller's read session and recalls an entity with its neighbourhood.
+///
+/// # Errors
+/// Returns the session, authorization or recall error.
+pub(crate) async fn recall_context_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    entity_id: Uuid,
+    query: RecallQuery,
+) -> Result<RecallContext, YorishiroError> {
+    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
+        entity_entities::workspace_for_actor(&ctx.db, &actor, entity_id).await?,
+    );
+    crate::models::iam::session::WorkspaceSession::read(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        target,
+        crate::models::iam::policy::Action::Recall,
+        async |session| {
+            recall_context(session.txn(), session.workspace_id()?, entity_id, query).await
+        },
+    )
+    .await
+}
