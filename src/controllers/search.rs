@@ -28,22 +28,20 @@ pub(crate) async fn search_entities(
 }
 
 pub fn routes() -> Routes {
-    Routes::new().prefix("api/search").add(
+    Routes::new().tag("community").prefix("api/search").add(
         "/",
         aide::axum::routing::get_with(search_entities, |op| {
-            op.tag("community")
-                .security_requirement("bearer_auth")
-                .with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["read"]),
-                ))
-                .with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["search"]),
-                ))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<422, Json<super::openapi::ApiErrorBody>>()
-                .response::<503, Json<super::openapi::ApiErrorBody>>()
+            op.with(crate::controllers::openapi::extension(
+                "x-yorishiro-required-scopes",
+                serde_json::json!(["read"]),
+            ))
+            .with(crate::controllers::openapi::extension(
+                "x-yorishiro-required-actions",
+                serde_json::json!(["search"]),
+            ))
+            .response::<401, Json<super::openapi::ApiErrorBody>>()
+            .response::<422, Json<super::openapi::ApiErrorBody>>()
+            .response::<503, Json<super::openapi::ApiErrorBody>>()
         }),
     )
 }

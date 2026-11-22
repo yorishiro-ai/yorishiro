@@ -115,93 +115,84 @@ pub(crate) async fn set_relation_status(
 
 pub fn routes() -> Routes {
     Routes::new()
+        .tag("community")
         .prefix("api/relations")
         .add(
             "/",
             aide::axum::routing::post_with(create_relation, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["write"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["relation_create"]),
-                    ))
-                    .response::<201, Json<RelationRecord>>()
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["write"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["relation_create"]),
+                ))
+                .response::<201, Json<RelationRecord>>()
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/",
             aide::axum::routing::get_with(list_relations, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["relation_list"]),
-                    ))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["relation_list"]),
+                ))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::get_with(get_relation, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["relation_get"]),
-                    ))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["relation_get"]),
+                ))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::delete_with(delete_relation, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["write"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["relation_delete"]),
-                    ))
-                    .response_with::<204, (), _>(|op| op.description("Relation deleted"))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["write"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["relation_delete"]),
+                ))
+                .response_with::<204, (), _>(|op| op.description("Relation deleted"))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/status",
             aide::axum::routing::put_with(set_relation_status, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["write"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["relation_update"]),
-                    ))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
-                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["write"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["relation_update"]),
+                ))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
+                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
 }

@@ -33,39 +33,36 @@ pub(crate) async fn import_jsonl(
 
 pub fn routes() -> Routes {
     Routes::new()
+        .tag("community")
         .add(
             "/api/import.jsonl",
             aide::axum::routing::post_with(import_jsonl, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["import_create"]),
-                    ))
-                    .response::<202, Json<QueuedJobResponse>>()
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["schema"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["import_create"]),
+                ))
+                .response::<202, Json<QueuedJobResponse>>()
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/api/import-jobs/{job_id}",
             aide::axum::routing::get_with(import_job_status, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["import_job_get"]),
-                    ))
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["schema"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["import_job_get"]),
+                ))
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
 }

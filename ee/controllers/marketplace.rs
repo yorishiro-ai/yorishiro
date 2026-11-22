@@ -125,132 +125,117 @@ async fn set_visibility(
 )]
 pub fn routes() -> Routes {
     Routes::new()
+        .tag("enterprise")
         .prefix("api/marketplace")
         .add(
             "/",
             aide::axum::routing::get_with(list_marketplace, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["marketplace_list"]),
-                    ))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["marketplace_list"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/versions",
             aide::axum::routing::get_with(list_versions, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["marketplace_version_list"]),
-                    ))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["marketplace_version_list"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/versions",
             aide::axum::routing::post_with(publish_version, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["marketplace_publish"]),
-                    ))
-                    .response::<201, Json<TemplateVersionRecord>>()
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["marketplace_publish"]),
+                ))
+                .response::<201, Json<TemplateVersionRecord>>()
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/reviews",
             aide::axum::routing::get_with(list_reviews, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["marketplace_review_list"]),
-                    ))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["marketplace_review_list"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/reviews",
             aide::axum::routing::post_with(submit_review, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["marketplace_review_submit"]),
-                    ))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["marketplace_review_submit"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/fork",
             aide::axum::routing::post_with(fork_template, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["marketplace_fork"]),
-                    ))
-                    .response::<201, Json<ForkResponse>>()
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["marketplace_fork"]),
+                ))
+                .response::<201, Json<ForkResponse>>()
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/visibility",
             aide::axum::routing::put_with(set_visibility, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["marketplace_visibility_update"]),
-                    ))
-                    .response_with::<204, (), _>(|op| {
-                        op.description("Marketplace visibility updated")
-                    })
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["marketplace_visibility_update"]),
+                ))
+                .response_with::<204, (), _>(|op| op.description("Marketplace visibility updated"))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
 }

@@ -121,201 +121,106 @@ async fn create_policy(
     Ok((StatusCode::CREATED, Json(policy.into())))
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "Keep route registration and aide metadata together"
-)]
 pub(crate) fn routes() -> Routes {
     Routes::new()
+        .tag("community")
         .prefix("api/iam")
         .add(
             "/groups/{group_id}/policies",
-            aide::axum::routing::get_with(list_iam_group_policies, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<403, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::get_with(list_iam_group_policies, |op| op),
         )
         .add(
             "/users/{user_id}/policies",
-            aide::axum::routing::get_with(list_iam_user_policies, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<403, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::get_with(list_iam_user_policies, |op| op),
         )
         .add(
             "/groups/{group_id}/members",
-            aide::axum::routing::get_with(list_iam_group_members, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<403, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::get_with(list_iam_group_members, |op| op),
         )
         .add(
             "/policies/{policy_id}",
-            aide::axum::routing::put_with(update_policy, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
-                    .response_with::<409, (), _>(|op| op.description(""))
-                    .response_with::<422, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::put_with(update_policy, |op| op),
         )
         .add(
             "/policies/{policy_id}",
             aide::axum::routing::delete_with(delete_policy, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<204, (), _>(|op| op.description(""))
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
+                op.response_with::<204, (), _>(|op| op.description(""))
             }),
         )
         .add(
             "/policies/{policy_id}",
-            aide::axum::routing::get_with(get_iam_policy, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::get_with(get_iam_policy, |op| op),
         )
         .add(
             "/groups/{group_id}/policies/{policy_id}",
             aide::axum::routing::put_with(attach_group_policy, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<204, (), _>(|op| op.description(""))
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
-                    .response_with::<409, (), _>(|op| op.description(""))
+                op.response_with::<204, (), _>(|op| op.description(""))
             }),
         )
         .add(
             "/groups/{group_id}/policies/{policy_id}",
             aide::axum::routing::delete_with(detach_group_policy, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<204, (), _>(|op| op.description(""))
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
-                    .response_with::<409, (), _>(|op| op.description(""))
+                op.response_with::<204, (), _>(|op| op.description(""))
             }),
         )
         .add(
             "/groups/{group_id}/members/{user_id}",
             aide::axum::routing::put_with(add_group_member, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<204, (), _>(|op| op.description(""))
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
-                    .response_with::<409, (), _>(|op| op.description(""))
+                op.response_with::<204, (), _>(|op| op.description(""))
             }),
         )
         .add(
             "/groups/{group_id}/members/{user_id}",
             aide::axum::routing::delete_with(remove_group_member, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<204, (), _>(|op| op.description(""))
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
-                    .response_with::<409, (), _>(|op| op.description(""))
+                op.response_with::<204, (), _>(|op| op.description(""))
             }),
         )
         .add(
             "/users/{user_id}/policies/{policy_id}",
             aide::axum::routing::put_with(attach_user_policy, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<204, (), _>(|op| op.description(""))
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
-                    .response_with::<409, (), _>(|op| op.description(""))
+                op.response_with::<204, (), _>(|op| op.description(""))
             }),
         )
         .add(
             "/users/{user_id}/policies/{policy_id}",
             aide::axum::routing::delete_with(detach_user_policy, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<204, (), _>(|op| op.description(""))
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
+                op.response_with::<204, (), _>(|op| op.description(""))
             }),
         )
-        .add(
-            "/audit",
-            aide::axum::routing::get_with(list_audit, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<403, (), _>(|op| op.description(""))
-            }),
-        )
+        .add("/audit", aide::axum::routing::get_with(list_audit, |op| op))
         .add(
             "/groups",
             aide::axum::routing::post_with(create_group, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response::<201, Json<GroupRecord>>()
-                    .response_with::<403, (), _>(|op| op.description(""))
+                op.response::<201, Json<GroupRecord>>()
             }),
         )
         .add(
             "/groups",
-            aide::axum::routing::get_with(list_iam_groups, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<403, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::get_with(list_iam_groups, |op| op),
         )
         .add(
             "/groups/{group_id}",
-            aide::axum::routing::put_with(rename_group, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::put_with(rename_group, |op| op),
         )
         .add(
             "/groups/{group_id}",
             aide::axum::routing::delete_with(delete_group, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<204, (), _>(|op| op.description(""))
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
+                op.response_with::<204, (), _>(|op| op.description(""))
             }),
         )
         .add(
             "/groups/{group_id}",
-            aide::axum::routing::get_with(get_iam_group, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<403, (), _>(|op| op.description(""))
-                    .response_with::<404, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::get_with(get_iam_group, |op| op),
         )
         .add(
             "/policies",
             aide::axum::routing::post_with(create_policy, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response::<201, Json<PolicyRecord>>()
-                    .response_with::<403, (), _>(|op| op.description(""))
+                op.response::<201, Json<PolicyRecord>>()
             }),
         )
         .add(
             "/policies",
-            aide::axum::routing::get_with(list_iam_policies, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .response_with::<403, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::get_with(list_iam_policies, |op| op),
         )
 }
 

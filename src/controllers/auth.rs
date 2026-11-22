@@ -103,12 +103,12 @@ async fn finish_login(
 /// # Panics
 /// Panics if the static tenant header metadata is invalid.
 pub fn routes() -> Routes {
-    Routes::new()
+    Routes::new().tag("community")
         .prefix("auth")
         .add(
             "/signup",
             aide::axum::routing::post_with(signup, |op| {
-                op.tag("community")
+                op
                     .response::<201, Json<SignupResponse>>()
                     .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
@@ -116,7 +116,7 @@ pub fn routes() -> Routes {
         .add(
             "/root/login",
             aide::axum::routing::post_with(root_login, |op| {
-                op.tag("community")
+                op
                     .response::<401, Json<super::openapi::ApiErrorBody>>()
                     .response::<403, Json<super::openapi::ApiErrorBody>>()
             }),
@@ -124,7 +124,7 @@ pub fn routes() -> Routes {
         .add(
             "/tenant/login",
             aide::axum::routing::post_with(tenant_login, |op| {
-                op.tag("community")
+                op
                     .with(|mut op| {
                         op.inner_mut().parameters.push(aide::openapi::ReferenceOr::Item(
                             serde_json::from_value(serde_json::json!({"in": "header", "name": "x-tenant-id", "required": true, "schema": {"type": "string", "format": "uuid"}})).expect("tenant login header"),

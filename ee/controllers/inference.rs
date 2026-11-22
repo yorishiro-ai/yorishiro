@@ -86,60 +86,55 @@ async fn infer_job_status(
 /// settings, while the inference call itself extends the schema routes it fills against.
 pub fn routes() -> Routes {
     Routes::new()
+        .tag("enterprise")
         .prefix("api/workspace")
         .add(
             "/llm-key",
             aide::axum::routing::put_with(set_llm_key, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["llm_provider_update"]),
-                    ))
-                    .response_with::<204, (), _>(|op| op.description("LLM credentials saved"))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["schema"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["llm_provider_update"]),
+                ))
+                .response_with::<204, (), _>(|op| op.description("LLM credentials saved"))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/llm-key",
             aide::axum::routing::get_with(get_llm_key, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["llm_provider_get"]),
-                    ))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["llm_provider_get"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/llm-key",
             aide::axum::routing::delete_with(delete_llm_key, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["llm_provider_delete"]),
-                    ))
-                    .response_with::<204, (), _>(|op| op.description("LLM credentials removed"))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["schema"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["llm_provider_delete"]),
+                ))
+                .response_with::<204, (), _>(|op| op.description("LLM credentials removed"))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
 }
@@ -147,24 +142,22 @@ pub fn routes() -> Routes {
 /// The route this module's licence gate covers: the server calls an LLM here, which is what makes
 /// it an enterprise feature. See [`routes`] for why the two groups are separate.
 pub fn gated_routes() -> Routes {
-    Routes::new().prefix("api/schemas").add(
+    Routes::new().tag("enterprise").prefix("api/schemas").add(
         "/active/{name}/infer-fill",
         aide::axum::routing::post_with(infer_fill, |op| {
-            op.tag("enterprise")
-                .security_requirement("bearer_auth")
-                .with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["schema"]),
-                ))
-                .with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["inference_create"]),
-                ))
-                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<503, Json<crate::controllers::openapi::ApiErrorBody>>()
+            op.with(crate::controllers::openapi::extension(
+                "x-yorishiro-required-scopes",
+                serde_json::json!(["schema"]),
+            ))
+            .with(crate::controllers::openapi::extension(
+                "x-yorishiro-required-actions",
+                serde_json::json!(["inference_create"]),
+            ))
+            .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+            .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+            .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+            .response::<503, Json<crate::controllers::openapi::ApiErrorBody>>()
         }),
     )
 }
@@ -175,119 +168,104 @@ pub fn gated_routes() -> Routes {
 /// `migration_routes()` (`api/migration-jobs/{job_id}/undo`): a dedicated prefix for
 /// async-job polling, under the licence gate because results include workspace
 /// activity counts that reveal whether a workspace has data to infer.
-#[expect(
-    clippy::too_many_lines,
-    reason = "Keep route registration and aide metadata together"
-)]
 pub fn inference_job_status_routes() -> Routes {
     Routes::new()
+        .tag("enterprise")
         .prefix("api/inference-jobs")
         .add(
             "/{job_id}",
             aide::axum::routing::get_with(infer_job_status, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["inference_job_get"]),
-                    ))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["inference_job_get"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{job_id}/proposals",
             aide::axum::routing::get_with(list_proposals, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["inference_proposal_list"]),
-                    ))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["inference_proposal_list"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{job_id}/confirm",
             aide::axum::routing::post_with(confirm_proposals, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["inference_confirm"]),
-                    ))
-                    .response::<202, Json<crate::dtos::jobs::QueuedJobResponse>>()
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<409, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["schema"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["inference_confirm"]),
+                ))
+                .response::<202, Json<crate::dtos::jobs::QueuedJobResponse>>()
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<409, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{job_id}/reject",
             aide::axum::routing::post_with(reject_proposals, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["inference_reject"]),
-                    ))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["schema"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["inference_reject"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{job_id}/discard",
             aide::axum::routing::post_with(discard_proposals, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["inference_discard"]),
-                    ))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["schema"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["inference_discard"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/confirmations/{job_id}",
             aide::axum::routing::get_with(confirmation_status, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["inference_confirmation_get"]),
-                    ))
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["schema"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["inference_confirmation_get"]),
+                ))
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
 }

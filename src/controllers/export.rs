@@ -30,23 +30,19 @@ pub(crate) async fn export_jsonl(
 }
 
 pub fn routes() -> Routes {
-    Routes::new().add(
+    Routes::new().tag("community").add(
         "/api/export.jsonl",
         aide::axum::routing::get_with(export_jsonl, |op| {
-            op.tag("community")
-                .security_requirement("bearer_auth")
-                .with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["read"]),
-                ))
-                .with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["export"]),
-                ))
-                .response_with::<200, String, _>(|op| {
-                    op.description(
-                        "Newline-delimited JSON export, at most 8 MiB and 10,000 records",
-                    )
+            op.with(crate::controllers::openapi::extension(
+                "x-yorishiro-required-scopes",
+                serde_json::json!(["read"]),
+            ))
+            .with(crate::controllers::openapi::extension(
+                "x-yorishiro-required-actions",
+                serde_json::json!(["export"]),
+            ))
+            .response_with::<200, String, _>(|op| {
+                op.description("Newline-delimited JSON export, at most 8 MiB and 10,000 records")
                     .with(|mut op| {
                         let response = op.inner();
                         if let Some(media) =
@@ -58,9 +54,9 @@ pub fn routes() -> Routes {
                         }
                         op
                     })
-                })
-                .response::<401, axum::Json<super::openapi::ApiErrorBody>>()
-                .response::<422, axum::Json<super::openapi::ApiErrorBody>>()
+            })
+            .response::<401, axum::Json<super::openapi::ApiErrorBody>>()
+            .response::<422, axum::Json<super::openapi::ApiErrorBody>>()
         }),
     )
 }

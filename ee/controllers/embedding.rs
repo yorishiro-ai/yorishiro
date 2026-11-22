@@ -58,60 +58,55 @@ async fn delete_embedding_key(
 
 pub fn routes() -> Routes {
     Routes::new()
+        .tag("enterprise")
         .prefix("api/workspace")
         .add(
             "/embedding-key",
             aide::axum::routing::put_with(set_embedding_key, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["embedding_provider_update"]),
-                    ))
-                    .response_with::<204, (), _>(|op| op.description("Embedding provider saved"))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["schema"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["embedding_provider_update"]),
+                ))
+                .response_with::<204, (), _>(|op| op.description("Embedding provider saved"))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<422, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/embedding-key",
             aide::axum::routing::get_with(get_embedding_key, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["embedding_provider_get"]),
-                    ))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["embedding_provider_get"]),
+                ))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/embedding-key",
             aide::axum::routing::delete_with(delete_embedding_key, |op| {
-                op.tag("enterprise")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["schema"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["embedding_provider_delete"]),
-                    ))
-                    .response_with::<204, (), _>(|op| op.description("Embedding provider removed"))
-                    .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                    .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["schema"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["embedding_provider_delete"]),
+                ))
+                .response_with::<204, (), _>(|op| op.description("Embedding provider removed"))
+                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
 }

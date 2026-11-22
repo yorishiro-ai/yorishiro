@@ -124,125 +124,108 @@ async fn list_members(
 )]
 pub fn routes() -> Routes {
     Routes::new()
+        .tag("community")
         .prefix("api/workspaces")
         .add(
             "/",
             aide::axum::routing::get_with(list_workspaces, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["workspace_list", "workspace_get"]),
-                    ))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["workspace_list", "workspace_get"]),
+                ))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/",
             aide::axum::routing::post_with(create_workspace, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["workspace_create"]),
-                    ))
-                    .response::<201, Json<WorkspaceRecord>>()
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["workspace_create"]),
+                ))
+                .response::<201, Json<WorkspaceRecord>>()
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
+                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::get_with(get_workspace, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-scopes",
-                        serde_json::json!(["read"]),
-                    ))
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["workspace_get"]),
-                    ))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-scopes",
+                    serde_json::json!(["read"]),
+                ))
+                .with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["workspace_get"]),
+                ))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::put_with(update_workspace, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["workspace_update"]),
-                    ))
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["workspace_update"]),
+                ))
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::delete_with(delete_workspace, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["workspace_delete"]),
-                    ))
-                    .response_with::<204, (), _>(|op| op.description("Workspace deleted"))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
-                    .response::<409, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["workspace_delete"]),
+                ))
+                .response_with::<204, (), _>(|op| op.description("Workspace deleted"))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
+                .response::<409, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/members/{user_id}",
             aide::axum::routing::put_with(grant_member, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["workspace_update"]),
-                    ))
-                    .response_with::<204, (), _>(|op| {
-                        op.description("Direct workspace grant saved")
-                    })
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["workspace_update"]),
+                ))
+                .response_with::<204, (), _>(|op| op.description("Direct workspace grant saved"))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/members/{user_id}",
             aide::axum::routing::delete_with(revoke_member, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["workspace_update"]),
-                    ))
-                    .response_with::<204, (), _>(|op| {
-                        op.description("Direct workspace grant and bound credentials revoked")
-                    })
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["workspace_update"]),
+                ))
+                .response_with::<204, (), _>(|op| {
+                    op.description("Direct workspace grant and bound credentials revoked")
+                })
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/members",
             aide::axum::routing::get_with(list_members, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["workspace_get"]),
-                    ))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["workspace_get"]),
+                ))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
             }),
         )
 }

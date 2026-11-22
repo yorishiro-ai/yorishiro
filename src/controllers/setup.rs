@@ -66,19 +66,16 @@ async fn setup(
 
 pub(crate) fn routes() -> Routes {
     Routes::new()
+        .tag("community")
         .prefix("setup")
         .add(
             "/",
             aide::axum::routing::post_with(setup, |op| {
-                op.tag("community")
-                    .response::<201, Json<SetupResponse>>()
+                op.response::<201, Json<SetupResponse>>()
                     .response::<404, Json<super::openapi::ApiErrorBody>>()
                     .response::<409, Json<super::openapi::ApiErrorBody>>()
                     .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
-        .add(
-            "/status",
-            aide::axum::routing::get_with(status, |op| op.tag("community")),
-        )
+        .add("/status", aide::axum::routing::get_with(status, |op| op))
 }

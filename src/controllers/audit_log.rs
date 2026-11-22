@@ -55,21 +55,19 @@ pub(crate) fn render_records(
 }
 
 pub fn routes() -> Routes {
-    Routes::new().prefix("api/audit-log").add(
+    Routes::new().tag("community").prefix("api/audit-log").add(
         "/",
         aide::axum::routing::get_with(list_audit_log, |op| {
-            op.tag("community")
-                .security_requirement("bearer_auth")
-                .with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-grants",
-                    serde_json::json!(["audit"]),
-                ))
-                .with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["audit_log_list"]),
-                ))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<403, Json<super::openapi::ApiErrorBody>>()
+            op.with(crate::controllers::openapi::extension(
+                "x-yorishiro-required-grants",
+                serde_json::json!(["audit"]),
+            ))
+            .with(crate::controllers::openapi::extension(
+                "x-yorishiro-required-actions",
+                serde_json::json!(["audit_log_list"]),
+            ))
+            .response::<401, Json<super::openapi::ApiErrorBody>>()
+            .response::<403, Json<super::openapi::ApiErrorBody>>()
         }),
     )
 }

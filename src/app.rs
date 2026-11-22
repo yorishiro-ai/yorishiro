@@ -141,7 +141,9 @@ impl RouteMounts {
 
     /// Registers a route group with Loco and records its operations in the inventory.
     pub(crate) fn mount(&mut self, routes: controllers::openapi::Routes) -> &mut Self {
-        let controllers::openapi::Routes { routes, api } = routes;
+        let controllers::openapi::Routes {
+            loco: routes, api, ..
+        } = routes;
         controllers::openapi::merge_api(&mut self.inventory.api, api);
         let group = AppRoutes::empty().add_route(routes.clone());
         self.inventory.add_group(&group, RouteClass::Public);

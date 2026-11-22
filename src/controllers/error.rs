@@ -22,4 +22,19 @@ impl IntoResponse for ApiError {
 
 impl aide::OperationOutput for ApiError {
     type Inner = ();
+
+    /// The statuses `YorishiroError` maps to besides authorization.
+    fn inferred_responses(
+        _: &mut aide::generate::GenContext,
+        _: &mut aide::openapi::Operation,
+    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
+        [404, 409, 422]
+            .map(|code| {
+                (
+                    Some(aide::openapi::StatusCode::Code(code)),
+                    aide::openapi::Response::default(),
+                )
+            })
+            .into()
+    }
 }

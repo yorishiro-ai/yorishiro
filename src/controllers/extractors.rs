@@ -300,7 +300,60 @@ where
     }
 }
 
-impl aide::OperationInput for AuthContext {}
-impl<R> aide::OperationInput for Authorized<R> {}
-impl<R> aide::OperationInput for Verified<R> {}
-impl aide::OperationInput for AuditAuthorized {}
+/// Every authenticating extractor documents the bearer scheme and the 403 it can return.
+macro_rules! documents_bearer_auth {
+    ($($ty:ty),* $(,)?) => {$(
+        impl aide::OperationInput for $ty {
+            fn operation_input(
+                _: &mut aide::generate::GenContext,
+                operation: &mut aide::openapi::Operation,
+            ) {
+                let requirement = [("bearer_auth".to_owned(), Vec::new())].into_iter().collect();
+                if !operation.security.contains(&requirement) {
+                    operation.security.push(requirement);
+                }
+            }
+
+            fn inferred_early_responses(
+                _: &mut aide::generate::GenContext,
+                _: &mut aide::openapi::Operation,
+            ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
+                vec![(Some(aide::openapi::StatusCode::Code(403)), aide::openapi::Response::default())]
+            }
+        }
+    )*};
+}
+
+documents_bearer_auth!(AuthContext, AuditAuthorized);
+
+impl<R> aide::OperationInput for Authorized<R> {
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        <AuthContext as aide::OperationInput>::operation_input(ctx, operation);
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
+        <AuthContext as aide::OperationInput>::inferred_early_responses(ctx, operation)
+    }
+}
+
+impl<R> aide::OperationInput for Verified<R> {
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        <AuthContext as aide::OperationInput>::operation_input(ctx, operation);
+    }
+
+    fn inferred_early_responses(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
+        <AuthContext as aide::OperationInput>::inferred_early_responses(ctx, operation)
+    }
+}

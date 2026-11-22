@@ -22,12 +22,10 @@ async fn whoami(
 }
 
 pub(crate) fn routes() -> Routes {
-    Routes::new().prefix("api/whoami").add(
+    Routes::new().tag("community").prefix("api/whoami").add(
         "/",
         aide::axum::routing::get_with(whoami, |op| {
-            op.tag("community")
-                .security_requirement("bearer_auth")
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
+            op.response::<401, Json<super::openapi::ApiErrorBody>>()
         }),
     )
 }

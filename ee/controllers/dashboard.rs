@@ -21,22 +21,20 @@ async fn tenant_overview(
 }
 
 pub fn routes() -> Routes {
-    Routes::new().prefix("api/tenant").add(
+    Routes::new().tag("enterprise").prefix("api/tenant").add(
         "/overview",
         aide::axum::routing::get_with(tenant_overview, |op| {
-            op.tag("enterprise")
-                .security_requirement("bearer_auth")
-                .with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["read"]),
-                ))
-                .with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["tenant_get", "tenant_user_list"]),
-                ))
-                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
+            op.with(crate::controllers::openapi::extension(
+                "x-yorishiro-required-scopes",
+                serde_json::json!(["read"]),
+            ))
+            .with(crate::controllers::openapi::extension(
+                "x-yorishiro-required-actions",
+                serde_json::json!(["tenant_get", "tenant_user_list"]),
+            ))
+            .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
+            .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
+            .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
         }),
     )
 }

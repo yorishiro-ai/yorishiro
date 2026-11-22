@@ -113,91 +113,80 @@ async fn fork_template(
 
 pub fn routes() -> Routes {
     Routes::new()
+        .tag("community")
         .prefix("api/template-library")
         .add(
             "/",
             aide::axum::routing::get_with(list_templates, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["template_library_list"]),
-                    ))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["template_library_list"]),
+                ))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/",
             aide::axum::routing::post_with(create_template, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["template_library_create"]),
-                    ))
-                    .response::<201, Json<TemplateRecord>>()
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["template_library_create"]),
+                ))
+                .response::<201, Json<TemplateRecord>>()
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
+                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::get_with(get_template, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["template_library_get"]),
-                    ))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["template_library_get"]),
+                ))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::put_with(update_template, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["template_library_update"]),
-                    ))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
-                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["template_library_update"]),
+                ))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
+                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::delete_with(delete_template, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["template_library_delete"]),
-                    ))
-                    .response_with::<204, (), _>(|op| op.description("Template deleted"))
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["template_library_delete"]),
+                ))
+                .response_with::<204, (), _>(|op| op.description("Template deleted"))
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/fork",
             aide::axum::routing::post_with(fork_template, |op| {
-                op.tag("community")
-                    .security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["template_library_fork"]),
-                    ))
-                    .response::<201, Json<TemplateRecord>>()
-                    .response::<401, Json<super::openapi::ApiErrorBody>>()
-                    .response::<403, Json<super::openapi::ApiErrorBody>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
-                    .response::<422, Json<super::openapi::ApiErrorBody>>()
+                op.with(crate::controllers::openapi::extension(
+                    "x-yorishiro-required-actions",
+                    serde_json::json!(["template_library_fork"]),
+                ))
+                .response::<201, Json<TemplateRecord>>()
+                .response::<401, Json<super::openapi::ApiErrorBody>>()
+                .response::<403, Json<super::openapi::ApiErrorBody>>()
+                .response::<404, Json<super::openapi::ApiErrorBody>>()
+                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
 }
