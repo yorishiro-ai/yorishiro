@@ -9,7 +9,7 @@ use axum::http::HeaderMap;
 use loco_rs::app::AppContext;
 use loco_rs::prelude::async_trait;
 
-use crate::db::{AppContextBackend, DbHandle};
+use crate::db::{DbHandle, is_sqlite};
 use crate::error::YorishiroError;
 use crate::models::api_keys::{ApiKeyScope, AuthContext, Entity, WORKSPACE_HEADER};
 use uuid::Uuid;
@@ -109,7 +109,7 @@ impl Authenticator for DefaultAuthenticator {
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
         let requested = requested_workspace(headers)?;
-        if app.is_sqlite() {
+        if is_sqlite(&app.db) {
             Entity::authenticate_sqlite(&app.db, presented_key, requested).await
         } else {
             let db = app

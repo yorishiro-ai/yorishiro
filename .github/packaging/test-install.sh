@@ -298,7 +298,7 @@ else
   # Started the way the unit does, since there is no systemd here: the same Loco environment
   # selects the packaged production configuration.
   #
-  # No local production.yaml is needed: Loco falls back to production.yaml.example.
+  # No local production.yaml is needed: the binary carries the production defaults.
   #
   # The output goes to a file because `docker exec -d` discards it and PID 1 here is `sleep`,
   # so `docker logs` never shows the server.

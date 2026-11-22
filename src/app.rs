@@ -327,7 +327,6 @@ fn install_services(ctx: AppContext) -> Result<AppContext> {
     initializers::embedding::install(&ctx, &settings);
     initializers::rate_limit::install(&ctx, &settings);
     // One zone parse per boot: per-record timestamp rendering takes the installed copy.
-    ctx.shared_store.insert(settings);
     ctx.shared_store.insert(zone);
     Ok(ctx)
 }

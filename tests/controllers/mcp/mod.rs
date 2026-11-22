@@ -61,7 +61,7 @@ mod input_parity_tests {
             source_id: Some(source_id),
             target_id: Some(target_id),
             relation_type: Some("knows".into()),
-            status: Some(entity_relations::RelationStatus::Deprecated),
+            status: Some("deprecated".into()),
             limit: Some(5),
             offset: Some(5),
         }

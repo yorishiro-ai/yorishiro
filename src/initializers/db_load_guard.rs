@@ -31,12 +31,7 @@ impl Initializer for LoadGuard {
     }
 
     async fn after_routes(&self, router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
-        let settings = ctx
-            .shared_store
-            .get::<crate::data::settings::Settings>()
-            .ok_or_else(|| {
-                loco_rs::Error::Message("application settings were not installed".into())
-            })?;
+        let settings = crate::data::settings::configured(ctx)?;
         if let Some(config) = LoadGuardConfig::from_settings(&settings.db_load_guard) {
             let task_ctx = ctx.clone();
             let task = tokio::spawn(async move { run(task_ctx, config).await });

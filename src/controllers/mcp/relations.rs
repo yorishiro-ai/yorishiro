@@ -13,9 +13,10 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{YorishiroMcpServer, ok_json};
-use crate::dtos::relations::{CreateRelationRequest, SetRelationStatusRequest};
+use crate::dtos::relations::CreateRelationRequest;
+use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
 use crate::models::api_keys::ApiKeyScope;
-use crate::models::entity_relations::{self, SetRelationStatusInput};
+use crate::models::entity_relations::{self, RelationStatus, SetRelationStatusInput};
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct GetRelationArgs {
@@ -34,7 +35,8 @@ pub struct ListRelationsArgs {
     pub relation_type: Option<String>,
     /// Restricts the listing to one state ("active", "deprecated" or "archived").
     /// Omitted, every state is listed.
-    pub status: Option<entity_relations::RelationStatus>,
+    #[schemars(with = "Option<RelationStatus>")]
+    pub status: Option<String>,
     /// Maximum number of results (defaults to 50 if omitted).
     pub limit: Option<i64>,
     /// Number of records to skip (defaults to 0 if omitted).
@@ -44,19 +46,34 @@ pub struct ListRelationsArgs {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct SetRelationStatusArgs {
     pub id: Uuid,
-    #[serde(flatten)]
-    pub body: SetRelationStatusRequest,
+    #[schemars(with = "RelationStatus")]
+    pub status: String,
+}
+
+// Validate inside the tool to keep invalid statuses in the structured tool-error envelope.
+fn parse_status(value: &str) -> Result<RelationStatus, YorishiroError> {
+    RelationStatus::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
+        message: format!("'{value}' is not a relation status"),
+        details: vec![ValidationDetail {
+            field: "/status".into(),
+            problem: "expected active, deprecated, or archived".into(),
+            code: ValidationErrorCode::Other,
+            expected: Some("active, deprecated, archived".into()),
+            actual: Some(value.into()),
+        }],
+        hint: "use active, deprecated, or archived".into(),
+    })
 }
 
 impl TryFrom<ListRelationsArgs> for entity_relations::ListRelationsQuery {
-    type Error = crate::YorishiroError;
+    type Error = YorishiroError;
 
     fn try_from(args: ListRelationsArgs) -> Result<Self, Self::Error> {
         Ok(Self {
             source_id: args.source_id,
             target_id: args.target_id,
             relation_type: args.relation_type,
-            status: args.status,
+            status: args.status.as_deref().map(parse_status).transpose()?,
             page: crate::models::pagination::ListParams::new(args.limit, args.offset),
         })
     }
@@ -138,7 +155,7 @@ impl YorishiroMcpServer {
                 actor,
                 SetRelationStatusInput {
                     id: args.id,
-                    status: args.body.status,
+                    status: try_tool!(parse_status(&args.status)),
                 },
             )
             .await,

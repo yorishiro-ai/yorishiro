@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use uuid::Uuid;
 
-use crate::data::settings::{QueryEmbedding, Settings};
+use crate::data::settings::QueryEmbedding;
 use crate::error::YorishiroError;
 use crate::models::query_embedding_requests::{Entity as Requests, QueryOutcome};
 use crate::models::search;
@@ -140,10 +140,8 @@ pub async fn embed_query(
     workspace_id: Uuid,
     query_text: &str,
 ) -> Result<Vec<f32>, YorishiroError> {
-    let settings = ctx
-        .shared_store
-        .get::<Settings>()
-        .ok_or_else(|| YorishiroError::Internal("application settings missing".into()))?
+    let settings = crate::data::settings::configured(ctx)
+        .map_err(|error| YorishiroError::Internal(error.into()))?
         .query_embedding;
     let scope = Scope {
         ctx,

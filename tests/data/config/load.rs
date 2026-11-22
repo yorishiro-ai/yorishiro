@@ -232,11 +232,11 @@ async fn production_config_is_the_packaged_loco_config() {
     clippy::significant_drop_tightening,
     reason = "environment overrides remain active until this scope ends"
 )]
-async fn production_example_is_used_when_local_config_is_absent() {
+async fn production_uses_embedded_defaults_and_ignores_the_example() {
     let directory = tempfile::tempdir().unwrap();
-    std::fs::copy(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/config/production.yaml"),
+    std::fs::write(
         directory.path().join("production.yaml.example"),
+        "invalid: [",
     )
     .unwrap();
 
@@ -258,11 +258,23 @@ async fn production_example_is_used_when_local_config_is_absent() {
     guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
 
     let config = load(&Environment::Production).unwrap();
+    let file_config = loco_rs::config::Config::from_folder(
+        &Environment::Production,
+        std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/config")),
+    )
+    .unwrap();
+    assert!(
+        serde_json::to_value(&config).unwrap() == serde_json::to_value(&file_config).unwrap(),
+        "embedded and file-based production settings differ"
+    );
     assert_eq!(
         config.database.uri,
         "sqlite:///tmp/packaged-fallback.sqlite3?mode=rwc"
     );
     assert!(!directory.path().join("production.yaml").exists());
+    std::fs::remove_file(directory.path().join("production.yaml.example")).unwrap();
+    let config_without_example = load(&Environment::Production).unwrap();
+    assert_eq!(config_without_example.database.uri, config.database.uri);
 }
 
 #[cfg(unix)]

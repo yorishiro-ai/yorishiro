@@ -8,7 +8,7 @@ use aws_lc_rs::digest::{SHA256, digest};
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect};
 
-use crate::db::{AppContextBackend, DbHandle};
+use crate::db::DbHandle;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::db_enum::db_enum;
 

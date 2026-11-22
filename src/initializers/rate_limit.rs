@@ -17,10 +17,7 @@ pub(crate) fn after_routes(
     ctx: &AppContext,
     credential_paths: &[&'static str],
 ) -> Result<axum::Router> {
-    let settings = ctx
-        .shared_store
-        .get::<Settings>()
-        .ok_or_else(|| loco_rs::Error::Message("application settings missing".into()))?;
+    let settings = crate::data::settings::configured(ctx)?;
     let limiter = Arc::new(RateLimiter::auth(&settings).guarding(credential_paths));
     Ok(router.layer(axum::middleware::from_fn_with_state(
         limiter,

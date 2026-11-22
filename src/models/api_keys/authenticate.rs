@@ -1,8 +1,8 @@
 //! Resolving a presented key to its workspace, tenant and scope, and recording its use.
 
 use super::{
-    AppContextBackend, AuthContext, ColumnTrait, ConnectionTrait, DbHandle, Entity, EntityTrait,
-    Expr, FromQueryResult, Model, QueryFilter, ResultExt, Uuid, WORKSPACE_HEADER, YorishiroError,
+    AuthContext, ColumnTrait, ConnectionTrait, DbHandle, Entity, EntityTrait, Expr,
+    FromQueryResult, Model, QueryFilter, ResultExt, Uuid, WORKSPACE_HEADER, YorishiroError,
     hash_key, stored_scope,
 };
 
@@ -160,7 +160,7 @@ impl Entity {
         app: &loco_rs::app::AppContext,
         auth: &AuthContext,
     ) -> Result<(), YorishiroError> {
-        if app.is_sqlite() {
+        if crate::db::is_sqlite(&app.db) {
             Self::touch_last_used(&app.db, auth.api_key_id).await;
             return Ok(());
         }
