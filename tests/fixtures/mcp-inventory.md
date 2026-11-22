@@ -143,22 +143,13 @@ Input schema:
 {
   "$defs": {
     "ApiKeyScope": {
-      "description": "Permission level held by an API key.\nDeclaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.\nThe wire form matches the DB `scope` column ('read'/'write'/'schema'/'migration').",
-      "oneOf": [
-        {
-          "enum": [
-            "read",
-            "write",
-            "schema"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "migration",
-          "description": "Running a batch migration, and switching maintenance mode.\nAbove `schema` because both act on data already stored.",
-          "type": "string"
-        }
-      ]
+      "enum": [
+        "read",
+        "write",
+        "schema",
+        "migration"
+      ],
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1053,7 +1044,6 @@ Input schema:
 {
   "$defs": {
     "WorkspaceRole": {
-      "description": "Workspace-local authority never grants tenant administration.",
       "enum": [
         "admin",
         "member",
@@ -3056,24 +3046,12 @@ Input schema:
 {
   "$defs": {
     "WorkerClass": {
-      "description": "What kind of compute a queued job is meant for.\n\nThe class is recorded on the job's lifecycle row and decides its priority band and concurrency limit.\nIt does not choose the worker: that is the job's [`crate::workers::target::WorkerTarget`], which a `TenantPrivate` job derives from the tenant that owns its workspace.",
-      "oneOf": [
-        {
-          "const": "tenant_private",
-          "description": "Runs only on compute a single tenant registered for its own workspaces.",
-          "type": "string"
-        },
-        {
-          "const": "official",
-          "description": "Runs only on compute this deployment operates itself.",
-          "type": "string"
-        },
-        {
-          "const": "shared",
-          "description": "Runs on any worker process willing to take the job; the default for a deployment with no registered compute of its own.",
-          "type": "string"
-        }
-      ]
+      "enum": [
+        "tenant_private",
+        "official",
+        "shared"
+      ],
+      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
