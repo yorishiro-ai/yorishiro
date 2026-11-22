@@ -2,8 +2,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "openapi", schema(as = EmbeddingKeyRequest))]
+#[cfg_attr(feature = "openapi", schemars(rename = "EmbeddingKeyRequest"))]
 pub(crate) struct SetEmbeddingKeyRequest {
     pub(crate) base_url: String,
     pub(crate) model: String,
@@ -11,7 +10,6 @@ pub(crate) struct SetEmbeddingKeyRequest {
     pub(crate) api_key: String,
     pub(crate) dimensions: i32,
     #[serde(default)]
-    #[cfg_attr(feature = "openapi", schema(default = false))]
     pub(crate) send_dimensions_param: bool,
     #[serde(default)]
     pub(crate) query_instruction: String,

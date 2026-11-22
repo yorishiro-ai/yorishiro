@@ -61,7 +61,14 @@ fn csrf_clear_cookie() -> String {
 
 /// `GET /auth/oauth/status`: lets a client decide whether to show the "Sign in with SSO" button, without hardcoding a build-time assumption about whether OAuth is configured.
 /// Unlike the other two routes, this one never answers `404` (it reports `enabled: false` when unconfigured, and only the partial-configuration `500` above departs from `200`), since a client that could not tell "not configured" apart from "not present" would have no way to decide whether to show the button at all.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/status", responses((status = 200, body = OAuthStatus), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn status_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/auth/oauth/status",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["enterprise"], "security": [], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<OAuthStatus>()}}}), "500": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 async fn status(State(ctx): State<AppContext>) -> Result<Json<OAuthStatus>, ApiError> {
     Ok(Json(OAuthStatus {
         enabled: OAuthConfig::from_config(&ctx.config)?.is_some(),
@@ -70,7 +77,14 @@ async fn status(State(ctx): State<AppContext>) -> Result<Json<OAuthStatus>, ApiE
 
 /// `GET /auth/oauth/authorize`: starts the login flow by redirecting the browser to the identity provider's own authorization endpoint.
 /// Also sets the CSRF cookie that `callback` checks the returning `state` against: without it, `state`'s HMAC signature alone only proves this server issued *some* state, not that the browser presenting it at callback time is the one that started this flow.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/authorize", responses((status = 302, description = "Redirects to the configured identity provider"), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn authorize_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/auth/oauth/authorize",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["enterprise"], "security": [], "responses": {"302": serde_json::json!({"description": "Redirects to the configured identity provider"}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "500": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 async fn authorize(State(ctx): State<AppContext>) -> Result<Response, ApiError> {
     let config = OAuthConfig::from_config(&ctx.config)?.ok_or_else(not_found)?;
 
@@ -90,7 +104,14 @@ async fn authorize(State(ctx): State<AppContext>) -> Result<Response, ApiError> 
 /// `GET /auth/oauth/callback`: the identity provider's redirect target.
 /// Verifies the OAuth identity and finds or provisions the Yorishiro user and tenant.
 /// Issues a tenant-scoped API key like `POST /auth/root/login` and returns it in a URL fragment to keep it out of access logs and `Referer` headers.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/auth/oauth/callback", params(("code" = Option<String>, Query), ("state" = Option<String>, Query), ("error" = Option<String>, Query)), responses((status = 302, description = "Redirects to the application login result"), (status = 400, body = crate::controllers::openapi::ApiErrorBody), (status = 403, description = "Account recovery or selected workspace access denied"), (status = 422, description = "Workspace selection required or invalid provider claims"), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 500, body = crate::controllers::openapi::ApiErrorBody)), security(()), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn callback_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/auth/oauth/callback",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["enterprise"], "security": [], "responses": {"302": serde_json::json!({"description": "Redirects to the application login result"}), "400": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "Account recovery or selected workspace access denied"}), "422": serde_json::json!({"description": "Workspace selection required or invalid provider claims"}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "500": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "code", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<String>()}, {"name": "state", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<String>()}, {"name": "error", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<String>()}]}),
+    )
+}
 async fn callback(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -139,11 +160,7 @@ async fn callback(
 
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![
-        crate::controllers::openapi::route_inventory::path_doc(__path_status),
-        crate::controllers::openapi::route_inventory::path_doc(__path_authorize),
-        crate::controllers::openapi::route_inventory::path_doc(__path_callback),
-    ]
+    vec![status_doc(), authorize_doc(), callback_doc()]
 }
 
 fn login_success_redirect(api_key: &str, clear_cookie: String) -> Response {

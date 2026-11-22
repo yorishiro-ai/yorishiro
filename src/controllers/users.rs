@@ -8,7 +8,14 @@ use crate::controllers::extractors::{ReadScope, Verified};
 use crate::dtos::users::{UpdateUserRequest, UserRecord};
 use crate::models::user_users;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/users/me", responses((status = 200, body = UserRecord), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn get_current_user_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/users/me",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<UserRecord>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 async fn get_current_user(
     State(ctx): State<AppContext>,
     actor: Verified<ReadScope>,
@@ -19,7 +26,14 @@ async fn get_current_user(
     )))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/users/me", request_body = UpdateUserRequest, responses((status = 200, body = UserRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn update_current_user_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/users/me",
+        axum::http::Method::PUT,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<UpdateUserRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<UserRecord>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "409": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 async fn update_current_user(
     State(ctx): State<AppContext>,
     actor: Verified<ReadScope>,
@@ -40,8 +54,5 @@ pub(crate) fn routes() -> Routes {
 
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_get_current_user),
-        super::openapi::route_inventory::path_doc(__path_update_current_user),
-    ]
+    vec![get_current_user_doc(), update_current_user_doc()]
 }

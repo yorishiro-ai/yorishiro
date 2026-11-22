@@ -63,7 +63,7 @@ pub(crate) async fn list_for_actor(
 }
 
 #[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct ForkRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
@@ -76,7 +76,7 @@ pub struct ForkRecord {
     pub fork_schema_version: i32,
     pub customized: bool,
     pub upstream_version: Option<i32>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    #[cfg_attr(feature = "openapi", schemars(with = "serde_json::Value"))]
     pub definition: MetaSchemaDefinition,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -84,18 +84,17 @@ pub struct ForkRecord {
 
 #[derive(Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "openapi", schema(as = CreateForkRequest))]
+#[cfg_attr(feature = "openapi", schemars(rename = "CreateForkRequest"))]
 pub struct CreateInput {
     pub source_workspace_id: Uuid,
     pub source_schema_id: Uuid,
 }
 
 #[derive(Clone, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "openapi", schema(as = UpdateForkRequest))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "openapi", schemars(rename = "UpdateForkRequest"))]
 pub struct UpdateInput {
-    #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
+    #[cfg_attr(feature = "openapi", schemars(with = "Option<serde_json::Value>"))]
     pub definition: Option<MetaSchemaDefinition>,
     pub action: Option<String>,
     #[serde(default)]

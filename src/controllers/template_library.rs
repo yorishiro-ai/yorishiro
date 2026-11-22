@@ -18,7 +18,14 @@ use crate::models::template_templates::{
     self, CreateTemplateInput, TemplateRecord, UpdateTemplateInput,
 };
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/template-library", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [TemplateRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_list"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn list_templates_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/template-library",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["template_library_list"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<TemplateRecord>>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "page", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}, {"name": "page_size", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}]}),
+    )
+}
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -31,7 +38,14 @@ async fn list_templates(
     Ok(Json(templates))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_get"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn get_template_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/template-library/{id}",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["template_library_get"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<TemplateRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -44,7 +58,14 @@ async fn get_template(
     Ok(Json(template))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/template-library", request_body = CreateTemplateRequest, responses((status = 201, body = TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_create"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn create_template_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/template-library",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<CreateTemplateRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["template_library_create"]), "responses": {"201": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<TemplateRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -69,7 +90,14 @@ async fn create_template(
     Ok((StatusCode::CREATED, Json(template)))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), request_body = UpdateTemplateRequest, responses((status = 200, body = TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_update"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn update_template_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/template-library/{id}",
+        axum::http::Method::PUT,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<UpdateTemplateRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["template_library_update"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<TemplateRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -95,7 +123,14 @@ async fn update_template(
     Ok(Json(template))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/template-library/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Template deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_delete"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn delete_template_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/template-library/{id}",
+        axum::http::Method::DELETE,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["template_library_delete"]), "responses": {"204": serde_json::json!({"description": "Template deleted"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 pub(crate) async fn delete_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -105,7 +140,14 @@ pub(crate) async fn delete_template(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/template-library/{id}/fork", params(("id" = Uuid, Path)), request_body = ForkTemplateRequest, responses((status = 201, body = TemplateRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["template_library_fork"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn fork_template_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/template-library/{id}/fork",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<ForkTemplateRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["template_library_fork"]), "responses": {"201": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<TemplateRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -122,12 +164,12 @@ async fn fork_template(
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::openapi::route_inventory::path_doc(__path_list_templates),
-        super::openapi::route_inventory::path_doc(__path_get_template),
-        super::openapi::route_inventory::path_doc(__path_create_template),
-        super::openapi::route_inventory::path_doc(__path_update_template),
-        super::openapi::route_inventory::path_doc(__path_delete_template),
-        super::openapi::route_inventory::path_doc(__path_fork_template),
+        list_templates_doc(),
+        get_template_doc(),
+        create_template_doc(),
+        update_template_doc(),
+        delete_template_doc(),
+        fork_template_doc(),
     ]
 }
 

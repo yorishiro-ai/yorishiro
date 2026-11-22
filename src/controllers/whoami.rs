@@ -11,7 +11,14 @@ use crate::dtos::whoami::WhoAmIResponse;
 ///
 /// # Errors
 /// Rejects stale credentials or invalid target bindings and propagates lookup failures.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/whoami", responses((status = 200, body = WhoAmIResponse), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn whoami_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/whoami",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<WhoAmIResponse>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 async fn whoami(
     State(app): State<AppContext>,
     AuthContext(ctx): AuthContext,
@@ -25,7 +32,7 @@ async fn whoami(
 
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![super::openapi::route_inventory::path_doc(__path_whoami)]
+    vec![whoami_doc()]
 }
 
 pub(crate) fn routes() -> Routes {

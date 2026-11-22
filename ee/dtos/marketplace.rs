@@ -5,16 +5,13 @@ use uuid::Uuid;
 /// `parse_publish` / `parse_input` and is refused with the API's own validation envelope and hint,
 /// which a serde rejection would replace with a plain-text body.
 #[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct PublishVersionRequest {
-    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    #[cfg_attr(feature = "openapi", schemars(with = "serde_json::Value"))]
     pub(crate) definition: serde_json::Value,
     pub(crate) changelog: Option<String>,
     #[serde(default = "default_publish_status")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(required = false, pattern = "^(draft|pre|stable)$", default = "draft")
-    )]
+    #[cfg_attr(feature = "openapi", schemars(regex(pattern = "^(draft|pre|stable)$")))]
     pub(crate) status: String,
 }
 
@@ -28,14 +25,17 @@ pub(crate) struct ForkParams {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct ForkResponse {
     pub(crate) template_id: Uuid,
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct SetVisibilityRequest {
-    #[cfg_attr(feature = "openapi", schema(value_type = crate::models::template_templates::TemplateVisibility))]
+    #[cfg_attr(
+        feature = "openapi",
+        schemars(with = "crate::models::template_templates::TemplateVisibility")
+    )]
     pub(crate) visibility: String,
 }

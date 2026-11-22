@@ -6,7 +6,14 @@ use loco_rs::{app::AppContext, controller::Routes};
 use crate::controllers::{ApiError, extractors::AuthContext};
 use crate::dtos::iam::{CreateGroup, CreatePolicy, GroupRecord, PolicyRecord};
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/iam/policies/{policy_id}", params(("policy_id" = uuid::Uuid, Path)), request_body = CreatePolicy, responses((status = 200, body = PolicyRecord), (status = 403), (status = 404), (status = 409), (status = 422)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn update_policy_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/policies/{policy_id}",
+        axum::http::Method::PUT,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<CreatePolicy>()}}}, "security": [{"bearer_auth": []}], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<PolicyRecord>()}}}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""}), "409": serde_json::json!({"description": ""}), "422": serde_json::json!({"description": ""})}, "parameters": [{"name": "policy_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn update_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -26,7 +33,14 @@ async fn update_policy(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/iam/policies/{policy_id}", params(("policy_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn delete_policy_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/policies/{policy_id}",
+        axum::http::Method::DELETE,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"204": serde_json::json!({"description": ""}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""})}, "parameters": [{"name": "policy_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn delete_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -36,7 +50,14 @@ async fn delete_policy(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/iam/users/{user_id}/policies/{policy_id}", params(("user_id" = uuid::Uuid, Path), ("policy_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404), (status = 409)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn attach_user_policy_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/users/{user_id}/policies/{policy_id}",
+        axum::http::Method::PUT,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"204": serde_json::json!({"description": ""}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""}), "409": serde_json::json!({"description": ""})}, "parameters": [{"name": "user_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}, {"name": "policy_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn attach_user_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -47,7 +68,14 @@ async fn attach_user_policy(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/iam/users/{user_id}/policies/{policy_id}", params(("user_id" = uuid::Uuid, Path), ("policy_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn detach_user_policy_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/users/{user_id}/policies/{policy_id}",
+        axum::http::Method::DELETE,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"204": serde_json::json!({"description": ""}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""})}, "parameters": [{"name": "user_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}, {"name": "policy_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn detach_user_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -60,7 +88,14 @@ async fn detach_user_policy(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/iam/groups/{group_id}", params(("group_id" = uuid::Uuid, Path)), request_body = CreateGroup, responses((status = 200, body = GroupRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn rename_group_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/groups/{group_id}",
+        axum::http::Method::PUT,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<CreateGroup>()}}}, "security": [{"bearer_auth": []}], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<GroupRecord>()}}}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""})}, "parameters": [{"name": "group_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn rename_group(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -74,7 +109,14 @@ async fn rename_group(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/iam/groups/{group_id}", params(("group_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn delete_group_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/groups/{group_id}",
+        axum::http::Method::DELETE,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"204": serde_json::json!({"description": ""}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""})}, "parameters": [{"name": "group_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn delete_group(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -84,7 +126,14 @@ async fn delete_group(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/audit", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<crate::dtos::iam::AuditRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn list_audit_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/audit",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<crate::dtos::iam::AuditRecord>>()}}}), "403": serde_json::json!({"description": ""})}, "parameters": [{"name": "limit", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}, {"name": "offset", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}]}),
+    )
+}
 async fn list_audit(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -99,7 +148,14 @@ async fn list_audit(
     Ok(Json(events.into_iter().map(Into::into).collect()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/iam/groups", request_body = CreateGroup, responses((status = 201, body = GroupRecord), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn create_group_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/groups",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<CreateGroup>()}}}, "security": [{"bearer_auth": []}], "responses": {"201": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<GroupRecord>()}}}), "403": serde_json::json!({"description": ""})}}),
+    )
+}
 async fn create_group(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -109,7 +165,14 @@ async fn create_group(
     Ok((StatusCode::CREATED, Json(group.into())))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/iam/policies", request_body = CreatePolicy, responses((status = 201, body = PolicyRecord), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn create_policy_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/policies",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<CreatePolicy>()}}}, "security": [{"bearer_auth": []}], "responses": {"201": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<PolicyRecord>()}}}), "403": serde_json::json!({"description": ""})}}),
+    )
+}
 async fn create_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -124,26 +187,26 @@ async fn create_policy(
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::openapi::route_inventory::path_doc(__path_get_iam_policy),
-        super::openapi::route_inventory::path_doc(__path_get_iam_group),
-        super::openapi::route_inventory::path_doc(__path_list_iam_group_policies),
-        super::openapi::route_inventory::path_doc(__path_list_iam_user_policies),
-        super::openapi::route_inventory::path_doc(__path_list_iam_group_members),
-        super::openapi::route_inventory::path_doc(__path_list_iam_policies),
-        super::openapi::route_inventory::path_doc(__path_list_iam_groups),
-        super::openapi::route_inventory::path_doc(__path_update_policy),
-        super::openapi::route_inventory::path_doc(__path_delete_policy),
-        super::openapi::route_inventory::path_doc(__path_detach_group_policy),
-        super::openapi::route_inventory::path_doc(__path_attach_group_policy),
-        super::openapi::route_inventory::path_doc(__path_remove_group_member),
-        super::openapi::route_inventory::path_doc(__path_add_group_member),
-        super::openapi::route_inventory::path_doc(__path_attach_user_policy),
-        super::openapi::route_inventory::path_doc(__path_detach_user_policy),
-        super::openapi::route_inventory::path_doc(__path_rename_group),
-        super::openapi::route_inventory::path_doc(__path_delete_group),
-        super::openapi::route_inventory::path_doc(__path_list_audit),
-        super::openapi::route_inventory::path_doc(__path_create_group),
-        super::openapi::route_inventory::path_doc(__path_create_policy),
+        get_iam_policy_doc(),
+        get_iam_group_doc(),
+        list_iam_group_policies_doc(),
+        list_iam_user_policies_doc(),
+        list_iam_group_members_doc(),
+        list_iam_policies_doc(),
+        list_iam_groups_doc(),
+        update_policy_doc(),
+        delete_policy_doc(),
+        detach_group_policy_doc(),
+        attach_group_policy_doc(),
+        remove_group_member_doc(),
+        add_group_member_doc(),
+        attach_user_policy_doc(),
+        detach_user_policy_doc(),
+        rename_group_doc(),
+        delete_group_doc(),
+        list_audit_doc(),
+        create_group_doc(),
+        create_policy_doc(),
     ]
 }
 
@@ -191,7 +254,14 @@ pub(crate) fn routes() -> Routes {
         .add("/policies", post(create_policy).get(list_iam_policies))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/iam/groups/{group_id}/members/{user_id}", params(("group_id" = uuid::Uuid, Path), ("user_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404), (status = 409)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn add_group_member_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/groups/{group_id}/members/{user_id}",
+        axum::http::Method::PUT,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"204": serde_json::json!({"description": ""}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""}), "409": serde_json::json!({"description": ""})}, "parameters": [{"name": "group_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}, {"name": "user_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn add_group_member(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -201,7 +271,14 @@ async fn add_group_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/iam/groups/{group_id}/members/{user_id}", params(("group_id" = uuid::Uuid, Path), ("user_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404), (status = 409)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn remove_group_member_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/groups/{group_id}/members/{user_id}",
+        axum::http::Method::DELETE,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"204": serde_json::json!({"description": ""}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""}), "409": serde_json::json!({"description": ""})}, "parameters": [{"name": "group_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}, {"name": "user_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn remove_group_member(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -212,7 +289,14 @@ async fn remove_group_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/iam/groups/{group_id}/policies/{policy_id}", params(("group_id" = uuid::Uuid, Path), ("policy_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404), (status = 409)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn attach_group_policy_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/groups/{group_id}/policies/{policy_id}",
+        axum::http::Method::PUT,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"204": serde_json::json!({"description": ""}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""}), "409": serde_json::json!({"description": ""})}, "parameters": [{"name": "group_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}, {"name": "policy_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn attach_group_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -225,7 +309,14 @@ async fn attach_group_policy(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/iam/groups/{group_id}/policies/{policy_id}", params(("group_id" = uuid::Uuid, Path), ("policy_id" = uuid::Uuid, Path)), responses((status = 204), (status = 403), (status = 404), (status = 409)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn detach_group_policy_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/groups/{group_id}/policies/{policy_id}",
+        axum::http::Method::DELETE,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"204": serde_json::json!({"description": ""}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""}), "409": serde_json::json!({"description": ""})}, "parameters": [{"name": "group_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}, {"name": "policy_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn detach_group_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -238,7 +329,14 @@ async fn detach_group_policy(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<GroupRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn list_iam_groups_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/groups",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<GroupRecord>>()}}}), "403": serde_json::json!({"description": ""})}, "parameters": [{"name": "limit", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}, {"name": "offset", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}]}),
+    )
+}
 async fn list_iam_groups(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -253,7 +351,14 @@ async fn list_iam_groups(
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/policies", params(("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<PolicyRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn list_iam_policies_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/policies",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<PolicyRecord>>()}}}), "403": serde_json::json!({"description": ""})}, "parameters": [{"name": "limit", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}, {"name": "offset", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}]}),
+    )
+}
 async fn list_iam_policies(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -268,7 +373,14 @@ async fn list_iam_policies(
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups/{group_id}/members", params(("group_id" = uuid::Uuid, Path), ("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<crate::dtos::iam::GroupMemberRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn list_iam_group_members_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/groups/{group_id}/members",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<crate::dtos::iam::GroupMemberRecord>>()}}}), "403": serde_json::json!({"description": ""})}, "parameters": [{"name": "group_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}, {"name": "limit", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}, {"name": "offset", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}]}),
+    )
+}
 async fn list_iam_group_members(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -285,7 +397,14 @@ async fn list_iam_group_members(
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/users/{user_id}/policies", params(("user_id" = uuid::Uuid, Path), ("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<crate::dtos::iam::UserPolicyRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn list_iam_user_policies_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/users/{user_id}/policies",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<crate::dtos::iam::UserPolicyRecord>>()}}}), "403": serde_json::json!({"description": ""})}, "parameters": [{"name": "user_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}, {"name": "limit", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}, {"name": "offset", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}]}),
+    )
+}
 async fn list_iam_user_policies(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -302,7 +421,14 @@ async fn list_iam_user_policies(
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups/{group_id}/policies", params(("group_id" = uuid::Uuid, Path), ("limit" = Option<i64>, Query), ("offset" = Option<i64>, Query)), responses((status = 200, body = Vec<crate::dtos::iam::GroupPolicyRecord>), (status = 403)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn list_iam_group_policies_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/groups/{group_id}/policies",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<crate::dtos::iam::GroupPolicyRecord>>()}}}), "403": serde_json::json!({"description": ""})}, "parameters": [{"name": "group_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}, {"name": "limit", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}, {"name": "offset", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}]}),
+    )
+}
 async fn list_iam_group_policies(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -319,7 +445,14 @@ async fn list_iam_group_policies(
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/groups/{group_id}", params(("group_id" = uuid::Uuid, Path)), responses((status = 200, body = GroupRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn get_iam_group_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/groups/{group_id}",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<GroupRecord>()}}}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""})}, "parameters": [{"name": "group_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn get_iam_group(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -332,7 +465,14 @@ async fn get_iam_group(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/iam/policies/{policy_id}", params(("policy_id" = uuid::Uuid, Path)), responses((status = 200, body = PolicyRecord), (status = 403), (status = 404)), security(("bearer_auth" = [])), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn get_iam_policy_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/iam/policies/{policy_id}",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<PolicyRecord>()}}}), "403": serde_json::json!({"description": ""}), "404": serde_json::json!({"description": ""})}, "parameters": [{"name": "policy_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn get_iam_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,

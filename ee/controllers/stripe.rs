@@ -73,7 +73,14 @@ pub mod inbound {
 /// Returns 501 without a configured secret, 400 on a missing/invalid signature or malformed body, and 200 once the event has been applied (or was simply not one we act on).
 ///
 /// Returns `impl IntoResponse` with raw status codes rather than going through `ApiError`: Stripe expects plain-text error bodies from webhooks, not the JSON `{"error": {...}}` envelope the rest of this API uses.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/stripe/webhook", params(("Stripe-Signature" = String, Header, description = "Stripe webhook signature")), request_body(content = String, content_type = "application/json"), responses((status = 200, description = "Event accepted"), (status = 400, description = "Plain-text validation error", content_type = "text/plain", body = String), (status = 500, description = "Event processing failed"), (status = 501, description = "Stripe billing is not configured", content_type = "text/plain", body = String)), security(()), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn stripe_webhook_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/stripe/webhook",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["enterprise"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<String>()}}}, "security": [], "responses": {"200": serde_json::json!({"description": "Event accepted"}), "400": serde_json::json!({"description": "Plain-text validation error", "content": {"text/plain": {"schema": crate::controllers::openapi::route_inventory::schema::<String>()}}}), "500": serde_json::json!({"description": "Event processing failed"}), "501": serde_json::json!({"description": "Stripe billing is not configured", "content": {"text/plain": {"schema": crate::controllers::openapi::route_inventory::schema::<String>()}}})}, "parameters": [{"name": "Stripe-Signature", "in": "header", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<String>()}]}),
+    )
+}
 async fn stripe_webhook(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -120,9 +127,7 @@ async fn stripe_webhook(
 
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![crate::controllers::openapi::route_inventory::path_doc(
-        __path_stripe_webhook,
-    )]
+    vec![stripe_webhook_doc()]
 }
 
 pub fn routes() -> Routes {

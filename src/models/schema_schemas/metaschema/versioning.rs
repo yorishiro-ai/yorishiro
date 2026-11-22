@@ -10,7 +10,7 @@ use super::types::{FieldDef, MetaSchemaDefinition};
 //
 // When `is_breaking = true`, the caller must INSERT a new version row.
 #[derive(Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct VersioningDiff {
     pub is_breaking: bool,
     pub reasons: Vec<String>,

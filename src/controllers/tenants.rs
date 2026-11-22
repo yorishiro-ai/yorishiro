@@ -10,7 +10,14 @@ use crate::controllers::extractors::AuthContext;
 use crate::dtos::tenants::DisableTenantRequest;
 use crate::models::tenant_tenants::retirement;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenants/current", responses((status = 200, body = crate::dtos::tenants::TenantRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-iam-action" = json!("tenant_get"))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn detail_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/tenants/current",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-iam-action" :  serde_json::json!("tenant_get"), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::dtos::tenants::TenantRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 async fn detail(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -21,7 +28,14 @@ async fn detail(
     )))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/tenants/current", request_body = crate::dtos::tenants::UpdateTenantRequest, responses((status = 200, body = crate::dtos::tenants::TenantRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-iam-action" = json!("tenant_update"))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn update_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/tenants/current",
+        axum::http::Method::PUT,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::dtos::tenants::UpdateTenantRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-iam-action" :  serde_json::json!("tenant_update"), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::dtos::tenants::TenantRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "409": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 async fn update(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -33,7 +47,14 @@ async fn update(
     )))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenants/current/retirement", responses((status = 200, body = retirement::RetirementInventory), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_get"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn inventory_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/tenants/current/retirement",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["tenant_get"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<retirement::RetirementInventory>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 async fn inventory(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -41,7 +62,14 @@ async fn inventory(
     Ok(Json(retirement::inventory_as(&ctx.db, &actor).await?))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/tenants/current/disable", request_body = DisableTenantRequest, responses((status = 204, description = "Tenant disabled, credentials revoked and work cancelled; data and identities retained, quota still occupied"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_update"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn disable_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/tenants/current/disable",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<DisableTenantRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["tenant_update"]), "responses": {"204": serde_json::json!({"description": "Tenant disabled, credentials revoked and work cancelled; data and identities retained, quota still occupied"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 async fn disable(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -53,12 +81,7 @@ async fn disable(
 
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_detail),
-        super::openapi::route_inventory::path_doc(__path_update),
-        super::openapi::route_inventory::path_doc(__path_inventory),
-        super::openapi::route_inventory::path_doc(__path_disable),
-    ]
+    vec![detail_doc(), update_doc(), inventory_doc(), disable_doc()]
 }
 
 pub(crate) fn routes() -> Routes {

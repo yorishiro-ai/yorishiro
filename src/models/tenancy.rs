@@ -185,7 +185,7 @@ pub async fn list_workspaces_for_user(
 
 /// A login candidate carries tenant labels because workspace names are tenant-local.
 #[derive(serde::Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct LoginWorkspace {
     pub workspace_id: Uuid,
     pub workspace_name: String,
@@ -243,7 +243,7 @@ pub async fn discover_workspaces(
 }
 
 #[derive(serde::Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct LoginMembership {
     pub tenant_id: Uuid,
     pub tenant_name: String,

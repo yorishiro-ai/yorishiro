@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct UserRecord {
     pub(crate) id: Uuid,
     pub(crate) email: Option<String>,
@@ -30,7 +30,6 @@ impl UserRecord {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct UpdateUserRequest {
     /// New display name.
     /// Null clears it.

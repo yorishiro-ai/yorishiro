@@ -25,7 +25,14 @@ fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
         .ok_or_else(|| YorishiroError::Internal("tenant cap policy missing".into()))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/setup/status", responses((status = 200, body = SetupStatusResponse)), security(()), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn status_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/setup/status",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<SetupStatusResponse>()}}})}}),
+    )
+}
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -38,7 +45,14 @@ async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusRespons
     Ok(Json(SetupStatusResponse { setup_required }))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/setup", request_body = SetupRequest, responses((status = 201, body = SetupResponse), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn setup_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/setup",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<SetupRequest>()}}}, "security": [], "responses": {"201": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<SetupResponse>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "409": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -70,10 +84,7 @@ async fn setup(
 
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_status),
-        super::openapi::route_inventory::path_doc(__path_setup),
-    ]
+    vec![status_doc(), setup_doc()]
 }
 
 pub(crate) fn routes() -> Routes {

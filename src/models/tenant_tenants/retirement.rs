@@ -18,7 +18,7 @@ use crate::models::_entities::{
 
 /// A secret-free snapshot, not approval for a later destructive operation.
 #[derive(serde::Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct RetirementInventory {
     pub tenant_id: Uuid,
     pub tenant_name: String,

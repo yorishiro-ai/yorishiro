@@ -24,7 +24,14 @@ use crate::edition::ee::models::marketplace::{
 use crate::models::template_templates::TemplateVisibility;
 
 /// `GET /api/marketplace`: community-visible templates from every tenant, ordered by name then id.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace", params(("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [MarketplaceListing]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_list"]))), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn list_marketplace_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/marketplace",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["enterprise"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["marketplace_list"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<MarketplaceListing>>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "page", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}, {"name": "page_size", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}]}),
+    )
+}
 async fn list_marketplace(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -36,7 +43,14 @@ async fn list_marketplace(
 }
 
 /// `GET /api/marketplace/{id}/versions`: published versions, plus the caller's own drafts when it owns the template.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace/{id}/versions", params(("id" = Uuid, Path), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [TemplateVersionRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_version_list"]))), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn list_versions_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/marketplace/{id}/versions",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["enterprise"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["marketplace_version_list"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<TemplateVersionRecord>>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}, {"name": "page", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}, {"name": "page_size", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}]}),
+    )
+}
 async fn list_versions(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -50,7 +64,14 @@ async fn list_versions(
 }
 
 /// `POST /api/marketplace/{id}/versions`: publish the next version of your own template.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/versions", params(("id" = Uuid, Path)), request_body = crate::edition::ee::controllers::openapi::PublishVersionRequest, responses((status = 201, body = TemplateVersionRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_publish"]))), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn publish_version_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/marketplace/{id}/versions",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["enterprise"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::edition::ee::controllers::openapi::PublishVersionRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["marketplace_publish"]), "responses": {"201": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<TemplateVersionRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 async fn publish_version(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -68,7 +89,14 @@ async fn publish_version(
 }
 
 /// `GET /api/marketplace/{id}/reviews`
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/marketplace/{id}/reviews", params(("id" = Uuid, Path), ("page" = Option<i32>, Query), ("page_size" = Option<i32>, Query)), responses((status = 200, body = [TemplateReviewRecord]), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_review_list"]))), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn list_reviews_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/marketplace/{id}/reviews",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["enterprise"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["marketplace_review_list"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<TemplateReviewRecord>>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}, {"name": "page", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}, {"name": "page_size", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}]}),
+    )
+}
 async fn list_reviews(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -82,7 +110,14 @@ async fn list_reviews(
 }
 
 /// `POST /api/marketplace/{id}/reviews`: leave or replace this tenant's review.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/reviews", params(("id" = Uuid, Path)), request_body = SubmitReviewRequest, responses((status = 200, body = TemplateReviewRecord), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_review_submit"]))), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn submit_review_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/marketplace/{id}/reviews",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["enterprise"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<SubmitReviewRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["marketplace_review_submit"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<TemplateReviewRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 async fn submit_review(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -95,7 +130,14 @@ async fn submit_review(
 }
 
 /// `POST /api/marketplace/{id}/fork`: copy a published version into your own library.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/marketplace/{id}/fork", params(("id" = Uuid, Path), ("version" = Option<i32>, Query)), responses((status = 201, body = ForkResponse), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_fork"]))), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn fork_template_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/marketplace/{id}/fork",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["enterprise"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["marketplace_fork"]), "responses": {"201": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<ForkResponse>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}, {"name": "version", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i32>()}]}),
+    )
+}
 async fn fork_template(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -113,7 +155,14 @@ async fn fork_template(
 }
 
 /// `PUT /api/marketplace/{id}/visibility`: list your own template, or take it back down.
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/marketplace/{id}/visibility", params(("id" = Uuid, Path)), request_body = SetVisibilityRequest, responses((status = 204, description = "Marketplace visibility updated"), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody), (status = 422, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["marketplace_visibility_update"]))), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn set_visibility_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/marketplace/{id}/visibility",
+        axum::http::Method::PUT,
+        || serde_json::json!({"tags": ["enterprise"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<SetVisibilityRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["marketplace_visibility_update"]), "responses": {"204": serde_json::json!({"description": "Marketplace visibility updated"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 async fn set_visibility(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -129,13 +178,13 @@ async fn set_visibility(
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     vec![
-        crate::controllers::openapi::route_inventory::path_doc(__path_list_marketplace),
-        crate::controllers::openapi::route_inventory::path_doc(__path_list_versions),
-        crate::controllers::openapi::route_inventory::path_doc(__path_publish_version),
-        crate::controllers::openapi::route_inventory::path_doc(__path_list_reviews),
-        crate::controllers::openapi::route_inventory::path_doc(__path_submit_review),
-        crate::controllers::openapi::route_inventory::path_doc(__path_fork_template),
-        crate::controllers::openapi::route_inventory::path_doc(__path_set_visibility),
+        list_marketplace_doc(),
+        list_versions_doc(),
+        publish_version_doc(),
+        list_reviews_doc(),
+        submit_review_doc(),
+        fork_template_doc(),
+        set_visibility_doc(),
     ]
 }
 

@@ -12,7 +12,7 @@ pub(crate) use operations::{add_member_in_transaction, is_member, list_members_a
 pub use operations::{create_tenant_user_member, reset_tenant_user_password};
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct MembershipRecord {
     pub user_id: Uuid,
     pub email: Option<String>,
@@ -22,7 +22,7 @@ pub struct MembershipRecord {
 
 /// A point-in-time snapshot, not authorization for a later mutation.
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct MembershipRemovalPreview {
     pub user_id: Uuid,
     pub member: bool,

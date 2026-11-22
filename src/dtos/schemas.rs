@@ -3,7 +3,7 @@ use crate::models::schema_schemas::metaschema::{MetaSchemaDefinition, Versioning
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct CreateSchemaResponse {
     pub(crate) schema: SchemaRecord,
     pub(crate) diff: VersioningDiff,

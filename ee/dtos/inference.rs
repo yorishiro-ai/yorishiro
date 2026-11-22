@@ -3,21 +3,21 @@ use serde::{Deserialize, Serialize};
 use crate::edition::ee::models::inference_jobs::InferenceJobStatus;
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct InferFillResponse {
     pub(crate) job_id: String,
     pub(crate) status: InferFillStatus,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum InferFillStatus {
     Queued,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct InferJobStatusResponse {
     pub(crate) job_id: String,
     pub(crate) status: InferenceJobStatus,
@@ -29,8 +29,7 @@ pub(crate) struct InferJobStatusResponse {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "openapi", schema(as = LlmKeyRequest))]
+#[cfg_attr(feature = "openapi", schemars(rename = "LlmKeyRequest"))]
 pub(crate) struct SetLlmKeyRequest {
     pub(crate) base_url: String,
     pub(crate) model: String,

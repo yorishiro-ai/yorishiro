@@ -12,125 +12,23 @@ pub(crate) const fn mount(router: Router, _inventory: &RouteInventory) -> Router
 #[cfg(feature = "openapi")]
 pub mod implementation {
 
-    use axum::Router;
-    use axum::http::Method;
-    use utoipa::openapi::path::{HttpMethod, Operation, ParameterBuilder, ParameterIn, PathItem};
-    use utoipa::openapi::response::ResponseBuilder;
-    use utoipa::openapi::schema::{KnownFormat, ObjectBuilder, SchemaFormat, Type};
-    use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
-    use utoipa::openapi::{
-        Components, Content, Info, OpenApiBuilder, PathsBuilder, Ref, RefOr, Required, Schema,
-    };
-    use utoipa_swagger_ui::SwaggerUi;
+    use aide::openapi::{Components, OpenApi, SchemaObject};
+    use axum::{Json, Router, routing::get};
 
-    use super::super::route_inventory::{RouteDoc, RouteEntry, RouteInventory};
+    use super::super::route_inventory::RouteInventory;
     use crate::models::iam::policy::{Action, Resource};
 
-    fn document_workspace_selection(entry: &RouteEntry, operation: &mut Operation) {
-        let workspace = Resource::Workspace {
-            tenant_id: uuid::Uuid::nil(),
-            workspace_id: uuid::Uuid::nil(),
-        };
-        let workspace_operation = operation
-            .extensions
-            .as_ref()
-            .and_then(|extensions| extensions.get("x-yorishiro-required-actions"))
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|value| serde_json::from_value::<Action>(value.clone()).ok())
-            .any(|action| action.applies_to(workspace));
-        let key_creation = entry.path == "/api/api-keys" && entry.method == Method::POST;
-        if !workspace_operation && !key_creation {
-            return;
-        }
-        let name = "X-Workspace-Id";
-        let parameters = operation.parameters.get_or_insert_with(Vec::new);
-        if !parameters.iter().any(|parameter| {
-            matches!(parameter, RefOr::T(parameter) if parameter.parameter_in == ParameterIn::Header
-                && parameter.name.eq_ignore_ascii_case(name))
-        }) {
-            let description = if key_creation {
-                "Workspace binding for the new key. Do not send this header with tenant_scoped: true."
-            } else {
-                "Explicit workspace selection. When omitted, operations that require one workspace may return 422 (`workspace_selection_required`) if several workspaces qualify."
-            };
-            parameters.push(
-                ParameterBuilder::new()
-                    .name(name)
-                    .parameter_in(ParameterIn::Header)
-                    .required(Required::False)
-                    .schema(Some(
-                        ObjectBuilder::new()
-                            .schema_type(Type::String)
-                            .format(Some(SchemaFormat::KnownFormat(KnownFormat::Uuid)))
-                            .build(),
-                    ))
-                    .description(Some(description))
-                    .build()
-                    .into(),
-            );
-        }
-        operation
-            .responses
-            .responses
-            .entry("403".into())
-            .or_insert_with(|| {
-                ResponseBuilder::new()
-                    .description(
-                        "The credential is not authorized for this operation or workspace.",
-                    )
-                    .content(
-                        "application/json",
-                        Content::new(Some(Ref::from_schema_name("ApiErrorBody"))),
-                    )
-                    .build()
-                    .into()
-            });
-    }
-
-    ///
     /// # Panics
-    /// Panics if an internal invariant required by this operation is violated.
-    #[must_use]
-    pub fn openapi_method(method: &Method) -> HttpMethod {
-        match *method {
-            Method::GET => HttpMethod::Get,
-            Method::POST => HttpMethod::Post,
-            Method::PUT => HttpMethod::Put,
-            Method::DELETE => HttpMethod::Delete,
-            Method::PATCH => HttpMethod::Patch,
-            Method::HEAD => HttpMethod::Head,
-            Method::OPTIONS => HttpMethod::Options,
-            Method::TRACE => HttpMethod::Trace,
-            _ => panic!("unsupported OpenAPI method: {method}"),
-        }
-    }
-
-    fn doc_for<'a>(docs: &'a [RouteDoc], entry: &RouteEntry) -> &'a RouteDoc {
-        let method = openapi_method(&entry.method);
-        docs.iter()
-            .find(|doc| doc.path == entry.path && doc.methods.contains(&method))
-            .unwrap_or_else(|| {
-                panic!(
-                    "missing OpenAPI metadata for {} {}",
-                    entry.method, entry.path
-                )
-            })
-    }
-
-    ///
-    /// # Panics
-    /// Panics if an internal invariant required by this operation is violated.
-    pub fn add_schema(components: &mut Components, name: String, schema: RefOr<Schema>) {
+    /// Panics if two types use the same schema name with different definitions.
+    pub fn add_schema(components: &mut Components, name: String, schema: SchemaObject) {
         if let Some(existing) = components.schemas.get(&name) {
             assert!(
                 existing == &schema,
                 "conflicting OpenAPI component schema: {name}"
             );
-            return;
+        } else {
+            components.schemas.insert(name, schema);
         }
-        components.schemas.insert(name, schema);
     }
 
     fn collect_refs(value: &serde_json::Value, refs: &mut Vec<String>) {
@@ -185,54 +83,101 @@ pub mod implementation {
     /// Build the document for the operations in the runtime route inventory.
     ///
     /// # Panics
-    /// Panics if an internal invariant required by this operation is violated.
+    /// Panics if route metadata or component schemas are inconsistent.
     #[must_use]
-    pub fn openapi_for(inventory: &RouteInventory) -> utoipa::openapi::OpenApi {
-        let mut paths = PathsBuilder::new();
-        let mut components = Components::new();
+    pub fn openapi_for(inventory: &RouteInventory) -> OpenApi {
+        let mut components = Components::default();
+        let mut paths = serde_json::Map::new();
         let mut operations = Vec::new();
-        components.add_security_scheme(
-            "bearer_auth",
-            SecurityScheme::Http(
-                HttpBuilder::new()
-                    .scheme(HttpAuthScheme::Bearer)
-                    .bearer_format("yorishiro-api-key")
-                    .build(),
-            ),
-        );
-
         for entry in inventory.public() {
-            let doc = doc_for(&inventory.docs, entry);
-            let method = openapi_method(&entry.method);
-            let mut operation = doc.operation.clone();
-            operation.operation_id = Some(entry.operation_id.clone());
-            document_workspace_selection(entry, &mut operation);
-            operations
-                .push(serde_json::to_value(&operation).expect("OpenAPI operation must serialize"));
-            paths = paths.path(&entry.path, PathItem::new(method, operation));
+            let doc = inventory
+                .docs
+                .iter()
+                .find(|doc| doc.path == entry.path && doc.methods.contains(&entry.method))
+                .expect("missing OpenAPI metadata");
+            let mut operation =
+                serde_json::to_value(&doc.operation).expect("OpenAPI operation must serialize");
+            operation["operationId"] = entry.operation_id.clone().into();
+            let workspace = Resource::Workspace {
+                tenant_id: uuid::Uuid::nil(),
+                workspace_id: uuid::Uuid::nil(),
+            };
+            let workspace_operation = operation["x-yorishiro-required-actions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|value| serde_json::from_value::<Action>(value.clone()).ok())
+                .any(|action| action.applies_to(workspace));
+            let key_creation =
+                entry.path == "/api/api-keys" && entry.method == axum::http::Method::POST;
+            if workspace_operation || key_creation {
+                let description = if key_creation {
+                    "Workspace binding for the new key. Do not send this header with tenant_scoped: true."
+                } else {
+                    "Explicit workspace selection. When omitted, operations that require one workspace may return 422 (`workspace_selection_required`) if several workspaces qualify."
+                };
+                let object = operation
+                    .as_object_mut()
+                    .expect("OpenAPI operation must be an object");
+                let parameters = object
+                    .entry("parameters")
+                    .or_insert_with(|| serde_json::json!([]))
+                    .as_array_mut()
+                    .expect("parameters must be an array");
+                if !parameters.iter().any(|parameter| {
+                    parameter["in"] == "header"
+                        && parameter["name"]
+                            .as_str()
+                            .is_some_and(|name| name.eq_ignore_ascii_case("X-Workspace-Id"))
+                }) {
+                    parameters.push(serde_json::json!({"name": "X-Workspace-Id", "in": "header", "required": false, "description": description, "schema": {"type": "string", "format": "uuid"}}));
+                }
+                operation["responses"].as_object_mut().expect("responses must be an object").entry("403").or_insert_with(|| serde_json::json!({"description": "The credential is not authorized for this operation or workspace.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiErrorBody"}}}}));
+            }
+            paths
+                .entry(entry.path.clone())
+                .or_insert_with(|| serde_json::json!({}))
+                [entry.method.as_str().to_ascii_lowercase()] = operation.clone();
+            operations.push(operation);
             for (name, schema) in &doc.schemas {
                 add_schema(&mut components, name.clone(), schema.clone());
             }
         }
-
-        let mut error_schemas = Vec::new();
-        <super::super::ApiErrorBody as utoipa::ToSchema>::schemas(&mut error_schemas);
-        for (name, schema) in error_schemas {
-            add_schema(&mut components, name, schema);
-        }
-
         validate_schema_refs(operations, &components);
-
-        OpenApiBuilder::new()
-            .info(Info::new("Yorishiro REST API", env!("CARGO_PKG_VERSION")))
-            .paths(paths.build())
-            .components(Some(components))
-            .build()
+        components.security_schemes.insert(
+            "bearer_auth".into(),
+            serde_json::from_value(serde_json::json!({"type": "http", "scheme": "bearer", "bearerFormat": "yorishiro-api-key"}))
+                .expect("bearer security scheme must deserialize"),
+        );
+        OpenApi {
+            openapi: "3.1.0".into(),
+            info: aide::openapi::Info {
+                title: "Yorishiro REST API".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                ..Default::default()
+            },
+            paths: Some(
+                serde_json::from_value(serde_json::Value::Object(paths))
+                    .expect("OpenAPI paths must deserialize"),
+            ),
+            components: Some(components),
+            ..Default::default()
+        }
     }
 
     pub(crate) fn mount(router: Router, inventory: &RouteInventory) -> Router {
-        let swagger = SwaggerUi::new("/docs").url("/docs/openapi.json", openapi_for(inventory));
-        router.merge(swagger)
+        let document = openapi_for(inventory);
+        router
+            .route(
+                "/docs",
+                get(aide::swagger::Swagger::new("/docs/openapi.json")
+                    .with_title("Yorishiro REST API")
+                    .axum_handler()),
+            )
+            .route(
+                "/docs/openapi.json",
+                get(move || async move { Json(document) }),
+            )
     }
 }
 

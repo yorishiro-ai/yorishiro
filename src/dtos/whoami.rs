@@ -3,7 +3,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct WhoAmIResponse {
     pub(crate) workspace_id: Option<Uuid>,
     pub(crate) tenant_id: Uuid,

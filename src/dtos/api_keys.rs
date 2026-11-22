@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Deserialize, schemars::JsonSchema)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CreateApiKeyRequest {
     pub(crate) name: String,
@@ -37,7 +36,7 @@ impl CreateApiKeyRequest {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct ApiKeyRecord {
     pub(crate) id: Uuid,
     pub(crate) prefix: String,
@@ -49,7 +48,7 @@ pub(crate) struct ApiKeyRecord {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct CreateApiKeyResponse {
     pub(crate) id: Uuid,
     pub(crate) prefix: String,
@@ -61,7 +60,7 @@ pub(crate) struct CreateApiKeyResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct ListApiKeysResponse {
     pub(crate) keys: Vec<ApiKeyRecord>,
 }

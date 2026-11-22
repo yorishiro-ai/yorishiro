@@ -11,7 +11,14 @@ use crate::controllers::ApiError;
 use crate::edition::ee::dtos::dashboard::TenantOverview;
 use crate::edition::ee::models::tenant_tenants;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tenant/overview", responses((status = 200, body = TenantOverview), (status = 401, body = crate::controllers::openapi::ApiErrorBody), (status = 403, body = crate::controllers::openapi::ApiErrorBody), (status = 404, body = crate::controllers::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["tenant_get", "tenant_user_list"]))), tag = "enterprise"))]
+#[cfg(feature = "openapi")]
+fn tenant_overview_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/tenant/overview",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["enterprise"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["tenant_get", "tenant_user_list"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<TenantOverview>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::controllers::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 async fn tenant_overview(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -30,7 +37,5 @@ pub fn routes() -> Routes {
 
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
-    vec![crate::controllers::openapi::route_inventory::path_doc(
-        __path_tenant_overview,
-    )]
+    vec![tenant_overview_doc()]
 }

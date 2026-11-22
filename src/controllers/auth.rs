@@ -16,14 +16,14 @@ use crate::dtos::auth::{
 use crate::error::YorishiroError;
 use crate::models::{tenancy, user_users};
 
-#[cfg_attr(feature = "openapi", utoipa::path(
-    post,
-    path = "/auth/signup",
-    request_body = SignupRequest,
-    responses((status = 201, body = SignupResponse), (status = 422, body = super::openapi::ApiErrorBody)),
-    security(()),
-    tag = "community"
-))]
+#[cfg(feature = "openapi")]
+fn signup_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/auth/signup",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<SignupRequest>()}}}, "security": [], "responses": {"201": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<SignupResponse>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 /// Creates a brand-new tenant whose root is the caller; there is no workspace yet.
 ///
 /// The new tenant can be managed using a tenant-scoped login key.
@@ -59,7 +59,14 @@ async fn signup(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/root/login", request_body = RootLoginRequest, responses((status = 200, body = LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn root_login_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/auth/root/login",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<RootLoginRequest>()}}}, "security": [], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<LoginResponse>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 async fn root_login(
     State(ctx): State<AppContext>,
     Json(body): Json<RootLoginRequest>,
@@ -70,7 +77,14 @@ async fn root_login(
     finish_login(&ctx, user, None).await
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/auth/tenant/login", params(("x-tenant-id" = uuid::Uuid, Header)), request_body = TenantLoginRequest, responses((status = 200, body = LoginResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(()), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn tenant_login_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/auth/tenant/login",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<TenantLoginRequest>()}}}, "security": [], "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<LoginResponse>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "x-tenant-id", "in": "header", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn tenant_login(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -121,9 +135,5 @@ pub fn routes() -> Routes {
 
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_signup),
-        super::openapi::route_inventory::path_doc(__path_root_login),
-        super::openapi::route_inventory::path_doc(__path_tenant_login),
-    ]
+    vec![signup_doc(), root_login_doc(), tenant_login_doc()]
 }

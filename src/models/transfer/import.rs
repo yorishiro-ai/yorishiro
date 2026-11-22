@@ -18,7 +18,7 @@ use super::ExportRecord;
 //
 // The caller supplies an RLS-scoped transaction and commits only after all records and embedding jobs succeed; an error rolls back on drop.
 #[derive(Clone, Default, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct ImportResult {
     pub schemas: u64,
     pub entities: u64,

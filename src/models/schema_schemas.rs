@@ -258,19 +258,19 @@ async fn deletion_blockers(
 //
 // `definition` is JSONB in the DB, but the application layer always treats it as a parsed `MetaSchemaDefinition`.
 #[derive(Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct SchemaRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,
     pub name: String,
     pub version: i32,
-    #[cfg_attr(feature = "openapi", schema(value_type = serde_json::Value))]
+    #[cfg_attr(feature = "openapi", schemars(with = "serde_json::Value"))]
     pub definition: MetaSchemaDefinition,
     pub status: SchemaStatus,
     pub origin_template_id: Option<Uuid>,
     pub origin_status: SchemaOriginStatus,
-    #[cfg_attr(feature = "openapi", schema(value_type = Option<serde_json::Value>))]
+    #[cfg_attr(feature = "openapi", schemars(with = "Option<serde_json::Value>"))]
     pub origin_snapshot: Option<MetaSchemaDefinition>,
     pub origin_updated_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -382,7 +382,7 @@ pub(crate) async fn get_by_id(
 ///
 /// Lives here because it names `schema_schemas` fields (`schema_id`, `version`) this module already owns.
 #[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct UpstreamChange {
     pub workspace_id: Uuid,
     pub schema_id: Uuid,
@@ -400,7 +400,7 @@ pub struct UpstreamChange {
 
 /// Counts the decisions in a computed origin merge plan.
 #[derive(Clone, Default, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct MergeDiffSummary {
     pub total_fields: usize,
     pub auto_add: usize,
@@ -413,7 +413,7 @@ pub struct MergeDiffSummary {
 /// A schema in a listing.
 /// A lightweight summary that omits the `definition` body.
 #[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct SchemaSummary {
     pub id: Uuid,
     pub workspace_id: Uuid,

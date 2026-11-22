@@ -45,7 +45,7 @@ pub const TEMPLATES: &[BuiltinTemplate] = &[
 
 /// Summary of a built-in schema template, returned by `list_templates` so a caller can pick a `template_id` without first fetching every template's full definition.
 #[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct TemplateSummary {
     pub id: String,
     pub name: String,

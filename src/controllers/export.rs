@@ -10,7 +10,14 @@ use crate::controllers::extractors::{Authorized, ReadScope, Verified};
 use crate::models::transfer::export;
 
 /// Line-delimited JSON export of every schema, entity, and relation belonging to the workspace, one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/export.jsonl", responses((status = 200, description = "Newline-delimited JSON export, at most 8 MiB and 10,000 records", content_type = "application/x-ndjson", body = String), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["export"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn export_jsonl_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/export.jsonl",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["export"]), "responses": {"200": serde_json::json!({"description": "Newline-delimited JSON export, at most 8 MiB and 10,000 records", "content": {"application/x-ndjson": {"schema": crate::controllers::openapi::route_inventory::schema::<String>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 pub(crate) async fn export_jsonl(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
@@ -34,9 +41,7 @@ pub(crate) async fn export_jsonl(
 
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![super::openapi::route_inventory::path_doc(
-        __path_export_jsonl,
-    )]
+    vec![export_jsonl_doc()]
 }
 
 pub fn routes() -> Routes {

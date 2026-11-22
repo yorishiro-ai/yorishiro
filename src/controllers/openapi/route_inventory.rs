@@ -3,13 +3,11 @@
 //! It checks that each public route has `OpenAPI` documentation and that anything left undocumented is an explicitly allowed exclusion.
 
 #[cfg(feature = "openapi")]
-use super::swagger::implementation::openapi_method;
+use aide::openapi::Operation;
+#[cfg(feature = "openapi")]
+use aide::openapi::SchemaObject;
 use axum::http::Method;
 use loco_rs::controller::AppRoutes;
-#[cfg(feature = "openapi")]
-use utoipa::openapi::path::{HttpMethod, Operation};
-#[cfg(feature = "openapi")]
-use utoipa::openapi::{RefOr, Schema};
 
 /// Whether a route is part of the public REST contract or an implementation endpoint.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -43,24 +41,58 @@ pub struct RouteInventory {
 #[derive(Clone)]
 pub struct RouteDoc {
     pub(crate) path: String,
-    pub(crate) methods: Vec<HttpMethod>,
+    pub(crate) methods: Vec<Method>,
     pub(crate) operation: Operation,
-    pub(crate) schemas: Vec<(String, RefOr<Schema>)>,
+    pub(crate) schemas: Vec<(String, SchemaObject)>,
 }
 
 #[cfg(feature = "openapi")]
-pub(crate) fn path_doc<P>(_: P) -> RouteDoc
-where
-    P: utoipa::Path + utoipa::__dev::SchemaReferences,
-{
-    let mut schemas = Vec::new();
-    <P as utoipa::__dev::SchemaReferences>::schemas(&mut schemas);
+pub(crate) fn path_doc(
+    path: &str,
+    method: Method,
+    operation: impl FnOnce() -> serde_json::Value,
+) -> RouteDoc {
+    aide::generate::reset_context();
+    let operation = serde_json::from_value(operation())
+        .unwrap_or_else(|error| panic!("invalid OpenAPI metadata for {method} {path}: {error}"));
+    let schemas = aide::generate::in_context(|ctx| {
+        ctx.schema
+            .take_definitions(true)
+            .into_iter()
+            .map(|(name, value)| {
+                (
+                    name,
+                    SchemaObject {
+                        json_schema: value
+                            .try_into()
+                            .expect("JSON schema must be an object or boolean"),
+                        external_docs: None,
+                        example: None,
+                    },
+                )
+            })
+            .collect()
+    });
     RouteDoc {
-        path: P::path(),
-        methods: P::methods(),
-        operation: P::operation(),
+        path: path.into(),
+        methods: vec![method],
+        operation,
         schemas,
     }
+}
+
+#[cfg(feature = "openapi")]
+pub(crate) fn schema<T: schemars::JsonSchema>() -> serde_json::Value {
+    aide::generate::in_context(|ctx| {
+        let schema = serde_json::to_value(ctx.schema.subschema_for::<T>())
+            .expect("JSON schema must serialize");
+        // OpenAPI schema objects cannot deserialize JSON Schema's boolean shorthand.
+        match schema {
+            serde_json::Value::Bool(true) => serde_json::json!({}),
+            serde_json::Value::Bool(false) => serde_json::json!({"not": {}}),
+            schema => schema,
+        }
+    })
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -155,8 +187,7 @@ impl RouteInventory {
             for entry in self.public() {
                 assert!(
                     self.docs.iter().any(|doc| {
-                        doc.path == entry.path
-                            && doc.methods.contains(&openapi_method(&entry.method))
+                        doc.path == entry.path && doc.methods.contains(&entry.method)
                     }),
                     "missing OpenAPI metadata for {} {}",
                     entry.method,
@@ -166,8 +197,7 @@ impl RouteInventory {
             for doc in &self.docs {
                 assert!(
                     self.public().any(|entry| {
-                        doc.path == entry.path
-                            && doc.methods.contains(&openapi_method(&entry.method))
+                        doc.path == entry.path && doc.methods.contains(&entry.method)
                     }),
                     "OpenAPI metadata has no composed route: {}",
                     doc.path

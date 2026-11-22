@@ -21,7 +21,7 @@ db_enum! {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct RelationRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,

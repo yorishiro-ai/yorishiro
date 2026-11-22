@@ -5,7 +5,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct CreateEntityRequest {
     pub schema_name: String,
     pub entity_type: String,
@@ -13,27 +13,27 @@ pub struct CreateEntityRequest {
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct FillDefaultsRequest {
     pub(crate) schema_name: String,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct FillDefaultsResponse {
     pub(crate) schema_name: String,
     pub(crate) job_id: Uuid,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct UndoResponse {
     pub(crate) job_id: Uuid,
     pub(crate) snapshot_job_id: Uuid,
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct UpdateEntityRequest {
     pub(crate) data: Value,
     /// The entity's `updated_at` as the client read it; a mismatch is refused with a 409 conflict.
@@ -76,7 +76,7 @@ impl TryFrom<ListEntitiesParams> for entity_entities::ListEntitiesQuery {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct ReindexResponse {
     /// The job ID assigned by the queue provider.
     pub(crate) job_id: String,

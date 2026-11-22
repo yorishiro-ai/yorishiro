@@ -177,13 +177,10 @@ pub(crate) fn licence_required(
     mut docs: Vec<crate::controllers::openapi::route_inventory::RouteDoc>,
 ) -> Vec<crate::controllers::openapi::route_inventory::RouteDoc> {
     for doc in &mut docs {
-        doc.operation
-            .extensions
-            .get_or_insert_with(Default::default)
-            .insert(
-                "x-yorishiro-licence-required".into(),
-                serde_json::json!(true),
-            );
+        doc.operation.extensions.insert(
+            "x-yorishiro-licence-required".into(),
+            serde_json::json!(true),
+        );
     }
     docs
 }

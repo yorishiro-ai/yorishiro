@@ -182,7 +182,7 @@ impl ActiveModelBehavior for ActiveModel {
 //
 // Distinct from the generated `Model` because it excludes `embedding` (stored separately in `entity_embeddings`), so SQLite deserialization does not trip on the PgVector type.
 #[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct EntityRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,
@@ -319,7 +319,7 @@ pub(crate) struct EntitySnapshot {
 
 /// What undoing a job put back.
 #[derive(Clone, Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct UndoReport {
     pub job_id: Uuid,
     /// Entities restored to the data they held before.

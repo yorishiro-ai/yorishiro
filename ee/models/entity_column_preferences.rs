@@ -20,7 +20,7 @@ pub const MAX_VISIBLE_COLUMNS: usize = 12;
 
 /// The visible columns for one entity type, in display order.
 #[derive(Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct ColumnPreference {
     pub(crate) workspace_id: Uuid,
     pub(crate) entity_type: String,

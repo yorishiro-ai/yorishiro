@@ -13,7 +13,14 @@ use crate::dtos::jobs::QueuedJobResponse;
 /// Requires `SchemaScope` (rather than `WriteScope`) since an import can create schemas, which is itself a schema-scope-only operation elsewhere in the API.
 ///
 /// Accepted imports run all-or-nothing on a worker; poll `/api/import-jobs/{job_id}` for completion.
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/import.jsonl", request_body(content = String, content_type = "application/x-ndjson"), responses((status = 202, body = QueuedJobResponse), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["import_create"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn import_jsonl_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/import.jsonl",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/x-ndjson": {"schema": crate::controllers::openapi::route_inventory::schema::<String>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["schema"]), "x-yorishiro-required-actions" :  serde_json::json!(["import_create"]), "responses": {"202": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<QueuedJobResponse>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 pub(crate) async fn import_jsonl(
     State(ctx): State<AppContext>,
     verified: Verified<SchemaScope>,
@@ -35,10 +42,7 @@ pub(crate) async fn import_jsonl(
 
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![
-        super::openapi::route_inventory::path_doc(__path_import_jsonl),
-        super::openapi::route_inventory::path_doc(__path_import_job_status),
-    ]
+    vec![import_jsonl_doc(), import_job_status_doc()]
 }
 
 pub fn routes() -> Routes {
@@ -47,7 +51,14 @@ pub fn routes() -> Routes {
         .add("/api/import-jobs/{job_id}", get(import_job_status))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/import-jobs/{job_id}", params(("job_id" = uuid::Uuid, Path), ("X-Workspace-Id" = Option<uuid::Uuid>, Header)), responses((status = 200, body = crate::models::queue_job_lifecycles::BulkJobStatus), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["schema"])), ("x-yorishiro-required-actions" = json!(["import_job_get"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn import_job_status_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/import-jobs/{job_id}",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["schema"]), "x-yorishiro-required-actions" :  serde_json::json!(["import_job_get"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::models::queue_job_lifecycles::BulkJobStatus>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "job_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}, {"name": "X-Workspace-Id", "in": "header", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<uuid::Uuid>()}]}),
+    )
+}
 async fn import_job_status(
     State(ctx): State<AppContext>,
     verified: Verified<SchemaScope>,

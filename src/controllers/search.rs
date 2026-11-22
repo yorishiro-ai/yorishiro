@@ -8,7 +8,14 @@ use crate::controllers::extractors::{ReadScope, Verified, search_token_limiter};
 use crate::dtos::search::SearchEntitiesParams;
 use crate::models::search::{self, SearchHit};
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/search", params(("query_text" = String, Query, description = "Text to embed and search for"), ("entity_type" = Option<String>, Query), ("filter" = Option<String>, Query, description = "JSON-encoded containment filter"), ("limit" = Option<i64>, Query)), responses((status = 200, body = [SearchHit]), (status = 401, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody), (status = 503, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"])), ("x-yorishiro-required-actions" = json!(["search"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn search_entities_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/search",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["search"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<SearchHit>>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "503": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "query_text", "in": "query", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<String>()}, {"name": "entity_type", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<String>()}, {"name": "filter", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<String>()}, {"name": "limit", "in": "query", "required": false, "schema": crate::controllers::openapi::route_inventory::schema::<i64>()}]}),
+    )
+}
 pub(crate) async fn search_entities(
     State(ctx): State<AppContext>,
     // `Verified`, not `Authorized`: no connection is acquired here until after the slow embedding call below.
@@ -30,9 +37,7 @@ pub(crate) async fn search_entities(
 
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
-    vec![super::openapi::route_inventory::path_doc(
-        __path_search_entities,
-    )]
+    vec![search_entities_doc()]
 }
 
 pub fn routes() -> Routes {

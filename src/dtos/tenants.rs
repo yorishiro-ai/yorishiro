@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct DisableTenantRequest {
     /// Explicitly confirms the authenticated administrator's tenant UUID.
     pub(crate) confirmed_tenant_id: Uuid,
@@ -11,7 +11,6 @@ pub(crate) struct DisableTenantRequest {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct UpdateTenantRequest {
     pub(crate) name: Option<String>,
     /// Explicitly replace the manual workspace cap, including clearing it with null.
@@ -21,7 +20,7 @@ pub(crate) struct UpdateTenantRequest {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct TenantRecord {
     pub(crate) id: Uuid,
     pub(crate) name: String,

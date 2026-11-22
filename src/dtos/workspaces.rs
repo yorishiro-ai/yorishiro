@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct WorkspaceMemberRecord {
     pub user_id: Uuid,
     pub role: crate::models::workspace_memberships::WorkspaceRole,
@@ -12,13 +12,13 @@ pub struct WorkspaceMemberRecord {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct GrantWorkspaceMemberRequest {
     pub(crate) role: crate::models::workspace_memberships::WorkspaceRole,
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct CreateWorkspaceRequest {
     pub(crate) name: String,
     /// Explicit operational cap on entities, independent of any additional deployment policy.
@@ -31,7 +31,7 @@ pub(crate) struct CreateWorkspaceRequest {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub(crate) struct WorkspaceDetail {
     pub(crate) id: Uuid,
     pub(crate) tenant_id: Uuid,
@@ -48,7 +48,6 @@ pub(crate) struct WorkspaceDetail {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub(crate) struct UpdateWorkspaceRequest {
     pub(crate) name: Option<String>,
     /// When true, replace the manual cap, including clearing it with null.

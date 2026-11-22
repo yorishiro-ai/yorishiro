@@ -16,7 +16,14 @@ use crate::models::tenancy;
 use crate::models::workspace_workspaces;
 use crate::models::workspace_workspaces::WorkspaceRecord;
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces", responses((status = 200, body = [WorkspaceRecord]), (status = 401, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_list", "workspace_get"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn list_workspaces_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/workspaces",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["workspace_list", "workspace_get"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<WorkspaceRecord>>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 pub(crate) async fn list_workspaces(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -32,7 +39,14 @@ pub(crate) async fn list_workspaces(
     Ok(Json(records))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/workspaces", request_body = CreateWorkspaceRequest, responses((status = 201, body = WorkspaceRecord), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 422, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_create"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn create_workspace_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/workspaces",
+        axum::http::Method::POST,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<CreateWorkspaceRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["workspace_create"]), "responses": {"201": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<WorkspaceRecord>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "422": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}}),
+    )
+}
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -52,7 +66,14 @@ async fn create_workspace(
     Ok((StatusCode::CREATED, Json(workspace)))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 200, body = WorkspaceDetail), (status = 401, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-scopes" = json!(["read"]))), extensions(("x-yorishiro-required-actions" = json!(["workspace_get"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn get_workspace_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/workspaces/{id}",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-scopes" :  serde_json::json!(["read"]), "x-yorishiro-required-actions" :  serde_json::json!(["workspace_get"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<WorkspaceDetail>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -66,7 +87,14 @@ async fn get_workspace(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), request_body = crate::dtos::workspaces::UpdateWorkspaceRequest, responses((status = 200, body = WorkspaceRecord), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_update"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn update_workspace_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/workspaces/{id}",
+        axum::http::Method::PUT,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::dtos::workspaces::UpdateWorkspaceRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["workspace_update"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<WorkspaceRecord>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 async fn update_workspace(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -78,7 +106,14 @@ async fn update_workspace(
     ))
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}", params(("id" = Uuid, Path)), responses((status = 204, description = "Workspace deleted"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody), (status = 409, description = "Last workspace or referenced by schema forks", body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_delete"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn delete_workspace_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/workspaces/{id}",
+        axum::http::Method::DELETE,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["workspace_delete"]), "responses": {"204": serde_json::json!({"description": "Workspace deleted"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "409": serde_json::json!({"description": "Last workspace or referenced by schema forks", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 pub(crate) async fn delete_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -91,18 +126,25 @@ pub(crate) async fn delete_workspace(
 #[cfg(feature = "openapi")]
 pub(crate) fn openapi_docs() -> Vec<super::openapi::route_inventory::RouteDoc> {
     vec![
-        super::openapi::route_inventory::path_doc(__path_list_workspaces),
-        super::openapi::route_inventory::path_doc(__path_create_workspace),
-        super::openapi::route_inventory::path_doc(__path_get_workspace),
-        super::openapi::route_inventory::path_doc(__path_update_workspace),
-        super::openapi::route_inventory::path_doc(__path_delete_workspace),
-        super::openapi::route_inventory::path_doc(__path_grant_member),
-        super::openapi::route_inventory::path_doc(__path_list_members),
-        super::openapi::route_inventory::path_doc(__path_revoke_member),
+        list_workspaces_doc(),
+        create_workspace_doc(),
+        get_workspace_doc(),
+        update_workspace_doc(),
+        delete_workspace_doc(),
+        grant_member_doc(),
+        list_members_doc(),
+        revoke_member_doc(),
     ]
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/workspaces/{id}/members/{user_id}", params(("id" = Uuid, Path), ("user_id" = Uuid, Path)), request_body = crate::dtos::workspaces::GrantWorkspaceMemberRequest, responses((status = 204, description = "Direct workspace grant saved"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_update"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn grant_member_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/workspaces/{id}/members/{user_id}",
+        axum::http::Method::PUT,
+        || serde_json::json!({"tags": ["community"], "requestBody": {"required": true, "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<crate::dtos::workspaces::GrantWorkspaceMemberRequest>()}}}, "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["workspace_update"]), "responses": {"204": serde_json::json!({"description": "Direct workspace grant saved"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}, {"name": "user_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 async fn grant_member(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -114,7 +156,14 @@ async fn grant_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(delete, path = "/api/workspaces/{id}/members/{user_id}", params(("id" = Uuid, Path), ("user_id" = Uuid, Path)), responses((status = 204, description = "Direct workspace grant and bound credentials revoked"), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody), (status = 404, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_update"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn revoke_member_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/workspaces/{id}/members/{user_id}",
+        axum::http::Method::DELETE,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["workspace_update"]), "responses": {"204": serde_json::json!({"description": "Direct workspace grant and bound credentials revoked"}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "404": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}, {"name": "user_id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 async fn revoke_member(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
@@ -124,7 +173,14 @@ async fn revoke_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/workspaces/{id}/members", params(("id" = Uuid, Path)), responses((status = 200, body = [crate::dtos::workspaces::WorkspaceMemberRecord]), (status = 401, body = super::openapi::ApiErrorBody), (status = 403, body = super::openapi::ApiErrorBody)), security(("bearer_auth" = [])), extensions(("x-yorishiro-required-actions" = json!(["workspace_get"]))), tag = "community"))]
+#[cfg(feature = "openapi")]
+fn list_members_doc() -> crate::controllers::openapi::route_inventory::RouteDoc {
+    crate::controllers::openapi::route_inventory::path_doc(
+        "/api/workspaces/{id}/members",
+        axum::http::Method::GET,
+        || serde_json::json!({"tags": ["community"], "security": [{"bearer_auth": []}], "x-yorishiro-required-actions" :  serde_json::json!(["workspace_get"]), "responses": {"200": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<Vec<crate::dtos::workspaces::WorkspaceMemberRecord>>()}}}), "401": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}}), "403": serde_json::json!({"description": "", "content": {"application/json": {"schema": crate::controllers::openapi::route_inventory::schema::<super::openapi::ApiErrorBody>()}}})}, "parameters": [{"name": "id", "in": "path", "required": true, "schema": crate::controllers::openapi::route_inventory::schema::<Uuid>()}]}),
+    )
+}
 async fn list_members(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,

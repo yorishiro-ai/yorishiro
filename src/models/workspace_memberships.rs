@@ -10,8 +10,7 @@ use crate::models::db_enum::db_enum;
 
 db_enum! {
     /// Workspace-local authority never grants tenant administration.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, schemars::JsonSchema)]
-    #[schemars(rename_all = "lowercase")]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum WorkspaceRole {
         Admin = "admin",
         Member = "member",

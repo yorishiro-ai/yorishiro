@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct SignupRequest {
     /// The email the new tenant root signs in with.
     pub email: String,
@@ -13,7 +13,7 @@ pub struct SignupRequest {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct SignupResponse {
     pub user_id: Uuid,
     pub email: String,
@@ -24,7 +24,7 @@ pub struct SignupResponse {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct RootLoginRequest {
     pub email: String,
     pub password: String,
@@ -32,14 +32,14 @@ pub struct RootLoginRequest {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct TenantLoginRequest {
     pub user_name: String,
     pub password: String,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct LoginResponse {
     /// The freshly issued API key's plaintext.
     /// Shown only in this response: only its hash is ever persisted, so it cannot be recovered afterward.
