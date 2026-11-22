@@ -38,6 +38,7 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/rustup-in
     && rustup toolchain install --no-self-update
 COPY Cargo.toml Cargo.lock ./
 COPY .cargo/config.toml .cargo/config.toml
+COPY benches/sqlite_ann.rs benches/sqlite_ann.rs
 COPY src/ src/
 COPY ee/ ee/
 COPY migration/ migration/
