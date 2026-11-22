@@ -12,7 +12,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json, verify};
+use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::edition::ee::models::marketplace;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::pagination::ListParams;
@@ -82,14 +82,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<MarketplacePage>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_marketplace")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "list_marketplace");
         render(
             marketplace::list_as(
                 &self.app_context().db,
@@ -106,14 +99,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<TemplatePage>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_marketplace_versions")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "list_marketplace_versions");
         render(
             marketplace::versions_as(
                 &self.app_context().db,
@@ -131,14 +117,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<PublishArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("publish_marketplace_version")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "publish_marketplace_version");
         let status = try_tool!(marketplace::TemplateVersionStatus::parse_publish(
             input.status.as_deref().unwrap_or("draft"),
         ));
@@ -163,14 +142,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<TemplatePage>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_marketplace_reviews")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "list_marketplace_reviews");
         render(
             marketplace::reviews_as(
                 &self.app_context().db,
@@ -188,14 +160,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<ReviewArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("submit_marketplace_review")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "submit_marketplace_review");
         render(
             marketplace::submit_review(
                 self.app_context(),
@@ -216,14 +181,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<ForkArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("fork_marketplace_template")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "fork_marketplace_template");
         match marketplace::fork_template(
             self.app_context(),
             &actor,
@@ -243,14 +201,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<VisibilityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("set_marketplace_visibility")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "set_marketplace_visibility");
         let visibility = try_tool!(
             crate::models::template_templates::TemplateVisibility::parse_input(&input.visibility,)
         );

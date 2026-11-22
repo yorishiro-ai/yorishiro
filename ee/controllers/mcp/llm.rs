@@ -6,7 +6,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::{tool, tool_router};
 
-use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json, verify};
+use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::edition::ee::dtos::inference::SetLlmKeyRequest;
 use crate::edition::ee::models::workspace_llm_keys;
 use crate::error::YorishiroError;
@@ -19,14 +19,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_llm_provider")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "get_llm_provider");
         match workspace_llm_keys::describe_as(&self.app_context().db, &actor).await {
             Ok(Some(record)) => ok_json(record),
             Ok(None) => Ok(err_to_tool_result(YorishiroError::not_found(
@@ -42,14 +35,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<SetLlmKeyRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("set_llm_provider")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "set_llm_provider");
         match workspace_llm_keys::set_as(
             &self.app_context().db,
             &actor,
@@ -69,14 +55,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("reset_llm_provider")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "reset_llm_provider");
         match workspace_llm_keys::clear_as(&self.app_context().db, &actor).await {
             Ok(()) => ok_json(serde_json::json!({"reset":true})),
             Err(error) => Ok(err_to_tool_result(error)),

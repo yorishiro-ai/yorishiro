@@ -40,14 +40,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SearchEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth_ctx = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("search_entities")?,
-            )
-            .await?
-        );
+        let auth_ctx = verified!(self, parts, "search_entities");
 
         let default = search::SearchQuery::default();
         let query = search::SearchQuery {

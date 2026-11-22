@@ -39,7 +39,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("import_jsonl")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "import_jsonl");
         let authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -73,7 +73,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("import_job_status")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "import_job_status");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),

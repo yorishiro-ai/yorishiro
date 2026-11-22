@@ -126,8 +126,8 @@ pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
 
 /// Unwraps a verified caller, or returns the scope denial as the tool result.
 macro_rules! verified {
-    ($outcome:expr) => {
-        match $outcome {
+    ($server:expr, $parts:expr, $tool:literal) => {
+        match $server.verify(&$parts, $tool).await? {
             $crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
             $crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
         }

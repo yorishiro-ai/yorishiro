@@ -56,6 +56,15 @@ impl YorishiroMcpServer {
         &self.ctx
     }
 
+    /// Authenticates the request and checks the scope the tool declares.
+    pub(crate) async fn verify(
+        &self,
+        parts: &axum::http::request::Parts,
+        tool: &str,
+    ) -> Result<super::VerifyOutcome, ErrorData> {
+        super::authorize::verify(self.app_context(), parts, self.required_scope(tool)?).await
+    }
+
     pub(crate) fn required_scope(&self, name: &str) -> Result<ApiKeyScope, ErrorData> {
         self.tool_router
             .get(name)

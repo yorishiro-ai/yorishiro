@@ -70,14 +70,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("create_template_library_item")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "create_template_library_item");
         let definition = match serde_json::from_value(args.definition) {
             Ok(value) => value,
             Err(error) => return Err(ErrorData::invalid_params(error.to_string(), None)),
@@ -108,14 +101,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<UpdateTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("update_template_library_item")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "update_template_library_item");
         let definition = match args.definition.map(serde_json::from_value).transpose() {
             Ok(value) => value,
             Err(error) => return Err(ErrorData::invalid_params(error.to_string(), None)),
@@ -146,14 +132,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetTemplateLibraryItemArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("delete_template_library_item")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "delete_template_library_item");
         match template_templates::delete_as(&self.app_context().db, &auth, args.id).await {
             Ok(()) => ok_json(serde_json::json!({"deleted": true})),
             Err(error) => Ok(err_to_tool_result(error)),
@@ -169,14 +148,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ForkTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("fork_template_library_item")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "fork_template_library_item");
         render(template_templates::fork_as(&self.app_context().db, &auth, args.id, args.name).await)
     }
 
@@ -192,14 +164,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_template_library")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "list_template_library");
 
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         let templates =
@@ -217,14 +182,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetTemplateLibraryItemArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_template_library_item")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "get_template_library_item");
 
         let template =
             try_tool!(template_templates::get_as(&self.app_context().db, &auth, args.id).await);

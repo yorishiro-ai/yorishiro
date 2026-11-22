@@ -12,7 +12,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json, verify};
+use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::edition::ee::dtos::inference::{
     InferFillResponse, InferFillStatus, InferJobStatusResponse,
 };
@@ -49,14 +49,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("infer_fill")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "infer_fill");
         match crate::edition::ee::workers::infer_fill::enqueue_infer_fill(
             self.app_context(),
             &actor,
@@ -78,14 +71,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_inference_job")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "get_inference_job");
         match inference_jobs::get_as(&self.app_context().db, &actor, input.job_id).await {
             Ok(record) => {
                 let completed = record.status == inference_jobs::InferenceJobStatus::Completed;
@@ -108,14 +94,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_inference_proposals")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "list_inference_proposals");
         render(inference_proposals::for_job_as(&self.app_context().db, &actor, input.job_id).await)
     }
 
@@ -125,14 +104,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("confirm_inference_proposals")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "confirm_inference_proposals");
         match crate::edition::ee::workers::confirm_proposals::enqueue(
             self.app_context(),
             &actor,
@@ -151,14 +123,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("reject_inference_proposals")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "reject_inference_proposals");
         render(inference_proposals::reject_as(&self.app_context().db, &actor, input.job_id).await)
     }
 
@@ -168,14 +133,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("discard_inference_proposals")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "discard_inference_proposals");
         render(inference_proposals::discard_as(&self.app_context().db, &actor, input.job_id).await)
     }
 
@@ -185,14 +143,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_inference_confirmation")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "get_inference_confirmation");
         render(
             inference_jobs::confirmation_status_as(&self.app_context().db, &actor, input.job_id)
                 .await,

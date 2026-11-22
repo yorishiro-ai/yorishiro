@@ -152,7 +152,8 @@ impl RouteMounts {
     }
 
     /// Publishes the document and credential paths to the shared store, and returns the route tree.
-    pub(crate) fn finish(self, ctx: &AppContext) -> AppRoutes {
+    pub(crate) fn finish(mut self, ctx: &AppContext) -> AppRoutes {
+        controllers::openapi::assert_unique_operation_ids(&mut self.api);
         ctx.shared_store.insert(self.api);
         ctx.shared_store
             .insert(CredentialPaths(self.credential_paths));

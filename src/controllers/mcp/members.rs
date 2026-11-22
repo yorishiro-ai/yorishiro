@@ -47,14 +47,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::members::CreateTenantUserRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("create_tenant_user")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "create_tenant_user");
         render(
             tenant_memberships::create_tenant_user_as(&self.app_context().db, &auth, &input).await,
         )
@@ -69,14 +62,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<ResetTenantUserPasswordArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("reset_tenant_user_password")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "reset_tenant_user_password");
         match tenant_memberships::reset_tenant_user_password(
             &self.app_context().db,
             &auth,
@@ -99,14 +85,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListMembersArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_members")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "list_members");
         let db = &self.app_context().db;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         render(tenant_memberships::list_members_as(db, &auth, page).await)
@@ -121,14 +100,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MemberArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("preview_member_removal")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "preview_member_removal");
         render(
             tenant_memberships::preview_removal(&self.app_context().db, &auth, args.user_id).await,
         )
@@ -143,14 +115,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MemberArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("remove_member")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "remove_member");
         match tenant_memberships::remove_member_as(&self.app_context().db, &auth, args.user_id)
             .await
         {

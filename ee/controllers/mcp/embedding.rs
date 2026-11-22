@@ -6,7 +6,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::{tool, tool_router};
 
-use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json, verify};
+use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest;
 use crate::edition::ee::models::workspace_embedding_keys;
 use crate::error::YorishiroError;
@@ -19,14 +19,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_embedding_provider")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "get_embedding_provider");
         match workspace_embedding_keys::describe_as(&self.app_context().db, &actor).await {
             Ok(Some(record)) => ok_json(record),
             Ok(None) => Ok(err_to_tool_result(YorishiroError::not_found(
@@ -42,14 +35,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<SetEmbeddingKeyRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("set_embedding_provider")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "set_embedding_provider");
         match workspace_embedding_keys::configure(self.app_context(), &actor, input).await {
             Ok(()) => ok_json(serde_json::json!({"saved":true})),
             Err(error) => Ok(err_to_tool_result(error)),
@@ -61,14 +47,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("reset_embedding_provider")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "reset_embedding_provider");
         match workspace_embedding_keys::remove(self.app_context(), &actor).await {
             Ok(()) => ok_json(serde_json::json!({"reset":true})),
             Err(error) => Ok(err_to_tool_result(error)),

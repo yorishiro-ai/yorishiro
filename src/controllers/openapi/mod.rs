@@ -170,6 +170,21 @@ pub(crate) fn operations_mut(
         })
 }
 
+/// Stops the process at boot when two operations share an ID, since clients generate method names from it.
+///
+/// # Panics
+/// Panics naming the colliding ID.
+pub(crate) fn assert_unique_operation_ids(api: &mut OpenApi) {
+    let mut seen = std::collections::HashSet::new();
+    for (path, method, operation) in operations_mut(api) {
+        let id = operation.operation_id.as_deref().unwrap_or_default();
+        assert!(
+            seen.insert(id.to_owned()),
+            "duplicate operation id {id}: {method} {path}"
+        );
+    }
+}
+
 /// Stable, path-safe operation ID such as `get_api_entities_id`.
 #[must_use]
 pub fn operation_id(method: &str, path: &str) -> String {

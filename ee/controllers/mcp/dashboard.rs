@@ -18,14 +18,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            crate::controllers::mcp::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_tenant_overview")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "get_tenant_overview");
         render(
             crate::edition::ee::models::tenant_tenants::overview_as(self.app_context(), &auth)
                 .await,

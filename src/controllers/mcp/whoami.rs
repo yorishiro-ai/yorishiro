@@ -19,14 +19,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("capabilities")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "capabilities");
         match crate::models::iam::access::capabilities(&self.app_context().db, &auth).await {
             Ok(capabilities) => {
                 let tools = self.tool_capabilities(&capabilities.scopes, capabilities.audit)?;
@@ -59,14 +52,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("discover_workspaces")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "discover_workspaces");
         render(crate::models::tenancy::discover_workspaces(&self.app_context().db, &auth).await)
     }
 

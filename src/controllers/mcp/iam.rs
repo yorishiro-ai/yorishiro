@@ -26,14 +26,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::ListIam>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_iam_groups")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "list_iam_groups");
         match crate::models::iam_groups::Model::list_as(
             &self.app_context().db,
             &auth,
@@ -52,14 +45,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::ListIam>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_iam_policies")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "list_iam_policies");
         match crate::models::iam_policies::Model::list_as(
             &self.app_context().db,
             &auth,
@@ -78,14 +64,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::ListGroupAssociations>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_iam_group_members")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "list_iam_group_members");
         match crate::models::iam_group_memberships::Model::list_as(
             &self.app_context().db,
             &auth,
@@ -109,14 +88,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::ListUserPolicies>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_iam_user_policies")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "list_iam_user_policies");
         match crate::models::iam_user_policy_attachments::Model::list_as(
             &self.app_context().db,
             &auth,
@@ -140,14 +112,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::ListGroupAssociations>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_iam_group_policies")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "list_iam_group_policies");
         match crate::models::iam_group_policy_attachments::Model::list_as(
             &self.app_context().db,
             &auth,
@@ -171,14 +136,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::GroupId>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_iam_group")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "get_iam_group");
         match crate::models::iam_groups::Model::get_as(
             &self.app_context().db,
             &auth,
@@ -197,14 +155,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::PolicyId>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_iam_policy")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "get_iam_policy");
         match crate::models::iam_policies::Model::get_as(
             &self.app_context().db,
             &auth,
@@ -223,14 +174,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::UpdatePolicy>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("update_iam_policy")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "update_iam_policy");
         match crate::models::iam_policies::Model::update_as(
             &self.app_context().db,
             &auth,
@@ -251,14 +195,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::PolicyId>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("delete_iam_policy")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "delete_iam_policy");
         match crate::models::iam_policies::Model::delete_as(
             &self.app_context().db,
             &auth,
@@ -277,14 +214,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::GroupMember>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("add_group_member")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "add_group_member");
         match crate::models::iam_group_memberships::Model::add_as(
             &self.app_context().db,
             &auth,
@@ -304,14 +234,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::GroupMember>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("remove_group_member")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "remove_group_member");
         match crate::models::iam_group_memberships::Model::remove_as(
             &self.app_context().db,
             &auth,
@@ -331,14 +254,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::GroupPolicy>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("attach_group_policy")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "attach_group_policy");
         match crate::models::iam_group_policy_attachments::Model::add_as(
             &self.app_context().db,
             &auth,
@@ -358,14 +274,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::GroupPolicy>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("detach_group_policy")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "detach_group_policy");
         match crate::models::iam_group_policy_attachments::Model::remove_as(
             &self.app_context().db,
             &auth,
@@ -385,14 +294,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::UserPolicy>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("attach_user_policy")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "attach_user_policy");
         match crate::models::iam_user_policy_attachments::Model::add_as(
             &self.app_context().db,
             &auth,
@@ -412,14 +314,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::UserPolicy>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("detach_user_policy")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "detach_user_policy");
         match crate::models::iam_user_policy_attachments::Model::remove_as(
             &self.app_context().db,
             &auth,
@@ -439,14 +334,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::RenameGroup>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("update_iam_group")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "update_iam_group");
         match crate::models::iam_groups::Model::rename_as(
             &self.app_context().db,
             &auth,
@@ -466,14 +354,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::GroupId>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("delete_iam_group")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "delete_iam_group");
         match crate::models::iam_groups::Model::delete_as(
             &self.app_context().db,
             &auth,
@@ -492,14 +373,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::iam::ListAudit>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_iam_audit")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "list_iam_audit");
         match crate::models::iam_audit_events::Model::list_as(
             &self.app_context().db,
             &auth,
@@ -523,14 +397,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateGroup>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("create_iam_group")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "create_iam_group");
         match crate::models::iam_groups::Model::create_as(&self.app_context().db, &auth, args.name)
             .await
         {
@@ -545,14 +412,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreatePolicy>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("create_iam_policy")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "create_iam_policy");
         match crate::models::iam_policies::Model::create_as(
             &self.app_context().db,
             &auth,

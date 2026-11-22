@@ -35,14 +35,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateApiKeyRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("create_api_key")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "create_api_key");
         try_tool!(
             args.validate_workspace_selection(
                 parts
@@ -92,14 +85,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_api_keys")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "list_api_keys");
         let ctx = self.app_context();
         let result = async {
             let mut records = Vec::new();
@@ -130,14 +116,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ApiKeyArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("revoke_api_key")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "revoke_api_key");
         match IdentityApiKeys::revoke_for_tenant(&self.app_context().db, &auth, args.key_id).await {
             Ok(()) => ok_json(serde_json::json!({"revoked":true})),
             Err(error) => Ok(err_to_tool_result(error)),
@@ -153,14 +132,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ApiKeyArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("rotate_api_key")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "rotate_api_key");
         match IdentityApiKeys::rotate(&self.app_context().db, &auth, args.key_id).await {
             Ok(created) => ok_json(CreateApiKeyResponse {
                 id: created.id,

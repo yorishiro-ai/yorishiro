@@ -49,9 +49,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListUpstreamChangesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("list_upstream_changes")?;
-        let actor =
-            verified!(crate::controllers::mcp::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "list_upstream_changes");
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         let changes = try_tool!(
             crate::edition::ee::models::schema_schemas::list_for_actor(
@@ -74,8 +72,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("merge_preview")?;
-        let actor =
-            verified!(crate::controllers::mcp::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "merge_preview");
         let mut authorized = try_tool!(
             crate::controllers::mcp::authorize::Authorized::for_target(
                 self.app_context(),
@@ -119,8 +116,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("merge_apply")?;
-        let actor =
-            verified!(crate::controllers::mcp::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "merge_apply");
         let mut authorized = try_tool!(
             crate::controllers::mcp::authorize::Authorized::for_target(
                 self.app_context(),

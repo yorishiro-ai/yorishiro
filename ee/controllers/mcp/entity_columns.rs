@@ -42,9 +42,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListColumnsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("list_entity_columns")?;
-        let actor =
-            verified!(crate::controllers::mcp::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "list_entity_columns");
         render(
             entity_column_preferences::list_for_actor(
                 self.app_context(),
@@ -62,8 +60,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("set_entity_columns")?;
-        let actor =
-            verified!(crate::controllers::mcp::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "set_entity_columns");
         let target = crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::EntityColumnsUpdate,
         );
@@ -102,8 +99,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("reset_entity_columns")?;
-        let actor =
-            verified!(crate::controllers::mcp::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "reset_entity_columns");
         let target = crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::EntityColumnsDelete,
         );

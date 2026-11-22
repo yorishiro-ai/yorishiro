@@ -32,14 +32,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_tenant")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "get_tenant");
         match crate::models::tenant_tenants::detail_as(&self.app_context().db, &auth).await {
             Ok(tenant) => ok_json(crate::dtos::tenants::TenantRecord::render(
                 self.app_context(),
@@ -58,14 +51,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::tenants::UpdateTenantRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("update_tenant")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "update_tenant");
         match crate::models::tenant_tenants::update_as(&self.app_context().db, &auth, input).await {
             Ok(tenant) => ok_json(crate::dtos::tenants::TenantRecord::render(
                 self.app_context(),
@@ -83,14 +69,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("tenant_retirement_inventory")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "tenant_retirement_inventory");
         render(retirement::inventory_as(&self.app_context().db, &auth).await)
     }
 
@@ -103,14 +82,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<DisableTenantArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("disable_tenant")?,
-            )
-            .await?
-        );
+        let auth = verified!(self, parts, "disable_tenant");
         match retirement::disable_as(&self.app_context().db, &auth, args.confirmed_tenant_id).await
         {
             Ok(()) => ok_json(serde_json::json!({"disabled": true})),

@@ -17,14 +17,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_current_user")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "get_current_user");
         match crate::models::user_users::current_profile(&self.app_context().db, &actor).await {
             Ok(user) => ok_json(UserRecord::render(self.app_context(), user)),
             Err(error) => Ok(err_to_tool_result(error)),
@@ -37,14 +30,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<UpdateUserRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("update_current_user")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "update_current_user");
         match crate::models::user_users::update_profile(
             &self.app_context().db,
             &actor,

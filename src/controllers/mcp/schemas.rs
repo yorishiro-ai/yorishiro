@@ -76,7 +76,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("archive_schema")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "archive_schema");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -112,7 +112,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("delete_schema")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "delete_schema");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -147,14 +147,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListSchemasArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_schemas")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "list_schemas");
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
         let summaries =
             try_tool!(schema_schemas::list_for_actor(self.app_context(), &actor, page).await);
@@ -171,7 +164,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("get_active_schema")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "get_active_schema");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -206,7 +199,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("get_schema_by_id")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "get_schema_by_id");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -240,7 +233,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("create_schema")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "create_schema");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -333,14 +326,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let _authorized = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_templates")?,
-            )
-            .await?
-        );
+        let _authorized = verified!(self, parts, "list_templates");
 
         ok_json(crate::data::templates::list_templates())
     }
@@ -354,14 +340,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetTemplateArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let _authorized = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_template")?,
-            )
-            .await?
-        );
+        let _authorized = verified!(self, parts, "get_template");
         render(crate::data::templates::get_template(&args.template_id))
     }
 
@@ -377,7 +356,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("get_entity_type_json_schema")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "get_entity_type_json_schema");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),

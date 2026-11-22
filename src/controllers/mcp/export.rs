@@ -21,7 +21,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("export_jsonl")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "export_jsonl");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),

@@ -41,14 +41,7 @@ impl YorishiroMcpServer {
         Parameters(page): Parameters<crate::dtos::iam::ListIam>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            crate::controllers::mcp::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_schema_forks")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "list_schema_forks");
         render(
             model::list_for_actor(
                 self.app_context(),
@@ -66,8 +59,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("get_schema_fork")?;
-        let actor =
-            verified!(crate::controllers::mcp::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "get_schema_fork");
         let target = crate::models::iam::access::WorkspaceTarget::Workspace(try_tool!(
             model::workspace_for_actor(&self.app_context().db, &actor, args.fork_id).await
         ));
@@ -105,8 +97,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("create_schema_fork")?;
-        let actor =
-            verified!(crate::controllers::mcp::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "create_schema_fork");
         let target = crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::SchemaForkCreate,
         );
@@ -146,8 +137,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("update_schema_fork")?;
-        let actor =
-            verified!(crate::controllers::mcp::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "update_schema_fork");
         let target = crate::models::iam::access::WorkspaceTarget::Workspace(try_tool!(
             model::workspace_for_actor(&self.app_context().db, &actor, args.fork_id).await
         ));
@@ -200,8 +190,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("delete_schema_fork")?;
-        let actor =
-            verified!(crate::controllers::mcp::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "delete_schema_fork");
         let target = crate::models::iam::access::WorkspaceTarget::Workspace(try_tool!(
             model::workspace_for_actor(&self.app_context().db, &actor, args.fork_id).await
         ));

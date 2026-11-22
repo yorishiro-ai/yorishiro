@@ -111,14 +111,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("create_entity")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "create_entity");
         let record = try_tool!(
             entity_entities::create_for_actor(self.app_context(), &actor, args.into(),).await
         );
@@ -132,14 +125,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("get_entity")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "get_entity");
         let record =
             try_tool!(entity_entities::get_for_actor(self.app_context(), &actor, args.id).await);
         ok_json(record)
@@ -152,14 +138,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<UpdateEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("update_entity")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "update_entity");
         let updated_by = actor.user_id;
         let record = try_tool!(
             entity_entities::update_for_actor(
@@ -184,14 +163,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<DeleteEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("delete_entity")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "delete_entity");
         try_tool!(entity_entities::delete_for_actor(self.app_context(), &actor, args.id).await);
         ok_json(serde_json::json!({ "deleted": true }))
     }
@@ -203,14 +175,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_entities")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "list_entities");
 
         let query = try_tool!(args.try_into());
 
@@ -233,7 +198,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("get_entity_drift")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "get_entity_drift");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -281,7 +246,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("migration_dry_run")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "migration_dry_run");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -316,7 +281,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("fill_defaults")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "fill_defaults");
         let authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -355,7 +320,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("migration_job_status")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "migration_job_status");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -390,7 +355,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("reindex_workspace")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "reindex_workspace");
         let authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -424,7 +389,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("undo_migration_job")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "undo_migration_job");
         let authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),

@@ -105,7 +105,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("create_relation")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "create_relation");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -149,7 +149,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("get_relation")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "get_relation");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -179,7 +179,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("delete_relation")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "delete_relation");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
@@ -208,14 +208,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListRelationsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(
-            super::verify(
-                self.app_context(),
-                &parts,
-                self.required_scope("list_relations")?,
-            )
-            .await?
-        );
+        let actor = verified!(self, parts, "list_relations");
 
         let query = try_tool!(args.try_into());
 
@@ -237,7 +230,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("set_relation_status")?;
-        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let actor = verified!(self, parts, "set_relation_status");
         let mut authorized = try_tool!(
             super::authorize::Authorized::for_target(
                 self.app_context(),
