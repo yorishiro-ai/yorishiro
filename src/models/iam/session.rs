@@ -1,12 +1,11 @@
-//! The authenticated workspace transaction shared by REST handlers and MCP tools.
+//! The authenticated workspace transaction shared by REST handlers, MCP tools and model operations.
 
 use sea_orm::{DatabaseConnection, DatabaseTransaction};
 
-use crate::controllers::middleware::auth;
 use crate::error::YorishiroError;
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
 use crate::models::iam::access::{
-    WorkspaceTarget, authorize_workspace_action, hide_inferred_resource,
+    WorkspaceTarget, authorize_workspace_action, hide_inferred_resource, require_scope,
 };
 use crate::models::iam::policy::Action;
 
@@ -26,6 +25,33 @@ pub struct WorkspaceSession {
 }
 
 impl WorkspaceSession {
+    /// Opens the workspace transaction an authenticated caller already named.
+    ///
+    /// # Errors
+    /// Returns an error if the caller has no workspace or the transaction cannot begin.
+    pub async fn begin(
+        app: &loco_rs::app::AppContext,
+        ctx: AuthContext,
+        scope: ApiKeyScope,
+    ) -> Result<Self, YorishiroError> {
+        let workspace_id = ctx.require_workspace()?;
+        // Touch independently: read handlers roll their workspace transaction back on drop.
+        crate::models::api_keys::Entity::touch_authenticated(app, &ctx).await?;
+        let txn = if scope >= ApiKeyScope::Write {
+            crate::db::begin_workspace_write(app, ctx.tenant_id, workspace_id).await?
+        } else {
+            crate::db::begin_workspace(app, ctx.tenant_id, workspace_id).await?
+        };
+        Ok(Self {
+            ctx,
+            txn,
+            identity: app.db.clone(),
+            authorization: None,
+            inferred_resource: false,
+            scope,
+        })
+    }
+
     /// Verifies the scope, resolves the target workspace and opens the transaction.
     ///
     /// # Errors
@@ -36,7 +62,7 @@ impl WorkspaceSession {
         scope: ApiKeyScope,
         target: WorkspaceTarget,
     ) -> Result<Self, YorishiroError> {
-        auth::require_scope(&actor, scope)?;
+        require_scope(&actor, scope)?;
         let inferred_resource = target.inferred_resource(&actor);
         actor.workspace_id = Some(
             target
@@ -44,36 +70,12 @@ impl WorkspaceSession {
                 .await
                 .map_err(|error| hide_inferred_resource(inferred_resource, error))?,
         );
-        let (ctx, txn) = auth::RequestAuth::new(app)
-            .begin(actor, scope >= ApiKeyScope::Write)
-            .await?;
-        Ok(Self {
-            ctx,
-            txn,
-            identity: app.db.clone(),
-            authorization: None,
-            inferred_resource,
-            scope,
-        })
+        let mut session = Self::begin(app, actor, scope).await?;
+        session.inferred_resource = inferred_resource;
+        Ok(session)
     }
 
-    /// Wraps a transaction that authentication already opened for an explicit workspace.
-    pub(crate) fn authenticated(
-        app: &loco_rs::app::AppContext,
-        (ctx, txn): (AuthContext, DatabaseTransaction),
-        scope: ApiKeyScope,
-    ) -> Self {
-        Self {
-            ctx,
-            txn,
-            identity: app.db.clone(),
-            authorization: None,
-            inferred_resource: false,
-            scope,
-        }
-    }
-
-    pub(crate) const fn txn(&self) -> &DatabaseTransaction {
+    pub const fn txn(&self) -> &DatabaseTransaction {
         &self.txn
     }
 
@@ -81,7 +83,7 @@ impl WorkspaceSession {
     ///
     /// # Errors
     /// Returns the authorization error, hiding an inferred resource.
-    pub(crate) async fn require_action(&mut self, action: Action) -> Result<(), YorishiroError> {
+    pub async fn require_action(&mut self, action: Action) -> Result<(), YorishiroError> {
         self.authorization =
             authorize_workspace_action(&self.txn, &self.identity, &self.ctx, self.scope, action)
                 .await
@@ -93,7 +95,7 @@ impl WorkspaceSession {
     ///
     /// # Errors
     /// Returns an internal error if either commit fails.
-    pub(crate) async fn commit(self) -> Result<(), YorishiroError> {
+    pub async fn commit(self) -> Result<(), YorishiroError> {
         self.txn
             .commit()
             .await

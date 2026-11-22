@@ -12,9 +12,7 @@ use crate::controllers::openapi::Routes;
 use crate::dtos::template_library::{
     CreateTemplateRequest, ForkTemplateRequest, UpdateTemplateRequest,
 };
-use crate::models::template_templates::{
-    self, CreateTemplateInput, TemplateRecord, UpdateTemplateInput,
-};
+use crate::models::template_templates::{self, TemplateRecord};
 
 ///
 /// # Errors
@@ -48,19 +46,7 @@ async fn create_template(
     AuthContext(auth): AuthContext,
     Json(body): Json<CreateTemplateRequest>,
 ) -> Result<impl aide::axum::IntoApiResponse, ApiError> {
-    let template = template_templates::create_as(
-        &ctx.db,
-        &auth,
-        CreateTemplateInput {
-            name: body.name,
-            description: body.description,
-            definition: body.definition,
-            tags: body.tags,
-            locale: body.locale,
-            author: body.author,
-        },
-    )
-    .await?;
+    let template = template_templates::create_as(&ctx.db, &auth, body.into()).await?;
     Ok(Created(template))
 }
 
@@ -73,19 +59,7 @@ async fn update_template(
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<UpdateTemplateRequest>,
 ) -> Result<Json<TemplateRecord>, ApiError> {
-    let template = template_templates::update_as(
-        &ctx.db,
-        &auth,
-        id,
-        UpdateTemplateInput {
-            name: body.name,
-            description: body.description,
-            definition: body.definition,
-            tags: body.tags,
-            locale: body.locale,
-        },
-    )
-    .await?;
+    let template = template_templates::update_as(&ctx.db, &auth, id, body.into()).await?;
     Ok(Json(template))
 }
 

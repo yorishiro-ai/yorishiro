@@ -2,7 +2,7 @@
 //!
 //! `Authorized` also opens the RLS-scoped transaction, so a handler cannot reach tenant data without passing through it.
 
-use crate::controllers::session::WorkspaceSession;
+use crate::models::iam::session::WorkspaceSession;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -162,13 +162,13 @@ where
         let app_ctx = AppContext::from_ref(state);
 
         let headers = auth::header_pairs(&parts.headers).map_err(ApiError)?;
-        let begun = auth::RequestAuth::new(&app_ctx)
+        let session = auth::RequestAuth::new(&app_ctx)
             .authorize(presented_key, R::SCOPE, &headers)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
 
         Ok(Self {
-            session: WorkspaceSession::authenticated(&app_ctx, begun, R::SCOPE),
+            session,
             _scope: PhantomData,
         })
     }

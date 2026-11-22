@@ -13,6 +13,9 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::dtos::template_library::{
+    CreateTemplateRequest, ForkTemplateRequest, UpdateTemplateRequest,
+};
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::template_templates;
 
@@ -30,33 +33,17 @@ pub(crate) struct ListTemplateLibraryArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct CreateTemplateLibraryArgs {
-    pub name: String,
-    pub description: Option<String>,
-    pub definition: serde_json::Value,
-    #[serde(default)]
-    pub tags: Vec<String>,
-    pub locale: Option<String>,
-    pub author: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct UpdateTemplateLibraryArgs {
     pub id: Uuid,
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub definition: Option<serde_json::Value>,
-    pub tags: Option<Vec<String>>,
-    pub locale: Option<String>,
+    #[serde(flatten)]
+    pub body: UpdateTemplateRequest,
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct ForkTemplateLibraryArgs {
     pub id: Uuid,
-    pub name: String,
+    #[serde(flatten)]
+    pub body: ForkTemplateRequest,
 }
 
 #[tool_router(vis = "pub(crate)", router = tool_router_template_library)]
@@ -67,29 +54,11 @@ impl YorishiroMcpServer {
     )]
     pub(crate) async fn create_template_library_item(
         &self,
-        Parameters(args): Parameters<CreateTemplateLibraryArgs>,
+        Parameters(args): Parameters<CreateTemplateRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts, "create_template_library_item");
-        let definition = match serde_json::from_value(args.definition) {
-            Ok(value) => value,
-            Err(error) => return Err(ErrorData::invalid_params(error.to_string(), None)),
-        };
-        render(
-            template_templates::create_as(
-                &self.app_context().db,
-                &auth,
-                template_templates::CreateTemplateInput {
-                    name: args.name,
-                    description: args.description,
-                    definition,
-                    tags: args.tags,
-                    locale: args.locale,
-                    author: args.author,
-                },
-            )
-            .await,
-        )
+        render(template_templates::create_as(&self.app_context().db, &auth, args.into()).await)
     }
 
     #[tool(
@@ -102,24 +71,9 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts, "update_template_library_item");
-        let definition = match args.definition.map(serde_json::from_value).transpose() {
-            Ok(value) => value,
-            Err(error) => return Err(ErrorData::invalid_params(error.to_string(), None)),
-        };
         render(
-            template_templates::update_as(
-                &self.app_context().db,
-                &auth,
-                args.id,
-                template_templates::UpdateTemplateInput {
-                    name: args.name,
-                    description: args.description,
-                    definition,
-                    tags: args.tags,
-                    locale: args.locale,
-                },
-            )
-            .await,
+            template_templates::update_as(&self.app_context().db, &auth, args.id, args.body.into())
+                .await,
         )
     }
 
@@ -149,7 +103,10 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts, "fork_template_library_item");
-        render(template_templates::fork_as(&self.app_context().db, &auth, args.id, args.name).await)
+        render(
+            template_templates::fork_as(&self.app_context().db, &auth, args.id, args.body.name)
+                .await,
+        )
     }
 
     #[tool(

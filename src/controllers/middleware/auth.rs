@@ -8,11 +8,11 @@ use std::sync::Arc;
 use axum::http::HeaderMap;
 use loco_rs::app::AppContext;
 use loco_rs::prelude::async_trait;
-use sea_orm::DatabaseTransaction;
 
 use crate::db::{AppContextBackend, DbHandle};
 use crate::error::YorishiroError;
 use crate::models::api_keys::{ApiKeyScope, AuthContext, Entity, WORKSPACE_HEADER};
+use crate::models::iam::session::WorkspaceSession;
 use uuid::Uuid;
 
 /// Copies readable request headers into the authenticator input shape.
@@ -192,10 +192,10 @@ impl<'a> RequestAuth<'a> {
         key: &str,
         required: ApiKeyScope,
         headers: &[(String, String)],
-    ) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
+    ) -> Result<WorkspaceSession, YorishiroError> {
         let ctx = self.resolve(key, headers).await?;
         require_scope(&ctx, required)?;
-        self.begin(ctx, required >= ApiKeyScope::Write).await
+        WorkspaceSession::begin(self.app, ctx, required).await
     }
 
     pub(crate) async fn verify_audit(
@@ -207,21 +207,5 @@ impl<'a> RequestAuth<'a> {
         require_audit(&ctx)?;
         Entity::touch_authenticated(self.app, &ctx).await?;
         Ok(ctx)
-    }
-
-    pub(crate) async fn begin(
-        &self,
-        ctx: AuthContext,
-        write: bool,
-    ) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
-        let workspace_id = ctx.require_workspace()?;
-        // Touch independently: read handlers roll their workspace transaction back on drop.
-        Entity::touch_authenticated(self.app, &ctx).await?;
-        let txn = if write {
-            crate::db::begin_workspace_write(self.app, ctx.tenant_id, workspace_id).await?
-        } else {
-            crate::db::begin_workspace(self.app, ctx.tenant_id, workspace_id).await?
-        };
-        Ok((ctx, txn))
     }
 }

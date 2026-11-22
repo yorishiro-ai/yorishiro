@@ -38,7 +38,6 @@ use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ServerHandler, tool_handler};
-use sea_orm::DatabaseTransaction;
 
 use crate::controllers::middleware::auth;
 use crate::error::YorishiroError;

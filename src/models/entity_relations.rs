@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
+use crate::error::{ResultExt, YorishiroError};
 pub use crate::models::_entities::entity_relations::{ActiveModel, Entity, Model};
 use crate::models::db_enum::db_enum;
 use crate::models::entity_entities::{self, EntityRecord};
@@ -63,20 +63,6 @@ impl ActiveModelBehavior for ActiveModel {
         this.id = crate::db::sqlite_generated_id(db, this.id);
         Ok(this)
     }
-}
-
-pub(crate) fn parse_relation_status(value: &str) -> Result<RelationStatus, YorishiroError> {
-    RelationStatus::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
-        message: format!("'{value}' is not a relation status"),
-        details: vec![ValidationDetail {
-            field: "/status".into(),
-            problem: "expected active, deprecated, or archived".into(),
-            code: ValidationErrorCode::Other,
-            expected: Some("active, deprecated, archived".into()),
-            actual: Some(value.into()),
-        }],
-        hint: "use active, deprecated, or archived".into(),
-    })
 }
 
 pub(crate) async fn workspace_for_actor(

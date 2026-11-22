@@ -7,9 +7,7 @@ use loco_rs::app::AppContext;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{
-    AuthContext, Authorized, MigrationScope, Verified, WriteScope,
-};
+use crate::controllers::extractors::{AuthContext, MigrationScope, Verified, WriteScope};
 use crate::controllers::openapi::Routes;
 use crate::dtos::entities::{
     CreateEntityRequest, FillDefaultsRequest, FillDefaultsResponse, ListEntitiesParams,
@@ -91,15 +89,7 @@ pub(crate) async fn undo_migration_job(
     verified: Verified<MigrationScope>,
     Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<Uuid>>,
 ) -> Result<Accepted<UndoResponse>, ApiError> {
-    let authorized = Authorized::<MigrationScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::SnapshotJob(job_id),
-    )
-    .await?;
-    let queued_id =
-        crate::workers::undo::enqueue(&ctx, authorized.txn(), &authorized.ctx, job_id).await?;
-    authorized.commit().await?;
+    let queued_id = crate::workers::undo::enqueue_for_actor(&ctx, verified.ctx, job_id).await?;
     Ok(Accepted(UndoResponse {
         job_id: queued_id,
         snapshot_job_id: job_id,
@@ -111,19 +101,10 @@ pub(crate) async fn migration_job_status(
     verified: Verified<MigrationScope>,
     Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<Uuid>>,
 ) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
-    let mut authorized = Authorized::<MigrationScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Job(job_id),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::MigrationJobGet)
-        .await?;
     Ok(Json(
-        crate::models::queue_job_lifecycles::migration_job_status(
-            authorized.txn(),
-            authorized.ctx.require_workspace()?,
+        crate::models::queue_job_lifecycles::migration_job_status_for_actor(
+            &ctx,
+            verified.ctx,
             job_id,
         )
         .await?,
@@ -148,17 +129,7 @@ pub(crate) async fn reindex_workspace(
     State(ctx): State<AppContext>,
     verified: Verified<MigrationScope>,
 ) -> Result<Json<ReindexResponse>, ApiError> {
-    let authorized = Authorized::<MigrationScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::WorkspaceReindex,
-        ),
-    )
-    .await?;
-    let job_id = reindex::enqueue_requested(&ctx, authorized.txn(), &authorized.ctx).await?;
-    authorized.commit().await?;
-
+    let job_id = reindex::enqueue_requested_for_actor(&ctx, verified.ctx).await?;
     Ok(Json(ReindexResponse { job_id }))
 }
 
@@ -171,22 +142,12 @@ pub(crate) async fn fill_defaults(
     verified: Verified<MigrationScope>,
     Json(body): Json<FillDefaultsRequest>,
 ) -> Result<Accepted<FillDefaultsResponse>, ApiError> {
-    let authorized = Authorized::<MigrationScope>::for_target(
+    let job_id = crate::workers::fill_defaults::enqueue_for_actor(
         &ctx,
         verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::MigrationFillDefaults,
-        ),
-    )
-    .await?;
-    let job_id = crate::workers::fill_defaults::enqueue(
-        &ctx,
-        authorized.txn(),
-        &authorized.ctx,
         body.schema_name.clone(),
     )
     .await?;
-    authorized.commit().await?;
     Ok(Accepted(FillDefaultsResponse {
         schema_name: body.schema_name,
         job_id,

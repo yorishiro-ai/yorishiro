@@ -7,20 +7,11 @@ use rmcp::handler::server::common::Extension;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::{tool, tool_router};
-use schemars::JsonSchema;
-use serde::Deserialize;
-use uuid::Uuid;
 
 use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::dtos::tenants::DisableTenantRequest;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::tenant_tenants::retirement;
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct DisableTenantArgs {
-    /// Must equal the current tenant UUID, not its display name.
-    pub confirmed_tenant_id: Uuid,
-}
 
 #[tool_router(vis = "pub(crate)", router = tool_router_tenants)]
 impl YorishiroMcpServer {
@@ -79,7 +70,7 @@ impl YorishiroMcpServer {
     )]
     pub(crate) async fn disable_tenant(
         &self,
-        Parameters(args): Parameters<DisableTenantArgs>,
+        Parameters(args): Parameters<DisableTenantRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts, "disable_tenant");

@@ -1,5 +1,6 @@
 //! Snapshot restoration runs on the configured Loco queue, not the request task.
 
+use crate::models::iam::session::WorkspaceSession;
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker, prelude::async_trait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -114,6 +115,27 @@ impl UndoWorker {
         }
         Ok(())
     }
+}
+
+/// Opens the caller's migration session, enqueues the undo of a snapshot job and commits.
+///
+/// # Errors
+/// Returns the session, authorization or enqueue error.
+pub(crate) async fn enqueue_for_actor(
+    ctx: &AppContext,
+    actor: AuthContext,
+    snapshot_job_id: Uuid,
+) -> Result<Uuid, YorishiroError> {
+    let session = WorkspaceSession::open(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Migration,
+        crate::models::iam::access::WorkspaceTarget::SnapshotJob(snapshot_job_id),
+    )
+    .await?;
+    let queued = enqueue(ctx, session.txn(), &session.ctx, snapshot_job_id).await?;
+    session.commit().await?;
+    Ok(queued)
 }
 
 pub(crate) async fn enqueue(

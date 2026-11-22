@@ -10,23 +10,12 @@ use rmcp::tool;
 use rmcp::tool_router;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::Value;
 use uuid::Uuid;
 
 use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::dtos::relations::{CreateRelationRequest, SetRelationStatusRequest};
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::entity_relations::{self, SetRelationStatusInput};
-
-#[derive(Deserialize, JsonSchema)]
-pub struct CreateRelationArgs {
-    pub source_id: Uuid,
-    pub target_id: Uuid,
-    #[expect(clippy::doc_markdown, reason = "MCP exposes this description verbatim")]
-    /// relation_type name declared in the schema's `relation_types` definition.
-    pub relation_type: String,
-    /// Arbitrary properties attached to the relation (JSON object, defaults to an empty object if omitted).
-    pub properties: Option<Value>,
-}
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct GetRelationArgs {
@@ -45,7 +34,7 @@ pub struct ListRelationsArgs {
     pub relation_type: Option<String>,
     /// Restricts the listing to one state ("active", "deprecated" or "archived").
     /// Omitted, every state is listed.
-    pub status: Option<String>,
+    pub status: Option<entity_relations::RelationStatus>,
     /// Maximum number of results (defaults to 50 if omitted).
     pub limit: Option<i64>,
     /// Number of records to skip (defaults to 0 if omitted).
@@ -55,36 +44,19 @@ pub struct ListRelationsArgs {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct SetRelationStatusArgs {
     pub id: Uuid,
-    /// "active", "deprecated" or "archived".
-    /// Traversal follows "active" relations only.
-    pub status: String,
-}
-
-impl From<CreateRelationArgs> for entity_relations::CreateRelationInput {
-    fn from(args: CreateRelationArgs) -> Self {
-        Self {
-            source_id: args.source_id,
-            target_id: args.target_id,
-            relation_type: args.relation_type,
-            properties: args.properties.unwrap_or_else(|| serde_json::json!({})),
-        }
-    }
+    #[serde(flatten)]
+    pub body: SetRelationStatusRequest,
 }
 
 impl TryFrom<ListRelationsArgs> for entity_relations::ListRelationsQuery {
     type Error = crate::YorishiroError;
 
     fn try_from(args: ListRelationsArgs) -> Result<Self, Self::Error> {
-        let status = args
-            .status
-            .as_deref()
-            .map(entity_relations::parse_relation_status)
-            .transpose()?;
         Ok(Self {
             source_id: args.source_id,
             target_id: args.target_id,
             relation_type: args.relation_type,
-            status,
+            status: args.status,
             page: crate::models::pagination::ListParams::new(args.limit, args.offset),
         })
     }
@@ -101,7 +73,7 @@ impl YorishiroMcpServer {
     )]
     pub async fn create_relation(
         &self,
-        Parameters(args): Parameters<CreateRelationArgs>,
+        Parameters(args): Parameters<CreateRelationRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("create_relation")?;
@@ -247,14 +219,13 @@ impl YorishiroMcpServer {
         );
 
         let workspace_id = authorized.workspace_id();
-        let status = try_tool!(entity_relations::parse_relation_status(&args.status));
         let record = try_tool!(
             entity_relations::set_status(
                 authorized.txn(),
                 workspace_id,
                 SetRelationStatusInput {
                     id: args.id,
-                    status,
+                    status: args.body.status,
                 },
             )
             .await

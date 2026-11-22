@@ -7,7 +7,10 @@ use uuid::Uuid;
 pub struct CreateRelationRequest {
     pub source_id: Uuid,
     pub target_id: Uuid,
+    #[expect(clippy::doc_markdown, reason = "MCP exposes this description verbatim")]
+    /// relation_type name declared in the schema's `relation_types` definition.
     pub relation_type: String,
+    /// Arbitrary properties attached to the relation (JSON object, defaults to an empty object if omitted).
     pub properties: Option<Value>,
 }
 
@@ -26,6 +29,7 @@ pub struct ListRelationsParams {
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(crate) struct SetRelationStatusRequest {
     /// `active`, `deprecated` or `archived`.
+    /// Traversal follows `active` relations only.
     pub(crate) status: RelationStatus,
 }
 

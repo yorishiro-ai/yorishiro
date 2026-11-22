@@ -27,6 +27,29 @@ pub(crate) async fn migration_job_status(
     bulk_job_status(db, workspace_id, id, &["undo", "fill_defaults", "reindex"]).await
 }
 
+/// Opens the caller's migration session and reads a migration job's status.
+///
+/// # Errors
+/// Returns the session, authorization or lookup error.
+pub(crate) async fn migration_job_status_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<BulkJobStatus, crate::YorishiroError> {
+    let mut session = crate::models::iam::session::WorkspaceSession::open(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Migration,
+        crate::models::iam::access::WorkspaceTarget::Job(id),
+    )
+    .await?;
+    session
+        .require_action(crate::models::iam::policy::Action::MigrationJobGet)
+        .await?;
+    let workspace_id = session.ctx.require_workspace()?;
+    migration_job_status(session.txn(), workspace_id, id).await
+}
+
 pub(crate) async fn bulk_job_status(
     db: &impl ConnectionTrait,
     workspace_id: Uuid,

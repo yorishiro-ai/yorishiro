@@ -4,7 +4,7 @@ use super::{
     ApiKeyScope, AppContext, AuthContext, CallToolResult, ErrorData, Parts, YorishiroError, auth,
     err_to_tool_result,
 };
-use crate::controllers::session::WorkspaceSession;
+use crate::models::iam::session::WorkspaceSession;
 
 /// The workspace session of a tool call that passed authentication and scope checks, with MCP error mapping.
 pub(crate) struct Authorized {
@@ -50,7 +50,7 @@ impl Authorized {
         &self.session.ctx
     }
 
-    pub(crate) fn workspace_id(&self) -> uuid::Uuid {
+    pub(crate) const fn workspace_id(&self) -> uuid::Uuid {
         self.session
             .ctx
             .workspace_id

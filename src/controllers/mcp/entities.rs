@@ -2,7 +2,6 @@
 
 use crate::controllers::mcp::{render, try_tool, verified};
 use axum::http::request::Parts;
-use chrono::{DateTime, Utc};
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
 use rmcp::handler::server::wrapper::Parameters;
@@ -15,20 +14,9 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::dtos::entities::{CreateEntityRequest, FillDefaultsRequest, UpdateEntityRequest};
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::entity_entities;
-
-#[derive(Deserialize, JsonSchema)]
-pub struct CreateEntityArgs {
-    /// Name of the schema this entity conforms to.
-    /// The workspace's current active version is used.
-    pub schema_name: String,
-    #[expect(clippy::doc_markdown, reason = "MCP exposes this description verbatim")]
-    /// entity_type name declared in the schema.
-    pub entity_type: String,
-    /// Entity body (JSON object) conforming to the schema's `fields` definition.
-    pub data: Value,
-}
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct GetEntityArgs {
@@ -38,11 +26,8 @@ pub(crate) struct GetEntityArgs {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct UpdateEntityArgs {
     pub id: Uuid,
-    /// Replacement entity body.
-    /// Validated against the schema version in effect when the entity was created.
-    pub data: Value,
-    /// The entity's `updated_at` as the client read it; a mismatch is refused with a conflict so a stale writer cannot clobber a newer write.
-    pub expected_updated_at: Option<DateTime<Utc>>,
+    #[serde(flatten)]
+    pub body: UpdateEntityRequest,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -53,12 +38,6 @@ pub(crate) struct DeleteEntityArgs {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct MigrationDryRunArgs {
     pub name: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub(crate) struct FillDefaultsArgs {
-    /// Name of the schema whose active version supplies the missing fields.
-    pub schema_name: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -77,16 +56,6 @@ pub struct ListEntitiesArgs {
     pub limit: Option<i64>,
     /// Number of records to skip (defaults to 0 if omitted).
     pub offset: Option<i64>,
-}
-
-impl From<CreateEntityArgs> for entity_entities::CreateEntityInput {
-    fn from(args: CreateEntityArgs) -> Self {
-        Self {
-            schema_name: args.schema_name,
-            entity_type: args.entity_type,
-            data: args.data,
-        }
-    }
 }
 
 impl TryFrom<ListEntitiesArgs> for entity_entities::ListEntitiesQuery {
@@ -108,7 +77,7 @@ impl YorishiroMcpServer {
         meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Create a new entity (requires write scope and entity_create IAM permission)")]
     pub async fn create_entity(
         &self,
-        Parameters(args): Parameters<CreateEntityArgs>,
+        Parameters(args): Parameters<CreateEntityRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts, "create_entity");
@@ -146,9 +115,9 @@ impl YorishiroMcpServer {
                 &actor,
                 entity_entities::UpdateEntityInput {
                     id: args.id,
-                    data: args.data,
+                    data: args.body.data,
                     updated_by,
-                    expected_updated_at: args.expected_updated_at,
+                    expected_updated_at: args.body.expected_updated_at,
                 },
             )
             .await
@@ -277,33 +246,18 @@ impl YorishiroMcpServer {
     )]
     pub async fn fill_defaults(
         &self,
-        Parameters(args): Parameters<FillDefaultsArgs>,
+        Parameters(args): Parameters<FillDefaultsRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("fill_defaults")?;
         let actor = verified!(self, parts, "fill_defaults");
-        let authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Permission(
-                    crate::models::iam::policy::Action::MigrationFillDefaults,
-                ),
-            )
-            .await
-        );
-
         let job_id = try_tool!(
-            crate::workers::fill_defaults::enqueue(
+            crate::workers::fill_defaults::enqueue_for_actor(
                 self.app_context(),
-                authorized.txn(),
-                authorized.auth_context(),
+                actor,
                 args.schema_name.clone(),
             )
             .await
         );
-        authorized.commit().await?;
         ok_json(crate::dtos::entities::FillDefaultsResponse {
             schema_name: args.schema_name,
             job_id,
@@ -319,27 +273,11 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MigrationJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("migration_job_status")?;
         let actor = verified!(self, parts, "migration_job_status");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Job(args.job_id),
-            )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::MigrationJobGet)
-                .await
-        );
-
         render(
-            crate::models::queue_job_lifecycles::migration_job_status(
-                authorized.txn(),
-                authorized.workspace_id(),
+            crate::models::queue_job_lifecycles::migration_job_status_for_actor(
+                self.app_context(),
+                actor,
                 args.job_id,
             )
             .await,
@@ -354,28 +292,10 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("reindex_workspace")?;
         let actor = verified!(self, parts, "reindex_workspace");
-        let authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Permission(
-                    crate::models::iam::policy::Action::WorkspaceReindex,
-                ),
-            )
-            .await
-        );
         let job_id = try_tool!(
-            crate::workers::reindex::enqueue_requested(
-                self.app_context(),
-                authorized.txn(),
-                authorized.auth_context(),
-            )
-            .await
+            crate::workers::reindex::enqueue_requested_for_actor(self.app_context(), actor).await
         );
-        authorized.commit().await?;
         ok_json(crate::dtos::entities::ReindexResponse { job_id })
     }
 
@@ -388,27 +308,10 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MigrationJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("undo_migration_job")?;
         let actor = verified!(self, parts, "undo_migration_job");
-        let authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::SnapshotJob(args.job_id),
-            )
-            .await
-        );
         let job_id = try_tool!(
-            crate::workers::undo::enqueue(
-                self.app_context(),
-                authorized.txn(),
-                authorized.auth_context(),
-                args.job_id,
-            )
-            .await
+            crate::workers::undo::enqueue_for_actor(self.app_context(), actor, args.job_id).await
         );
-        authorized.commit().await?;
         ok_json(crate::dtos::entities::UndoResponse {
             job_id,
             snapshot_job_id: args.job_id,

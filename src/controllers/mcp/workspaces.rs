@@ -12,6 +12,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::dtos::workspaces::CreateWorkspaceRequest;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::{tenancy, workspace_workspaces};
 
@@ -34,14 +35,6 @@ pub(crate) struct GrantWorkspaceMemberArgs {
     pub workspace_id: Uuid,
     pub user_id: Uuid,
     pub role: crate::models::workspace_memberships::WorkspaceRole,
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct CreateWorkspaceArgs {
-    pub name: String,
-    pub max_entities: Option<i32>,
-    pub schema_id: Option<Uuid>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -172,7 +165,7 @@ impl YorishiroMcpServer {
     )]
     pub(crate) async fn create_workspace(
         &self,
-        Parameters(args): Parameters<CreateWorkspaceArgs>,
+        Parameters(args): Parameters<CreateWorkspaceRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts, "create_workspace");
