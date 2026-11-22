@@ -1,3 +1,4 @@
+use crate::controllers::mcp::{render, try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -8,7 +9,7 @@ use rmcp::tool_router;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, ok_json};
 use crate::dtos::jobs::QueuedJobResponse;
 use crate::models::api_keys::ApiKeyScope;
 
@@ -38,35 +39,28 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("import_jsonl")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Permission(
-                crate::models::iam::policy::Action::ImportCreate,
-            ),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Permission(
+                    crate::models::iam::policy::Action::ImportCreate,
+                ),
+            )
+            .await
+        );
 
-        let job_id = match crate::workers::import::enqueue(
-            self.app_context(),
-            authorized.txn(),
-            authorized.auth_context(),
-            args.jsonl,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let job_id = try_tool!(
+            crate::workers::import::enqueue(
+                self.app_context(),
+                authorized.txn(),
+                authorized.auth_context(),
+                args.jsonl,
+            )
+            .await
+        );
         authorized.commit().await?;
         ok_json(QueuedJobResponse { job_id })
     }
@@ -79,37 +73,29 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("import_job_status")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Job(args.job_id),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::ImportJobGet)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Job(args.job_id),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
-        match crate::models::queue_job_lifecycles::bulk_job_status(
-            authorized.txn(),
-            authorized.workspace_id(),
-            args.job_id,
-            &["import"],
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::ImportJobGet)
+                .await
+        );
+        render(
+            crate::models::queue_job_lifecycles::bulk_job_status(
+                authorized.txn(),
+                authorized.workspace_id(),
+                args.job_id,
+                &["import"],
+            )
+            .await,
         )
-        .await
-        {
-            Ok(status) => ok_json(status),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 }

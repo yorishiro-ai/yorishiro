@@ -1,5 +1,6 @@
 //! MCP tools for the workspace template library: create, update, delete, list, get and fork.
 
+use crate::controllers::mcp::{render, try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -11,7 +12,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::template_templates;
 
@@ -69,37 +70,33 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("create_template_library_item")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("create_template_library_item")?,
+            )
+            .await?
+        );
         let definition = match serde_json::from_value(args.definition) {
             Ok(value) => value,
             Err(error) => return Err(ErrorData::invalid_params(error.to_string(), None)),
         };
-        match template_templates::create_as(
-            &self.app_context().db,
-            &auth,
-            template_templates::CreateTemplateInput {
-                name: args.name,
-                description: args.description,
-                definition,
-                tags: args.tags,
-                locale: args.locale,
-                author: args.author,
-            },
+        render(
+            template_templates::create_as(
+                &self.app_context().db,
+                &auth,
+                template_templates::CreateTemplateInput {
+                    name: args.name,
+                    description: args.description,
+                    definition,
+                    tags: args.tags,
+                    locale: args.locale,
+                    author: args.author,
+                },
+            )
+            .await,
         )
-        .await
-        {
-            Ok(template) => ok_json(template),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 
     #[tool(
@@ -111,37 +108,33 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<UpdateTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("update_template_library_item")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("update_template_library_item")?,
+            )
+            .await?
+        );
         let definition = match args.definition.map(serde_json::from_value).transpose() {
             Ok(value) => value,
             Err(error) => return Err(ErrorData::invalid_params(error.to_string(), None)),
         };
-        match template_templates::update_as(
-            &self.app_context().db,
-            &auth,
-            args.id,
-            template_templates::UpdateTemplateInput {
-                name: args.name,
-                description: args.description,
-                definition,
-                tags: args.tags,
-                locale: args.locale,
-            },
+        render(
+            template_templates::update_as(
+                &self.app_context().db,
+                &auth,
+                args.id,
+                template_templates::UpdateTemplateInput {
+                    name: args.name,
+                    description: args.description,
+                    definition,
+                    tags: args.tags,
+                    locale: args.locale,
+                },
+            )
+            .await,
         )
-        .await
-        {
-            Ok(template) => ok_json(template),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 
     #[tool(
@@ -153,16 +146,14 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetTemplateLibraryItemArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("delete_template_library_item")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("delete_template_library_item")?,
+            )
+            .await?
+        );
         match template_templates::delete_as(&self.app_context().db, &auth, args.id).await {
             Ok(()) => ok_json(serde_json::json!({"deleted": true})),
             Err(error) => Ok(err_to_tool_result(error)),
@@ -178,20 +169,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ForkTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("fork_template_library_item")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match template_templates::fork_as(&self.app_context().db, &auth, args.id, args.name).await {
-            Ok(template) => ok_json(template),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        let auth = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("fork_template_library_item")?,
+            )
+            .await?
+        );
+        render(template_templates::fork_as(&self.app_context().db, &auth, args.id, args.name).await)
     }
 
     #[tool(
@@ -206,23 +192,18 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_template_library")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("list_template_library")?,
+            )
+            .await?
+        );
 
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        let templates = match template_templates::list_as(&self.app_context().db, &auth, page).await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let templates =
+            try_tool!(template_templates::list_as(&self.app_context().db, &auth, page).await);
         ok_json(templates)
     }
 
@@ -236,22 +217,17 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetTemplateLibraryItemArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("get_template_library_item")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("get_template_library_item")?,
+            )
+            .await?
+        );
 
         let template =
-            match template_templates::get_as(&self.app_context().db, &auth, args.id).await {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+            try_tool!(template_templates::get_as(&self.app_context().db, &auth, args.id).await);
         ok_json(template)
     }
 }

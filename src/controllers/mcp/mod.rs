@@ -124,6 +124,35 @@ pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
     result
 }
 
+/// Unwraps a verified caller, or returns the scope denial as the tool result.
+macro_rules! verified {
+    ($outcome:expr) => {
+        match $outcome {
+            $crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
+            $crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        }
+    };
+}
+
+/// Unwraps a model result, or returns its error as the tool result.
+macro_rules! try_tool {
+    ($result:expr) => {
+        match $result {
+            Ok(value) => value,
+            Err(error) => return Ok($crate::controllers::mcp::err_to_tool_result(error)),
+        }
+    };
+}
+
+pub(crate) use {try_tool, verified};
+
+/// Renders a model result as the tool result.
+pub(crate) fn render<T: serde::Serialize>(
+    result: Result<T, YorishiroError>,
+) -> Result<CallToolResult, ErrorData> {
+    result.map_or_else(|error| Ok(err_to_tool_result(error)), ok_json)
+}
+
 pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData> {
     let text = serde_json::to_string(&value).map_err(crate::error::mcp_internal)?;
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))

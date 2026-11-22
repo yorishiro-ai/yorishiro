@@ -1,3 +1,4 @@
+use crate::controllers::mcp::verified;
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -5,7 +6,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::{tool, tool_router};
 
-use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::dtos::users::{UpdateUserRequest, UserRecord};
 use crate::models::api_keys::ApiKeyScope;
 
@@ -16,16 +17,14 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("get_current_user")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("get_current_user")?,
+            )
+            .await?
+        );
         match crate::models::user_users::current_profile(&self.app_context().db, &actor).await {
             Ok(user) => ok_json(UserRecord::render(self.app_context(), user)),
             Err(error) => Ok(err_to_tool_result(error)),
@@ -38,16 +37,14 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<UpdateUserRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("update_current_user")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("update_current_user")?,
+            )
+            .await?
+        );
         match crate::models::user_users::update_profile(
             &self.app_context().db,
             &actor,

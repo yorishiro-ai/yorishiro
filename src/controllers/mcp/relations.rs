@@ -1,5 +1,6 @@
 //! MCP tools for entity relations: create, get, list, delete and set status.
 
+use crate::controllers::mcp::{try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -104,46 +105,38 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("create_relation")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Workspace(
-                match crate::models::entity_entities::workspace_for_actor(
-                    &self.app_context().db,
-                    &actor,
-                    args.source_id,
-                )
-                .await
-                {
-                    Ok(id) => id,
-                    Err(error) => return Ok(err_to_tool_result(error)),
-                },
-            ),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::RelationCreate)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Workspace(
+                    match crate::models::entity_entities::workspace_for_actor(
+                        &self.app_context().db,
+                        &actor,
+                        args.source_id,
+                    )
+                    .await
+                    {
+                        Ok(id) => id,
+                        Err(error) => return Ok(err_to_tool_result(error)),
+                    },
+                ),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::RelationCreate)
+                .await
+        );
 
         let input = args.into();
 
         let workspace_id = authorized.workspace_id();
-        let record = match entity_relations::create(authorized.txn(), workspace_id, input).await {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let record =
+            try_tool!(entity_relations::create(authorized.txn(), workspace_id, input).await);
         authorized.commit().await?;
         ok_json(record)
     }
@@ -156,33 +149,25 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("get_relation")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Relation(args.id),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::RelationGet)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Relation(args.id),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::RelationGet)
+                .await
+        );
 
         let workspace_id = authorized.workspace_id();
-        let record = match entity_relations::get(authorized.txn(), workspace_id, args.id).await {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let record =
+            try_tool!(entity_relations::get(authorized.txn(), workspace_id, args.id).await);
         ok_json(record)
     }
 
@@ -194,33 +179,24 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("delete_relation")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Relation(args.id),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::RelationDelete)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Relation(args.id),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::RelationDelete)
+                .await
+        );
 
         let workspace_id = authorized.workspace_id();
-        match entity_relations::delete(authorized.txn(), workspace_id, args.id).await {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        }
+        try_tool!(entity_relations::delete(authorized.txn(), workspace_id, args.id).await);
         authorized.commit().await?;
         ok_json(serde_json::json!({ "deleted": true }))
     }
@@ -232,27 +208,19 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListRelationsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_relations")?,
-        )
-        .await?
-        {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("list_relations")?,
+            )
+            .await?
+        );
 
-        let query = match args.try_into() {
-            Ok(query) => query,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let query = try_tool!(args.try_into());
 
         let records =
-            match entity_relations::list_for_actor(self.app_context(), &actor, query).await {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+            try_tool!(entity_relations::list_for_actor(self.app_context(), &actor, query).await);
         ok_json(records)
     }
 
@@ -269,46 +237,35 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("set_relation_status")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Relation(args.id),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::RelationUpdate)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Relation(args.id),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::RelationUpdate)
+                .await
+        );
 
         let workspace_id = authorized.workspace_id();
-        let status = match entity_relations::parse_relation_status(&args.status) {
-            Ok(status) => status,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
-        let record = match entity_relations::set_status(
-            authorized.txn(),
-            workspace_id,
-            SetRelationStatusInput {
-                id: args.id,
-                status,
-            },
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let status = try_tool!(entity_relations::parse_relation_status(&args.status));
+        let record = try_tool!(
+            entity_relations::set_status(
+                authorized.txn(),
+                workspace_id,
+                SetRelationStatusInput {
+                    id: args.id,
+                    status,
+                },
+            )
+            .await
+        );
         authorized.commit().await?;
         ok_json(record)
     }

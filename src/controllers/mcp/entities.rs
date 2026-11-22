@@ -1,5 +1,6 @@
 //! MCP tools for entities, plus drift reports and the migration tools (dry run, fill defaults, status, reindex, undo).
 
+use crate::controllers::mcp::{render, try_tool, verified};
 use axum::http::request::Parts;
 use chrono::{DateTime, Utc};
 use rmcp::ErrorData;
@@ -110,26 +111,17 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("create_entity")?,
-        )
-        .await?
-        {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let record = match entity_entities::create_for_actor(
-            self.app_context(),
-            &actor,
-            args.into(),
-        )
-        .await
-        {
-            Ok(record) => record,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
+        let actor = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("create_entity")?,
+            )
+            .await?
+        );
+        let record = try_tool!(
+            entity_entities::create_for_actor(self.app_context(), &actor, args.into(),).await
+        );
         ok_json(record)
     }
 
@@ -140,21 +132,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("get_entity")?,
-        )
-        .await?
-        {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let record = match entity_entities::get_for_actor(self.app_context(), &actor, args.id).await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let actor = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("get_entity")?,
+            )
+            .await?
+        );
+        let record =
+            try_tool!(entity_entities::get_for_actor(self.app_context(), &actor, args.id).await);
         ok_json(record)
     }
 
@@ -165,32 +152,28 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<UpdateEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("update_entity")?,
-        )
-        .await?
-        {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("update_entity")?,
+            )
+            .await?
+        );
         let updated_by = actor.user_id;
-        let record = match entity_entities::update_for_actor(
-            self.app_context(),
-            &actor,
-            entity_entities::UpdateEntityInput {
-                id: args.id,
-                data: args.data,
-                updated_by,
-                expected_updated_at: args.expected_updated_at,
-            },
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let record = try_tool!(
+            entity_entities::update_for_actor(
+                self.app_context(),
+                &actor,
+                entity_entities::UpdateEntityInput {
+                    id: args.id,
+                    data: args.data,
+                    updated_by,
+                    expected_updated_at: args.expected_updated_at,
+                },
+            )
+            .await
+        );
         ok_json(record)
     }
 
@@ -201,20 +184,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<DeleteEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("delete_entity")?,
-        )
-        .await?
-        {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match entity_entities::delete_for_actor(self.app_context(), &actor, args.id).await {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        }
+        let actor = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("delete_entity")?,
+            )
+            .await?
+        );
+        try_tool!(entity_entities::delete_for_actor(self.app_context(), &actor, args.id).await);
         ok_json(serde_json::json!({ "deleted": true }))
     }
 
@@ -225,27 +203,19 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_entities")?,
-        )
-        .await?
-        {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("list_entities")?,
+            )
+            .await?
+        );
 
-        let query = match args.try_into() {
-            Ok(query) => query,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let query = try_tool!(args.try_into());
 
-        let records = match entity_entities::list_for_actor(self.app_context(), &actor, query).await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let records =
+            try_tool!(entity_entities::list_for_actor(self.app_context(), &actor, query).await);
         ok_json(records)
     }
 
@@ -263,40 +233,36 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("get_entity_drift")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Workspace(
-                match entity_entities::workspace_for_actor(&self.app_context().db, &actor, args.id)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Workspace(
+                    match entity_entities::workspace_for_actor(
+                        &self.app_context().db,
+                        &actor,
+                        args.id
+                    )
                     .await
-                {
-                    Ok(id) => id,
-                    Err(error) => return Ok(err_to_tool_result(error)),
-                },
-            ),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::EntityDriftGet)
+                    {
+                        Ok(id) => id,
+                        Err(error) => return Ok(err_to_tool_result(error)),
+                    },
+                ),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::EntityDriftGet)
+                .await
+        );
 
         let workspace_id = authorized.workspace_id();
-        let drift = match entity_entities::drift(authorized.txn(), workspace_id, args.id).await {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let drift =
+            try_tool!(entity_entities::drift(authorized.txn(), workspace_id, args.id).await);
         ok_json(drift)
     }
 
@@ -315,38 +281,28 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("migration_dry_run")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Permission(
-                crate::models::iam::policy::Action::MigrationDryRun,
-            ),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::MigrationDryRun)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Permission(
+                    crate::models::iam::policy::Action::MigrationDryRun,
+                ),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::MigrationDryRun)
+                .await
+        );
 
         let workspace_id = authorized.workspace_id();
-        let report =
-            match entity_entities::migration_dry_run(authorized.txn(), workspace_id, &args.name)
-                .await
-            {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let report = try_tool!(
+            entity_entities::migration_dry_run(authorized.txn(), workspace_id, &args.name).await
+        );
         ok_json(report)
     }
 
@@ -360,35 +316,28 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("fill_defaults")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Permission(
-                crate::models::iam::policy::Action::MigrationFillDefaults,
-            ),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Permission(
+                    crate::models::iam::policy::Action::MigrationFillDefaults,
+                ),
+            )
+            .await
+        );
 
-        let job_id = match crate::workers::fill_defaults::enqueue(
-            self.app_context(),
-            authorized.txn(),
-            authorized.auth_context(),
-            args.schema_name.clone(),
-        )
-        .await
-        {
-            Ok(id) => id,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
+        let job_id = try_tool!(
+            crate::workers::fill_defaults::enqueue(
+                self.app_context(),
+                authorized.txn(),
+                authorized.auth_context(),
+                args.schema_name.clone(),
+            )
+            .await
+        );
         authorized.commit().await?;
         ok_json(crate::dtos::entities::FillDefaultsResponse {
             schema_name: args.schema_name,
@@ -406,38 +355,30 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("migration_job_status")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Job(args.job_id),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::MigrationJobGet)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Job(args.job_id),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::MigrationJobGet)
+                .await
+        );
 
-        match crate::models::queue_job_lifecycles::migration_job_status(
-            authorized.txn(),
-            authorized.workspace_id(),
-            args.job_id,
+        render(
+            crate::models::queue_job_lifecycles::migration_job_status(
+                authorized.txn(),
+                authorized.workspace_id(),
+                args.job_id,
+            )
+            .await,
         )
-        .await
-        {
-            Ok(status) => ok_json(status),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 
     #[tool(
@@ -449,33 +390,26 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("reindex_workspace")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Permission(
-                crate::models::iam::policy::Action::WorkspaceReindex,
-            ),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        let job_id = match crate::workers::reindex::enqueue_requested(
-            self.app_context(),
-            authorized.txn(),
-            authorized.auth_context(),
-        )
-        .await
-        {
-            Ok(id) => id,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Permission(
+                    crate::models::iam::policy::Action::WorkspaceReindex,
+                ),
+            )
+            .await
+        );
+        let job_id = try_tool!(
+            crate::workers::reindex::enqueue_requested(
+                self.app_context(),
+                authorized.txn(),
+                authorized.auth_context(),
+            )
+            .await
+        );
         authorized.commit().await?;
         ok_json(crate::dtos::entities::ReindexResponse { job_id })
     }
@@ -490,32 +424,25 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("undo_migration_job")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::SnapshotJob(args.job_id),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        let job_id = match crate::workers::undo::enqueue(
-            self.app_context(),
-            authorized.txn(),
-            authorized.auth_context(),
-            args.job_id,
-        )
-        .await
-        {
-            Ok(id) => id,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::SnapshotJob(args.job_id),
+            )
+            .await
+        );
+        let job_id = try_tool!(
+            crate::workers::undo::enqueue(
+                self.app_context(),
+                authorized.txn(),
+                authorized.auth_context(),
+                args.job_id,
+            )
+            .await
+        );
         authorized.commit().await?;
         ok_json(crate::dtos::entities::UndoResponse {
             job_id,

@@ -1,5 +1,6 @@
 //! MCP tools for schemas: listing, creating, archiving and deleting versions, reading the active one, and the built-in templates.
 
+use crate::controllers::mcp::{render, try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -75,27 +76,21 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("archive_schema")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaArchive)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::SchemaArchive)
+                .await
+        );
 
         match schema_schemas::archive(authorized.txn(), authorized.workspace_id(), args.schema_id)
             .await
@@ -117,27 +112,21 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("delete_schema")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaDelete)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::SchemaDelete)
+                .await
+        );
 
         match schema_schemas::delete(authorized.txn(), authorized.workspace_id(), args.schema_id)
             .await
@@ -158,22 +147,17 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListSchemasArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_schemas")?,
-        )
-        .await?
-        {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("list_schemas")?,
+            )
+            .await?
+        );
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        let summaries = match schema_schemas::list_for_actor(self.app_context(), &actor, page).await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let summaries =
+            try_tool!(schema_schemas::list_for_actor(self.app_context(), &actor, page).await);
         ok_json(summaries)
     }
 
@@ -187,38 +171,28 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("get_active_schema")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Permission(
-                crate::models::iam::policy::Action::SchemaGet,
-            ),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaGet)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Permission(
+                    crate::models::iam::policy::Action::SchemaGet,
+                ),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::SchemaGet)
+                .await
+        );
 
         let workspace_id = authorized.workspace_id();
-        let record =
-            match schema_schemas::get_active_schema(authorized.txn(), workspace_id, &args.name)
-                .await
-            {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let record = try_tool!(
+            schema_schemas::get_active_schema(authorized.txn(), workspace_id, &args.name).await
+        );
         ok_json(record)
     }
 
@@ -232,34 +206,26 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("get_schema_by_id")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaGet)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::SchemaGet)
+                .await
+        );
 
         let workspace_id = authorized.workspace_id();
-        let record =
-            match schema_schemas::get_by_id(authorized.txn(), workspace_id, args.schema_id).await {
-                Ok(value) => value,
-                Err(err) => return Ok(err_to_tool_result(err)),
-            };
+        let record = try_tool!(
+            schema_schemas::get_by_id(authorized.txn(), workspace_id, args.schema_id).await
+        );
         ok_json(record)
     }
 
@@ -274,29 +240,23 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("create_schema")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Permission(
-                crate::models::iam::policy::Action::SchemaCreate,
-            ),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaCreate)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Permission(
+                    crate::models::iam::policy::Action::SchemaCreate,
+                ),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::SchemaCreate)
+                .await
+        );
 
         let mut origin_template_id = None;
         let mut origin_snapshot = None;
@@ -329,17 +289,14 @@ impl YorishiroMcpServer {
                 }
             },
             (None, Some(template_id)) => {
-                let (definition, origin) =
-                    match crate::models::template_templates::resolve_template_definition(
+                let (definition, origin) = try_tool!(
+                    crate::models::template_templates::resolve_template_definition(
                         &self.app_context().db,
                         authorized.auth_context().tenant_id,
                         &template_id,
                     )
                     .await
-                    {
-                        Ok(value) => value,
-                        Err(err) => return Ok(err_to_tool_result(err)),
-                    };
+                );
                 origin_template_id = origin;
                 origin_snapshot = origin.map(|_| definition.clone());
                 definition
@@ -348,19 +305,17 @@ impl YorishiroMcpServer {
 
         let tenant_id = authorized.auth_context().tenant_id;
         let workspace_id = authorized.workspace_id();
-        let (record, diff) = match schema_schemas::create_schema(
-            authorized.txn(),
-            tenant_id,
-            workspace_id,
-            definition,
-            origin_template_id,
-            origin_snapshot,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let (record, diff) = try_tool!(
+            schema_schemas::create_schema(
+                authorized.txn(),
+                tenant_id,
+                workspace_id,
+                definition,
+                origin_template_id,
+                origin_snapshot,
+            )
+            .await
+        );
         authorized.commit().await?;
         ok_json(serde_json::json!({
             "schema": record,
@@ -378,16 +333,14 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let _authorized = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_templates")?,
-        )
-        .await?
-        {
-            super::VerifyOutcome::Verified(authorized) => authorized,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let _authorized = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("list_templates")?,
+            )
+            .await?
+        );
 
         ok_json(crate::data::templates::list_templates())
     }
@@ -401,20 +354,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetTemplateArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let _authorized = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("get_template")?,
-        )
-        .await?
-        {
-            super::VerifyOutcome::Verified(authorized) => authorized,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match crate::data::templates::get_template(&args.template_id) {
-            Ok(template) => ok_json(template),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        let _authorized = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("get_template")?,
+            )
+            .await?
+        );
+        render(crate::data::templates::get_template(&args.template_id))
     }
 
     #[tool(
@@ -429,41 +377,29 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let required = self.required_scope("get_entity_type_json_schema")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Permission(
-                crate::models::iam::policy::Action::SchemaGet,
-            ),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaGet)
+        let actor = verified!(super::verify(self.app_context(), &parts, required).await?);
+        let mut authorized = try_tool!(
+            super::authorize::Authorized::for_target(
+                self.app_context(),
+                &actor,
+                required,
+                crate::models::iam::access::WorkspaceTarget::Permission(
+                    crate::models::iam::policy::Action::SchemaGet,
+                ),
+            )
             .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
+        );
+        try_tool!(
+            authorized
+                .require_action(crate::models::iam::policy::Action::SchemaGet)
+                .await
+        );
 
         let workspace_id = authorized.workspace_id();
-        let record = match schema_schemas::get_active_schema(
-            authorized.txn(),
-            workspace_id,
-            &args.schema_name,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let record = try_tool!(
+            schema_schemas::get_active_schema(authorized.txn(), workspace_id, &args.schema_name,)
+                .await
+        );
 
         match record.definition.entity_types.get(&args.entity_type) {
             Some(entity_type_def) => ok_json(

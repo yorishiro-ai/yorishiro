@@ -1,3 +1,4 @@
+use crate::controllers::mcp::verified;
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -5,9 +6,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::{tool, tool_router};
 
-use crate::controllers::mcp::{
-    VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json, verify,
-};
+use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json, verify};
 use crate::edition::ee::dtos::inference::SetLlmKeyRequest;
 use crate::edition::ee::models::workspace_llm_keys;
 use crate::error::YorishiroError;
@@ -20,16 +19,14 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("get_llm_provider")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(
+            verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("get_llm_provider")?,
+            )
+            .await?
+        );
         match workspace_llm_keys::describe_as(&self.app_context().db, &actor).await {
             Ok(Some(record)) => ok_json(record),
             Ok(None) => Ok(err_to_tool_result(YorishiroError::not_found(
@@ -45,16 +42,14 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<SetLlmKeyRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("set_llm_provider")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(
+            verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("set_llm_provider")?,
+            )
+            .await?
+        );
         match workspace_llm_keys::set_as(
             &self.app_context().db,
             &actor,
@@ -74,16 +69,14 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("reset_llm_provider")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(
+            verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("reset_llm_provider")?,
+            )
+            .await?
+        );
         match workspace_llm_keys::clear_as(&self.app_context().db, &actor).await {
             Ok(()) => ok_json(serde_json::json!({"reset":true})),
             Err(error) => Ok(err_to_tool_result(error)),

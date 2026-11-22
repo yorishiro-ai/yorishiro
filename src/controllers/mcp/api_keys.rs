@@ -1,5 +1,6 @@
 //! MCP tools for creating, listing, rotating and revoking API keys.
 
+use crate::controllers::mcp::{render, try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -10,7 +11,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::controllers::api_keys::render_grant;
 use crate::dtos::api_keys::{
     ApiKeyRecord, CreateApiKeyRequest, CreateApiKeyResponse, ListApiKeysResponse,
@@ -34,23 +35,21 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateApiKeyRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("create_api_key")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        if let Err(error) = args.validate_workspace_selection(
-            parts
-                .headers
-                .contains_key(crate::models::api_keys::WORKSPACE_HEADER),
-        ) {
-            return Ok(err_to_tool_result(error));
-        }
+        let auth = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("create_api_key")?,
+            )
+            .await?
+        );
+        try_tool!(
+            args.validate_workspace_selection(
+                parts
+                    .headers
+                    .contains_key(crate::models::api_keys::WORKSPACE_HEADER),
+            )
+        );
         let created = if args.tenant_scoped {
             IdentityApiKeys::create_delegated_tenant_api_key(
                 &self.app_context().db,
@@ -93,16 +92,14 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_api_keys")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("list_api_keys")?,
+            )
+            .await?
+        );
         let ctx = self.app_context();
         let result = async {
             let mut records = Vec::new();
@@ -121,10 +118,7 @@ impl YorishiroMcpServer {
             Ok::<_, crate::error::YorishiroError>(ListApiKeysResponse { keys: records })
         }
         .await;
-        match result {
-            Ok(records) => ok_json(records),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        render(result)
     }
 
     #[tool(
@@ -136,16 +130,14 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ApiKeyArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("revoke_api_key")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("revoke_api_key")?,
+            )
+            .await?
+        );
         match IdentityApiKeys::revoke_for_tenant(&self.app_context().db, &auth, args.key_id).await {
             Ok(()) => ok_json(serde_json::json!({"revoked":true})),
             Err(error) => Ok(err_to_tool_result(error)),
@@ -161,16 +153,14 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ApiKeyArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("rotate_api_key")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(
+            super::verify(
+                self.app_context(),
+                &parts,
+                self.required_scope("rotate_api_key")?,
+            )
+            .await?
+        );
         match IdentityApiKeys::rotate(&self.app_context().db, &auth, args.key_id).await {
             Ok(created) => ok_json(CreateApiKeyResponse {
                 id: created.id,
