@@ -71,7 +71,7 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
         let tools = grants["tools"].as_array().expect("tool capabilities");
         let inventory = tool_inventory(&inventory);
         assert_eq!(tools.len(), inventory.len());
-        for tool in &inventory {
+        for tool in inventory {
             let capability = tools.iter().find(|entry| entry["name"] == tool["name"])
                 .expect("every visible tool has a capability");
             assert_eq!(capability["required_scope"], tool["_meta"]["yorishiro/required_scope"]);

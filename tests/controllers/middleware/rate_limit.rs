@@ -1,6 +1,8 @@
 /// Tests for the rate limiter: guard checks and token accounting.
 use std::time::Duration;
 
+mod requests;
+
 use uuid::Uuid;
 use yorishiro::controllers::middleware::rate_limit::{RateLimiter, charge_search_tokens};
 

@@ -788,9 +788,7 @@ pub(crate) async fn insert_fork(
 ) -> Result<InsertForkOutcome, YorishiroError> {
     use crate::models::_entities::template_templates::ActiveModel;
 
-    // `visibility = 'tenant'` for the reason this function's own doc comment gives; not one of
-    // ForkSource's copyable columns, since a fork never starts out community-visible regardless
-    // of what its source was.
+    // Forks always start tenant-private, regardless of source visibility.
     let active = ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant_id),
         name: sea_orm::ActiveValue::Set(source.name.clone()),
@@ -844,9 +842,6 @@ pub(crate) async fn update_visibility(
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::template_templates::ActiveModel;
 
-    // updated_at is not set here: template_templates::ActiveModel's before_save stamps it on
-    // every update whose caller didn't already set it explicitly, so a hand-written `now()` would
-    // just duplicate what before_save already does.
     let active = ActiveModel {
         id: sea_orm::ActiveValue::Unchanged(template_id),
         visibility: sea_orm::ActiveValue::Set(visibility.as_db_str().to_string()),

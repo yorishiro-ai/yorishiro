@@ -48,6 +48,9 @@ Async waits release the task to do other work, but one physical connection still
 Run the local development stack with `docker compose -f docker-compose.test.yaml up --build`.
 The Makefile starts the test database or Valkey from the same Compose file when using the default local URLs.
 The separate `docker-compose.yaml` deploys published images and requires a release `TAG` and a production `DATABASE_URL`.
+`YORISHIRO_HTTP_ALLOWED_NETWORKS` restricts REST (including webhooks), MCP, Swagger, authentication, and setup to a JSON list of peer CIDRs.
+The default `[]` allows all peers without bypassing authentication.
+Behind a reverse proxy, enforce client IP policy at the proxy because the app uses the socket peer and ignores forwarding headers.
 
 Run the full suite with Rust's default parallel test execution.
 
@@ -61,6 +64,8 @@ Licensed tests skip without `YORISHIRO_LICENSE_KEY`, and the E5 model tests skip
 Run the opt-in Stripe tests with `cargo test --locked --features stripe-tests --test mod -- ::stripe::`.
 The Stripe request tests install a test licence state and do not require a Stripe account or a signed EE licence.
 `UPDATE_FIXTURES=1 cargo test --features enterprise enterprise_inventory_contract` rewrites `tests/fixtures/mcp-inventory.md`; review the diff before committing.
+`UPDATE_FIXTURES=1 cargo test --features enterprise openapi_document_is_mounted_with_enterprise_routes` updates `tests/fixtures/openapi-operations.txt` with the paths, methods, parameters, and response codes from the served OpenAPI document.
+Run the optional SQLite search benchmark with `cargo bench --bench sqlite_ann -- sqlite:///path/to/database.sqlite3 WORKSPACE_UUID`; it opens the database read-only.
 
 Metaschema validation includes property-based tests for arbitrary schema-shaped definitions and rejection of empty `entity_types`.
 

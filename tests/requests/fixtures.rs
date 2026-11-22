@@ -67,7 +67,7 @@ impl TestTenant {
     )]
     pub(crate) async fn create(
         request: &loco_rs::TestServer,
-        ctx: &AppContext,
+        _ctx: &AppContext,
         args: TenantArgs,
     ) -> Self {
         let response = request
@@ -83,17 +83,43 @@ impl TestTenant {
         let tenant_id =
             serde_json::from_value(account["tenant_id"].clone()).expect("signup tenant ID");
         let owner_id = serde_json::from_value(account["user_id"].clone()).expect("signup owner ID");
-        let txn = ctx.db.begin().await.expect("begin workspace setup");
-        let workspace =
-            tenancy::create_workspace(&txn, tenant_id, &args.workspace_name, None, None)
-                .await
-                .expect("create workspace");
-        txn.commit().await.expect("commit workspace setup");
-        let api_key =
-            issue_api_key(ctx, workspace.id, owner_id, args.key_scope, args.key_audit).await;
+        let login = request
+            .post("/auth/root/login")
+            .json(&serde_json::json!({
+                "email": args.owner_email,
+                "password": args.owner_password,
+            }))
+            .await;
+        login.assert_status_ok();
+        let login = login.json::<serde_json::Value>();
+        let bearer = format!("Bearer {}", login["api_key"].as_str().expect("login key"));
+        let workspace = request
+            .post("/api/workspaces")
+            .add_header("Authorization", &bearer)
+            .json(&serde_json::json!({"name": args.workspace_name}))
+            .await;
+        workspace.assert_status(axum::http::StatusCode::CREATED);
+        let workspace_id: Uuid =
+            serde_json::from_value(workspace.json::<serde_json::Value>()["id"].clone())
+                .expect("workspace ID");
+        let key = request
+            .post("/api/api-keys")
+            .add_header("Authorization", &bearer)
+            .add_header("X-Workspace-Id", workspace_id.to_string())
+            .json(&serde_json::json!({
+                "name": "test-workspace-key",
+                "scope": args.key_scope,
+                "audit": args.key_audit,
+            }))
+            .await;
+        key.assert_status(axum::http::StatusCode::CREATED);
+        let api_key = key.json::<serde_json::Value>()["full_key"]
+            .as_str()
+            .expect("workspace API key")
+            .to_owned();
         Self {
             tenant_id,
-            workspace_id: workspace.id,
+            workspace_id,
             owner_id,
             api_key,
         }

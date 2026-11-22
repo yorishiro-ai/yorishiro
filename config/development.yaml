@@ -1,39 +1,22 @@
-# Loco configuration file documentation
-
-# Application logging configuration
 logger:
-  # Enable or disable logging.
   enable: true
   # Enable pretty backtrace (sets RUST_BACKTRACE=1)
   pretty_backtrace: true
-  # Log level, options: trace, debug, info, warn or error.
-  # loco applies this to its own module whitelist plus this application, which its default filter
-  # admits because there is one application crate. Setting `override_filter` below would make this
-  # key inert: loco does not read `level` at all when that is set.
-  # `RUST_LOG` overrides everything here when set: loco tries `EnvFilter::try_from_default_env()`
-  # before reading this file at all (`logger.rs:193`), so a platform that injects `RUST_LOG` silences
-  # this application unless that variable names it too.
+  # RUST_LOG overrides this level and must include the application module.
   level: <%= get_env(name="LOG_LEVEL", default="info") %>
-  # Define the logging format. options: compact, pretty or json
   format: compact
 
-# Web server configuration
 server:
   # Port on which the server listens, on the interface selected by BINDING.
-  # Every Loco app defaults to 5150, so a second one on this machine will
-  # collide. Override without editing this file: `PORT=5151 cargo loco start`.
   port: <%= get_env(name="PORT", default="5150") %>
-  # Binding for the server (which interface to bind to)
   binding: <%= get_env(name="BINDING", default="localhost") %>
-  # The UI hostname or IP address that mailers will point to.
   host: http://localhost
-  # Out of the box middleware configuration. to disable middleware you can changed the `enable` field to `false` of comment the middleware block
   middlewares:
     cors:
       enable: true
       # JSON array of exact browser origins, shared by REST and MCP.
       allow_origins: <%= get_env(name="YORISHIRO_ALLOWED_ORIGINS", default="[]") %>
-      allow_headers: [Authorization, Content-Type, Accept, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID]
+      allow_headers: [Authorization, Content-Type, Accept, X-Workspace-Id, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID]
       allow_methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
       expose_headers: [Mcp-Session-Id, MCP-Protocol-Version, X-Request-Id]
     # Stamps every request/response with an `x-request-id` header, generating one if the caller sent none.
@@ -75,9 +58,6 @@ scheduler:
 # --worker=worker-target:shared. Official and tenant workers need their own selected targets.
 # Bare --worker, --server-and-worker, and --all are rejected.
 
-  
-# Queue Configuration
-#
 # YORISHIRO_QUEUE_KIND selects Redis, Sqlite or Postgres.
 # Without an explicit kind, the template selects SQLite for sqlite:// and PostgreSQL otherwise.
 # SQL queue pool settings are declared explicitly alongside database settings.
@@ -138,6 +118,7 @@ workers:
   mode: BackgroundQueue
 
 settings:
+  http_allowed_networks: <%= get_env(name="YORISHIRO_HTTP_ALLOWED_NETWORKS", default="[]") %>
   # Deployment routing declaration, not live worker discovery.
   worker_targets: <%= get_env(name="YORISHIRO_WORKER_TARGETS", default='["worker-target:shared"]') %>
   timezone: <%= get_env(name="YORISHIRO_TIMEZONE", default="UTC") %>
@@ -160,28 +141,14 @@ settings:
     timeout_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", default="15000") %>
     poll_interval_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", default="100") %>
     retention_seconds: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", default="300") %>
-
-
-# Initializers Configuration
-# initializers:
-#  oauth2:
-#    authorization_code: # Authorization code grant type
-#      - client_identifier: google # Identifier for the OAuth2 provider. Replace 'google' with your provider's name if different, must be unique within the oauth2 config.
-#        ... other fields
-
-# Database Configuration
 database:
   # Database connection URI
   # SQLite by default so a clone with nothing configured boots and works.
-  # Point DATABASE_URL at Postgres for anything needing RLS, multi-tenancy or vector search, none of which this backend has.
+  # Use PostgreSQL for RLS and multi-tenancy; both backends support vector search.
   uri: <%= get_env(name="DATABASE_URL", default="sqlite://yorishiro.sqlite3?mode=rwc") %>
-  # When enabled, the sql query will be logged.
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
-  # Set the timeout duration when acquiring a connection.
   connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
-  # Set the idle duration before closing a connection.
   idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
-  # Minimum number of connections for a pool.
   min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
   # Maximum number of connections for a pool.
   max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="50") %>
@@ -192,13 +159,9 @@ database:
   # Recreating schema when application loaded.  This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_recreate: false
 
-# Authentication Configuration
 auth:
-  # JWT authentication
   jwt:
-    # Secret key for token generation and verification
     secret: p61ncQ4lhkoRR923aP7b
-    # Token expiration time in seconds
     expiration: 604800 # 7 days
     # Where to read the token from. Omitted => `Authorization: Bearer <token>`.
     # A cookie or query parameter is a single map with a `from:` tag:

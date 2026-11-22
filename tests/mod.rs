@@ -3,6 +3,7 @@
     reason = "tests read their inputs, such as DATABASE_URL and the licence key, from the environment"
 )]
 
+mod app;
 mod controllers;
 mod data;
 mod db;

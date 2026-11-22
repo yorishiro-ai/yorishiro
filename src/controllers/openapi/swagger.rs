@@ -14,12 +14,80 @@ pub mod implementation {
 
     use axum::Router;
     use axum::http::Method;
-    use utoipa::openapi::path::{HttpMethod, PathItem};
+    use utoipa::openapi::path::{HttpMethod, Operation, ParameterBuilder, ParameterIn, PathItem};
+    use utoipa::openapi::response::ResponseBuilder;
+    use utoipa::openapi::schema::{KnownFormat, ObjectBuilder, SchemaFormat, Type};
     use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
-    use utoipa::openapi::{Components, Info, OpenApiBuilder, PathsBuilder, RefOr, Schema};
+    use utoipa::openapi::{
+        Components, Content, Info, OpenApiBuilder, PathsBuilder, Ref, RefOr, Required, Schema,
+    };
     use utoipa_swagger_ui::SwaggerUi;
 
     use super::super::route_inventory::{RouteDoc, RouteEntry, RouteInventory};
+    use crate::models::iam::policy::{Action, Resource};
+
+    fn document_workspace_selection(entry: &RouteEntry, operation: &mut Operation) {
+        let workspace = Resource::Workspace {
+            tenant_id: uuid::Uuid::nil(),
+            workspace_id: uuid::Uuid::nil(),
+        };
+        let workspace_operation = operation
+            .extensions
+            .as_ref()
+            .and_then(|extensions| extensions.get("x-yorishiro-required-actions"))
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|value| serde_json::from_value::<Action>(value.clone()).ok())
+            .any(|action| action.applies_to(workspace));
+        let key_creation = entry.path == "/api/api-keys" && entry.method == Method::POST;
+        if !workspace_operation && !key_creation {
+            return;
+        }
+        let name = "X-Workspace-Id";
+        let parameters = operation.parameters.get_or_insert_with(Vec::new);
+        if !parameters.iter().any(|parameter| {
+            matches!(parameter, RefOr::T(parameter) if parameter.parameter_in == ParameterIn::Header
+                && parameter.name.eq_ignore_ascii_case(name))
+        }) {
+            let description = if key_creation {
+                "Workspace binding for the new key. Do not send this header with tenant_scoped: true."
+            } else {
+                "Explicit workspace selection. When omitted, operations that require one workspace may return 422 (`workspace_selection_required`) if several workspaces qualify."
+            };
+            parameters.push(
+                ParameterBuilder::new()
+                    .name(name)
+                    .parameter_in(ParameterIn::Header)
+                    .required(Required::False)
+                    .schema(Some(
+                        ObjectBuilder::new()
+                            .schema_type(Type::String)
+                            .format(Some(SchemaFormat::KnownFormat(KnownFormat::Uuid)))
+                            .build(),
+                    ))
+                    .description(Some(description))
+                    .build()
+                    .into(),
+            );
+        }
+        operation
+            .responses
+            .responses
+            .entry("403".into())
+            .or_insert_with(|| {
+                ResponseBuilder::new()
+                    .description(
+                        "The credential is not authorized for this operation or workspace.",
+                    )
+                    .content(
+                        "application/json",
+                        Content::new(Some(Ref::from_schema_name("ApiErrorBody"))),
+                    )
+                    .build()
+                    .into()
+            });
+    }
 
     ///
     /// # Panics
@@ -138,6 +206,7 @@ pub mod implementation {
             let method = openapi_method(&entry.method);
             let mut operation = doc.operation.clone();
             operation.operation_id = Some(entry.operation_id.clone());
+            document_workspace_selection(entry, &mut operation);
             operations
                 .push(serde_json::to_value(&operation).expect("OpenAPI operation must serialize"));
             paths = paths.path(&entry.path, PathItem::new(method, operation));

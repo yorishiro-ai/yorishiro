@@ -1,57 +1,30 @@
-# Loco configuration file documentation
-#
-# This is the production environment.
-#
-# Yorishiro supports SQLite or PostgreSQL for application data.
-# Queue storage is configured independently through Loco's queue provider.
-# This release supports SQLite, PostgreSQL, and the Redis-compatible provider.
 # An unconfigured start uses local SQLite files and serves a single-tenant trial instance.
-# The default database is `sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc` (an
-# absolute path, independent of the process's CWD), while SQLite jobs use the separate
-# `sqlite:///var/lib/yorishiro/yorishiro_queue.sqlite3?mode=rwc` file.
-# `HOST` defaults to `http://localhost`, which is enough for a trial instance that nobody
-# needs to reach externally.
-#
-# To use PostgreSQL for application data, set `DATABASE_URL` to a `postgres://` URI.
-# When you do, `YORISHIRO_QUEUE_KIND` defaults to `Postgres` and the queue uses `DATABASE_URL`
-# as its connection URI (the same instance), so you need only one database running.
+# Set DATABASE_URL to PostgreSQL to use it for application data and the default queue.
 # Set `YORISHIRO_QUEUE_KIND=Redis` and a `redis://` or `rediss://` `QUEUE_URL` to use the Redis-compatible provider independently of the application database.
-#
-# The enterprise edition variables below are not rendered by this file (they are read
-# through the typed keys in `ee/data/env.rs`), but listed here for completeness so this
-# document is the single reference for every configuration option:
-#   YORISHIRO_LICENSE_KEY   - RSA256-signed licence key for enterprise features (see `ee/services/licence.rs`)
 
-# Application logging configuration
 logger:
-  # Enable or disable logging.
   enable: true
   # Enable pretty backtrace (sets RUST_BACKTRACE=1). Off in production: it
   # costs performance and puts source paths into your logs.
   pretty_backtrace: false
-  # Log level, options: trace, debug, info, warn or error.
   level: <%= get_env(name="LOG_LEVEL", default="info") %>
-  # Define the logging format. options: compact, pretty or json
   # `json` is the machine-readable one, for a log aggregator.
   format: json
 
-# Web server configuration
 server:
   # Port on which the server listens, on the interface selected by BINDING.
   port: <%= get_env(name="PORT", default="5150") %>
   # Binding for the server (which interface to bind to).
   # Explicit 0.0.0.0 or :: enables network access and accepts any MCP Host.
   binding: <%= get_env(name="BINDING", default="localhost") %>
-  # The UI hostname or IP address that mailers will point to.
   # Defaults to localhost for an unconfigured trial instance.
   host: <%= get_env(name="HOST", default="http://localhost") %>
-  # Out of the box middleware configuration. to disable middleware you can changed the `enable` field to `false` of comment the middleware block
   middlewares:
     cors:
       enable: true
       # JSON array of exact browser origins, shared by REST and MCP.
       allow_origins: <%= get_env(name="YORISHIRO_ALLOWED_ORIGINS", default="[]") %>
-      allow_headers: [Authorization, Content-Type, Accept, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID]
+      allow_headers: [Authorization, Content-Type, Accept, X-Workspace-Id, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID]
       allow_methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
       expose_headers: [Mcp-Session-Id, MCP-Protocol-Version, X-Request-Id]
     # Stamps every request/response with an `x-request-id` header, generating one if the caller sent none.
@@ -90,16 +63,8 @@ scheduler:
 # --worker=worker-target:shared. Official and tenant workers need their own selected targets.
 # Bare --worker, --server-and-worker, and --all are rejected.
 
-  
-# Queue Configuration
-#
-# YORISHIRO_QUEUE_KIND picks which of loco-rs's three queue providers boots (Postgres/Sqlite/Redis, QueueConfig's #[serde(tag = "kind")] variants, config/queue.rs): each needs a different set of fields (RedisQueueConfig alone has `queues`; Postgres/SqliteQueueConfig share the SQL-pool knobs but point at different URIs), so a template conditional renders one whole alternative block rather than templating individual fields inside a single fixed shape.
-# Derives from DATABASE_URL's scheme so the queue follows the database when neither is set.
-# With DATABASE_URL unset, SQLite uses a separate queue file.
-# PostgreSQL continues to use DATABASE_URL unless QUEUE_URL is set.
-# `Redis` is Loco's provider variant name for Redis-compatible queue services.
-# QUEUE_URL takes no default when an external backend is required (Redis, or explicit
-# non-SQLite queue), matching this file's own no-silent-fallback convention.
+# Queue providers need different fields, so each branch renders a complete configuration.
+# External providers require an explicit URI; SQLite defaults to a separate local file.
 <% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
 queue:
   kind: Redis
@@ -175,6 +140,7 @@ workers:
   mode: BackgroundQueue
 
 settings:
+  http_allowed_networks: <%= get_env(name="YORISHIRO_HTTP_ALLOWED_NETWORKS", default="[]") %>
   # Deployment routing declaration, not live worker discovery.
   worker_targets: <%= get_env(name="YORISHIRO_WORKER_TARGETS", default='["worker-target:shared"]') %>
   timezone: <%= get_env(name="YORISHIRO_TIMEZONE", default="UTC") %>
@@ -197,28 +163,14 @@ settings:
     timeout_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", default="15000") %>
     poll_interval_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", default="100") %>
     retention_seconds: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", default="300") %>
-
-
-# Initializers Configuration
-# initializers:
-#  oauth2:
-#    authorization_code: # Authorization code grant type
-#      - client_identifier: google # Identifier for the OAuth2 provider. Replace 'google' with your provider's name if different, must be unique within the oauth2 config.
-#        ... other fields
-
-# Database Configuration
 database:
   # Database connection URI.
   # Defaults to a local SQLite file for an unconfigured trial instance.
   # Use PostgreSQL for database-enforced tenant isolation; both backends support vector search.
   uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc") %>'
-  # When enabled, the sql query will be logged.
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
-  # Set the timeout duration when acquiring a connection.
   connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
-  # Set the idle duration before closing a connection.
   idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
-  # Minimum number of connections for a pool.
   min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
   # Maximum number of connections for a pool. SQLite has a single writer, so it defaults to 10 rather than 100.
 <% if (get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first) == "sqlite" %>
@@ -236,8 +188,6 @@ database:
   # Recreating schema when application loaded.  This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_recreate: false
 
-# Authentication Configuration
-#
 # Deliberately absent, not merely unset.
 # Authentication uses API keys through RequestAuth, not Loco's JWT configuration.
 

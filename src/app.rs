@@ -117,8 +117,6 @@ impl RouteMounts {
             .guard_credentials("/auth/root/login")
             .guard_credentials("/auth/tenant/login");
 
-        // Registers a route group with Loco and records it, with its OpenAPI document when the
-        // `openapi` feature is on, in the inventory.
         macro_rules! mount {
             ($routes:expr $(, $docs:expr)?) => {{
                 mounts.mount($routes);
@@ -283,9 +281,17 @@ pub(crate) fn after_routes(
     } else {
         router
     };
-    Ok(router.layer(axum::middleware::from_fn_with_state(
+    let router = router.layer(axum::middleware::from_fn_with_state(
         ctx.clone(),
         controllers::middleware::maintenance::maintenance_guard,
+    ));
+    let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
+    if settings.http_allowed_networks.is_empty() {
+        return Ok(router);
+    }
+    Ok(router.layer(axum::middleware::from_fn_with_state(
+        std::sync::Arc::<[ipnet::IpNet]>::from(settings.http_allowed_networks),
+        controllers::middleware::client_network::require_allowed_network,
     )))
 }
 

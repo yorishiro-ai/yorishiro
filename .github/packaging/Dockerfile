@@ -1,4 +1,6 @@
-# Build against AlmaLinux 10's glibc so both supported package targets can run the binary.
+# syntax=docker/dockerfile:1.29.0
+
+# Build against AlmaLinux 10's glibc for package compatibility.
 FROM almalinux:10
 
 RUN dnf install -y gcc gcc-c++ openssl-devel pkgconf-pkg-config git binutils \

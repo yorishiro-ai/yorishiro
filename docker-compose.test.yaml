@@ -1,13 +1,8 @@
-# Runs the built binary from the Dockerfile at the repository root, the same image used for
-# distribution.
-#
+# Local development and tests use the distribution image's Dockerfile.
 #   docker compose -f docker-compose.test.yaml up --build
 #
-# The queue uses the Redis protocol.
 # `app` serves HTTP, `worker` consumes embedding sync/query/reindex, `jobs` consumes import/maintenance/inference, and `scheduler` runs scheduled tasks.
 # Both consumers are required; the HTTP server consumes no queued jobs.
-#
-# This file is for local development and tests only.
 
 # One image and shared configuration keep all four roles on the same database and queue.
 x-yorishiro: &yorishiro
@@ -112,11 +107,9 @@ services:
     # Only this role loads the embedding model.
     # To reuse local files, mount ./models:/app/models:ro containing both model.safetensors and tokenizer.json under models/<short_id>/.
     # Without a mount, verified model files are downloaded into /app/models at worker startup.
-    # The image's HEALTHCHECK curls the HTTP server, which a worker does not run, so it would be
-    # reported unhealthy forever.
+    # Workers do not serve the image's HTTP health check.
     healthcheck:
       disable: true
-    # After the server is healthy, which is after it has applied the migrations the worker needs.
     depends_on:
       app:
         condition: service_healthy
@@ -129,11 +122,9 @@ services:
     # Durable application jobs run without loading an embedding model.
     # To serve other targets, list job-target:official or job-target:tenant:<tenant-id> after --worker=, separated by commas.
     command: ["start", "--worker=job-target:shared"]
-    # The image's HEALTHCHECK curls the HTTP server, which a worker does not run, so it would be
-    # reported unhealthy forever.
+    # Workers do not serve the image's HTTP health check.
     healthcheck:
       disable: true
-    # After the server is healthy, which is after it has applied the migrations the worker needs.
     depends_on:
       app:
         condition: service_healthy

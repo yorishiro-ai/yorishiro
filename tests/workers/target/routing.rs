@@ -130,7 +130,9 @@ async fn injected_deliveries_are_consumed_only_by_their_target() {
         let directory = tempfile::tempdir().unwrap();
         for (index, target) in targets.into_iter().enumerate() {
             let mut worker_ctx = ctx.clone();
-            let queue = crate::requests::query_worker::target_queue(&mut worker_ctx, target).await;
+            let queue =
+                crate::workers::query_embedding::harness::target_queue(&mut worker_ctx, target)
+                    .await;
             let running = Arc::clone(&queue);
             let worker = tokio::spawn(async move { running.run(vec![target.tag()]).await });
             let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(

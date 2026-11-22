@@ -4,6 +4,7 @@
 !Cargo.lock
 !rust-toolchain.toml
 !.cargo/config.toml
+!benches/sqlite_ann.rs
 !src/**/*.rs
 !src/templates/*.json
 !ee/**/*.rs

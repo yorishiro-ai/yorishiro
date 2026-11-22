@@ -14,20 +14,15 @@ pub(crate) async fn iam_mcp_call(
     tool: &str,
     arguments: serde_json::Value,
 ) -> serde_json::Value {
-    let response = request.post("/mcp")
-        .add_header("Accept", "application/json, text/event-stream")
-        .add_header("MCP-Session-Id", session)
-        .add_header("MCP-Protocol-Version", "2025-03-26")
-        .add_header("Authorization", format!("Bearer {key}"))
-        .json(&serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":tool,"arguments":arguments}})).await;
-    response.assert_status_ok();
-    let text = response.text();
-    let payload = text
-        .lines()
-        .filter_map(|line| line.strip_prefix("data:").map(str::trim))
-        .find(|line| !line.is_empty())
-        .unwrap_or_else(|| text.trim());
-    serde_json::from_str(payload).expect("MCP JSON response")
+    super::mcp::mcp_call(
+        request,
+        session,
+        key,
+        2,
+        "tools/call",
+        serde_json::json!({"name": tool, "arguments": arguments}),
+    )
+    .await
 }
 
 #[expect(

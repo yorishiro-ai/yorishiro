@@ -37,6 +37,7 @@
 //! notices.
 use crate::requests::boot_request;
 use crate::requests::boot_request_with;
+use crate::requests::mcp;
 use yorishiro::App;
 use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 
@@ -151,8 +152,8 @@ async fn missing_licence_state_closes_the_gate_again() {
         if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
-        let session = super::mcp::initialize(&request).await;
-        let listed = super::mcp::mcp_call(
+        let session = mcp::initialize(&request).await;
+        let listed = mcp::mcp_call(
             &request,
             &session,
             "",
@@ -161,12 +162,13 @@ async fn missing_licence_state_closes_the_gate_again() {
             serde_json::json!({}),
         )
         .await;
-        let licensed_tools: Vec<_> =
-            serde_json::from_str::<serde_json::Value>(include_str!("../../blackbox/tools.json"))
-                .unwrap()["licensed"]
-                .as_array()
-                .unwrap()
-                .clone();
+        let licensed_tools: Vec<_> = serde_json::from_str::<serde_json::Value>(include_str!(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/blackbox/tools.json")
+        ))
+        .unwrap()["licensed"]
+            .as_array()
+            .unwrap()
+            .clone();
         for name in &licensed_tools {
             assert!(
                 listed["result"]["tools"]
@@ -197,7 +199,7 @@ async fn missing_licence_state_closes_the_gate_again() {
             unavailable, 404,
             "missing licence state must close the gate without a restart; got {unavailable}"
         );
-        let listed = super::mcp::mcp_call(
+        let listed = mcp::mcp_call(
             &request,
             &session,
             "",
@@ -214,7 +216,7 @@ async fn missing_licence_state_closes_the_gate_again() {
                     .iter()
                     .any(|tool| tool["name"] == *name)
             );
-            let rejected = super::mcp::mcp_call(
+            let rejected = mcp::mcp_call(
                 &request,
                 &session,
                 "",

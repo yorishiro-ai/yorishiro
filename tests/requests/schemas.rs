@@ -169,35 +169,6 @@ async fn schema_deletion_refuses_active_versions_and_references() {
 }
 
 #[tokio::test]
-async fn create_schema_from_a_builtin_template() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant { api_key: key, .. } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
-
-        let response = request
-            .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({ "template_id": "task-management" }))
-            .await;
-        assert_eq!(response.status_code(), StatusCode::CREATED);
-        let body: serde_json::Value = response.json();
-        assert_eq!(body["schema"]["name"], "task-management");
-        assert!(
-            body["schema"]["definition"]["entity_types"]["task"].is_object(),
-            "body: {body}"
-        );
-    })
-    .await;
-}
-
-#[tokio::test]
 async fn create_schema_from_every_builtin_template() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let TestTenant { api_key: key, .. } = TestTenant::create(
@@ -222,6 +193,11 @@ async fn create_schema_from_every_builtin_template() {
                 template.id,
                 response.text()
             );
+            let body: serde_json::Value = response.json();
+            assert_eq!(body["schema"]["name"], template.id);
+            if template.id == "task-management" {
+                assert!(body["schema"]["definition"]["entity_types"]["task"].is_object());
+            }
         }
     })
     .await;

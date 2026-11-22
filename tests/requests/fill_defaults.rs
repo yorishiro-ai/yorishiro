@@ -39,7 +39,6 @@ pub(crate) async fn finish_via_api(
     finish_job(ctx, id, "completed", Some((request, key, status_path))).await;
 }
 
-#[cfg(feature = "enterprise")]
 #[expect(
     clippy::future_not_send,
     reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
@@ -86,7 +85,8 @@ async fn finish_job(
         .unwrap();
     let tag = outbox.tags.unwrap()[0].as_str().unwrap().to_owned();
     let mut worker_ctx = ctx.clone();
-    let queue = super::query_worker::queue_for_tag(&mut worker_ctx, tag.clone()).await;
+    let queue =
+        crate::workers::query_embedding::harness::queue_for_tag(&mut worker_ctx, tag.clone()).await;
     let running = queue.clone();
     let worker = tokio::spawn(async move { running.run(vec![tag]).await });
     let result =

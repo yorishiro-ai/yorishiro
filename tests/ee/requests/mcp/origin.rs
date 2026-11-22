@@ -40,7 +40,7 @@ async fn mcp_origin_tools_match_ungated_rest_when_same_session_licence_state_is_
         for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
             assert!(licensed_tools.iter().any(|tool| tool["name"] == name));
         }
-        for tool in &licensed_tools {
+        for tool in licensed_tools {
             assert_eq!(tool["inputSchema"]["type"], "object");
         }
 

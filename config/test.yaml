@@ -1,34 +1,24 @@
 # Test environment (LOCO_ENV=test, Loco's default under cargo test).
 # The database follows DATABASE_URL's scheme; the queue follows YORISHIRO_QUEUE_KIND, or the database when unset.
 # The tenant cap policy lives in the edition, not here.
-
-# Loco configuration file documentation
-
-# Application logging configuration
 logger:
-  # Enable or disable logging.
   enable: true
   # Enable pretty backtrace (sets RUST_BACKTRACE=1)
   pretty_backtrace: true
-  # Log level, options: trace, debug, info, warn or error.
   level: debug
-  # Define the logging format. options: compact, pretty or json
   format: compact
 
-# Web server configuration
 server:
   # Port on which the server listens, on the interface selected by BINDING.
   port: <%= get_env(name="PORT", default="5150") %>
   binding: <%= get_env(name="BINDING", default="localhost") %>
-  # The UI hostname or IP address that mailers will point to.
   host: http://localhost
-  # Out of the box middleware configuration. to disable middleware you can changed the `enable` field to `false` of comment the middleware block
   middlewares:
     cors:
       enable: true
       # JSON array of exact browser origins, shared by REST and MCP.
       allow_origins: <%= get_env(name="YORISHIRO_ALLOWED_ORIGINS", default="[]") %>
-      allow_headers: [Authorization, Content-Type, Accept, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID]
+      allow_headers: [Authorization, Content-Type, Accept, X-Workspace-Id, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID]
       allow_methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
       expose_headers: [Mcp-Session-Id, MCP-Protocol-Version, X-Request-Id]
     # Stamps every request/response with an `x-request-id` header, generating one if the caller sent none.
@@ -47,8 +37,6 @@ scheduler:
 # Bare --worker, --server-and-worker, and --all are rejected.
 
 
-# Queue Configuration
-#
 queue:
 <% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
   kind: Redis
@@ -89,6 +77,7 @@ workers:
   mode: BackgroundQueue
 
 settings:
+  http_allowed_networks: <%= get_env(name="YORISHIRO_HTTP_ALLOWED_NETWORKS", default="[]") %>
   # Deployment routing declaration, not live worker discovery.
   worker_targets: <%= get_env(name="YORISHIRO_WORKER_TARGETS", default='["worker-target:shared"]') %>
   timezone: <%= get_env(name="YORISHIRO_TIMEZONE", default="UTC") %>
@@ -112,13 +101,6 @@ settings:
     poll_interval_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", default="100") %>
     retention_seconds: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", default="300") %>
 
-# Initializers Configuration
-# initializers:
-#  oauth2:
-#    authorization_code: # Authorization code grant type
-#      - client_identifier: google # Identifier for the OAuth2 provider. Replace 'google' with your provider's name if different, must be unique within the oauth2 config.
-#        ... other fields
-
 database:
 <% if (get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first) == "sqlite" %>
   uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///tmp/yorishiro.sqlite3?mode=rwc") %>'
@@ -140,13 +122,9 @@ database:
   dangerously_truncate: <%= get_env(name="DANGEROUSLY_TRUNCATE", default="false") %>
   dangerously_recreate: <%= get_env(name="DANGEROUSLY_RECREATE", default="false") %>
 
-# Authentication Configuration
 auth:
-  # JWT authentication
   jwt:
-    # Secret key for token generation and verification
     secret: uClCedX7U2MVLKyarzNq
-    # Token expiration time in seconds
     expiration: 604800 # 7 days
 
 initializers:

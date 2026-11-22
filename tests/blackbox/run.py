@@ -1474,7 +1474,9 @@ def membership_retirement_lifecycle(app):
 
 def tenant_settings_lifecycle(app):
     _, bound = app.issue(app.workspace, "schema")
-    MCP(app, bound).call("update_tenant", {"name": "Bound key"}, error=True)
+    bound_client = MCP(app, bound)
+    bound_client.call("get_tenant", error=True)
+    bound_client.call("update_tenant", {"name": "Bound key"}, error=True)
     app.rest("PUT", "/api/tenants/current", {"name": "Bound key"}, key=bound, status=403)
     owner = app.tenant_key
     client = MCP(app, owner)
@@ -1497,6 +1499,9 @@ def tenant_settings_lifecycle(app):
         app.rest("PUT", path, body, status=409, key=owner)
         client.call("update_tenant", body, error=True)
     require(client.call("get_tenant") == renamed, "invalid tenant update changed stored metadata")
+    capped = client.call("update_tenant", {"replace_max_workspaces": True, "max_workspaces": 0})
+    require(capped["max_workspaces"] == 0, "explicit zero cap was not applied")
+    client.call("create_workspace", {"name": "blocked-by-tenant-cap"}, error=True)
     cleared = app.rest("PUT", path, {"replace_max_workspaces": True, "max_workspaces": None}, key=owner)
     require(cleared["max_workspaces"] is None and client.call("get_tenant") == cleared,
             "explicit tenant cap clear failed")

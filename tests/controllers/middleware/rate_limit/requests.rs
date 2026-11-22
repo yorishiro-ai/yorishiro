@@ -1,4 +1,4 @@
-use super::boot_request;
+use crate::requests::boot_request;
 use axum::http::StatusCode;
 use yorishiro::App;
 

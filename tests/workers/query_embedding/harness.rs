@@ -16,7 +16,7 @@ use yorishiro::App;
 use yorishiro::services::embedding::EmbeddingProvider;
 use yorishiro::workers::target::WorkerTarget;
 
-use super::boot_request;
+use crate::requests::boot_request;
 
 /// Configures and registers a shared-target consumer through Loco, without starting its loop.
 ///

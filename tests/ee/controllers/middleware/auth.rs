@@ -1,5 +1,6 @@
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
+use crate::requests::mcp;
 use axum::http::StatusCode;
 use sea_orm::EntityTrait;
 use yorishiro::App;
@@ -173,7 +174,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         assert!(!response.text().contains(&tenant_key.plaintext));
         assert!(!response.text().contains("key_hash"));
         // Each MCP call resolves its own headers, including calls in the same session.
-        let session = super::mcp::initialize(&request).await;
+        let session = mcp::initialize(&request).await;
         for (id, with_header) in [(2u64, true), (3, false)] {
             let mut call = request
                 .post("/mcp")
@@ -191,7 +192,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
                 }))
                 .await;
             assert_eq!(response.status_code(), 200, "{}", response.text());
-            let body = super::mcp::rpc_body(&response.text());
+            let body = mcp::rpc_body(&response.text());
             assert_ne!(body["result"]["isError"], true, "{body}");
             let mcp: serde_json::Value =
                 serde_json::from_str(body["result"]["content"][0]["text"].as_str().unwrap())
@@ -216,7 +217,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .json(&serde_json::json!({"jsonrpc":"2.0", "id":4, "method":"tools/call", "params":{"name":"list_schemas","arguments":{}}}))
             .await;
-        let body = super::mcp::rpc_body(&response.text());
+        let body = mcp::rpc_body(&response.text());
         assert_eq!(body["result"]["isError"], false, "{body}");
         let response = request
             .post("/mcp")
@@ -226,7 +227,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .json(&serde_json::json!({"jsonrpc":"2.0", "id":5, "method":"tools/call", "params":{"name":"search_entities","arguments":{"query_text":"test"}}}))
             .await;
-        let body = super::mcp::rpc_body(&response.text());
+        let body = mcp::rpc_body(&response.text());
         assert_eq!(body["result"]["isError"], true, "{body}");
         assert!(!body.to_string().contains("x-workspace-id"), "{body}");
     })
@@ -257,7 +258,7 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
         let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {root_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
-        let session = super::mcp::initialize(&request).await;
+        let session = mcp::initialize(&request).await;
         for (id, allowed) in [(2, true), (3, false), (4, true)] {
             if id == 3 {
                 request.delete(&attachment).add_header("Authorization", format!("Bearer {root_key}"))
@@ -277,7 +278,7 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
                 .add_header("Authorization", format!("Bearer {}", key.plaintext))
                 .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
                 .json(&serde_json::json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"list_schemas","arguments":{}}})).await;
-            let body = super::mcp::rpc_body(&response.text());
+            let body = mcp::rpc_body(&response.text());
             if allowed {
                 assert_ne!(body["result"]["isError"], true, "{body}");
             } else {
