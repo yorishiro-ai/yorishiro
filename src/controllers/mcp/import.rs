@@ -38,30 +38,10 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ImportJsonlArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("import_jsonl")?;
         let actor = verified!(self, parts, "import_jsonl");
-        let authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Permission(
-                    crate::models::iam::policy::Action::ImportCreate,
-                ),
-            )
-            .await
-        );
-
         let job_id = try_tool!(
-            crate::workers::import::enqueue(
-                self.app_context(),
-                authorized.txn(),
-                authorized.auth_context(),
-                args.jsonl,
-            )
-            .await
+            crate::workers::import::enqueue_for_actor(self.app_context(), actor, args.jsonl).await
         );
-        authorized.commit().await?;
         ok_json(QueuedJobResponse { job_id })
     }
 
@@ -72,28 +52,12 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ImportJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("import_job_status")?;
         let actor = verified!(self, parts, "import_job_status");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Job(args.job_id),
-            )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::ImportJobGet)
-                .await
-        );
         render(
-            crate::models::queue_job_lifecycles::bulk_job_status(
-                authorized.txn(),
-                authorized.workspace_id(),
+            crate::models::queue_job_lifecycles::import_job_status_for_actor(
+                self.app_context(),
+                actor,
                 args.job_id,
-                &["import"],
             )
             .await,
         )

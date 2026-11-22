@@ -20,27 +20,8 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("export_jsonl")?;
         let actor = verified!(self, parts, "export_jsonl");
-        let mut authorized = try_tool!(
-            super::authorize::Authorized::for_target(
-                self.app_context(),
-                &actor,
-                required,
-                crate::models::iam::access::WorkspaceTarget::Permission(
-                    crate::models::iam::policy::Action::Export,
-                ),
-            )
-            .await
-        );
-        try_tool!(
-            authorized
-                .require_action(crate::models::iam::policy::Action::Export)
-                .await
-        );
-
-        let lines =
-            try_tool!(export::export_jsonl(authorized.txn(), authorized.workspace_id()).await);
+        let lines = try_tool!(export::export_jsonl_for_actor(self.app_context(), actor).await);
         Ok(CallToolResult::success(vec![ContentBlock::text(lines)]))
     }
 }

@@ -575,3 +575,25 @@ pub struct Enqueue<'a> {
     pub concurrency_key: Option<&'a str>,
     pub concurrency_limit: Option<i32>,
 }
+
+/// Opens the caller's schema-scope session and reads an import job's status.
+///
+/// # Errors
+/// Returns the session, authorization or lookup error.
+pub(crate) async fn import_job_status_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<BulkJobStatus, crate::YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::read(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam::access::WorkspaceTarget::Job(id),
+        crate::models::iam::policy::Action::ImportJobGet,
+        async |session| {
+            bulk_job_status(session.txn(), session.workspace_id()?, id, &["import"]).await
+        },
+    )
+    .await
+}
