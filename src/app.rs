@@ -283,9 +283,17 @@ pub(crate) fn after_routes(
     } else {
         router
     };
-    Ok(router.layer(axum::middleware::from_fn_with_state(
+    let router = router.layer(axum::middleware::from_fn_with_state(
         ctx.clone(),
         controllers::middleware::maintenance::maintenance_guard,
+    ));
+    let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
+    if settings.http_allowed_networks.is_empty() {
+        return Ok(router);
+    }
+    Ok(router.layer(axum::middleware::from_fn_with_state(
+        std::sync::Arc::<[ipnet::IpNet]>::from(settings.http_allowed_networks),
+        controllers::middleware::client_network::require_allowed_network,
     )))
 }
 

@@ -2,5 +2,6 @@
 
 pub mod access_log;
 pub mod auth;
+pub(crate) mod client_network;
 pub mod maintenance;
 pub mod rate_limit;

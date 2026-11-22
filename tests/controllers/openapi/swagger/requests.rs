@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use axum::http::StatusCode;
 use serde_json::Value;
 use yorishiro::App;
@@ -11,6 +13,33 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
         assert_eq!(response.status_code(), StatusCode::OK);
 
         let document: Value = response.json();
+        assert_eq!(document["info"]["version"], env!("CARGO_PKG_VERSION"));
+        let rendered = operation_summary(&document);
+        if std::env::var_os("UPDATE_FIXTURES").is_some_and(|value| value == "1") {
+            std::fs::write("tests/fixtures/openapi-operations.txt", &rendered).unwrap();
+        } else {
+            assert_eq!(
+                include_str!("../../../fixtures/openapi-operations.txt"),
+                rendered,
+                "Regenerate with UPDATE_FIXTURES=1 cargo test --features enterprise openapi_document_is_mounted_with_enterprise_routes"
+            );
+        }
+        for (path, method) in [
+            ("/api/entities", "post"),
+            ("/api/search", "get"),
+            ("/api/schema-forks", "post"),
+        ] {
+            let operation = &document["paths"][path][method];
+            let headers = operation["parameters"].as_array().unwrap();
+            assert_eq!(
+                headers.iter().filter(|parameter| {
+                    parameter["in"] == "header" && parameter["name"] == "X-Workspace-Id"
+                }).count(),
+                1,
+                "{method} {path}"
+            );
+        }
+        assert!(document["paths"]["/api/schema-forks"]["post"]["responses"]["422"].is_object());
         assert_eq!(document["openapi"], "3.1.0");
         assert!(document["paths"]["/auth/login"].is_null());
         assert!(document["paths"]["/auth/root/login"]["post"].is_object());
@@ -73,57 +102,49 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
             serde_json::json!([])
         );
         assert!(document["components"]["schemas"]["TenantOverview"].is_object());
-        assert_enterprise_schemas(&document["components"]["schemas"]);
     })
     .await;
 }
 
-fn assert_enterprise_schemas(schemas: &Value) {
-    assert_eq!(
-        schemas["InferenceProposalResponse"]["properties"]["status"]["$ref"],
-        "#/components/schemas/ProposalStatus"
-    );
-    assert_eq!(
-        schemas["ProposalStatus"]["enum"],
-        serde_json::json!([
-            "pending",
-            "confirmed",
-            "rejected",
-            "discarded",
-            "stale",
-            "invalid"
-        ])
-    );
-    assert_eq!(
-        schemas["EmbeddingKeyRequest"]["properties"]["send_dimensions_param"]["default"],
-        false
-    );
-    assert_eq!(
-        schemas["PublishVersionRequest"]["properties"]["status"]["default"],
-        "draft"
-    );
-    assert_eq!(
-        schemas["TemplateVersionRecord"]["properties"]["created_at"]["format"],
-        "date-time"
-    );
-    assert_eq!(
-        schemas["MergeResponse"]["properties"]["diff"]["$ref"],
-        "#/components/schemas/VersioningDiff"
-    );
-    assert_eq!(
-        schemas["InferFillStatus"]["enum"],
-        serde_json::json!(["queued"])
-    );
-    assert_eq!(
-        schemas["InferenceJobStatus"]["enum"],
-        serde_json::json!(["queued", "running", "completed", "failed"])
-    );
-    assert_eq!(
-        schemas["TemplateVersionStatus"]["enum"],
-        serde_json::json!(["draft", "pre", "stable"])
-    );
-    assert_eq!(
-        schemas["TemplateVisibility"]["enum"],
-        serde_json::json!(["tenant", "community"])
-    );
+fn operation_summary(document: &Value) -> String {
+    let mut lines = Vec::new();
+    for (path, methods) in document["paths"].as_object().unwrap() {
+        for (method, operation) in methods.as_object().unwrap() {
+            let mut parameters = operation["parameters"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|parameter| {
+                    let location = parameter["in"].as_str().unwrap();
+                    let name = parameter["name"].as_str().unwrap();
+                    let optional = if parameter["required"].as_bool() == Some(true) {
+                        ""
+                    } else {
+                        "?"
+                    };
+                    format!("{location}:{name}{optional}")
+                })
+                .collect::<Vec<_>>();
+            parameters.sort_unstable();
+            let mut statuses = operation["responses"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            statuses.sort_unstable();
+            lines.push(format!(
+                "{} {path} [{}] -> {}",
+                method.to_ascii_uppercase(),
+                parameters.join(", "),
+                statuses.join(", ")
+            ));
+        }
+    }
+    lines.sort_unstable();
+    let mut summary = String::new();
+    for line in lines {
+        writeln!(summary, "{line}").unwrap();
+    }
+    summary
 }

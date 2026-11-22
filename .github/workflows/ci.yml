@@ -303,6 +303,11 @@ jobs:
           container: ${{ job.services.db.id }}
       - name: Run the tests
         run: make test-${{ matrix.database }} EDITION=${{ matrix.edition }}
+      - name: Test signed Stripe webhooks
+        if: matrix.name == 'ee-postgres'
+        env:
+          QUEUE_URL: ${{ env.DATABASE_URL }}
+        run: cargo test --locked --features stripe-tests --test mod -- '::stripe::'
 
   test-valkey:
     name: Test (ee-valkey)

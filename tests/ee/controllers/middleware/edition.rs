@@ -1,3 +1,4 @@
+mod gate;
 mod licence;
 
 use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};

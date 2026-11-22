@@ -30,6 +30,9 @@ pub struct Settings {
     pub(crate) http_timeouts: HttpTimeouts,
     #[serde(default)]
     pub(crate) mcp: Mcp,
+    /// Peer networks allowed to reach REST, MCP, and the API documentation.
+    #[serde(default)]
+    pub(crate) http_allowed_networks: Vec<ipnet::IpNet>,
     pub embedding: Embedding,
     #[serde(default)]
     pub(crate) rate_limit: RateLimit,

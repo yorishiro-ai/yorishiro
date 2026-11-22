@@ -1727,89 +1727,8 @@ async fn sqlite_document_embed_persist_and_search() {
             hits[0].distance.is_some(),
             "vector hit must have a distance"
         );
-        #[cfg(feature = "enterprise")]
-        assert_sqlite_ann_benchmark(&ctx, workspace_id, entity.id, &provider.model_name()).await;
     })
     .await;
-}
-
-#[cfg(feature = "enterprise")]
-async fn assert_sqlite_ann_benchmark(
-    ctx: &loco_rs::app::AppContext,
-    workspace_id: uuid::Uuid,
-    entity_id: uuid::Uuid,
-    model_name: &str,
-) {
-    use loco_rs::task::{Task, Vars};
-    use sea_orm::sea_query::{Alias, Expr, Query};
-    use yorishiro::edition::ee::tasks::sqlite_ann_benchmark::SqliteAnnBenchmark;
-    SqliteAnnBenchmark
-        .run(
-            ctx,
-            &Vars::from_cli_args(vec![("workspace_id".into(), workspace_id.to_string())]),
-        )
-        .await
-        .expect("benchmark stored embedding without a vec0 table");
-    ctx.db.execute_unprepared("CREATE VIRTUAL TABLE entity_embeddings_vec0 USING vec0(entity_id TEXT PRIMARY KEY, workspace_id TEXT PARTITION KEY, embedding FLOAT[768] distance_metric=cosine)")
-        .await.unwrap();
-    let unrelated_workspace = uuid::Uuid::now_v7();
-    // Fault injection populates the optional vec0 index, not application-owned rows.
-    for (id, workspace) in (0..11)
-        .map(|_| (uuid::Uuid::now_v7(), unrelated_workspace))
-        .chain(std::iter::once((entity_id, workspace_id)))
-    {
-        let insert = Query::insert()
-            .into_table(Alias::new("entity_embeddings_vec0"))
-            .columns([
-                Alias::new("entity_id"),
-                Alias::new("workspace_id"),
-                Alias::new("embedding"),
-            ])
-            .values_panic([
-                id.to_string().into(),
-                workspace.to_string().into(),
-                yorishiro::db::sqlite_vec_blob(&model_vector(model_name)).into(),
-            ])
-            .to_owned();
-        ctx.db
-            .execute_raw(ctx.db.get_database_backend().build(&insert))
-            .await
-            .unwrap();
-    }
-    SqliteAnnBenchmark
-        .run(
-            ctx,
-            &Vars::from_cli_args(vec![
-                ("workspace_id".into(), workspace_id.to_string()),
-                ("min_entities".into(), "0".into()),
-                ("max_latency_ms".into(), "0".into()),
-            ]),
-        )
-        .await
-        .expect("benchmark real vec0 KNN with UUID keys and workspace partition");
-    let delete = Query::delete()
-        .from_table(Alias::new("entity_embeddings_vec0"))
-        .and_where(Expr::col(Alias::new("entity_id")).eq(entity_id.to_string()))
-        .to_owned();
-    ctx.db
-        .execute_raw(ctx.db.get_database_backend().build(&delete))
-        .await
-        .unwrap();
-    let error = SqliteAnnBenchmark
-        .run(
-            ctx,
-            &Vars::from_cli_args(vec![
-                ("workspace_id".into(), workspace_id.to_string()),
-                ("min_entities".into(), "0".into()),
-                ("max_latency_ms".into(), "0".into()),
-            ]),
-        )
-        .await
-        .expect_err("an unpopulated workspace partition must not look like a fast benchmark");
-    assert!(
-        error.to_string().contains("returned no entities"),
-        "{error}"
-    );
 }
 
 /// Width switching uses the actual vectors rather than a fixed registry of storage tables.

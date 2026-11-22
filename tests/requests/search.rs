@@ -1,8 +1,10 @@
 use super::boot_request;
 use super::fixtures::{TenantArgs, TestTenant};
-use super::query_worker::{boot_with_query_worker, boot_with_query_worker_and_drain};
 use crate::http_stub::{keyword_provider, unavailable_provider};
 use crate::requests::boot_request_with;
+use crate::workers::query_embedding::harness::{
+    boot_with_query_worker, boot_with_query_worker_and_drain,
+};
 use axum::http::StatusCode;
 use std::sync::Arc;
 use std::time::Duration;

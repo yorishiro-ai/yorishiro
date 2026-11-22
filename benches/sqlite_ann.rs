@@ -19,111 +19,98 @@
 //! # Usage
 //!
 //! ```sh
-//! cargo loco task sqlite_ann_benchmark \
-//!     workspace_id:<uuid> \
-//!     [min_entities:<int>] \
-//!     [max_latency_ms:<int>]
+//! cargo bench --bench sqlite_ann -- sqlite:///path/to/database.sqlite3 WORKSPACE_UUID
 //! ```
 
-use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::entity_embeddings;
-use crate::models::_entities::entity_entities::Column as EntityColumn;
-use crate::models::entity_entities;
-use crate::models::search::SearchHit;
-use crate::models::search::SearchRow;
-use loco_rs::prelude::*;
-use loco_rs::task::Vars;
+use loco_rs::prelude::{Error, Result};
 use sea_orm::FromQueryResult;
 use sea_orm::Statement;
 use sea_orm::sea_query::{Alias, Asterisk, Expr, ExprTrait, JoinType, Query};
+use sea_orm::sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait};
+use sea_orm::{ConnectionTrait, DatabaseConnection, SqlxSqliteConnector};
 use uuid::Uuid;
+use yorishiro::error::{ResultExt, YorishiroError};
+use yorishiro::models::_entities::entity_embeddings;
+use yorishiro::models::_entities::entity_entities::Column as EntityColumn;
+use yorishiro::models::entity_entities;
 
-/// `cargo loco task sqlite_ann_benchmark workspace_id:<uuid> [min_entities:<int>] [max_latency_ms:<int>]`
-///
-/// Measures full-scan vector search latency on SQLite and reports whether
-/// the vec0 virtual table should be adopted.
-pub struct SqliteAnnBenchmark;
+#[tokio::main]
+async fn main() -> Result<()> {
+    let usage = "usage: cargo bench --bench sqlite_ann -- sqlite:///path/to/database.sqlite3 WORKSPACE_UUID [MIN_ENTITIES] [MAX_LATENCY_MS]";
+    let args: Vec<_> = std::env::args()
+        .skip(1)
+        .filter(|arg| arg != "--bench")
+        .collect();
+    let [url, workspace_id, thresholds @ ..] = args.as_slice() else {
+        println!("{usage}");
+        return Ok(());
+    };
+    if !url.starts_with("sqlite:") || thresholds.len() > 2 {
+        return Err(Error::Message(usage.into()));
+    }
+    let workspace_id = workspace_id
+        .parse()
+        .map_err(|_| Error::Message(usage.into()))?;
+    let min_entities = thresholds
+        .first()
+        .map_or(Ok(1000), |arg| arg.parse())
+        .map_err(|_| Error::Message(usage.into()))?;
+    let max_latency_ms = thresholds
+        .get(1)
+        .map_or(Ok(200), |arg| arg.parse())
+        .map_err(|_| Error::Message(usage.into()))?;
+    yorishiro::db::register_sqlite_extensions();
+    let options = url
+        .parse::<SqliteConnectOptions>()
+        .map_err(|e| Error::Message(e.to_string()))?
+        .read_only(true);
+    let pool = SqlitePoolOptions::new()
+        .connect_with(options)
+        .await
+        .map_err(|e| Error::Message(e.to_string()))?;
+    let db = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
+    let table_name = "entity_embeddings";
 
-#[async_trait]
-impl Task for SqliteAnnBenchmark {
-    fn task(&self) -> TaskInfo {
-        TaskInfo {
-            name: "sqlite_ann_benchmark".to_string(),
-            detail: "Measures SQLite full-scan vector search latency and recommends vec0 adoption if thresholds exceeded: cargo loco task sqlite_ann_benchmark workspace_id:<uuid> [min_entities:<int>] [max_latency_ms:<int>]".to_string(),
-        }
+    // Count entities with embeddings in this workspace.
+    let entity_count = entity_embeddings::Entity::find()
+        .join(
+            JoinType::InnerJoin,
+            entity_embeddings::Relation::EntityEntities.def(),
+        )
+        .filter(EntityColumn::WorkspaceId.eq(workspace_id))
+        .filter(entity_embeddings::Column::Embedding.is_not_null())
+        .count(&db)
+        .await?;
+    let entity_count = usize::try_from(entity_count)
+        .map_err(|_| Error::Message("embedding count exceeds platform limits".into()))?;
+
+    // Need at least one embedding to run the benchmark.
+    if entity_count == 0 {
+        println!("no embeddings found for workspace {workspace_id}: nothing to benchmark");
+        return Ok(());
     }
 
-    async fn run(&self, ctx: &AppContext, vars: &Vars) -> Result<()> {
-        // Only meaningful on SQLite.
-        if !crate::db::is_sqlite(&ctx.db) {
-            return Err(Error::Message(
-                "sqlite_ann_benchmark is only meaningful on SQLite".to_string(),
-            ));
-        }
+    // Fetch one entity that has an embedding to extract its vector.
+    let sample_row = fetch_sample_embedding(&db, workspace_id, table_name)
+        .await
+        .map_err(|e| Error::Message(e.to_string()))?;
 
-        let workspace_id: Uuid = vars
-            .cli_arg("workspace_id")
-            .map_err(|_| Error::Message("workspace_id is required".to_string()))?
-            .parse()
-            .map_err(|_| Error::Message("workspace_id is not a valid UUID".to_string()))?;
-
-        let min_entities: usize = match vars.cli_arg("min_entities") {
-            Ok(raw) => raw
-                .parse::<usize>()
-                .map_err(|_| Error::Message("min_entities is not a valid integer".to_string()))?,
-            Err(_) => 1000,
-        };
-
-        let max_latency_ms: u64 = match vars.cli_arg("max_latency_ms") {
-            Ok(raw) => raw
-                .parse::<u64>()
-                .map_err(|_| Error::Message("max_latency_ms is not a valid integer".to_string()))?,
-            Err(_) => 200,
-        };
-
-        let table_name = crate::models::entity_embeddings::TABLE.to_owned();
-
-        // Count entities with embeddings in this workspace.
-        let entity_count = entity_embeddings::Entity::find()
-            .join(
-                JoinType::InnerJoin,
-                entity_embeddings::Relation::EntityEntities.def(),
-            )
-            .filter(EntityColumn::WorkspaceId.eq(workspace_id))
-            .filter(entity_embeddings::Column::Embedding.is_not_null())
-            .count(&ctx.db)
-            .await?;
-        let entity_count = usize::try_from(entity_count)
-            .map_err(|_| Error::Message("embedding count exceeds platform limits".into()))?;
-
-        // Need at least one embedding to run the benchmark.
-        if entity_count == 0 {
-            println!("no embeddings found for workspace {workspace_id}: nothing to benchmark");
-            return Ok(());
-        }
-
-        // Fetch one entity that has an embedding to extract its vector.
-        let sample_row = fetch_sample_embedding(&ctx.db, workspace_id, &table_name)
-            .await
-            .map_err(|e| Error::Message(e.to_string()))?;
-
-        if let Some((_, vector_blob)) = sample_row {
-            let vector = vector_blob_to_f32(&vector_blob);
-            run_benchmark(
-                ctx,
-                workspace_id,
-                &vector,
-                &table_name,
-                entity_count,
-                min_entities,
-                max_latency_ms,
-            )
-            .await
-        } else {
-            println!("no embeddings with vector data found for workspace {workspace_id}");
-            Ok(())
-        }
+    if let Some((_, vector_blob)) = sample_row {
+        let vector = vector_blob_to_f32(&vector_blob);
+        run_benchmark(
+            &db,
+            workspace_id,
+            &vector,
+            table_name,
+            entity_count,
+            min_entities,
+            max_latency_ms,
+        )
+        .await
+    } else {
+        println!("no embeddings with vector data found for workspace {workspace_id}");
+        Ok(())
     }
 }
 
@@ -191,7 +178,7 @@ struct PhaseResult {
 }
 
 async fn run_benchmark(
-    ctx: &AppContext,
+    db: &DatabaseConnection,
     workspace_id: Uuid,
     vector: &[f32],
     table_name: &str,
@@ -202,7 +189,7 @@ async fn run_benchmark(
     let iterations = 5;
 
     // Phase 1: full-scan benchmark.
-    let full_scan = benchmark_phase(&ctx.db, workspace_id, vector, table_name, iterations, true)
+    let full_scan = benchmark_phase(db, workspace_id, vector, table_name, iterations, true)
         .await
         .map_err(|e| Error::Message(e.to_string()))?;
 
@@ -219,12 +206,12 @@ async fn run_benchmark(
     println!("  max:    {:.0} ms", full_scan.max_ms);
 
     // Phase 2: vec0 benchmark (if the virtual table exists).
-    let vec0_result = check_vec0_availability(&ctx.db, table_name)
+    let vec0_result = check_vec0_availability(db, table_name)
         .await
         .map_err(|e| Error::Message(e.to_string()))?;
 
     if vec0_result.available {
-        let vec0 = benchmark_phase(&ctx.db, workspace_id, vector, table_name, iterations, false)
+        let vec0 = benchmark_phase(db, workspace_id, vector, table_name, iterations, false)
             .await
             .map_err(|e| Error::Message(e.to_string()))?;
 
@@ -278,10 +265,9 @@ async fn run_benchmark(
             }
         );
         if vec0_result.available {
-            let vec0 =
-                benchmark_phase(&ctx.db, workspace_id, vector, table_name, iterations, false)
-                    .await
-                    .map_err(|e| Error::Message(e.to_string()))?;
+            let vec0 = benchmark_phase(db, workspace_id, vector, table_name, iterations, false)
+                .await
+                .map_err(|e| Error::Message(e.to_string()))?;
             println!(
                 "  vec0 median latency: {:.0} ms ({:.1}x faster)",
                 vec0.median_ms,
@@ -314,17 +300,7 @@ async fn benchmark_phase(
     let mut latencies = Vec::with_capacity(iterations);
     for _ in 0..iterations {
         let start = std::time::Instant::now();
-        #[expect(
-            clippy::needless_collect,
-            reason = "benchmark latency includes materializing every converted search hit"
-        )]
-        let hits: Vec<SearchHit> = SearchRow::find_by_statement(knn.clone())
-            .all(conn)
-            .await
-            .internal()?
-            .into_iter()
-            .map(SearchRow::into_hit)
-            .collect();
+        let hits = conn.query_all_raw(knn.clone()).await.internal()?;
         if hits.is_empty() {
             return Err(YorishiroError::Internal(
                 "benchmark query returned no entities for a workspace with a sample embedding"
@@ -370,7 +346,7 @@ fn make_full_scan_query(vector: &[f32], workspace_id: Uuid, table_name: &str) ->
         )
         .expr_as(
             Func::cust(Alias::new("vec_distance_cosine")).args([
-                Expr::val(crate::db::sqlite_vec_blob(vector)),
+                Expr::val(yorishiro::db::sqlite_vec_blob(vector)),
                 Expr::col((Alias::new("ee"), Alias::new("embedding"))),
             ]),
             "distance",
@@ -402,7 +378,7 @@ fn make_vec0_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> Stat
         .from(Alias::new(format!("{table_name}_vec0")))
         .and_where(Expr::col(Alias::new("embedding")).binary(
             SqliteBinOper::Match,
-            Expr::val(crate::db::sqlite_vec_blob(vector)),
+            Expr::val(yorishiro::db::sqlite_vec_blob(vector)),
         ))
         .and_where(Expr::col(Alias::new("k")).eq(10))
         .and_where(Expr::col(Alias::new("workspace_id")).eq(workspace_id.to_string()))

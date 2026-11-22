@@ -79,6 +79,10 @@ workspace = true
 name = "mod"
 path = "tests/mod.rs"
 
+[[bench]]
+name = "sqlite_ann"
+harness = false
+
 [features]
 default = ["enterprise"]
 # The community edition: build it with `--no-default-features --features community`.
@@ -137,6 +141,7 @@ chrono.workspace = true
 chrono-tz.workspace = true
 uuid.workspace = true
 aws-lc-rs = "1.19.0"
+ipnet = { version = "2.12.2", features = ["serde"] }
 jsonschema = { version = "0.61.2" }
 rmcp = { version = "3.9.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
 schemars = { version = "1.2.3", features = ["uuid1"] }

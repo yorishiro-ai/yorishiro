@@ -43,6 +43,7 @@ async fn workspace_member_tools_match_rest_and_revoke_bound_credentials() {
 }
 
 #[tokio::test]
+#[cfg(feature = "enterprise")]
 async fn workspace_member_tools_reject_cross_tenant_grants() {
     use yorishiro::models::{tenant_memberships, user_users};
 
@@ -149,6 +150,7 @@ async fn mcp_membership_tools_treat_tenant_users_as_tenant_bound_accounts() {
 }
 
 #[tokio::test]
+#[cfg(feature = "enterprise")]
 async fn mcp_tenant_users_cannot_join_another_tenant() {
     if !crate::require_postgres_backend() {
         return;

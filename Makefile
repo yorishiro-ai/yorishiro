@@ -70,7 +70,7 @@ test-sqlite: patch-check
 VALKEY_URL ?= redis://localhost:6379
 test-valkey: patch-check
 	@if [ "$(VALKEY_URL)" = "redis://localhost:6379" ]; then $(TEST_COMPOSE) up -d --wait redis; fi
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' YORISHIRO_QUEUE_KIND=Redis QUEUE_URL='$(VALKEY_URL)' cargo test --locked --workspace $(TEST_FEATURES) -- workers::dispatch workers::queue::upstream_fixes requests::queue::configured_queue_orders_competing_jobs_by_priority
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' YORISHIRO_QUEUE_KIND=Redis QUEUE_URL='$(VALKEY_URL)' cargo test --locked --workspace $(TEST_FEATURES) -- workers::dispatch workers::queue::upstream_fixes ee::workers::queue::configured_queue_orders_competing_jobs_by_priority
 
 build: build-ce
 

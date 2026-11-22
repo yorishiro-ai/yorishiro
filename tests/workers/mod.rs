@@ -2,7 +2,7 @@ mod dispatch;
 mod queue;
 
 mod embedding_sync;
-mod query_embedding;
+pub(crate) mod query_embedding;
 mod reindex;
 mod startup_reindex;
 mod target;

@@ -14,7 +14,7 @@ use super::*;
     reason = "one indexed corpus compares concurrent REST and MCP ranking before and after the nearest vector changes"
 )]
 async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_recovery() {
-    use crate::requests::query_worker::boot_with_query_worker;
+    use crate::workers::query_embedding::harness::boot_with_query_worker;
     use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
     use yorishiro::models::{_entities::entity_embeddings as vectors, entity_embeddings};
 
@@ -152,7 +152,7 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
 )]
 async fn mcp_search_asks_a_worker_to_embed_the_query() {
     use crate::http_stub::{keyword_provider, unavailable_provider};
-    use crate::requests::query_worker::boot_with_query_worker;
+    use crate::workers::query_embedding::harness::boot_with_query_worker;
     use yorishiro::models::entity_embeddings;
 
     let (provider, _server, inputs) = keyword_provider(4096).await;

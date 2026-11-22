@@ -75,7 +75,7 @@ async fn provider() -> (
 
 async fn deliver_stale_request(ctx: &AppContext, workspace_id: Uuid, request_id: Uuid) {
     let mut worker_ctx = ctx.clone();
-    let queue = crate::requests::query_worker::shared_target_queue(&mut worker_ctx).await;
+    let queue = harness::shared_target_queue(&mut worker_ctx).await;
     // Inject a late provider delivery after its caller's request is gone or expired.
     let provider_id = queue
         .enqueue(
@@ -224,7 +224,7 @@ async fn a_job_for_a_request_that_is_gone_or_finished_does_nothing() {
 #[tokio::test]
 async fn the_worker_stores_a_vector_of_the_width_the_workspace_holds() {
     let (provider, _server, _) = provider().await;
-    crate::requests::query_worker::boot_with_query_worker(provider, |request, ctx| async move {
+    harness::boot_with_query_worker(provider, |request, ctx| async move {
         let ws = workspace(&request, &ctx).await;
         let tenant = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(ws)
             .one(&ctx.db)
@@ -263,7 +263,7 @@ async fn a_failure_is_recorded_on_the_request_and_returned_to_loco() {
         query_instruction: String::new(),
         document_prefix: String::new(),
     })) as Arc<dyn EmbeddingProvider>;
-    crate::requests::query_worker::boot_with_query_worker(provider, |request, ctx| async move {
+    harness::boot_with_query_worker(provider, |request, ctx| async move {
         let ws = workspace(&request, &ctx).await;
         let tenant = yorishiro::models::_entities::workspace_workspaces::Entity::find_by_id(ws)
             .one(&ctx.db)
@@ -310,3 +310,4 @@ async fn a_failure_is_recorded_on_the_request_and_returned_to_loco() {
     })
     .await;
 }
+pub(crate) mod harness;

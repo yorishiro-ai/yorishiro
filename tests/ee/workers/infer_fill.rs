@@ -55,7 +55,7 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
         let db = ctx.db.clone();
         let target = WorkerTarget::Shared;
         let mut ctx = ctx;
-        let queue = crate::requests::query_worker::job_target_queue(&mut ctx, target).await;
+        let queue = crate::workers::query_embedding::harness::job_target_queue(&mut ctx, target).await;
         let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &fixture.api_key).await, "note".into())
             .await
             .unwrap();
@@ -244,7 +244,8 @@ async fn deliver_lifecycle(ctx: &AppContext, lifecycle_id: Uuid) {
 
     let target = WorkerTarget::Shared;
     let mut worker_ctx = ctx.clone();
-    let queue = crate::requests::query_worker::job_target_queue(&mut worker_ctx, target).await;
+    let queue =
+        crate::workers::query_embedding::harness::job_target_queue(&mut worker_ctx, target).await;
     let running = queue.clone();
     let worker = tokio::spawn(async move { running.run(vec![target.job_tag()]).await });
     let directory = tempfile::tempdir().unwrap();
@@ -583,7 +584,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
             let jobs = [jobs[0], jobs[1]];
             // Two real consumers must contend while the first external call is held.
             let mut worker_ctx = ctx.clone();
-            let queue = crate::requests::query_worker::job_target_queue(
+            let queue = crate::workers::query_embedding::harness::job_target_queue(
                 &mut worker_ctx,
                 WorkerTarget::Shared,
             )

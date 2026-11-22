@@ -95,3 +95,5 @@ fn identical_duplicate_schemas_are_allowed() {
     add_schema(&mut components, "Shared".into(), schema);
     assert_eq!(components.schemas.len(), 1);
 }
+#[cfg(feature = "enterprise")]
+mod requests;
