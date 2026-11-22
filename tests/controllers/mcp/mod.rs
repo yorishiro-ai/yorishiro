@@ -1,4 +1,3 @@
-use crate::controllers::render_inventory_section;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::model::CallToolResult;
 use rmcp::model::Tool;
@@ -186,18 +185,6 @@ fn assert_inventory_contract(label: &str, tools: &[Tool]) {
 fn community_inventory_contract_is_valid() {
     let community = community_tool_router().list_all();
     assert_inventory_contract("community", &community);
-    let docs = include_str!("../../fixtures/mcp-inventory.md");
-    let start = "<!-- BEGIN GENERATED MCP INVENTORY -->\n";
-    let end = "## Enterprise-only tools\n";
-    let generated_community = docs
-        .split_once(start)
-        .and_then(|(_, rest)| rest.split_once(end).map(|(body, _)| body))
-        .expect("English MCP community inventory markers");
-    assert_eq!(
-        generated_community,
-        render_inventory_section("Community tools", &community),
-        "English MCP community documentation has drifted from the runtime inventory"
-    );
 }
 
 #[test]

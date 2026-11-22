@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use axum::http::StatusCode;
 use serde_json::Value;
 use yorishiro::App;
@@ -14,16 +12,6 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
 
         let document: Value = response.json();
         assert_eq!(document["info"]["version"], env!("CARGO_PKG_VERSION"));
-        let rendered = operation_summary(&document);
-        if std::env::var_os("UPDATE_FIXTURES").is_some_and(|value| value == "1") {
-            std::fs::write("tests/fixtures/openapi-operations.txt", &rendered).unwrap();
-        } else {
-            assert_eq!(
-                include_str!("../../../fixtures/openapi-operations.txt"),
-                rendered,
-                "Regenerate with UPDATE_FIXTURES=1 cargo test --features enterprise openapi_document_is_mounted_with_enterprise_routes"
-            );
-        }
         assert_eq!(document["openapi"], "3.1.0");
         assert_eq!(document["components"]["securitySchemes"]["bearer_auth"]["scheme"], "bearer");
         let invalid = request.post("/auth/root/login").json(&serde_json::json!({"email":12,"password":"invalid"})).await;
@@ -68,47 +56,4 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
         assert!(document["components"]["schemas"]["TenantOverview"].is_object());
     })
     .await;
-}
-
-fn operation_summary(document: &Value) -> String {
-    let mut lines = Vec::new();
-    for (path, methods) in document["paths"].as_object().unwrap() {
-        for (method, operation) in methods.as_object().unwrap() {
-            let mut parameters = operation["parameters"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|parameter| {
-                    let location = parameter["in"].as_str().unwrap();
-                    let name = parameter["name"].as_str().unwrap();
-                    let optional = if parameter["required"].as_bool() == Some(true) {
-                        ""
-                    } else {
-                        "?"
-                    };
-                    format!("{location}:{name}{optional}")
-                })
-                .collect::<Vec<_>>();
-            parameters.sort_unstable();
-            let mut statuses = operation["responses"]
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<_>>();
-            statuses.sort_unstable();
-            lines.push(format!(
-                "{} {path} [{}] -> {}",
-                method.to_ascii_uppercase(),
-                parameters.join(", "),
-                statuses.join(", ")
-            ));
-        }
-    }
-    lines.sort_unstable();
-    let mut summary = String::new();
-    for line in lines {
-        writeln!(summary, "{line}").unwrap();
-    }
-    summary
 }

@@ -31,7 +31,6 @@ The backend comes from `DATABASE_URL` and the edition from the feature set; ther
 A Valkey (Redis-compatible) queue runs with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` naming a server; the Valkey tests skip otherwise.
 Licensed tests skip unless `YORISHIRO_LICENSE_KEY` holds a valid key; the CI job `ee-postgres-licensed` supplies it.
 The pinned E5 model tests skip unless `models/multilingual-e5-base/` holds the model files.
-`UPDATE_FIXTURES=1 cargo test --features enterprise enterprise_inventory_contract` rewrites `tests/fixtures/mcp-inventory.md`; review the diff.
 
 Custom PostgreSQL:
 
