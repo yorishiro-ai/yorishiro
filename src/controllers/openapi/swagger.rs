@@ -53,7 +53,7 @@ pub mod implementation {
             let description = if key_creation {
                 "Workspace binding for the new key. Do not send this header with tenant_scoped: true."
             } else {
-                "Explicit workspace selection. When omitted, selection depends on the operation and the credential's binding."
+                "Explicit workspace selection. When omitted, operations that require one workspace may return 422 (`workspace_selection_required`) if several workspaces qualify."
             };
             parameters.push(
                 ParameterBuilder::new()
@@ -71,51 +71,15 @@ pub mod implementation {
                     .into(),
             );
         }
-        add_error_response(
-            operation,
-            "403",
-            "The credential is not authorized for this operation or workspace.",
-        );
-        if matches!(
-            (entry.method.as_str(), entry.path.as_str()),
-            (
-                "POST",
-                "/api/entities"
-                    | "/api/import.jsonl"
-                    | "/api/schema-forks"
-                    | "/api/schemas"
-                    | "/api/migration-jobs/reindex"
-                    | "/api/migration-jobs/fill-defaults"
-                    | "/api/migration-jobs/{job_id}/undo"
-            ) | (
-                "GET",
-                "/api/export.jsonl"
-                    | "/api/schemas/active/{name}"
-                    | "/api/schemas/active/{name}/entity-types/{entity_type}/json-schema"
-            ) | (
-                "PUT" | "DELETE",
-                "/api/workspace/entity-columns/{entity_type}"
-            )
-        ) {
-            add_error_response(operation, "422", "The request cannot be processed.");
-            let note = "When several workspaces qualify and none is selected, the API returns 422 with code `workspace_selection_required`.";
-            if let Some(description) = &mut operation.description {
-                description.push_str("\n\n");
-                description.push_str(note);
-            } else {
-                operation.description = Some(note.into());
-            }
-        }
-    }
-
-    fn add_error_response(operation: &mut Operation, status: &str, description: &str) {
         operation
             .responses
             .responses
-            .entry(status.into())
+            .entry("403".into())
             .or_insert_with(|| {
                 ResponseBuilder::new()
-                    .description(description)
+                    .description(
+                        "The credential is not authorized for this operation or workspace.",
+                    )
                     .content(
                         "application/json",
                         Content::new(Some(Ref::from_schema_name("ApiErrorBody"))),

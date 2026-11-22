@@ -1,17 +1,4 @@
-# Builds the runtime image published for `docker-compose.yaml`.
-#
-#   docker compose -f docker-compose.test.yaml up --build
-#   docker run --rm -e DATABASE_URL=... -e QUEUE_URL=... -e HOST=... yorishiro
-#
-# The default command serves HTTP only.
-# Compose runs embedding compute in `worker`, durable application jobs in `jobs`, and scheduled tasks in `scheduler` from this same image.
-# Disable the HTTP HEALTHCHECK for these non-HTTP roles:
-#
-#   docker run --rm --no-healthcheck yorishiro start --worker=worker-target:shared
-#   docker run --rm --no-healthcheck yorishiro start --worker=job-target:shared
-#   docker run --rm --no-healthcheck yorishiro scheduler
-#
-# Local embedding inference uses Candle and safetensors without a separate native runtime.
+# syntax=docker/dockerfile:1.29.0
 
 ARG DEBIAN_IMAGE=debian:trixie-slim
 FROM ${DEBIAN_IMAGE} AS builder
@@ -44,8 +31,6 @@ COPY ee/ ee/
 COPY migration/ migration/
 COPY patches/loco-rs/ patches/loco-rs/
 RUN python3 patches/loco-rs/verify.py --prepare
-# CE excludes the enterprise overlay at build time.
-# EE still checks the licence at runtime for gated features.
 ARG EDITION=ee
 ARG BUILD_SHA=dev
 ENV BUILD_SHA=${BUILD_SHA}
@@ -59,10 +44,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     esac) \
     && cp target/release/yorishiro /usr/local/bin/yorishiro
 
-# The binary uses the system C++ runtime for candle/tokenizers support, so the runtime image
-# installs the same libgcc/libstdc++ dependencies declared by the native packages.
-# ca-certificates is for the OpenAI-compatible provider's TLS, curl for the HEALTHCHECK.
-# The builder and runtime share the same base and glibc.
+# Keep the builder and runtime on the same glibc.
 FROM ${DEBIAN_IMAGE}
 
 RUN apt-get update && apt-get install -y \
@@ -79,23 +61,17 @@ COPY --from=builder /usr/local/bin/yorishiro /usr/local/bin/yorishiro
 RUN mkdir -p /var/lib/yorishiro \
     && chown root:yorishiro /var/lib/yorishiro \
     && chmod 1770 /var/lib/yorishiro
-# The image owns the canonical runtime configuration and loads it through LOCO_CONFIG_FOLDER.
 COPY config/production.yaml /app/config/production.yaml
 
-# Mount pinned artifacts under /app/models/<short_id> or fetch them there on first use.
 WORKDIR /app
-# The production configuration defaults SQLite state to /var/lib/yorishiro.
-# The directory is already created with root:yorishiro 1770 above.
 RUN install -d -o yorishiro -g yorishiro /var/lib/yorishiro/state /app/models
 
 ENV HOME=/home/yorishiro
 ENV LOCO_ENV=production
 ENV LOCO_CONFIG_FOLDER=/app/config
 USER yorishiro
-# Compose and the health check use the production default port.
 EXPOSE 5150
-# `/_ping` rather than `/_health`: both come from loco's default routes, and `_ping` answers
-# without touching the database, so this reports on the process rather than on its dependencies.
+# Probe process liveness without touching the database.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
     CMD curl -sf http://localhost:5150/_ping || exit 1
 ENTRYPOINT ["yorishiro"]

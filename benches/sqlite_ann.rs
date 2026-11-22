@@ -1,20 +1,6 @@
 //! Benchmarks SQLite full-scan vector search and compares it against vec0 if available.
 //!
-//! This is a measurement task, not a migration or adoption tool: it reports
-//! whether a deployment's entity count and scan latency justify moving to the
-//! vec0 virtual table (KNN index). It does not change any schema or configuration.
-//!
-//! # Thresholds
-//!
-//! The task uses two thresholds:
-//! - `min_entities` (default 1000): fewer entities than this makes vec0
-//!   unnecessary regardless of latency.
-//! - `max_latency_ms` (default 200): full-scan latencies below this are
-//!   acceptable on the current entity count.
-//!
-//! When both thresholds are exceeded (entity count >= min AND latency > max),
-//! the report recommends adopting vec0. Below, it reports that full-scan is
-//! still acceptable.
+//! The database is opened read-only.
 //!
 //! # Usage
 //!
@@ -25,7 +11,7 @@
 use loco_rs::prelude::{Error, Result};
 use sea_orm::FromQueryResult;
 use sea_orm::Statement;
-use sea_orm::sea_query::{Alias, Asterisk, Expr, ExprTrait, JoinType, Query};
+use sea_orm::sea_query::{Alias, Expr, ExprTrait, JoinType, Query};
 use sea_orm::sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait};
 use sea_orm::{ConnectionTrait, DatabaseConnection, SqlxSqliteConnector};
@@ -34,6 +20,10 @@ use yorishiro::error::{ResultExt, YorishiroError};
 use yorishiro::models::_entities::entity_embeddings;
 use yorishiro::models::_entities::entity_entities::Column as EntityColumn;
 use yorishiro::models::entity_entities;
+
+const EMBEDDINGS: &str = "entity_embeddings";
+const VEC0: &str = "entity_embeddings_vec0";
+const ITERATIONS: usize = 5;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -70,9 +60,7 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| Error::Message(e.to_string()))?;
     let db = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
-    let table_name = "entity_embeddings";
 
-    // Count entities with embeddings in this workspace.
     let entity_count = entity_embeddings::Entity::find()
         .join(
             JoinType::InnerJoin,
@@ -82,27 +70,22 @@ async fn main() -> Result<()> {
         .filter(entity_embeddings::Column::Embedding.is_not_null())
         .count(&db)
         .await?;
-    let entity_count = usize::try_from(entity_count)
-        .map_err(|_| Error::Message("embedding count exceeds platform limits".into()))?;
 
-    // Need at least one embedding to run the benchmark.
     if entity_count == 0 {
         println!("no embeddings found for workspace {workspace_id}: nothing to benchmark");
         return Ok(());
     }
 
-    // Fetch one entity that has an embedding to extract its vector.
-    let sample_row = fetch_sample_embedding(&db, workspace_id, table_name)
+    let sample_row = fetch_sample_embedding(&db, workspace_id)
         .await
         .map_err(|e| Error::Message(e.to_string()))?;
 
-    if let Some((_, vector_blob)) = sample_row {
+    if let Some(vector_blob) = sample_row {
         let vector = vector_blob_to_f32(&vector_blob);
         run_benchmark(
             &db,
             workspace_id,
             &vector,
-            table_name,
             entity_count,
             min_entities,
             max_latency_ms,
@@ -114,24 +97,18 @@ async fn main() -> Result<()> {
     }
 }
 
-/// Row returned from the embedding table.
 #[derive(sea_orm::FromQueryResult)]
 struct EmbeddingRow {
-    entity_id: Uuid,
     embedding: Vec<u8>,
 }
 
 async fn fetch_sample_embedding(
     conn: &DatabaseConnection,
     workspace_id: Uuid,
-    table_name: &str,
-) -> std::result::Result<Option<(Uuid, Vec<u8>)>, YorishiroError> {
+) -> std::result::Result<Option<Vec<u8>>, YorishiroError> {
     let query = Query::select()
-        .columns([
-            (Alias::new("ee"), Alias::new("entity_id")),
-            (Alias::new("ee"), Alias::new("embedding")),
-        ])
-        .from_as(Alias::new(table_name), Alias::new("ee"))
+        .column((Alias::new("ee"), Alias::new("embedding")))
+        .from_as(Alias::new(EMBEDDINGS), Alias::new("ee"))
         .join_as(
             JoinType::InnerJoin,
             entity_entities::Entity,
@@ -148,11 +125,10 @@ async fn fetch_sample_embedding(
         .await
         .internal()?;
 
-    Ok(row.map(|er| (er.entity_id, er.embedding)))
+    Ok(row.map(|row| row.embedding))
 }
 
 fn vector_blob_to_f32(blob: &[u8]) -> Vec<f32> {
-    // Re-interpret the BLOB as f32 LE values.
     assert_eq!(
         blob.len() % 4,
         0,
@@ -165,79 +141,61 @@ fn vector_blob_to_f32(blob: &[u8]) -> Vec<f32> {
         .collect()
 }
 
-/// Results from one measurement phase.
-struct PhaseResult {
-    /// Median latency in milliseconds across iterations.
-    median_ms: f64,
-    /// Max latency across iterations.
-    max_ms: f64,
-    /// Min latency across iterations.
-    min_ms: f64,
-    /// Whether this method is available on this deployment.
-    available: bool,
+struct LatencyMs {
+    median: f64,
+    max: f64,
+    min: f64,
 }
 
 async fn run_benchmark(
     db: &DatabaseConnection,
     workspace_id: Uuid,
     vector: &[f32],
-    table_name: &str,
-    entity_count: usize,
-    min_entities: usize,
+    entity_count: u64,
+    min_entities: u64,
     max_latency_ms: u64,
 ) -> Result<()> {
-    let iterations = 5;
-
-    // Phase 1: full-scan benchmark.
-    let full_scan = benchmark_phase(db, workspace_id, vector, table_name, iterations, true)
+    let full_scan = benchmark_phase(db, make_full_scan_query(vector, workspace_id))
         .await
         .map_err(|e| Error::Message(e.to_string()))?;
 
     println!("=== SQLite ANN Benchmark ===");
     println!("workspace_id: {workspace_id}");
     println!("embedding width: {}", vector.len());
-    println!("table: {table_name}");
     println!("entities with embeddings: {entity_count}");
-    println!("iterations: {iterations}");
+    println!("iterations: {ITERATIONS}");
     println!();
     println!("--- Full-scan (vec_distance_cosine) ---");
-    println!("  median: {:.0} ms", full_scan.median_ms);
-    println!("  min:    {:.0} ms", full_scan.min_ms);
-    println!("  max:    {:.0} ms", full_scan.max_ms);
+    println!("  median: {:.0} ms", full_scan.median);
+    println!("  min:    {:.0} ms", full_scan.min);
+    println!("  max:    {:.0} ms", full_scan.max);
 
-    // Phase 2: vec0 benchmark (if the virtual table exists).
-    let vec0_result = check_vec0_availability(db, table_name)
+    if vec0_available(db)
         .await
-        .map_err(|e| Error::Message(e.to_string()))?;
-
-    if vec0_result.available {
-        let vec0 = benchmark_phase(db, workspace_id, vector, table_name, iterations, false)
+        .map_err(|e| Error::Message(e.to_string()))?
+    {
+        let vec0 = benchmark_phase(db, make_vec0_query(vector, workspace_id))
             .await
             .map_err(|e| Error::Message(e.to_string()))?;
 
         println!();
         println!("--- vec0 (KNN virtual table) ---");
-        println!("  median: {:.0} ms", vec0.median_ms);
-        println!("  min:    {:.0} ms", vec0.min_ms);
-        println!("  max:    {:.0} ms", vec0.max_ms);
+        println!("  median: {:.0} ms", vec0.median);
+        println!("  min:    {:.0} ms", vec0.min);
+        println!("  max:    {:.0} ms", vec0.max);
 
-        let speedup = if vec0.median_ms > 0.0 {
-            full_scan.median_ms / vec0.median_ms
-        } else {
-            f64::INFINITY
-        };
+        let speedup = full_scan.median / vec0.median;
         println!("  speedup vs full-scan: {speedup:.1}x");
     } else {
         println!();
         println!("--- vec0: not available on this deployment ---");
     }
 
-    // Recommendation.
     println!();
     println!("--- Recommendation ---");
     let entities_ok = entity_count >= min_entities;
-    let latency_ok = full_scan.median_ms
-        <= std::time::Duration::from_millis(max_latency_ms).as_secs_f64() * 1000.0;
+    let latency_ok =
+        full_scan.median <= std::time::Duration::from_millis(max_latency_ms).as_secs_f64() * 1000.0;
 
     if !entities_ok {
         println!(
@@ -248,36 +206,14 @@ async fn run_benchmark(
         println!(
             "median latency ({:.0} ms) is below the threshold ({} ms). \
              Full-scan is acceptable for {} entities.",
-            full_scan.median_ms, max_latency_ms, entity_count
+            full_scan.median, max_latency_ms, entity_count
         );
     } else {
         println!(
             "median latency ({:.0} ms) exceeds the threshold ({} ms) \
              with {} entities. Consider adopting the vec0 virtual table for KNN search.",
-            full_scan.median_ms, max_latency_ms, entity_count
+            full_scan.median, max_latency_ms, entity_count
         );
-        println!(
-            "  vec0 was {}",
-            if vec0_result.available {
-                "available"
-            } else {
-                "not available"
-            }
-        );
-        if vec0_result.available {
-            let vec0 = benchmark_phase(db, workspace_id, vector, table_name, iterations, false)
-                .await
-                .map_err(|e| Error::Message(e.to_string()))?;
-            println!(
-                "  vec0 median latency: {:.0} ms ({:.1}x faster)",
-                vec0.median_ms,
-                if vec0.median_ms > 0.0 {
-                    full_scan.median_ms / vec0.median_ms
-                } else {
-                    f64::INFINITY
-                }
-            );
-        }
     }
 
     Ok(())
@@ -285,48 +221,31 @@ async fn run_benchmark(
 
 async fn benchmark_phase(
     conn: &DatabaseConnection,
-    workspace_id: Uuid,
-    vector: &[f32],
-    table_name: &str,
-    iterations: usize,
-    use_full_scan: bool,
-) -> std::result::Result<PhaseResult, YorishiroError> {
-    let knn = if use_full_scan {
-        make_full_scan_query(vector, workspace_id, table_name)
-    } else {
-        make_vec0_query(vector, workspace_id, table_name)
-    };
-
-    let mut latencies = Vec::with_capacity(iterations);
-    for _ in 0..iterations {
+    query: Statement,
+) -> std::result::Result<LatencyMs, YorishiroError> {
+    let mut latencies = [0.0; ITERATIONS];
+    for latency in &mut latencies {
         let start = std::time::Instant::now();
-        let hits = conn.query_all_raw(knn.clone()).await.internal()?;
+        let hits = conn.query_all_raw(query.clone()).await.internal()?;
         if hits.is_empty() {
             return Err(YorishiroError::Internal(
                 "benchmark query returned no entities for a workspace with a sample embedding"
                     .into(),
             ));
         }
-        latencies.push(start.elapsed().as_secs_f64() * 1000.0);
+        *latency = start.elapsed().as_secs_f64() * 1000.0;
     }
 
-    latencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let mid = latencies.len() / 2;
-    let median = if latencies.len() % 2 == 0 {
-        f64::midpoint(latencies[mid - 1], latencies[mid])
-    } else {
-        latencies[mid]
-    };
+    latencies.sort_by(f64::total_cmp);
 
-    Ok(PhaseResult {
-        median_ms: median,
-        max_ms: *latencies.last().unwrap(),
-        min_ms: latencies[0],
-        available: true,
+    Ok(LatencyMs {
+        median: latencies[ITERATIONS / 2],
+        max: latencies[ITERATIONS - 1],
+        min: latencies[0],
     })
 }
 
-fn make_full_scan_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> Statement {
+fn make_full_scan_query(vector: &[f32], workspace_id: Uuid) -> Statement {
     use sea_orm::sea_query::{Func, Order};
     let query = Query::select()
         .columns(
@@ -354,7 +273,7 @@ fn make_full_scan_query(vector: &[f32], workspace_id: Uuid, table_name: &str) ->
         .from_as(entity_entities::Entity, Alias::new("e"))
         .join_as(
             JoinType::InnerJoin,
-            Alias::new(table_name),
+            Alias::new(EMBEDDINGS),
             Alias::new("ee"),
             Expr::col((Alias::new("e"), EntityColumn::Id))
                 .equals((Alias::new("ee"), Alias::new("entity_id"))),
@@ -369,13 +288,13 @@ fn make_full_scan_query(vector: &[f32], workspace_id: Uuid, table_name: &str) ->
 
 /// SQL query for vec0 KNN search (uses the vec0 virtual table).
 ///
-/// The optional `{table_name}_vec0` table uses canonical UUID TEXT `entity_id`
+/// The optional `entity_embeddings_vec0` table uses canonical UUID TEXT `entity_id`
 /// as its primary key, a TEXT `workspace_id` partition key, and cosine `embedding` vectors.
-fn make_vec0_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> Statement {
+fn make_vec0_query(vector: &[f32], workspace_id: Uuid) -> Statement {
     use sea_orm::sea_query::{Func, Order, extension::sqlite::SqliteBinOper};
     let knn = Query::select()
         .columns(["entity_id", "distance"].map(Alias::new))
-        .from(Alias::new(format!("{table_name}_vec0")))
+        .from(Alias::new(VEC0))
         .and_where(Expr::col(Alias::new("embedding")).binary(
             SqliteBinOper::Match,
             Expr::val(yorishiro::db::sqlite_vec_blob(vector)),
@@ -423,20 +342,11 @@ fn make_vec0_query(vector: &[f32], workspace_id: Uuid, table_name: &str) -> Stat
     sea_orm::DatabaseBackend::Sqlite.build(&query)
 }
 
-/// Check whether the vec0 virtual table exists for the given embedding table.
-///
-/// Returns `PhaseResult { available: true }` if the virtual table is found,
-/// `PhaseResult { available: false }` if it is not.
-async fn check_vec0_availability(
-    conn: &DatabaseConnection,
-    table_name: &str,
-) -> std::result::Result<PhaseResult, YorishiroError> {
-    let vec0_table = format!("{table_name}_vec0");
-
+async fn vec0_available(conn: &DatabaseConnection) -> std::result::Result<bool, YorishiroError> {
     let query = Query::select()
-        .column(Asterisk)
+        .column(Alias::new("name"))
         .from(Alias::new("sqlite_master"))
-        .and_where(Expr::col(Alias::new("name")).eq(vec0_table))
+        .and_where(Expr::col(Alias::new("name")).eq(VEC0))
         .limit(1)
         .to_owned();
     let row = conn
@@ -444,10 +354,5 @@ async fn check_vec0_availability(
         .await
         .internal()?;
 
-    Ok(PhaseResult {
-        median_ms: 0.0,
-        max_ms: 0.0,
-        min_ms: 0.0,
-        available: row.is_some(),
-    })
+    Ok(row.is_some())
 }

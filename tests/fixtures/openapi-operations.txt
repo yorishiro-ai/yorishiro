@@ -11,7 +11,7 @@ DELETE /api/schema-forks/{fork_id} [header:X-Workspace-Id?, path:fork_id] -> 204
 DELETE /api/schemas/{schema_id} [header:X-Workspace-Id?, path:schema_id] -> 204, 401, 403, 404, 409
 DELETE /api/template-library/{id} [path:id] -> 204, 401, 403, 404
 DELETE /api/workspace/embedding-key [header:X-Workspace-Id?] -> 204, 401, 403
-DELETE /api/workspace/entity-columns/{entity_type} [header:X-Workspace-Id?, path:entity_type] -> 204, 401, 403, 422
+DELETE /api/workspace/entity-columns/{entity_type} [header:X-Workspace-Id?, path:entity_type] -> 204, 401, 403
 DELETE /api/workspace/llm-key [header:X-Workspace-Id?] -> 204, 401, 403
 DELETE /api/workspace/worker-class [header:X-Workspace-Id?] -> 204, 401, 403
 DELETE /api/workspaces/{id} [header:X-Workspace-Id?, path:id] -> 204, 401, 403, 404, 409
@@ -44,8 +44,8 @@ GET /api/relations/{id} [header:X-Workspace-Id?, path:id] -> 200, 401, 403, 404
 GET /api/schema-forks [header:X-Workspace-Id?] -> 200, 401, 403
 GET /api/schema-forks/{fork_id} [header:X-Workspace-Id?, path:fork_id] -> 200, 401, 403, 404
 GET /api/schemas [header:X-Workspace-Id?, query:page?, query:page_size?] -> 200, 401, 403
-GET /api/schemas/active/{name} [header:X-Workspace-Id?, path:name] -> 200, 401, 403, 404, 422
-GET /api/schemas/active/{name}/entity-types/{entity_type}/json-schema [header:X-Workspace-Id?, path:entity_type, path:name] -> 200, 401, 403, 404, 422
+GET /api/schemas/active/{name} [header:X-Workspace-Id?, path:name] -> 200, 401, 403, 404
+GET /api/schemas/active/{name}/entity-types/{entity_type}/json-schema [header:X-Workspace-Id?, path:entity_type, path:name] -> 200, 401, 403, 404
 GET /api/schemas/upstream-changes [header:X-Workspace-Id?, query:page?, query:page_size?] -> 200, 401, 403
 GET /api/schemas/{schema_id} [header:X-Workspace-Id?, path:schema_id] -> 200, 401, 403, 404
 GET /api/schemas/{schema_id}/merge-preview [header:X-Workspace-Id?, path:schema_id] -> 200, 401, 403, 404
@@ -84,8 +84,8 @@ POST /api/marketplace/{id}/reviews [path:id] -> 200, 401, 404, 422
 POST /api/marketplace/{id}/versions [path:id] -> 201, 401, 404, 422
 POST /api/members/users [] -> 201, 401, 403, 409
 POST /api/migration-jobs/fill-defaults [header:X-Workspace-Id?] -> 202, 401, 403, 422
-POST /api/migration-jobs/reindex [header:X-Workspace-Id?] -> 200, 401, 403, 422, 503
-POST /api/migration-jobs/{job_id}/undo [header:X-Workspace-Id?, path:job_id] -> 202, 401, 403, 404, 422
+POST /api/migration-jobs/reindex [header:X-Workspace-Id?] -> 200, 401, 403, 503
+POST /api/migration-jobs/{job_id}/undo [header:X-Workspace-Id?, path:job_id] -> 202, 401, 403, 404
 POST /api/relations [header:X-Workspace-Id?] -> 201, 401, 403, 422
 POST /api/schema-forks [header:X-Workspace-Id?] -> 201, 401, 403, 422
 POST /api/schemas [header:X-Workspace-Id?] -> 201, 401, 403, 409, 422

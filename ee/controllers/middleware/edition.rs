@@ -17,8 +17,6 @@ use std::sync::Arc;
 
 /// The public half of the signing key, compiled in.
 /// Rotating it means replacing this file and cutting a release; keys signed by the previous private key stop verifying at that point.
-// Resolved from this file's own directory (`ee/controllers/middleware/`), so the key stays inside `ee/` beside
-// the code it verifies for.
 const PUBLIC_KEY_PEM: &[u8] = include_bytes!("../../keys/licence-public.pem");
 
 /// What a licence key asserts.
@@ -49,8 +47,7 @@ pub fn verify(token: &str, public_key_pem: &[u8]) -> Result<LicenceClaims, Yoris
         )
     })?;
 
-    // RS256 only.
-    // Naming one algorithm is what rules out the "alg: none" and algorithm-confusion families by construction rather than by remembering to check the header separately.
+    // Pin RS256 to prevent algorithm confusion.
     let mut validation = Validation::new(Algorithm::RS256);
     // The key is issued by us for us; there is no issuer or audience to distinguish.
     validation.validate_aud = false;
@@ -100,8 +97,7 @@ impl LicenceState {
         };
 
         if let Ok(claims) = verify(token, PUBLIC_KEY_PEM) {
-            // `sub` is free-form and routinely an email address, so it does not go in a routine log line.
-            // Plan and expiry are what an operator needs to see; the issuee is in the key they already hold.
+            // Omit `sub` because it may contain personal information.
             tracing::info!(
                 plan = %claims.plan,
                 expires_at = claims.exp,

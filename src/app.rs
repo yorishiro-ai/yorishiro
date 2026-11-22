@@ -117,8 +117,6 @@ impl RouteMounts {
             .guard_credentials("/auth/root/login")
             .guard_credentials("/auth/tenant/login");
 
-        // Registers a route group with Loco and records it, with its OpenAPI document when the
-        // `openapi` feature is on, in the inventory.
         macro_rules! mount {
             ($routes:expr $(, $docs:expr)?) => {{
                 mounts.mount($routes);

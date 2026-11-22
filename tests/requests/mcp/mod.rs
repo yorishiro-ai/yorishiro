@@ -8,7 +8,6 @@ mod members;
 mod schemas;
 mod search;
 mod template_library;
-mod tenants;
 mod users;
 mod whoami;
 

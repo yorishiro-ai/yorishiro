@@ -48,11 +48,9 @@ Async waits release the task to do other work, but one physical connection still
 Run the local development stack with `docker compose -f docker-compose.test.yaml up --build`.
 The Makefile starts the test database or Valkey from the same Compose file when using the default local URLs.
 The separate `docker-compose.yaml` deploys published images and requires a release `TAG` and a production `DATABASE_URL`.
-Set `YORISHIRO_HTTP_ALLOWED_NETWORKS` to a JSON array of CIDRs, such as `["127.0.0.0/8", "::1/128"]`, to restrict REST, MCP, Swagger UI, signup, and setup to the same peer networks.
-An empty list preserves unrestricted network access; authentication still applies where required.
-Behind a reverse proxy, enforce client IP policy at the proxy and allow only the proxy network at the application.
-The application does not trust forwarded IP headers.
-If external webhooks are enabled, their requests must also come through an allowed peer.
+`YORISHIRO_HTTP_ALLOWED_NETWORKS` restricts REST (including webhooks), MCP, Swagger, authentication, and setup to a JSON list of peer CIDRs.
+The default `[]` allows all peers without bypassing authentication.
+Behind a reverse proxy, enforce client IP policy at the proxy because the app uses the socket peer and ignores forwarding headers.
 
 Run the full suite with Rust's default parallel test execution.
 
@@ -64,8 +62,6 @@ An app booted by other means must call `close_app_pools` before it returns, or t
 
 Licensed tests skip without `YORISHIRO_LICENSE_KEY`, and the E5 model tests skip without `models/multilingual-e5-base/`.
 Run the opt-in Stripe tests with `cargo test --locked --features stripe-tests --test mod -- ::stripe::`.
-CI runs these separately from general coverage because they exercise inbound signed webhooks.
-Use [stripe-mock](https://github.com/stripe/stripe-mock) for outbound Stripe API contract tests when an outbound client is added; it does not send signed webhooks.
 The Stripe request tests install a test licence state and do not require a Stripe account or a signed EE licence.
 `UPDATE_FIXTURES=1 cargo test --features enterprise enterprise_inventory_contract` rewrites `tests/fixtures/mcp-inventory.md`; review the diff before committing.
 `UPDATE_FIXTURES=1 cargo test --features enterprise openapi_document_is_mounted_with_enterprise_routes` updates `tests/fixtures/openapi-operations.txt` with the paths, methods, parameters, and response codes from the served OpenAPI document.
