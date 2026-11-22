@@ -3,7 +3,6 @@
 mod schemas;
 pub use schemas::*;
 
-pub mod route_inventory;
 pub mod swagger;
 
 use aide::axum::{ApiRouter, routing::ApiMethodRouter};
@@ -90,10 +89,9 @@ impl Routes {
         let _ = ApiRouter::new()
             .api_route(path, method.clone())
             .finish_api(&mut api);
-        if let Some(tag) = self.tag {
-            for operation in operations_mut(&mut api) {
-                operation.tags.push(tag.into());
-            }
+        for (path, method, operation) in operations_mut(&mut api) {
+            operation.operation_id = Some(operation_id(method, path));
+            operation.tags.extend(self.tag.map(Into::into));
         }
         merge_api(&mut self.api, api);
         self.loco = self.loco.add(uri, method.into());
@@ -102,7 +100,7 @@ impl Routes {
 
     #[must_use]
     pub fn licensed(mut self) -> Self {
-        for operation in operations_mut(&mut self.api) {
+        for (_, _, operation) in operations_mut(&mut self.api) {
             operation
                 .extensions
                 .insert("x-yorishiro-licence-required".into(), true.into());
@@ -128,10 +126,17 @@ pub(crate) fn merge_api(target: &mut OpenApi, source: OpenApi) {
     if let Some(paths) = source.paths {
         let target = &mut target.paths.get_or_insert_with(Default::default).paths;
         for (path, item) in paths.paths {
+            let item = item.into_item().expect("generated path is inline");
             if let Some(existing) = target.get_mut(&path).and_then(|item| item.as_item_mut()) {
-                existing.merge_with(item.into_item().expect("generated path is inline"));
+                for (method, _) in item.iter() {
+                    assert!(
+                        existing.iter().all(|(taken, _)| taken != method),
+                        "duplicate route: {method} {path}"
+                    );
+                }
+                existing.merge_with(item);
             } else {
-                target.insert(path, item);
+                target.insert(path, aide::openapi::ReferenceOr::Item(item));
             }
         }
     }
@@ -144,19 +149,39 @@ pub(crate) fn merge_api(target: &mut OpenApi, source: OpenApi) {
     }
 }
 
-fn operations_mut(api: &mut OpenApi) -> impl Iterator<Item = &mut aide::openapi::Operation> {
+/// Every operation with its path and lowercase method.
+pub(crate) fn operations_mut(
+    api: &mut OpenApi,
+) -> impl Iterator<Item = (&str, &'static str, &mut aide::openapi::Operation)> {
     api.paths
         .iter_mut()
-        .flat_map(|paths| paths.paths.values_mut())
-        .filter_map(|path| path.as_item_mut())
-        .flat_map(|path| {
+        .flat_map(|paths| paths.paths.iter_mut())
+        .filter_map(|(path, item)| Some((path.as_str(), item.as_item_mut()?)))
+        .flat_map(|(path, item)| {
             [
-                &mut path.get,
-                &mut path.post,
-                &mut path.put,
-                &mut path.delete,
-                &mut path.patch,
+                ("get", &mut item.get),
+                ("post", &mut item.post),
+                ("put", &mut item.put),
+                ("delete", &mut item.delete),
+                ("patch", &mut item.patch),
             ]
+            .into_iter()
+            .filter_map(move |(method, operation)| Some((path, method, operation.as_mut()?)))
         })
-        .flatten()
+}
+
+/// Stable, path-safe operation ID such as `get_api_entities_id`.
+#[must_use]
+pub fn operation_id(method: &str, path: &str) -> String {
+    let suffix = path
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+        .to_ascii_lowercase();
+    if suffix.is_empty() {
+        method.to_owned()
+    } else {
+        format!("{method}_{suffix}")
+    }
 }

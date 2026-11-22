@@ -18,7 +18,6 @@ use std::path::Path;
 
 use crate::controllers;
 use crate::controllers::mcp::McpToolSet;
-use crate::controllers::openapi::route_inventory::{RouteClass, RouteInventory};
 use crate::initializers;
 use crate::tasks;
 use crate::workers::registry::WorkerRegistry;
@@ -87,12 +86,12 @@ pub(crate) async fn after_context(ctx: AppContext) -> Result<AppContext> {
     Ok(ctx)
 }
 
-/// The route tree under construction, together with the inventory that `validate` checks and swagger serves.
+/// The route tree under construction, together with the `OpenAPI` document its routes generated.
 ///
 /// An edition mounts its own route groups after the base ones, so it adds paths rather than replacing any.
 pub(crate) struct RouteMounts {
     app_routes: AppRoutes,
-    inventory: RouteInventory,
+    api: aide::openapi::OpenApi,
     credential_paths: Vec<&'static str>,
 }
 
@@ -103,13 +102,9 @@ struct CredentialPaths(Vec<&'static str>);
 impl RouteMounts {
     /// The base route groups, mounted.
     pub(crate) fn community() -> Self {
-        let mut inventory = RouteInventory::default();
-        inventory.add_allowlisted_exclusions();
-        let app_routes = AppRoutes::with_default_routes();
-        inventory.add_infrastructure(&app_routes);
         let mut mounts = Self {
-            app_routes,
-            inventory,
+            app_routes: AppRoutes::with_default_routes(),
+            api: aide::openapi::OpenApi::default(),
             credential_paths: Vec::new(),
         };
         mounts
@@ -139,14 +134,12 @@ impl RouteMounts {
         mounts
     }
 
-    /// Registers a route group with Loco and records its operations in the inventory.
+    /// Registers a route group with Loco and merges its generated operations into the document.
     pub(crate) fn mount(&mut self, routes: controllers::openapi::Routes) -> &mut Self {
         let controllers::openapi::Routes {
             loco: routes, api, ..
         } = routes;
-        controllers::openapi::merge_api(&mut self.inventory.api, api);
-        let group = AppRoutes::empty().add_route(routes.clone());
-        self.inventory.add_group(&group, RouteClass::Public);
+        controllers::openapi::merge_api(&mut self.api, api);
         let current = std::mem::replace(&mut self.app_routes, AppRoutes::empty());
         self.app_routes = current.add_route(routes);
         self
@@ -158,18 +151,11 @@ impl RouteMounts {
         self
     }
 
-    /// Validates the inventory, publishes it to the shared store, and returns the route tree.
-    ///
-    /// # Panics
-    /// Panics if the inventory fails validation, so a duplicate or unlisted route stops the process at boot.
+    /// Publishes the document and credential paths to the shared store, and returns the route tree.
     pub(crate) fn finish(self, ctx: &AppContext) -> AppRoutes {
-        ctx.shared_store.insert(self.inventory);
+        ctx.shared_store.insert(self.api);
         ctx.shared_store
             .insert(CredentialPaths(self.credential_paths));
-        ctx.shared_store
-            .get::<RouteInventory>()
-            .expect("route inventory was just installed")
-            .validate();
         self.app_routes
     }
 }
@@ -188,11 +174,11 @@ pub(crate) fn after_routes(
     ctx: &AppContext,
     tools: McpToolSet,
 ) -> Result<axum::Router> {
-    let inventory = ctx
+    let api = ctx
         .shared_store
-        .get::<RouteInventory>()
-        .ok_or_else(|| loco_rs::Error::Message("route inventory missing".into()))?;
-    let router = controllers::openapi::swagger::mount(router, &inventory);
+        .get::<aide::openapi::OpenApi>()
+        .ok_or_else(|| loco_rs::Error::Message("OpenAPI document missing".into()))?;
+    let router = controllers::openapi::swagger::mount(router, &api);
     let router = controllers::mcp::mount(router, ctx, move |ctx| tools.server(ctx));
     let credential_paths = ctx
         .shared_store
