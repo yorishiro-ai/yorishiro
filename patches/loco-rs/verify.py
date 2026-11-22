@@ -50,17 +50,26 @@ def main():
             raise SystemExit("source is missing; run python3 patches/loco-rs/verify.py --prepare")
         before, after = files(pristine), files(source)
         if args.refresh:
-            diff = []
+            diffs = {}
             for path in sorted(before.keys() | after.keys()):
                 if before.get(path) != after.get(path):
-                    diff.extend(difflib.unified_diff(
+                    diffs[HERE / "patches" / f"{path}.patch"] = "".join(difflib.unified_diff(
                         before.get(path, b"").decode().splitlines(keepends=True),
                         after.get(path, b"").decode().splitlines(keepends=True),
                         fromfile=f"a/{path}" if path in before else "/dev/null",
                         tofile=f"b/{path}" if path in after else "/dev/null",
                     ))
-            (HERE / "fixes.patch").write_text("".join(diff))
-        subprocess.run(["patch", "-p1", "--fuzz=0", "--batch", "-i", str(HERE / "fixes.patch")], cwd=pristine, check=True)
+            for stale in (HERE / "patches").rglob("*.patch"):
+                if stale not in diffs:
+                    stale.unlink()
+            for path, diff in diffs.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(diff)
+        patches = sorted((HERE / "patches").rglob("*.patch"))
+        if not patches:
+            raise SystemExit("no Loco patches found")
+        for patch in patches:
+            subprocess.run(["patch", "-p1", "--fuzz=0", "--batch", "-i", str(patch)], cwd=pristine, check=True)
         if args.prepare and not source.exists():
             shutil.copytree(pristine, source)
             after = files(source)

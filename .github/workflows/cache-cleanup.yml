@@ -3,7 +3,6 @@ name: Cache Cleanup
 on:
   pull_request_target:
     types: [closed]
-    branches: [develop]
 
 permissions:
   actions: write
@@ -12,6 +11,7 @@ permissions:
 jobs:
   cleanup:
     runs-on: ubuntu-26.04
+    timeout-minutes: 5
     steps:
       - name: Delete caches for this PR
         env:

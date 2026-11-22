@@ -4,12 +4,16 @@ name: CI
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [develop]
+  merge_group:
+    types: [checks_requested]
     branches: [develop]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -30,6 +34,38 @@ env:
   EMBEDDING_TOKENIZER_SIZE: "17082660"
 
 jobs:
+  licensed-validation:
+    name: Determine licensed test eligibility
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    outputs:
+      enabled: ${{ steps.eligibility.outputs.enabled }}
+      matrix: ${{ steps.eligibility.outputs.matrix }}
+    steps:
+      - id: eligibility
+        env:
+          TRUSTED: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]') }}
+          DEPENDABOT_LICENCE: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'dependabot[bot]' && secrets.YORISHIRO_LICENSE_KEY != '' }}
+        run: |
+          enabled=false
+          if [[ "$TRUSTED" == true || "$DEPENDABOT_LICENCE" == true ]]; then
+            enabled=true
+          fi
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          matrix=$(jq -cn --argjson licensed "$enabled" '
+            [
+              {name:"ce-sqlite", edition:"ce", database:"sqlite"},
+              {name:"ee-sqlite", edition:"ee", database:"sqlite", models:true},
+              {name:"ce-postgres", edition:"ce", database:"postgres"},
+              {name:"ee-postgres", edition:"ee", database:"postgres"}
+            ] + if $licensed then
+              [{name:"ee-postgres-licensed", edition:"ee", database:"postgres", licensed:true, models:true}]
+            else [] end')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          if [[ "$enabled" != true ]]; then
+            echo 'Licensed checks run after merge on develop. No licence is exposed to this run.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   ce:
     name: Community edition
     runs-on: ubuntu-26.04
@@ -39,9 +75,7 @@ jobs:
       - uses: ./.github/actions/rust-setup
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ce
+          cache-key: ce
       - name: Clippy CE without enterprise code
         run: make clippy-ce
 
@@ -53,6 +87,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
+        with:
+          tool: actionlint@1.7.12
+      - name: Validate workflow definitions
+        run: actionlint -color
 
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
@@ -62,8 +103,7 @@ jobs:
       - uses: ./.github/actions/rust-setup
         with:
           components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
+          cache-key: check
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -146,10 +186,9 @@ jobs:
           test -x target/debug/yorishiro
 
       - name: Bootstrap PostgreSQL extensions and non-superuser migration identity
-        env:
-          POSTGRES_CONTAINER: ${{ job.services.db.id }}
-        run: |
-          docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/init-test-postgres.sql
+        uses: ./.github/actions/postgres-test-setup
+        with:
+          container: ${{ job.services.db.id }}
 
       - name: Run migrations with the built binary
         run: ./target/debug/yorishiro db migrate
@@ -198,17 +237,13 @@ jobs:
 
   test:
     name: Test (${{ matrix.name }})
+    needs: licensed-validation
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {name: ce-sqlite, edition: ce, database: sqlite}
-          - {name: ee-sqlite, edition: ee, database: sqlite, models: true}
-          - {name: ce-postgres, edition: ce, database: postgres}
-          - {name: ee-postgres, edition: ee, database: postgres}
-          - {name: ee-postgres-licensed, edition: ee, database: postgres, licensed: true, models: true}
+        include: ${{ fromJSON(needs.licensed-validation.outputs.matrix) }}
     env:
       DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgres://yorishiro:yorishiro@localhost:5432/yorishiro' || '' }}
       YORISHIRO_LICENSE_KEY: ${{ matrix.licensed && secrets.YORISHIRO_LICENSE_KEY || '' }}
@@ -234,9 +269,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/rust-setup
-      - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: test-${{ matrix.name }}
+          cache-key: test-${{ matrix.name }}
       - name: Require the signed licence
         if: matrix.licensed
         run: test -n "$YORISHIRO_LICENSE_KEY"
@@ -249,13 +283,11 @@ jobs:
             ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
             ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
-      - name: Reject an uncacheable fork pull request miss
-        if: matrix.models && steps.embedding-cache.outputs.cache-hit != 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-        run: |
-          echo "::error::Repository policy requires a trusted-branch embedding cache for fork pull requests. Re-run after that cache is populated."
-          exit 1
+      - name: Report a model cache miss on an external run
+        if: matrix.models && steps.embedding-cache.outputs.cache-hit != 'true' && needs.licensed-validation.outputs.enabled != 'true'
+        run: echo 'E5 model tests are skipped on this run because the verified model cache was not available.' >> "$GITHUB_STEP_SUMMARY"
       - name: Prepare and verify multilingual-e5-base artifacts
-        if: matrix.models
+        if: matrix.models && (steps.embedding-cache.outputs.cache-hit == 'true' || needs.licensed-validation.outputs.enabled == 'true')
         env:
           CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
           CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
@@ -263,7 +295,7 @@ jobs:
           TOKENIZER_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_TOKENIZER_REMOTE_PATH }}
         run: python3 scripts/embedding_cache.py prepare
       - name: Save verified multilingual-e5-base cache
-        if: matrix.models && steps.embedding-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: matrix.models && steps.embedding-cache.outputs.cache-hit != 'true' && needs.licensed-validation.outputs.enabled == 'true'
         uses: actions/cache/save@v6
         with:
           path: |
@@ -272,10 +304,9 @@ jobs:
           key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
       - name: Bootstrap PostgreSQL extensions and a non-superuser migration identity
         if: matrix.database == 'postgres'
-        env:
-          POSTGRES_CONTAINER: ${{ job.services.db.id }}
-        run: |
-          docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/init-test-postgres.sql
+        uses: ./.github/actions/postgres-test-setup
+        with:
+          container: ${{ job.services.db.id }}
       - name: Run the tests
         run: make test-${{ matrix.database }} EDITION=${{ matrix.edition }}
 
@@ -295,9 +326,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/rust-setup
-      - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: test-ee-valkey
+          cache-key: test-ee-valkey
       - name: Run the Valkey queue tests
         run: make test-valkey EDITION=ee VALKEY_URL=redis://127.0.0.1:6379
 
@@ -362,7 +392,8 @@ jobs:
 
   public-contract-tenant:
     name: Public contracts (PostgreSQL, licensed ee, tenant)
-    needs: build-ee
+    needs: [build-ee, licensed-validation]
+    if: needs.licensed-validation.outputs.enabled == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     services:
@@ -383,11 +414,10 @@ jobs:
           name: public-contract-binary-ee
           path: ${{ runner.temp }}/binary
       - name: Prepare the owned non-superuser PostgreSQL database
-        env:
-          POSTGRES_CONTAINER: ${{ job.services.db.id }}
-        run: |
-          docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -v test_database=public_contract \
-            -U postgres -d postgres < scripts/init-test-postgres.sql
+        uses: ./.github/actions/postgres-test-setup
+        with:
+          container: ${{ job.services.db.id }}
+          database: public_contract
       - name: Exercise authenticated cross-tenant acceptance
         env:
           YORISHIRO_PUBLIC_POSTGRES_URL: postgres://yorishiro:yorishiro@localhost:5432/public_contract
@@ -407,13 +437,22 @@ jobs:
   required-check:
     name: Required validation
     if: ${{ always() }}
-    needs: [ce, check, schema-generation, build-ce, build-ee, test, test-valkey, public-contract, public-contract-ee, public-contract-tenant]
+    needs: [licensed-validation, ce, check, schema-generation, build-ce, build-ee, test, test-valkey, public-contract, public-contract-ee, public-contract-tenant]
     runs-on: ubuntu-26.04
     steps:
       - name: Require every validation to succeed
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          RESULTS: ${{ toJSON(needs) }}
         run: |
-          for result in $RESULTS; do
-            [[ "$result" == success ]] || { echo "a required job ended $result" >&2; exit 1; }
-          done
+          {
+            echo '| Job | Result |'
+            echo '| --- | --- |'
+            jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"' <<< "$RESULTS"
+          } >> "$GITHUB_STEP_SUMMARY"
+          jq -e '
+            .["licensed-validation"].outputs.enabled as $licensed
+            | to_entries | all(
+                .value.result == "success" or
+                (.key == "public-contract-tenant" and .value.result == "skipped" and $licensed == "false")
+              )
+          ' <<< "$RESULTS"

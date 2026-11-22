@@ -1,8 +1,8 @@
 name: Auto Label
 
 on:
-  pull_request:
-    types: [opened, synchronize]
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -11,7 +11,9 @@ permissions:
 jobs:
   label:
     runs-on: ubuntu-26.04
+    timeout-minutes: 5
     steps:
-      - uses: actions/labeler@v7
+      # Read the base repository's label configuration without checking out PR code.
+      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}

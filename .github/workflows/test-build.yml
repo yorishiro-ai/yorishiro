@@ -20,9 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/rust-setup
-      - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: binary-${{ inputs.edition }}-debug
+          cache-key: binary-${{ inputs.edition }}-debug
       - name: Build the binary
         run: |
           case "$EDITION" in ce) features=community ;; ee) features=enterprise ;; *) exit 1 ;; esac

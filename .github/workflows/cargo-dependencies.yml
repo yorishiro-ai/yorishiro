@@ -1,0 +1,59 @@
+name: Cargo dependency updates
+
+on:
+  schedule:
+    - cron: "23 5 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cargo-dependency-updates
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - name: Report missing GitHub App configuration
+        if: vars.DEPENDENCY_UPDATE_APP_ID == ''
+        run: |
+          echo 'Cargo update PRs are disabled until DEPENDENCY_UPDATE_APP_ID and DEPENDENCY_UPDATE_APP_PRIVATE_KEY are configured.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v7
+        if: vars.DEPENDENCY_UPDATE_APP_ID != ''
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/rust-setup
+        if: vars.DEPENDENCY_UPDATE_APP_ID != ''
+      - name: Update the Cargo lockfile
+        if: vars.DEPENDENCY_UPDATE_APP_ID != ''
+        run: cargo update
+      - uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3
+        if: vars.DEPENDENCY_UPDATE_APP_ID != ''
+        id: app
+        with:
+          app-id: ${{ vars.DEPENDENCY_UPDATE_APP_ID }}
+          private-key: ${{ secrets.DEPENDENCY_UPDATE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8
+        if: vars.DEPENDENCY_UPDATE_APP_ID != ''
+        id: update-pr
+        with:
+          token: ${{ steps.app.outputs.token }}
+          branch: chore/cargo-dependency-updates
+          base: develop
+          add-paths: Cargo.lock
+          commit-message: Update Cargo dependencies
+          title: Update Cargo dependencies
+          body: Update the Cargo lockfile after preparing the pinned Loco patch.
+          labels: dependencies
+      - name: Summarize dependency updates
+        if: vars.DEPENDENCY_UPDATE_APP_ID != ''
+        env:
+          PR_URL: ${{ steps.update-pr.outputs.pull-request-url }}
+        run: |
+          echo "Cargo dependency update: ${PR_URL:-no lockfile changes}" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,33 @@
+--- a/src/bgworker/mod.rs
++++ b/src/bgworker/mod.rs
+@@ -347,6 +347,14 @@
+     /// Does not currently return an error, but implementations might, so
+     /// using Result here as return type.
+     fn shutdown(&self) -> Result<()>;
++
++    /// Releases provider resources after its worker run has drained.
++    ///
++    /// # Errors
++    /// Returns an error if shutdown fails.
++    async fn close(&self) -> Result<()> {
++        self.shutdown()
++    }
+ }
+ 
+ /// Process worker task handles and handle any errors.
+@@ -750,6 +758,15 @@
+     pub fn shutdown(&self) -> Result<()> {
+         tracing::info!("Shutting down background job processing");
+         self.0.shutdown()
++    }
++
++    /// Releases provider resources after shutdown and worker draining.
++    /// Unlike `shutdown`, this waits for SQL connection pools to close.
++    ///
++    /// # Errors
++    /// Returns an error if the provider cannot close.
++    pub async fn close(&self) -> Result<()> {
++        self.0.close().await
+     }
+ 
+     pub(crate) async fn get_jobs(

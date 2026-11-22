@@ -1,0 +1,17 @@
+--- a/src/bgworker/pg.rs
++++ b/src/bgworker/pg.rs
+@@ -247,6 +247,14 @@
+         self.token.cancel();
+         Ok(())
+     }
++
++    async fn close(&self) -> Result<()> {
++        self.token.cancel();
++        // Bug fix: handlers retain AppContext and therefore the queue itself.
++        *self.registry.lock().await = JobRegistry::new();
++        self.pool.close().await;
++        Ok(())
++    }
+ }
+ 
+ async fn connect(cfg: &PostgresQueueConfig) -> Result<PgPool> {

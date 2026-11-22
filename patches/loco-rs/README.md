@@ -5,14 +5,15 @@ Application CLI routing, pool options and queue configuration live outside this 
 
 ## Provenance and application
 
-`source/` is ignored generated material: the published `loco-rs` 1.3.1 crate with `fixes.patch` applied.
+`source/` is ignored generated material: the published `loco-rs` 1.3.1 crate with the diffs under `patches/` applied.
+Each diff mirrors its upstream path, for example `patches/src/bgworker/pg.rs.patch`.
 Only the patch, provenance and restoration script are tracked in Git.
 Run `python3 patches/loco-rs/verify.py --prepare` before direct Cargo commands on a fresh checkout.
 Make build/check targets, CI toolchain setup and Docker builds restore it automatically.
 The archive SHA-256 is `8aa30671d3a487b08a61cec5e9d9b9764cdf73e7df074fd1618811935214e076`, matching the registry checksum before the path override.
 The crate's upstream revision is `3ddc279740ebf0516403ca8f7028ce481d616a02` in [loco-rs/loco](https://github.com/loco-rs/loco).
 Its Apache-2.0 licence remains in `source/LICENSE`.
-The upstream files, including their original whitespace and `Cargo.lock`, are retained byte for byte except for `fixes.patch`.
+The upstream files, including their original whitespace and `Cargo.lock`, are retained byte for byte except for the documented diffs.
 The `.gitattributes` whitespace exception preserves the unified diff's required context prefixes; the verifier still compares every byte.
 `source/Cargo.lock` is archival upstream material, not the application's resolution; builds and audits use the root `Cargo.lock`.
 The root `[patch.crates-io]` selects this source for both editions.
@@ -20,7 +21,7 @@ No Cargo registry cache, shared database, or running container is modified.
 
 Run `python3 patches/loco-rs/verify.py` to check the pinned archive, apply the diff with no fuzz in a temporary directory, and compare every source file.
 The verifier downloads the archive only if it is absent from Cargo's cache.
-After an intentional source edit, regenerate `fixes.patch` with `python3 patches/loco-rs/verify.py --refresh`, review the diff, then run the verifier without `--refresh`.
+After an intentional source edit, regenerate the per-file diffs with `python3 patches/loco-rs/verify.py --refresh`, review them, then run the verifier without `--refresh`.
 Changing the pinned version requires reviewing these fixes against the new upstream source, not blindly applying the old diff.
 
 ## Defects corrected
@@ -30,7 +31,7 @@ Changing the pinned version requires reviewing these fixes against the new upstr
 | LQ-01 | Redis single-job enqueue wrote the payload and queue membership separately. | Write both in a Redis transaction, as upstream batch enqueue already does. | Existing enqueue/dispatch tests and Redis topology suites. |
 | LQ-02 | Claiming a long-queued job did not refresh its processing timestamp, so the reaper could immediately redeliver it. | Atomically claim the unchanged candidate, persist `processing` and the claim time, and assign a unique attempt token. | `redis_claim_refreshes_age_and_fences_reaped_completion_and_failure`. |
 | LQ-03 | A reaper could overwrite a job completed or reclaimed after its read; a stale worker could overwrite the replacement attempt. | Reaper transitions compare the exact record and set membership atomically; completion/failure compare the attempt token atomically. | The same regression test holds two real workers across redelivery and checks both stale success and failure. |
-| LQ-04 | Completion/failure persistence errors logged the entire job, including import bodies and credentials. | Log the job ID instead of `Debug`-formatting its payload. | Review `fixes.patch`; this changes diagnostic fields, not stored job arguments. |
+| LQ-04 | Completion/failure persistence errors logged the entire job, including import bodies and credentials. | Log the job ID instead of `Debug`-formatting its payload. | Review the worker diffs; this changes diagnostic fields, not stored job arguments. |
 | LQ-05 | Queue shutdown only cancelled polling; SQL pools and handlers retaining `AppContext` were not released. | Add awaited `close()`, clear retained handlers and close SQL pools; boot calls it after workers drain. | `sql_queue_close_releases_pool_and_retained_worker_context` and real request teardown. |
 
 `shutdown()` remains a stop signal.

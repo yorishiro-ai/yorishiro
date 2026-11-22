@@ -9,7 +9,6 @@ name: Security
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [develop]
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
@@ -18,6 +17,7 @@ on:
       - "patches/**"
       - ".github/workflows/security.yml"
       - ".github/actions/rust-setup/**"
+      - "rust-toolchain.toml"
   workflow_dispatch:
 
 concurrency:
@@ -31,6 +31,7 @@ jobs:
   security:
     name: Dependency security audit
     runs-on: ubuntu-26.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:

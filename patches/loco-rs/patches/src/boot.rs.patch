@@ -1,0 +1,15 @@
+--- a/src/boot.rs
++++ b/src/boot.rs
+@@ -194,7 +194,11 @@
+ 
+     println!("press ctrl-c again to force quit");
+     select! {
+-        _ = handle => {}
++        _ = handle => {
++            if let Some(queue) = &app_context.queue_provider {
++                queue.close().await?;
++            }
++        }
+         () = shutdown_signal() => {}
+     }
+     Ok(())
