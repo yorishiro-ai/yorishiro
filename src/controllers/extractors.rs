@@ -2,6 +2,7 @@
 //!
 //! `Authorized` also opens the RLS-scoped transaction, so a handler cannot reach tenant data without passing through it.
 
+use crate::controllers::session::WorkspaceSession;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -103,93 +104,47 @@ impl RequiredScope for MigrationScope {
     const SCOPE: ApiKeyScope = ApiKeyScope::Migration;
 }
 
-/// An extractor that authenticates, verifies the required scope, and begins a transaction with the RLS context already set in a single call (see `TenantDb::begin_for_workspace`).
+/// An extractor that authenticates, verifies the required scope, and opens the workspace transaction in one call (see [`WorkspaceSession`]).
 ///
-/// There is no way to obtain a `DatabaseTransaction` on the tenant pool except through this type, which structurally prevents forgetting the scope check.
-///
-/// **A write handler must call `.commit().await?` before returning, or every write it made is silently discarded** (`DatabaseTransaction` rolls back on drop).
-/// A read-only handler can just let it drop; a rollback of nothing-written is a no-op.
+/// **A write handler must call `.commit().await?` before returning, or every write it made is silently discarded.**
 pub struct Authorized<R> {
-    pub ctx: api_keys::AuthContext,
-    txn: sea_orm::DatabaseTransaction,
-    identity: sea_orm::DatabaseConnection,
-    authorization: Option<sea_orm::DatabaseTransaction>,
-    inferred_resource: bool,
+    session: WorkspaceSession,
     _scope: PhantomData<R>,
+}
+
+impl<R> std::ops::Deref for Authorized<R> {
+    type Target = WorkspaceSession;
+
+    fn deref(&self) -> &WorkspaceSession {
+        &self.session
+    }
+}
+
+impl<R> std::ops::DerefMut for Authorized<R> {
+    fn deref_mut(&mut self) -> &mut WorkspaceSession {
+        &mut self.session
+    }
 }
 
 impl<R> Authorized<R> {
     pub(crate) async fn for_target(
         app: &AppContext,
-        mut actor: api_keys::AuthContext,
+        actor: api_keys::AuthContext,
         target: crate::models::iam::access::WorkspaceTarget,
     ) -> Result<Self, ApiError>
     where
         R: RequiredScope,
     {
-        auth::require_scope(&actor, R::SCOPE)?;
-        let inferred_resource = target.inferred_resource(&actor);
-        actor.workspace_id = Some(target.resolve(&app.db, &actor, R::SCOPE).await.map_err(
-            |error| crate::models::iam::access::hide_inferred_resource(inferred_resource, error),
-        )?);
-        let (ctx, txn) = auth::RequestAuth::new(app)
-            .begin(actor, R::SCOPE >= ApiKeyScope::Write)
-            .await?;
         Ok(Self {
-            ctx,
-            txn,
-            identity: app.db.clone(),
-            authorization: None,
-            inferred_resource,
+            session: WorkspaceSession::open(app, actor, R::SCOPE, target).await?,
             _scope: PhantomData,
         })
     }
 
-    #[must_use]
-    pub const fn txn(&self) -> &sea_orm::DatabaseTransaction {
-        &self.txn
-    }
-
-    /// Commits the transaction.
-    /// Every write handler must call this before returning `Ok`.
-    ///
     /// # Errors
-    /// Returns an error if the operation cannot be completed.
+    /// Returns an error if the commit fails.
     pub async fn commit(self) -> Result<(), ApiError> {
-        self.txn
-            .commit()
-            .await
-            .map_err(|e| ApiError(YorishiroError::Internal(e.into())))?;
-        if let Some(authorization) = self.authorization {
-            authorization
-                .commit()
-                .await
-                .map_err(|e| ApiError(YorishiroError::Internal(e.into())))?;
-        }
-        Ok(())
-    }
-}
-
-impl<R> Authorized<R> {
-    pub(crate) async fn require_action(
-        &mut self,
-        action: crate::models::iam::policy::Action,
-    ) -> Result<(), ApiError>
-    where
-        R: RequiredScope,
-    {
-        self.authorization = crate::models::iam::access::authorize_workspace_action(
-            &self.txn,
-            &self.identity,
-            &self.ctx,
-            R::SCOPE,
-            action,
-        )
-        .await
-        .map_err(|error| {
-            crate::models::iam::access::hide_inferred_resource(self.inferred_resource, error)
-        })?;
-        Ok(())
+        Ok(self.session.commit().await?)
     }
 }
 
@@ -207,17 +162,13 @@ where
         let app_ctx = AppContext::from_ref(state);
 
         let headers = auth::header_pairs(&parts.headers).map_err(ApiError)?;
-        let (ctx, txn) = auth::RequestAuth::new(&app_ctx)
+        let begun = auth::RequestAuth::new(&app_ctx)
             .authorize(presented_key, R::SCOPE, &headers)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
 
         Ok(Self {
-            ctx,
-            txn,
-            identity: app_ctx.db.clone(),
-            authorization: None,
-            inferred_resource: false,
+            session: WorkspaceSession::authenticated(&app_ctx, begun, R::SCOPE),
             _scope: PhantomData,
         })
     }

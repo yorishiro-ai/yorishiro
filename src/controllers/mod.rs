@@ -28,5 +28,6 @@ pub mod error;
 pub mod extractors;
 pub mod middleware;
 pub mod openapi;
+pub mod session;
 
 pub use error::{Accepted, ApiError, Created};
