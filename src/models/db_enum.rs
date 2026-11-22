@@ -3,8 +3,7 @@
 //! A value like `"read_only"` used to be written out separately for `as_db_str`, `FromStr`, serde's `rename_all`, and the database `CHECK` constraint, and nothing but a round-trip test noticed when one copy drifted.
 //! `db_enum!` takes the table once and derives every conversion from it, so the wire form and the stored form cannot disagree.
 //!
-//! The generated `Deserialize` accepts only the canonical string.
-//! `from_db_str` and `FromStr` also accept the `| "alias"` spellings, which exist for command-line input and are not part of the stored or wire contract.
+//! Every conversion accepts only the canonical string.
 
 /// Declares a closed enum whose variants each have one stored string.
 ///
@@ -13,7 +12,7 @@
 ///     #[derive(Clone, Copy, PartialEq, Eq)]
 ///     pub enum Mode {
 ///         Off = "off",
-///         ReadOnly = "read_only" | "read-only",
+///         ReadOnly = "read_only",
 ///     }
 /// }
 /// ```
@@ -24,7 +23,7 @@ macro_rules! db_enum {
     (
         $(#[$meta:meta])*
         $vis:vis enum $name:ident {
-            $( $(#[$variant_meta:meta])* $variant:ident = $text:literal $(| $alias:literal)* ),+ $(,)?
+            $( $(#[$variant_meta:meta])* $variant:ident = $text:literal ),+ $(,)?
         }
     ) => {
         $(#[$meta])*
@@ -48,7 +47,7 @@ macro_rules! db_enum {
             #[must_use]
             $vis fn from_db_str(value: &str) -> Option<Self> {
                 match value {
-                    $( $text $(| $alias)* => Some(Self::$variant), )+
+                    $( $text => Some(Self::$variant), )+
                     _ => None,
                 }
             }

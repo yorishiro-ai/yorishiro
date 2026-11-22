@@ -1,4 +1,4 @@
-//! The conversions `db_enum!` derives, exercised through `MaintenanceMode`, the enum that declares `| "alias"` spellings.
+//! The conversions `db_enum!` derives, exercised through `MaintenanceMode`.
 //!
 //! The macro itself stays crate-private, so these tests reach it through the types it generates.
 
@@ -18,19 +18,6 @@ fn every_variant_round_trips_through_every_conversion() {
             *variant
         );
     }
-}
-
-#[test]
-fn aliases_parse_but_are_not_part_of_the_wire_contract() {
-    assert_eq!(
-        MaintenanceMode::from_db_str("read-only"),
-        Some(MaintenanceMode::ReadOnly)
-    );
-    assert_eq!(
-        "read-only".parse::<MaintenanceMode>(),
-        Ok(MaintenanceMode::ReadOnly)
-    );
-    assert!(serde_json::from_value::<MaintenanceMode>("read-only".into()).is_err());
 }
 
 #[test]

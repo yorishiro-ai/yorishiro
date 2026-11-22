@@ -1,4 +1,4 @@
-//! Enterprise request middleware: role checks for enterprise routes and the licence gate.
+//! Enterprise request authentication and licence gate.
 
 pub mod auth;
 pub mod edition;

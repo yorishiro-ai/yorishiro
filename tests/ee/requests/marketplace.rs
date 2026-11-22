@@ -184,8 +184,7 @@ async fn publish_list_fork_and_review_round_trip() {
         let member_id = member.json::<serde_json::Value>()["user_id"].clone();
         let login = request
             .post("/auth/tenant/login")
-            .add_header("X-Tenant-Id", owner.tenant_id.to_string())
-            .json(&json!({"user_name":"marketplace-delegate","password":"marketplace-password"}))
+            .json(&json!({"tenant_id":owner.tenant_id,"user_name":"marketplace-delegate","password":"marketplace-password"}))
             .await;
         login.assert_status_ok();
         let delegated_key = login.json::<serde_json::Value>()["api_key"]

@@ -6,15 +6,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "tenant_reindex_schedules")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub tenant_id: Uuid,
-    #[sea_orm(column_type = "Text")]
-    pub interval: String,
     #[sea_orm(column_type = "Text", nullable)]
     pub timezone: Option<String>,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub tenant_id: Uuid,
     pub scheduled_for: Option<DateTimeWithTimeZone>,
-    pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(column_type = "Text")]
+    pub interval: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

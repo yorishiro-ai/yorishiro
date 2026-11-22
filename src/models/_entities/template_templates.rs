@@ -6,31 +6,31 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "template_templates")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
-    #[sea_orm(column_type = "JsonBinary")]
-    pub tags: Json,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub locale: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub author: Option<String>,
     #[sea_orm(unique_key = "template_templates_tenant_id_name_key")]
     pub tenant_id: Uuid,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
     #[sea_orm(
         column_type = "Text",
         unique_key = "template_templates_tenant_id_name_key"
     )]
     pub name: String,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub description: Option<String>,
     #[sea_orm(column_type = "JsonBinary")]
     pub definition: Json,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub locale: Option<String>,
     #[sea_orm(column_type = "Text")]
     pub visibility: String,
     #[sea_orm(column_type = "Text", nullable)]
-    pub author: Option<String>,
-    pub fork_of: Option<Uuid>,
-    pub created_by: Option<Uuid>,
-    pub created_at: DateTimeWithTimeZone,
+    pub description: Option<String>,
     pub updated_at: DateTimeWithTimeZone,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub tags: Json,
+    pub fork_of: Option<Uuid>,
+    pub created_at: DateTimeWithTimeZone,
+    pub created_by: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

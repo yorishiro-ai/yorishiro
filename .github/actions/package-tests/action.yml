@@ -41,11 +41,11 @@ runs:
       shell: bash
       run: ./.github/packaging/test-install-paths-self.sh
 
-    - name: Test package transitions and co-install refusal
+    - name: Test current package lifecycle and co-install refusal
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-      run: ./.github/packaging/test-transitions.sh dist "$VERSION"
+      run: ./.github/packaging/test-package-lifecycle.sh dist "$VERSION"
 
     - name: Test representative installed packages
       shell: bash

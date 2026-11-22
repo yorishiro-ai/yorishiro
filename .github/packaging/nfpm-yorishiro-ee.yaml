@@ -1,9 +1,5 @@
 # Enterprise package. The enterprise feature is compiled into this artifact.
-# compiles into this crate as a module declared in `src/lib.rs`, and what a
-# deployment serves is decided at runtime by the licence layer, not by which file was installed.
-#
-# The `conflicts` block below still names the retired `yorishiro-ce`, so a machine carrying
-# the old package can move to this one.
+# What a deployment serves is decided at runtime by the licence layer.
 name: yorishiro-ee
 arch: ${ARCH}
 platform: linux
@@ -77,10 +73,6 @@ overrides:
       - libstdc++
 
 conflicts:
-  - yorishiro
-  - yorishiro-ce
-replaces:
-  - yorishiro
   - yorishiro-ce
 
 contents:

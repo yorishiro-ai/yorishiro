@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "tenant_memberships")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
-    #[sea_orm(unique_key = "uq_tenant_memberships_tenant_id_user_id")]
-    pub tenant_id: Uuid,
     #[sea_orm(unique)]
     pub user_id: Uuid,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(unique_key = "uq_tenant_memberships_tenant_id_user_id")]
+    pub tenant_id: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -23,6 +23,8 @@ pub enum Relation {
     IamTenantRoots,
     #[sea_orm(has_many = "super::iam_user_policy_attachments::Entity")]
     IamUserPolicyAttachments,
+    #[sea_orm(has_many = "super::iam_user_role_attachments::Entity")]
+    IamUserRoleAttachments,
     #[sea_orm(
         belongs_to = "super::tenant_tenants::Entity",
         from = "Column::TenantId",
@@ -56,6 +58,12 @@ impl Related<super::iam_tenant_roots::Entity> for Entity {
 impl Related<super::iam_user_policy_attachments::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IamUserPolicyAttachments.def()
+    }
+}
+
+impl Related<super::iam_user_role_attachments::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamUserRoleAttachments.def()
     }
 }
 

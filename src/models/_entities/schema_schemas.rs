@@ -6,30 +6,30 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "schema_schemas")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    #[sea_orm(unique_key = "schema_schemas_workspace_name_version_key")]
+    pub version: i32,
+    pub updated_at: Option<DateTimeWithTimeZone>,
+    pub origin_updated_at: Option<DateTimeWithTimeZone>,
     pub tenant_id: Uuid,
+    pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub origin_snapshot: Option<Json>,
     #[sea_orm(unique_key = "schema_schemas_workspace_name_version_key")]
     pub workspace_id: Uuid,
+    #[sea_orm(column_type = "Text")]
+    pub status: String,
+    #[sea_orm(column_type = "Text")]
+    pub origin_status: String,
     #[sea_orm(
         column_type = "Text",
         unique_key = "schema_schemas_workspace_name_version_key"
     )]
     pub name: String,
-    #[sea_orm(unique_key = "schema_schemas_workspace_name_version_key")]
-    pub version: i32,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
     #[sea_orm(column_type = "JsonBinary")]
     pub definition: Json,
-    #[sea_orm(column_type = "Text")]
-    pub status: String,
     pub origin_template_id: Option<Uuid>,
-    #[sea_orm(column_type = "Text")]
-    pub origin_status: String,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub origin_snapshot: Option<Json>,
-    pub origin_updated_at: Option<DateTimeWithTimeZone>,
-    pub created_at: DateTimeWithTimeZone,
-    pub updated_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

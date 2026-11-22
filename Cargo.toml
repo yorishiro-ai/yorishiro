@@ -94,7 +94,6 @@ enterprise = [
   "dep:base64",
   "dep:jsonwebtoken",
 ]
-stripe-tests = ["enterprise"]
 
 [workspace.dependencies]
 sea-orm-migration = { version = "2.0.4", features = [

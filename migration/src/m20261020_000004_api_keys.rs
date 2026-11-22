@@ -80,7 +80,6 @@ async fn up_api_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                 .col(helpers::ts_tz_col(manager, Alias::new("revoked_at")))
                 .col(helpers::uuid_col(manager, Alias::new("replaced_by_id")))
                 // Set only on a temporary session issued by assuming an IAM role; deliberately no foreign key, so deleting a role revokes its sessions instead of cascading into key history.
-                .col(helpers::uuid_col(manager, Alias::new("role_id")))
                 .col(
                     ColumnDef::new(Alias::new("audit"))
                         .boolean()

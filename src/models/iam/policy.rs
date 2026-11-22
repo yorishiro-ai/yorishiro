@@ -127,7 +127,9 @@ pub enum Action {
     RolePolicyList,
     RolePolicyAttach,
     RolePolicyDetach,
-    RoleAssume,
+    UserRoleList,
+    UserRoleAdd,
+    UserRoleRemove,
 }
 
 impl Action {
@@ -247,7 +249,9 @@ impl Action {
         Self::RolePolicyList,
         Self::RolePolicyAttach,
         Self::RolePolicyDetach,
-        Self::RoleAssume,
+        Self::UserRoleList,
+        Self::UserRoleAdd,
+        Self::UserRoleRemove,
     ];
 
     #[expect(
@@ -312,11 +316,11 @@ impl Action {
             | Self::RoleDelete
             | Self::RolePolicyList
             | Self::RolePolicyAttach
-            | Self::RolePolicyDetach => {
+            | Self::RolePolicyDetach
+            | Self::UserRoleList
+            | Self::UserRoleAdd
+            | Self::UserRoleRemove => {
                 matches!(resource, Resource::Tenant { .. })
-            }
-            Self::RoleAssume => {
-                matches!(resource, Resource::Role { .. } | Resource::AllRoles { .. })
             }
             Self::WorkspaceGet
             | Self::WorkspaceUpdate
@@ -401,8 +405,6 @@ pub enum Resource {
     Tenant { tenant_id: Uuid },
     Workspace { tenant_id: Uuid, workspace_id: Uuid },
     AllWorkspaces { tenant_id: Uuid },
-    Role { tenant_id: Uuid, role_id: Uuid },
-    AllRoles { tenant_id: Uuid },
 }
 
 impl Resource {
@@ -410,9 +412,7 @@ impl Resource {
         match self {
             Self::Tenant { tenant_id }
             | Self::Workspace { tenant_id, .. }
-            | Self::AllWorkspaces { tenant_id }
-            | Self::Role { tenant_id, .. }
-            | Self::AllRoles { tenant_id } => tenant_id,
+            | Self::AllWorkspaces { tenant_id } => tenant_id,
         }
     }
 
@@ -420,8 +420,6 @@ impl Resource {
         self == target
             || matches!((self, target),
                 (Self::AllWorkspaces { tenant_id: a }, Self::Workspace { tenant_id: b, .. }) if a == b)
-            || matches!((self, target),
-                (Self::AllRoles { tenant_id: a }, Self::Role { tenant_id: b, .. }) if a == b)
     }
 }
 
@@ -543,10 +541,7 @@ impl Policy {
         owns_workspace: impl Fn(Uuid, Uuid) -> bool,
     ) -> bool {
         if target.tenant_id() != tenant_id
-            || matches!(
-                target,
-                Resource::AllWorkspaces { .. } | Resource::AllRoles { .. }
-            )
+            || matches!(target, Resource::AllWorkspaces { .. })
             || !action.applies_to(target)
             || policies.iter().any(|policy| policy.tenant_id != tenant_id)
             || matches!(target, Resource::Workspace { tenant_id, workspace_id } if !owns_workspace(tenant_id, workspace_id))

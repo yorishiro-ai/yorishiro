@@ -17,6 +17,7 @@ pub use super::iam_role_policy_attachments::Entity as IamRolePolicyAttachments;
 pub use super::iam_roles::Entity as IamRoles;
 pub use super::iam_tenant_roots::Entity as IamTenantRoots;
 pub use super::iam_user_policy_attachments::Entity as IamUserPolicyAttachments;
+pub use super::iam_user_role_attachments::Entity as IamUserRoleAttachments;
 pub use super::inference_jobs::Entity as InferenceJobs;
 pub use super::inference_proposals::Entity as InferenceProposals;
 pub use super::query_embedding_requests::Entity as QueryEmbeddingRequests;

@@ -6,28 +6,28 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "workspace_workspaces")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub schema_id: Option<Uuid>,
     #[sea_orm(unique_key = "workspace_workspaces_tenant_id_name_key")]
     pub tenant_id: Uuid,
+    pub embedding_revision: i64,
+    pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(column_type = "Text")]
+    pub status: String,
+    pub embedding_reindexing: bool,
+    #[sea_orm(column_type = "Text")]
+    pub embedding_document_prefix: String,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub embedding_model: Option<String>,
+    pub max_entities: Option<i32>,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
     #[sea_orm(
         column_type = "Text",
         unique_key = "workspace_workspaces_tenant_id_name_key"
     )]
     pub name: String,
-    pub max_entities: Option<i32>,
-    #[sea_orm(column_type = "Text")]
-    pub status: String,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub embedding_model: Option<String>,
     pub embedding_dimensions: Option<i32>,
-    #[sea_orm(column_type = "Text")]
-    pub embedding_document_prefix: String,
     pub embedding_content_revision: i64,
-    pub embedding_revision: i64,
-    pub schema_id: Option<Uuid>,
-    pub created_at: DateTimeWithTimeZone,
-    pub embedding_reindexing: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

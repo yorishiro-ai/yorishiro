@@ -14,6 +14,11 @@ import run
 
 
 class ToolInventoryTests(unittest.TestCase):
+    def test_ce_suites_own_auth_and_graph_worker_once(self):
+        names = [name for suite in ("rest", "mcp", "management") for name, _ in run.scenarios(suite)]
+        self.assertEqual(names.count("auth.rest-issue-rest-mcp-revoke"), 1)
+        self.assertEqual(names.count("api.relation-export-import-worker"), 1)
+
     def test_owned_inference_endpoint_requires_credentials_and_returns_a_proposal(self):
         with run.inference_endpoint() as (url, requests):
             connection = run.http.client.HTTPConnection(url.removeprefix("http://"), timeout=5)
@@ -289,7 +294,7 @@ class ArgumentTests(unittest.TestCase):
     def test_bootstrap_uses_setup_or_signup_without_removed_tasks(self):
         value = "00000000-0000-0000-0000-000000000001"
         account = {"user_id": value, "tenant_id": value, "api_key": "ysr_bootstrap"}
-        for suite, edition in (("cli", "ce"), ("tenant-postgres", "ee")):
+        for suite, edition in (("management", "ce"), ("tenant-postgres", "ee")):
             args = run.parse_args(self.arguments())
             args.suite, args.edition = suite, edition
             with self.subTest(suite=suite), tempfile.TemporaryDirectory() as directory, \

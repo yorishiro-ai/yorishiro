@@ -6,21 +6,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "inference_jobs")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
-    pub attempt: i32,
     pub proposed: i64,
-    pub workspace_id: Uuid,
-    #[sea_orm(column_type = "Text")]
-    pub schema_name: String,
-    #[sea_orm(column_type = "Text")]
-    pub status: String,
     pub applied: i64,
-    pub skipped: i64,
     #[sea_orm(column_type = "Text", nullable)]
     pub error: Option<String>,
-    pub created_at: DateTimeWithTimeZone,
+    pub workspace_id: Uuid,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
+    #[sea_orm(column_type = "Text")]
+    pub status: String,
+    pub skipped: i64,
+    #[sea_orm(column_type = "Text")]
+    pub schema_name: String,
     pub updated_at: DateTimeWithTimeZone,
+    pub attempt: i32,
+    pub created_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

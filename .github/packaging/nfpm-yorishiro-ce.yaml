@@ -72,10 +72,6 @@ overrides:
       - libstdc++
 
 conflicts:
-  - yorishiro
-  - yorishiro-ee
-replaces:
-  - yorishiro
   - yorishiro-ee
 
 contents:

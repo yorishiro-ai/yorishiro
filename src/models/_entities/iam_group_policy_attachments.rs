@@ -6,15 +6,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "iam_group_policy_attachments")]
 pub struct Model {
+    #[sea_orm(unique_key = "uq_iam_group_policy_attachments_subjects")]
+    pub group_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     #[sea_orm(unique_key = "uq_iam_group_policy_attachments_subjects")]
-    pub tenant_id: Uuid,
-    #[sea_orm(unique_key = "uq_iam_group_policy_attachments_subjects")]
-    pub group_id: Uuid,
-    #[sea_orm(unique_key = "uq_iam_group_policy_attachments_subjects")]
     pub policy_id: Uuid,
     pub created_at: DateTimeWithTimeZone,
+    #[sea_orm(unique_key = "uq_iam_group_policy_attachments_subjects")]
+    pub tenant_id: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -22,7 +22,7 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::iam_groups::Entity",
         from = "(Column::TenantId, Column::GroupId)",
-        to = "(super::iam_groups::Column::Id, super::iam_groups::Column::TenantId, super::iam_groups::Column::Id, super::iam_groups::Column::TenantId)",
+        to = "(super::iam_groups::Column::Id, super::iam_groups::Column::TenantId, super::iam_groups::Column::Id)",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]

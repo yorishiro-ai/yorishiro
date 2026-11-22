@@ -6,16 +6,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "entity_snapshots")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
-    pub job_id: Uuid,
-    pub workspace_id: Uuid,
-    pub entity_id: Uuid,
-    pub schema_id: Uuid,
-    pub schema_version: i32,
     #[sea_orm(column_type = "JsonBinary")]
     pub data: Json,
+    pub workspace_id: Uuid,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
+    pub entity_id: Uuid,
+    pub schema_version: i32,
     pub created_at: DateTimeWithTimeZone,
+    pub schema_id: Uuid,
+    pub job_id: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

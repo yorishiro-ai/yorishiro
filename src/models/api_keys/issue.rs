@@ -1,4 +1,4 @@
-//! Issuing keys: direct keys, login keys, role sessions and delegated keys.
+//! Issuing direct keys, login keys and delegated keys.
 
 use super::{
     ActiveModel, ActiveModelTrait, ActiveValue, ApiKeyScope, AuthContext, CreatedApiKey,
@@ -34,7 +34,6 @@ impl Entity {
     }
 
     /// Issues a key without a workspace, so it acts on the caller's tenant and names its workspace per request.
-    /// The role cap is the same one command applies: a key attributed to a user may not exceed what that user's tenant role permits, since the key can act as them.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.

@@ -24,8 +24,6 @@ fn enterprise_inventory_contract_is_disjoint_and_contains_community() {
     let expected_full_names: HashSet<_> =
         community_names.union(&enterprise_names).copied().collect();
     assert_eq!(full_names, expected_full_names);
-    assert!(community_names.is_subset(&full_names));
-    assert!(enterprise_names.is_subset(&full_names));
     for tool in &enterprise {
         assert!(
             tool.description

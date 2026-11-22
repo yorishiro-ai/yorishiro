@@ -44,39 +44,6 @@ async fn create_workspace(request: &loco_rs::TestServer, api_key: &str) -> uuid:
 }
 
 #[tokio::test]
-async fn legacy_role_credentials_are_rejected_even_when_attributed_to_root() {
-    use crate::requests::fixtures::{TenantArgs, TestTenant};
-    use yorishiro::models::api_keys::{self, ApiKeyScope};
-
-    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let legacy = api_keys::Entity::create_api_key(
-            &ctx.db,
-            tenant.workspace_id,
-            ApiKeyScope::Read,
-            Some(tenant.owner_id),
-            false,
-        )
-        .await
-        .unwrap();
-        api_keys::ActiveModel {
-            id: Set(legacy.id),
-            role_id: Set(Some(uuid::Uuid::new_v4())),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await
-        .unwrap();
-        request
-            .get("/api/whoami")
-            .add_header("Authorization", format!("Bearer {}", legacy.plaintext))
-            .await
-            .assert_status(StatusCode::UNAUTHORIZED);
-    })
-    .await;
-}
-
-#[tokio::test]
 async fn unselected_lists_do_not_expose_workspaces_without_iam_grants() {
     use crate::requests::fixtures;
     boot_request_with::<App, _, _>(&[], |request, ctx| async move {
@@ -1130,4 +1097,76 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .json(&serde_json::json!({"name":"deleted-denied"})).await.assert_status(StatusCode::FORBIDDEN);
         })
         .await;
+}
+
+#[tokio::test]
+async fn assigned_roles_change_user_permissions_without_changing_identity() {
+    use crate::requests::fixtures::{TenantArgs, TestTenant};
+    use serde_json::{Value, json};
+
+    boot_request_with::<App, _, _>(&[], |request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let root = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let auth = format!("Bearer {root}");
+        let user = request.post("/api/members/users").add_header("Authorization", &auth)
+            .json(&json!({"user_name":"role-user","password":"role-user-password"})).await;
+        user.assert_status(StatusCode::CREATED);
+        let user_id = user.json::<Value>()["user_id"].as_str().unwrap().to_owned();
+        let login = request.post("/auth/tenant/login")
+            .json(&json!({"tenant_id":tenant.tenant_id,"user_name":"role-user","password":"role-user-password"})).await;
+        login.assert_status_ok();
+        let login = login.json::<Value>();
+        let user_auth = format!("Bearer {}", login["api_key"].as_str().unwrap());
+        request.get("/api/iam/policies").add_header("Authorization", &user_auth)
+            .await.assert_status(StatusCode::FORBIDDEN);
+        let roles = request.get("/api/iam/roles").add_header("Authorization", &auth).await;
+        roles.assert_status_ok();
+        let roles = roles.json::<Vec<Value>>();
+        assert_eq!(roles.len(), 3);
+        let session = super::mcp::initialize(&request).await;
+        let listed = iam_mcp_call(&request, &session, &root, "list_iam_roles", json!({})).await;
+        assert_ne!(listed["result"]["isError"], true, "{listed}");
+        let listed: Value = serde_json::from_str(listed["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(listed, json!(roles));
+        let role = roles.iter().find(|r| r["name"] == "Tenant Administrator").unwrap();
+        request.put(&format!("/api/iam/roles/{}", role["id"].as_str().unwrap()))
+            .add_header("Authorization", &auth).json(&json!({"name":"changed"}))
+            .await.assert_status(StatusCode::CONFLICT);
+        request.delete(&format!("/api/iam/roles/{}", role["id"].as_str().unwrap()))
+            .add_header("Authorization", &auth).await.assert_status(StatusCode::CONFLICT);
+        let path = format!("/api/iam/roles/{}/members/{user_id}", role["id"].as_str().unwrap());
+        request.put(&path).add_header("Authorization", &auth).await.assert_status(StatusCode::NO_CONTENT);
+        request.get("/api/iam/policies").add_header("Authorization", &user_auth).await.assert_status_ok();
+        let identity = request.get("/api/whoami").add_header("Authorization", &user_auth).await;
+        identity.assert_status_ok();
+        assert_eq!(identity.json::<Value>()["user_id"], user_id);
+        request.put(&format!("/api/iam/roles/{}/members/{}", role["id"].as_str().unwrap(), uuid::Uuid::new_v4()))
+            .add_header("Authorization", &auth).await.assert_status(StatusCode::NOT_FOUND);
+        request.delete(&path).add_header("Authorization", &auth).await.assert_status(StatusCode::NO_CONTENT);
+        request.get("/api/iam/policies").add_header("Authorization", &user_auth)
+            .await.assert_status(StatusCode::FORBIDDEN);
+        let custom = request.post("/api/iam/roles").add_header("Authorization", &auth)
+            .json(&json!({"name":"custom-role"})).await;
+        custom.assert_status(StatusCode::CREATED);
+        let custom = custom.json::<Value>();
+        let policies = request.get("/api/iam/policies").add_header("Authorization", &auth).await.json::<Vec<Value>>();
+        let reader = policies.iter().find(|p| p["name"] == "Tenant Reader").unwrap();
+        let attachment = format!("/api/iam/roles/{}/policies/{}", custom["id"].as_str().unwrap(), reader["id"].as_str().unwrap());
+        request.put(&attachment).add_header("Authorization", &auth).await.assert_status(StatusCode::NO_CONTENT);
+        request.put(&format!("/api/iam/roles/{}/policies/{}", role["id"].as_str().unwrap(), reader["id"].as_str().unwrap()))
+            .add_header("Authorization", &auth).await.assert_status(StatusCode::CONFLICT);
+        request.delete(&attachment).add_header("Authorization", &auth).await.assert_status(StatusCode::NO_CONTENT);
+        let txn = ctx.db.begin().await.unwrap();
+        let foreign = yorishiro::models::tenant_tenants::ActiveModel {
+            name: Set("foreign-role-tenant".into()), ..Default::default()
+        }.insert(&txn).await.unwrap();
+        let foreign_role = yorishiro::models::iam_roles::ActiveModel {
+            tenant_id: Set(foreign.id), name: Set("foreign-role".into()), ..Default::default()
+        }.insert(&txn).await.unwrap();
+        txn.commit().await.unwrap();
+        request.put(&format!("/api/iam/roles/{}/members/{user_id}", foreign_role.id))
+            .add_header("Authorization", &auth).await.assert_status(StatusCode::NOT_FOUND);
+        request.get(&format!("/api/iam/roles/{}", foreign_role.id))
+            .add_header("Authorization", &auth).await.assert_status(StatusCode::NOT_FOUND);
+    }).await;
 }

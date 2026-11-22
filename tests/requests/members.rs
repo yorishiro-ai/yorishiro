@@ -288,18 +288,16 @@ async fn tenant_users_sign_in_with_tenant_id_and_name_until_removed() {
         let login = |body: serde_json::Value| {
             request
                 .post("/auth/tenant/login")
-                .add_header("x-tenant-id", tenant.tenant_id.to_string())
-                .json(&body)
+                .json(&{ let mut body = body; body["tenant_id"] = serde_json::json!(tenant.tenant_id); body })
         };
         request
             .post("/auth/tenant/login")
             .json(&serde_json::json!({"user_name":user_name,"password":password}))
             .await
-            .assert_status(StatusCode::UNAUTHORIZED);
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
         request
             .post("/auth/tenant/login")
-            .add_header("x-tenant-id", uuid::Uuid::new_v4().to_string())
-            .json(&serde_json::json!({"user_name":user_name,"password":password}))
+            .json(&serde_json::json!({"tenant_id":uuid::Uuid::new_v4(),"user_name":user_name,"password":password}))
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
         let signed_in = login(serde_json::json!({"user_name":user_name,"password":password})).await;

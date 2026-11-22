@@ -32,6 +32,7 @@ pub struct RootLoginRequest {
 #[serde(deny_unknown_fields)]
 #[derive(schemars::JsonSchema)]
 pub struct TenantLoginRequest {
+    pub tenant_id: Uuid,
     pub user_name: String,
     pub password: String,
 }

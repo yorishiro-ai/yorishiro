@@ -6,14 +6,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "iam_role_policy_attachments")]
 pub struct Model {
+    #[sea_orm(unique_key = "uq_iam_role_policy_attachments_subjects")]
+    pub role_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     #[sea_orm(unique_key = "uq_iam_role_policy_attachments_subjects")]
-    pub tenant_id: Uuid,
-    #[sea_orm(unique_key = "uq_iam_role_policy_attachments_subjects")]
-    pub role_id: Uuid,
-    #[sea_orm(unique_key = "uq_iam_role_policy_attachments_subjects")]
     pub policy_id: Uuid,
+    #[sea_orm(unique_key = "uq_iam_role_policy_attachments_subjects")]
+    pub tenant_id: Uuid,
     pub created_at: DateTimeWithTimeZone,
 }
 
@@ -22,7 +22,7 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::iam_policies::Entity",
         from = "(Column::TenantId, Column::PolicyId)",
-        to = "(super::iam_policies::Column::Id, super::iam_policies::Column::TenantId, super::iam_policies::Column::Id, super::iam_policies::Column::TenantId)",
+        to = "(super::iam_policies::Column::Id, super::iam_policies::Column::TenantId, super::iam_policies::Column::Id)",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]

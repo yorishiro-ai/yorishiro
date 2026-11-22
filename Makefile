@@ -42,11 +42,22 @@ fmt: patch-check
 fmt-check: patch-check
 	cargo fmt --all -- --check
 
-python-lint:
+python-lint: test-python
 	uv run ruff check scripts tests/blackbox tests/ci patches/loco-rs/verify.py
+	@for script in .cargo/env.sh scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-package-lifecycle.sh; do bash -n "$$script" || exit; done
+
+.PHONY: test-python test-contract
+test-python:
 	uv run scripts/test_env_config.py
 	uv run scripts/test_harden_generated_entities.py
-	@for script in .cargo/env.sh scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh; do bash -n "$$script" || exit; done
+	uv run python -m unittest discover -s tests/blackbox -p 'test_*.py'
+	uv run python -m unittest discover -s tests/ci -p 'test_*.py'
+
+BINARY ?= $(CARGO_TARGET_DIR)/debug/yorishiro
+SUITE ?= mcp
+ARTIFACTS ?= $(CARGO_TARGET_DIR)/contracts/$(EDITION)-$(SUITE)
+test-contract:
+	python3 tests/blackbox/run.py --binary "$(BINARY)" --suite "$(SUITE)" --edition "$(EDITION)" --artifacts "$(ARTIFACTS)"
 
 edition-boundary-check:
 	uv run scripts/test_edition_boundary.py

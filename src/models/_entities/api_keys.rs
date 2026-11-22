@@ -8,23 +8,22 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    pub name: String,
-    pub workspace_id: Option<Uuid>,
     pub tenant_id: Uuid,
-    pub user_id: Option<Uuid>,
-    #[sea_orm(column_type = "VarBinary(StringLen::None)", unique)]
-    pub key_hash: Vec<u8>,
+    pub created_at: DateTimeWithTimeZone,
     #[sea_orm(column_type = "Text")]
     pub key_prefix: String,
+    pub workspace_id: Option<Uuid>,
+    pub audit: bool,
     #[sea_orm(column_type = "Text")]
     pub scope: String,
-    pub created_at: DateTimeWithTimeZone,
-    pub last_used_at: Option<DateTimeWithTimeZone>,
-    pub expires_at: Option<DateTimeWithTimeZone>,
-    pub revoked_at: Option<DateTimeWithTimeZone>,
+    #[sea_orm(column_type = "VarBinary(StringLen::None)", unique)]
+    pub key_hash: Vec<u8>,
     pub replaced_by_id: Option<Uuid>,
-    pub role_id: Option<Uuid>,
-    pub audit: bool,
+    pub user_id: Option<Uuid>,
+    pub revoked_at: Option<DateTimeWithTimeZone>,
+    pub last_used_at: Option<DateTimeWithTimeZone>,
+    pub name: String,
+    pub expires_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

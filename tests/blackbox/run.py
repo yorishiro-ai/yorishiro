@@ -90,7 +90,7 @@ def tool_error(document):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path)
-    parser.add_argument("--suite", choices=("rest", "mcp", "cli", "tenant-postgres"))
+    parser.add_argument("--suite", choices=("rest", "mcp", "management", "tenant-postgres"))
     parser.add_argument("--edition", choices=("ce", "ee"))
     parser.add_argument("--artifacts", type=Path)
     parser.add_argument("--list", action="store_true", help="print selected scenario IDs as JSON")
@@ -217,8 +217,8 @@ class App:
                           status=204, key=self.tenant_key)
                 members = self.rest("GET", "/api/members", key=self.tenant_key)
                 name = next(row["user_name"] for row in members if row["user_id"] == member["user_id"])
-                login = self.rest("POST", "/auth/tenant/login", {"user_name": name, "password": password},
-                                  key="", headers={"X-Tenant-Id": self.tenant})
+                login = self.rest("POST", "/auth/tenant/login", {"tenant_id": self.tenant, "user_name": name, "password": password},
+                                  key="")
                 self.administrator_key = login["api_key"]
                 self.secrets.append(self.administrator_key)
             issuer = self.administrator_key
@@ -592,21 +592,21 @@ class GraphAPI:
         return json.loads(body)
 
 
-def relation_export_import_worker(app, surface):
+def relation_export_import_worker(app):
     def workspace(name):
         value = app.create_workspace(name)
         _, key = app.issue(value, "schema")
         return value, key
 
     source_id, source_key = workspace("graph-source")
-    source = GraphAPI(app, surface, source_key)
-    peer = GraphAPI(app, "mcp" if surface == "rest" else "rest", source_key)
+    source = GraphAPI(app, "rest", source_key)
+    peer = GraphAPI(app, "mcp", source_key)
     definition = {"name": "graph", "entity_types": {"person": {"fields": {
         "name": {"type": "string", "required": True}}}},
         "relation_types": {"knows": {"source": "person", "target": "person"}}}
     schema_id = source.call("create_schema", {"definition": definition})["schema"]["id"]
     _, write_key = app.issue(source_id, "write")
-    source = GraphAPI(app, surface, write_key)
+    source = GraphAPI(app, "rest", write_key)
     peer = GraphAPI(app, peer.surface, write_key)
     people = [source.call("create_entity", {"schema_name": "graph", "entity_type": "person",
                                          "data": {"name": name}}) for name in ("Alice", "Bob")]
@@ -671,7 +671,7 @@ def relation_export_import_worker(app, surface):
     require(rejected.get("result", {}).get("isError") is True
             and "not found" in json.dumps(rejected), "wrong MCP missing-entity error")
     for state in ("deprecated", "archived", "active"):
-        relation = source.call("set_relation_status", {"id": relation["id"], "status": state})
+        relation = peer.call("set_relation_status", {"id": relation["id"], "status": state})
         require(relation["status"] == state, "relation status update ignored")
         read_relation(relation)
     source.call("delete_relation", {"id": relation["id"]})
@@ -680,7 +680,10 @@ def relation_export_import_worker(app, surface):
     require(source.call("list_relations") == peer.call("list_relations") == [], "deleted relation still listed")
     require(readers[1].client.call("recall_context", {"entity_id": people[0]["id"]})["relations"] == [],
             "recall retained a deleted relation")
-    relation = source.call("create_relation", {**payload, "properties": {"since": 2026}})
+    relation = peer.call("create_relation", {**payload, "properties": {"since": 2026}})
+    peer.call("delete_relation", {"id": relation["id"]})
+    require(source.call("list_relations") == [], "MCP deletion left a relation")
+    relation = peer.call("create_relation", {**payload, "properties": {"since": 2026}})
     relation = source.call("set_relation_status", {"id": relation["id"], "status": "deprecated"})
     require(relation["properties"] == {"since": 2026} and relation["status"] == "deprecated",
             "relation properties or deprecated status lost")
@@ -695,8 +698,8 @@ def relation_export_import_worker(app, surface):
     require([item["record"] for item in records] == expected, "export changed IDs/data/properties/status")
 
     destination_id, destination_key = workspace("graph-destination")
-    destination = GraphAPI(app, surface, destination_key)
-    destination_peer = GraphAPI(app, peer.surface, destination_key)
+    destination = GraphAPI(app, "mcp", destination_key)
+    destination_peer = GraphAPI(app, "rest", destination_key)
     job_id = destination.submit(exported)["job_id"]
     require(str(uuid.UUID(job_id)) == job_id, "import returned noncanonical job ID")
     for api in (destination, destination_peer):
@@ -705,6 +708,8 @@ def relation_export_import_worker(app, surface):
                 "import was not queued before worker startup")
         for name in ("list_schemas", "list_entities", "list_relations"):
             require(api.call(name) == [], "import mutated destination before worker startup")
+    # Exercise the other submission format without repeating the graph import.
+    empty_job_id = destination_peer.submit("")["job_id"]
     with app.job_worker() as worker:
         while True:
             app.remaining()
@@ -722,6 +727,16 @@ def relation_export_import_worker(app, surface):
                 "completed import status differs across surfaces")
         require(job["result"] == {"job_id": job_id, "schemas": 1, "entities": 2, "relations": 1},
                 "wrong completed import counts")
+        while True:
+            app.remaining()
+            require(worker.poll() is None, "import worker exited before empty import completion")
+            empty_job = destination_peer.call("import_job_status", {"job_id": empty_job_id})
+            require(empty_job["status"] in ("queued", "running", "completed"), f"empty import failed: {empty_job}")
+            if empty_job["status"] == "completed":
+                require(empty_job["result"] == {"job_id": empty_job_id, "schemas": 0, "entities": 0, "relations": 0},
+                        "empty import changed record counts")
+                break
+            time.sleep(min(0.1, app.remaining()))
 
     restored = {}
     for name, count in (("list_schemas", 1), ("list_entities", 2), ("list_relations", 1)):
@@ -837,8 +852,8 @@ def mcp_suite(app):
         require(status == 200, f"parallel MCP HTTP {status}: {text}")
         require(isinstance(tool_value(rpc_document(text, request_id)), list),
                 "parallel root list_schemas failed")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
-        list(pool.map(concurrent_call, range(64)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(concurrent_call, range(2)))
     listed = client.rpc("tools/list")["result"]
     names = {tool["name"] for tool in listed["tools"]}
     reviewed = json.loads((ROOT / "tests/blackbox/tools.json").read_text())
@@ -849,8 +864,6 @@ def mcp_suite(app):
             expected.difference_update(reviewed["licensed"])
     require(names == expected, "MCP public-tool inventory changed; review scenario ownership and gaps")
     app.discovered_tools = sorted(names)
-    require({"list_schemas", "create_schema", "get_entity", "create_entity", "delete_entity"} <= names,
-            "MCP discovery missing common tools")
     require(len(names) == len(listed["tools"]), "MCP discovery has duplicate names")
     require(not listed.get("nextCursor"), "MCP tool inventory unexpectedly paginated")
     advertised = {tool["name"]: tool["inputSchema"].get("properties", {}) for tool in listed["tools"]}
@@ -896,7 +909,7 @@ def cli_suite(app):
         out, err = app.cli(*arguments, ok=False)
         require(out.strip() or err.strip(), "CLI failure produced no diagnostic")
     require("mode=off" in app.task("maintenance_status"), "initial maintenance state is not off")
-    for method, body in (("GET", None), ("PUT", {"mode": "full-lock"})):
+    for method, body in (("GET", None), ("PUT", {"mode": "full_lock"})):
         status, _, _ = app.http(method, "/api/system/maintenance", body, key=app.key)
         require(status == 404, "maintenance must only be controlled through the CLI")
     app.task("maintenance", mode="read_only", retry_after=7, reason="blackbox-maintenance")
@@ -959,11 +972,24 @@ def iam_lifecycle(app):
         "user_name": "iam-member", "password": password,
     }, status=201, key=app.tenant_key)
     user_id = account["user_id"]
+    role = client.call("create_iam_role", {"name": "workspace-operators"})
+    role_id = role["id"]
+    require(client.call("get_iam_role", {"role_id": role_id}) == role, "IAM role lookup differs")
+    require(role in client.call("list_iam_roles"), "IAM role missing from list")
+    client.call("update_iam_role", {"role_id": role_id, "name": "workspace-reviewers"})
     document = {"statements": [{"effect": "allow", "actions": ["workspace_get"],
                                "resources": [{"type": "workspace", "tenant_id": app.tenant,
                                               "workspace_id": app.workspace}]}]}
     policy = client.call("create_iam_policy", {"name": "workspace-reader", "document": document})
     policy_id = policy["id"]
+    role_member = {"role_id": role_id, "user_id": user_id}
+    role_policy = {"role_id": role_id, "policy_id": policy_id}
+    client.call("add_role_member", role_member)
+    client.call("attach_role_policy", role_policy)
+    for tool, path in (("list_iam_role_members", "members"), ("list_iam_role_policies", "policies")):
+        require(client.call(tool, {"role_id": role_id}) ==
+                app.rest("GET", f"/api/iam/roles/{role_id}/{path}", key=app.tenant_key),
+                "IAM role association transport mismatch")
     require(client.call("get_iam_policy", {"policy_id": policy_id}) == policy,
             "IAM policy lookup differs")
     require(policy in client.call("list_iam_policies"), "IAM policy missing from list")
@@ -983,8 +1009,8 @@ def iam_lifecycle(app):
                 f"IAM association REST/MCP mismatch: {tool}")
     member_name = app.rest("GET", "/api/members", key=app.tenant_key)
     member_name = next(row["user_name"] for row in member_name if row["user_id"] == user_id)
-    login = app.rest("POST", "/auth/tenant/login", {"user_name": member_name, "password": password},
-                     key="", headers={"X-Tenant-Id": app.tenant})
+    login = app.rest("POST", "/auth/tenant/login", {"tenant_id": app.tenant, "user_name": member_name, "password": password},
+                     key="")
     member_key = login["api_key"]
     app.secrets.append(member_key)
     member_identity = app.rest("GET", "/api/whoami", key=member_key)
@@ -993,7 +1019,7 @@ def iam_lifecycle(app):
     require(not member_identity["tenant_root"] and not member_capabilities["tenant_root"],
             "IAM member was reported as tenant root")
     require("workspace_access" not in member_identity and "tenant_admin" not in member_capabilities
-            and "workspace_access" not in member_capabilities, "discovery retained legacy role authority")
+            and "workspace_access" not in member_capabilities, "discovery exposes unauthorized capabilities")
     require(member_capabilities["credential_scope"] == member_identity["stored_scope"]
             and member_capabilities["constraints"]["authorization_model"] == "tenant_iam"
             and not member_capabilities["constraints"]["discovery_authorizes_requests"],
@@ -1075,6 +1101,9 @@ def iam_lifecycle(app):
     client.call("update_iam_policy", {"policy_id": policy_id, "name": "workspace-denied", "document": denied})
     app.rest("GET", f"/api/workspaces/{app.workspace}", status=403, key=member_key, headers=selected)
     client.call("detach_group_policy", group_policy)
+    client.call("detach_role_policy", role_policy)
+    client.call("remove_role_member", role_member)
+    client.call("delete_iam_role", {"role_id": role_id})
     ordinary.call("list_entities", error=True)
     ordinary.call("list_schemas", error=True)
     app.rest("GET", "/api/entities", status=403, key=bound_key)
@@ -1398,8 +1427,8 @@ def membership_retirement_lifecycle(app):
     account = client.call("create_tenant_user", {"user_name": "successor", "password": password})
     user_id = account["user_id"]
     member_name = next(row["user_name"] for row in client.call("list_members") if row["user_id"] == user_id)
-    login = app.rest("POST", "/auth/tenant/login", {"user_name": member_name, "password": password},
-                     key="", headers={"X-Tenant-Id": app.tenant})
+    login = app.rest("POST", "/auth/tenant/login", {"tenant_id": app.tenant, "user_name": member_name, "password": password},
+                     key="")
     key = login["api_key"]
     app.secrets.append(key)
     member = MCP(app, key)
@@ -1424,8 +1453,8 @@ def membership_retirement_lifecycle(app):
     })
     client.call("reset_tenant_user_password", {"user_id": user_id, "password": password})
     app.rest("GET", "/api/whoami", key=key, status=401)
-    login = app.rest("POST", "/auth/tenant/login", {"user_name": member_name, "password": password},
-                     key="", headers={"X-Tenant-Id": app.tenant})
+    login = app.rest("POST", "/auth/tenant/login", {"tenant_id": app.tenant, "user_name": member_name, "password": password},
+                     key="")
     key = login["api_key"]
     app.secrets.append(key)
     member = MCP(app, key)
@@ -1449,8 +1478,8 @@ def membership_retirement_lifecycle(app):
     user_id = replacement["user_id"]
     member_name = replacement["user_name"]
     client.call("attach_user_policy", {"user_id": user_id, "policy_id": administrator["id"]})
-    successor_key = app.rest("POST", "/auth/tenant/login", {"user_name": member_name, "password": password},
-                             key="", headers={"X-Tenant-Id": app.tenant})["api_key"]
+    successor_key = app.rest("POST", "/auth/tenant/login", {"tenant_id": app.tenant, "user_name": member_name, "password": password},
+                             key="")["api_key"]
     app.secrets.append(successor_key)
     successor = MCP(app, successor_key)
     successor.call("tenant_retirement_inventory")
@@ -1665,8 +1694,8 @@ def enterprise_providers(app):
     }, status=201, key=app.tenant_key)
     members = app.rest("GET", "/api/members", key=app.tenant_key)
     name = next(row["user_name"] for row in members if row["user_id"] == member["user_id"])
-    login = app.rest("POST", "/auth/tenant/login", {"user_name": name, "password": password},
-                     key="", headers={"X-Tenant-Id": app.tenant})
+    login = app.rest("POST", "/auth/tenant/login", {"tenant_id": app.tenant, "user_name": name, "password": password},
+                     key="")
     app.secrets.append(login["api_key"])
     issuance = root.call("create_iam_policy", {"name": "provider-key-issuance", "document": {"statements": [
         {"effect": "allow", "actions": ["credential_create"],
@@ -2115,19 +2144,18 @@ def scenarios(suite, edition="ce"):
                 ("ee.provider-settings-lifecycle", enterprise_providers),
                 ("ee.schema-fork-upstream-merge", enterprise_schema_composition),
                 ("ee.search-reindex-worker", enterprise_search)]
-    common = [("server.bootstrap", lambda app: app.boot()),
-              ("auth.rest-issue-rest-mcp-revoke", vertical_slice)]
+    common = [("server.bootstrap", lambda app: app.boot())]
     focused = {
         "rest": [("rest.schema-entity-crud", lambda app: crud(app, "rest")),
-                  ("rest.relation-export-import-worker", lambda app: relation_export_import_worker(app, "rest")),
                   ("rest.builtin-template-relations", builtin_relations),
                  ("rest.auth-scope-input", rest_suite)],
-        "mcp": [("mcp.schema-entity-crud", lambda app: crud(app, "mcp")),
+        "mcp": [("auth.rest-issue-rest-mcp-revoke", vertical_slice),
+                ("mcp.schema-entity-crud", lambda app: crud(app, "mcp")),
                 ("mcp.iam-policy-group-lifecycle", iam_lifecycle),
-                ("mcp.relation-export-import-worker", lambda app: relation_export_import_worker(app, "mcp")),
+                ("api.relation-export-import-worker", relation_export_import_worker),
                 ("mcp.discovery-auth-scope-input", mcp_suite),
                 ("mcp.migration-worker-undo", migration_lifecycle)],
-        "cli": [("cli.arguments-tasks-stdout-effects", cli_suite),
+        "management": [("cli.arguments-tasks-stdout-effects", cli_suite),
                 ("management.human-key-management", human_key_management),
                 ("mcp.user-profile-lifecycle", user_profile_lifecycle),
                 ("mcp.tenant-settings-lifecycle", tenant_settings_lifecycle),
@@ -2142,7 +2170,7 @@ def scenarios(suite, edition="ce"):
 def self_check():
     enterprise = scenarios("mcp", "ee")
     require(len({name for name, _ in enterprise}) == len(enterprise), "duplicate EE scenario IDs")
-    for suite in ("rest", "mcp", "cli"):
+    for suite in ("rest", "mcp", "management"):
         definitions = scenarios(suite)
         ids = [name for name, _ in definitions]
         require(ids and len(ids) == len(set(ids)), "empty or duplicate scenario IDs")

@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "iam_tenant_roots")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub tenant_id: Uuid,
     #[sea_orm(unique)]
     pub user_id: Uuid,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub tenant_id: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

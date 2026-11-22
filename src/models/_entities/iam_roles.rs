@@ -12,21 +12,20 @@ pub struct Model {
         unique_key = "uq_iam_roles_tenant_id_id"
     )]
     pub id: Uuid,
-    #[sea_orm(unique_key = "uq_iam_roles_tenant_id_name")]
-    pub tenant_id: Uuid,
+    pub created_at: DateTimeWithTimeZone,
     #[sea_orm(column_type = "Text", unique_key = "uq_iam_roles_tenant_id_name")]
     pub name: String,
-    #[sea_orm(column_type = "JsonBinary")]
-    pub trust_policy: Json,
-    pub max_session_seconds: i32,
-    pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    #[sea_orm(unique_key = "uq_iam_roles_tenant_id_name")]
+    pub tenant_id: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(has_many = "super::iam_role_policy_attachments::Entity")]
     IamRolePolicyAttachments,
+    #[sea_orm(has_many = "super::iam_user_role_attachments::Entity")]
+    IamUserRoleAttachments,
     #[sea_orm(
         belongs_to = "super::tenant_tenants::Entity",
         from = "Column::TenantId",
@@ -40,6 +39,12 @@ pub enum Relation {
 impl Related<super::iam_role_policy_attachments::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IamRolePolicyAttachments.def()
+    }
+}
+
+impl Related<super::iam_user_role_attachments::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamUserRoleAttachments.def()
     }
 }
 
