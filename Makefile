@@ -2,6 +2,7 @@
 
 # Set DATABASE_URL to use a different PostgreSQL database for tests or local tasks.
 DATABASE_URL ?= postgres://yorishiro:yorishiro@localhost:15432/yorishiro
+TEST_COMPOSE := docker compose -f docker-compose.test.yaml
 # Select the edition for the test targets.
 EDITION ?= ee
 TEST_FEATURES = $(if $(filter ce,$(EDITION)),--no-default-features --features community,--features enterprise)
@@ -58,7 +59,7 @@ test-location-check:
 # Request tests create disposable databases from template1, which must already contain vector and pg_trgm.
 test-postgres: patch-check
 	@if [ "$(DATABASE_URL)" = "postgres://yorishiro:yorishiro@localhost:15432/yorishiro" ]; then \
-		docker compose up -d --wait testdb; \
+		$(TEST_COMPOSE) up -d --wait testdb; \
 	fi
 	QUEUE_URL='$(DATABASE_URL)' cargo test --locked --workspace $(TEST_FEATURES)
 
@@ -68,7 +69,7 @@ test-sqlite: patch-check
 # Run queue-provider tests against Valkey with SQLite for application data.
 VALKEY_URL ?= redis://localhost:6379
 test-valkey: patch-check
-	@if [ "$(VALKEY_URL)" = "redis://localhost:6379" ]; then docker compose up -d --wait redis; fi
+	@if [ "$(VALKEY_URL)" = "redis://localhost:6379" ]; then $(TEST_COMPOSE) up -d --wait redis; fi
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' YORISHIRO_QUEUE_KIND=Redis QUEUE_URL='$(VALKEY_URL)' cargo test --locked --workspace $(TEST_FEATURES) -- workers::dispatch workers::queue::upstream_fixes requests::queue::configured_queue_orders_competing_jobs_by_priority
 
 build: build-ce
@@ -91,7 +92,9 @@ endif
 	./target/debug/yorishiro doctor
 
 migrate: build
-	docker compose up -d --wait testdb
+	@if [ "$(DATABASE_URL)" = "postgres://yorishiro:yorishiro@localhost:15432/yorishiro" ]; then \
+		$(TEST_COMPOSE) up -d --wait testdb; \
+	fi
 	./target/debug/yorishiro db migrate
 
 # Generate SeaORM entity structs from the current schema.

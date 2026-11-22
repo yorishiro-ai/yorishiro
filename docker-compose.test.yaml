@@ -1,14 +1,13 @@
 # Runs the built binary from the Dockerfile at the repository root, the same image used for
 # distribution.
 #
-#   docker compose up --build
+#   docker compose -f docker-compose.test.yaml up --build
 #
 # The queue uses the Redis protocol.
 # `app` serves HTTP, `worker` consumes embedding sync/query/reindex, `jobs` consumes import/maintenance/inference, and `scheduler` runs scheduled tasks.
 # Both consumers are required; the HTTP server consumes no queued jobs.
 #
-# The database credentials here are development ones. A deployment sets its own through the
-# environment.
+# This file is for local development and tests only.
 
 # One image and shared configuration keep all four roles on the same database and queue.
 x-yorishiro: &yorishiro
@@ -32,7 +31,7 @@ x-yorishiro: &yorishiro
     LOG_LEVEL: info
     # Explicitly retain the packaged default: run the local embedding provider and fetch its
     # model into the container cache when no read-only model mount is supplied.
-    # `YORISHIRO_EMBEDDING_PROVIDER=none docker compose up` skips the model download.
+    # Set YORISHIRO_EMBEDDING_PROVIDER=none to skip the model download.
     YORISHIRO_EMBEDDING_PROVIDER: ${YORISHIRO_EMBEDDING_PROVIDER:-local}
     # Loco configuration defaults to one tenant, keeping the first-run setup wizard reachable.
     # Set to "0" for multiple tenants on a licensed PostgreSQL deployment, disabling that wizard.
@@ -61,6 +60,7 @@ services:
 
   testdb:
     image: *postgres-image
+    profiles: [test]
     shm_size: 1gb
     init: true
     container_name: testdb

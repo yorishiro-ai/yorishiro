@@ -19,6 +19,10 @@ on:
       - Cargo.toml
       - Cargo.lock
       - Dockerfile
+      - docker-compose.yaml
+      - docker-compose.test.yaml
+      - init-extensions.sql
+      - scripts/init-test-postgres.sql
       - .dockerignore
       - patches/**
       - migration/Cargo.toml

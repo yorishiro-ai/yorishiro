@@ -45,6 +45,10 @@ Async waits release the task to do other work, but one physical connection still
 
 ## Tests
 
+Run the local development stack with `docker compose -f docker-compose.test.yaml up --build`.
+The Makefile starts the test database or Valkey from the same Compose file when using the default local URLs.
+The separate `docker-compose.yaml` deploys published images and requires a release `TAG` and a production `DATABASE_URL`.
+
 Run the full suite with Rust's default parallel test execution.
 
 Use `make test-sqlite` or `make test-postgres` locally; `EDITION=ce` selects the community edition.
