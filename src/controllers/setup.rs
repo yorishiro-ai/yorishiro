@@ -5,9 +5,9 @@
 //! The resolved edition tenant cap controls whether first-run setup is available.
 //! An unlimited cap disables the wizard; the source default is one tenant.
 
+use crate::controllers::Created;
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
@@ -41,7 +41,7 @@ async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusRespons
 async fn setup(
     State(ctx): State<AppContext>,
     Json(body): Json<SetupRequest>,
-) -> Result<(StatusCode, Json<SetupResponse>), ApiError> {
+) -> Result<Created<SetupResponse>, ApiError> {
     let account = tenancy::setup_first_account(
         &ctx.db,
         max_tenants(&ctx)?,
@@ -53,29 +53,18 @@ async fn setup(
     let (created, _, _) =
         tenancy::issue_login_key(&ctx.db, account.user_id, None, Some(account.tenant_id)).await?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(SetupResponse {
-            user_id: account.user_id,
-            email: account.email,
-            tenant_id: account.tenant_id,
-            api_key: created.plaintext,
-        }),
-    ))
+    Ok(Created(SetupResponse {
+        user_id: account.user_id,
+        email: account.email,
+        tenant_id: account.tenant_id,
+        api_key: created.plaintext,
+    }))
 }
 
 pub(crate) fn routes() -> Routes {
     Routes::new()
         .tag("community")
         .prefix("setup")
-        .add(
-            "/",
-            aide::axum::routing::post_with(setup, |op| {
-                op.response::<201, Json<SetupResponse>>()
-                    .response::<404, Json<super::openapi::ApiErrorBody>>()
-                    .response::<409, Json<super::openapi::ApiErrorBody>>()
-                    .response::<422, Json<super::openapi::ApiErrorBody>>()
-            }),
-        )
-        .add("/status", aide::axum::routing::get_with(status, |op| op))
+        .add("/", aide::axum::routing::post(setup))
+        .add("/status", aide::axum::routing::get(status))
 }

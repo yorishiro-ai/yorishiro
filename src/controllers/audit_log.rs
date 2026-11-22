@@ -66,8 +66,6 @@ pub fn routes() -> Routes {
                 "x-yorishiro-required-actions",
                 serde_json::json!(["audit_log_list"]),
             ))
-            .response::<401, Json<super::openapi::ApiErrorBody>>()
-            .response::<403, Json<super::openapi::ApiErrorBody>>()
         }),
     )
 }

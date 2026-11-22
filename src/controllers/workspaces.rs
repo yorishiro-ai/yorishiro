@@ -1,8 +1,8 @@
 //! REST routes for workspaces and their members.
 
+use crate::controllers::Created;
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 
@@ -36,7 +36,7 @@ async fn create_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Json(body): Json<CreateWorkspaceRequest>,
-) -> Result<axum::response::Response, ApiError> {
+) -> Result<Created<WorkspaceRecord>, ApiError> {
     let workspace = tenancy::create_workspace_in_context(
         &ctx,
         &auth,
@@ -45,10 +45,7 @@ async fn create_workspace(
         body.schema_id,
     )
     .await?;
-    Ok(axum::response::IntoResponse::into_response((
-        StatusCode::CREATED,
-        Json(workspace),
-    )))
+    Ok(Created(WorkspaceRecord::try_from(workspace)?))
 }
 
 ///
@@ -79,9 +76,9 @@ pub(crate) async fn delete_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     tenancy::delete_workspace_as(&ctx.db, &auth, id).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 async fn grant_member(
@@ -91,10 +88,10 @@ async fn grant_member(
         crate::dtos::common::IdUserIdPath<Uuid, Uuid>,
     >,
     Json(body): Json<crate::dtos::workspaces::GrantWorkspaceMemberRequest>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     crate::models::workspace_memberships::Model::grant_as(&ctx.db, &actor, id, user_id, body.role)
         .await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 async fn revoke_member(
@@ -103,9 +100,9 @@ async fn revoke_member(
     Path(crate::dtos::common::IdUserIdPath { id, user_id }): Path<
         crate::dtos::common::IdUserIdPath<Uuid, Uuid>,
     >,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     crate::models::workspace_memberships::Model::revoke_as(&ctx.db, &actor, id, user_id).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 async fn list_members(
@@ -118,10 +115,6 @@ async fn list_members(
     ))
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "Keep route registration and aide metadata together"
-)]
 pub fn routes() -> Routes {
     Routes::new()
         .tag("community")
@@ -133,7 +126,6 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["workspace_list", "workspace_get"]),
                 ))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -143,25 +135,15 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["workspace_create"]),
                 ))
-                .response::<201, Json<WorkspaceRecord>>()
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<403, Json<super::openapi::ApiErrorBody>>()
-                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::get_with(get_workspace, |op| {
                 op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["read"]),
-                ))
-                .with(crate::controllers::openapi::extension(
                     "x-yorishiro-required-actions",
                     serde_json::json!(["workspace_get"]),
                 ))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -171,8 +153,6 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["workspace_update"]),
                 ))
-                .response::<403, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -182,11 +162,6 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["workspace_delete"]),
                 ))
-                .response_with::<204, (), _>(|op| op.description("Workspace deleted"))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<403, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
-                .response::<409, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -196,10 +171,6 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["workspace_update"]),
                 ))
-                .response_with::<204, (), _>(|op| op.description("Direct workspace grant saved"))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<403, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -212,9 +183,6 @@ pub fn routes() -> Routes {
                 .response_with::<204, (), _>(|op| {
                     op.description("Direct workspace grant and bound credentials revoked")
                 })
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<403, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -224,8 +192,6 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["workspace_get"]),
                 ))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<403, Json<super::openapi::ApiErrorBody>>()
             }),
         )
 }

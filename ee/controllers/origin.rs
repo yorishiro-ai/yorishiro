@@ -3,12 +3,12 @@
 //! This overlays base's own `/api/schemas` namespace, since merging a schema is a schema operation from the client's side, not an administrative one like the dashboard or Stripe.
 //!
 use crate::controllers::ApiError;
+use crate::controllers::Created;
 use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope, Verified};
 use crate::controllers::openapi::Routes;
 use crate::models::schema_schemas::UpstreamChange;
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 
@@ -65,7 +65,7 @@ async fn merge_apply(
     Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
         crate::dtos::common::SchemaIdPath<Uuid>,
     >,
-) -> Result<(StatusCode, Json<MergeResponse>), ApiError> {
+) -> Result<Created<MergeResponse>, ApiError> {
     let mut authorized = Authorized::<SchemaScope>::for_target(
         &ctx,
         verified.ctx,
@@ -85,14 +85,11 @@ async fn merge_apply(
     )
     .await?;
     authorized.commit().await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(MergeResponse {
-            schema,
-            diff,
-            summary,
-        }),
-    ))
+    Ok(Created(MergeResponse {
+        schema,
+        diff,
+        summary,
+    }))
 }
 
 pub fn routes() -> Routes {
@@ -103,48 +100,27 @@ pub fn routes() -> Routes {
             "/upstream-changes",
             aide::axum::routing::get_with(list_upstream_changes, |op| {
                 op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["read"]),
-                ))
-                .with(crate::controllers::openapi::extension(
                     "x-yorishiro-required-actions",
                     serde_json::json!(["schema_upstream_list"]),
                 ))
-                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{schema_id}/merge-preview",
             aide::axum::routing::get_with(merge_preview, |op| {
                 op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["read"]),
-                ))
-                .with(crate::controllers::openapi::extension(
                     "x-yorishiro-required-actions",
                     serde_json::json!(["schema_merge_preview"]),
                 ))
-                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{schema_id}/merge",
             aide::axum::routing::post_with(merge_apply, |op| {
                 op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["schema"]),
-                ))
-                .with(crate::controllers::openapi::extension(
                     "x-yorishiro-required-actions",
                     serde_json::json!(["schema_merge_apply"]),
                 ))
-                .response::<201, Json<MergeResponse>>()
-                .response::<401, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<403, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
 }

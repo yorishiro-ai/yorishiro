@@ -1,6 +1,7 @@
 //! REST routes for IAM policies, groups, their attachments and the audit log.
 
-use axum::{Json, extract::State, http::StatusCode};
+use crate::controllers::Created;
+use axum::{Json, extract::State};
 use loco_rs::app::AppContext;
 
 use crate::controllers::openapi::Routes;
@@ -34,31 +35,31 @@ async fn delete_policy(
     axum::extract::Path(crate::dtos::common::PolicyIdPath { policy_id: id }): axum::extract::Path<
         crate::dtos::common::PolicyIdPath<uuid::Uuid>,
     >,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     crate::models::iam_policies::Model::delete_as(&ctx.db, &actor, id).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 async fn attach_user_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Path(crate::dtos::common::UserIdPolicyIdPath { user_id, policy_id }): axum::extract::Path<crate::dtos::common::UserIdPolicyIdPath<uuid::Uuid, uuid::Uuid>>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     crate::models::iam_user_policy_attachments::Model::add_as(&ctx.db, &actor, user_id, policy_id)
         .await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 async fn detach_user_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Path(crate::dtos::common::UserIdPolicyIdPath { user_id, policy_id }): axum::extract::Path<crate::dtos::common::UserIdPolicyIdPath<uuid::Uuid, uuid::Uuid>>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     crate::models::iam_user_policy_attachments::Model::remove_as(
         &ctx.db, &actor, user_id, policy_id,
     )
     .await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 async fn rename_group(
@@ -82,9 +83,9 @@ async fn delete_group(
     axum::extract::Path(crate::dtos::common::GroupIdPath { group_id: id }): axum::extract::Path<
         crate::dtos::common::GroupIdPath<uuid::Uuid>,
     >,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     crate::models::iam_groups::Model::delete_as(&ctx.db, &actor, id).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 async fn list_audit(
@@ -105,20 +106,20 @@ async fn create_group(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     Json(body): Json<CreateGroup>,
-) -> Result<(StatusCode, Json<GroupRecord>), ApiError> {
+) -> Result<Created<GroupRecord>, ApiError> {
     let group = crate::models::iam_groups::Model::create_as(&ctx.db, &actor, body.name).await?;
-    Ok((StatusCode::CREATED, Json(group.into())))
+    Ok(Created(group.into()))
 }
 
 async fn create_policy(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     Json(body): Json<CreatePolicy>,
-) -> Result<(StatusCode, Json<PolicyRecord>), ApiError> {
+) -> Result<Created<PolicyRecord>, ApiError> {
     let policy =
         crate::models::iam_policies::Model::create_as(&ctx.db, &actor, body.name, body.document)
             .await?;
-    Ok((StatusCode::CREATED, Json(policy.into())))
+    Ok(Created(policy.into()))
 }
 
 pub(crate) fn routes() -> Routes {
@@ -127,120 +128,85 @@ pub(crate) fn routes() -> Routes {
         .prefix("api/iam")
         .add(
             "/groups/{group_id}/policies",
-            aide::axum::routing::get_with(list_iam_group_policies, |op| op),
+            aide::axum::routing::get(list_iam_group_policies),
         )
         .add(
             "/users/{user_id}/policies",
-            aide::axum::routing::get_with(list_iam_user_policies, |op| op),
+            aide::axum::routing::get(list_iam_user_policies),
         )
         .add(
             "/groups/{group_id}/members",
-            aide::axum::routing::get_with(list_iam_group_members, |op| op),
+            aide::axum::routing::get(list_iam_group_members),
         )
         .add(
             "/policies/{policy_id}",
-            aide::axum::routing::put_with(update_policy, |op| op),
+            aide::axum::routing::put(update_policy),
         )
         .add(
             "/policies/{policy_id}",
-            aide::axum::routing::delete_with(delete_policy, |op| {
-                op.response_with::<204, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::delete(delete_policy),
         )
         .add(
             "/policies/{policy_id}",
-            aide::axum::routing::get_with(get_iam_policy, |op| op),
+            aide::axum::routing::get(get_iam_policy),
         )
         .add(
             "/groups/{group_id}/policies/{policy_id}",
-            aide::axum::routing::put_with(attach_group_policy, |op| {
-                op.response_with::<204, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::put(attach_group_policy),
         )
         .add(
             "/groups/{group_id}/policies/{policy_id}",
-            aide::axum::routing::delete_with(detach_group_policy, |op| {
-                op.response_with::<204, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::delete(detach_group_policy),
         )
         .add(
             "/groups/{group_id}/members/{user_id}",
-            aide::axum::routing::put_with(add_group_member, |op| {
-                op.response_with::<204, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::put(add_group_member),
         )
         .add(
             "/groups/{group_id}/members/{user_id}",
-            aide::axum::routing::delete_with(remove_group_member, |op| {
-                op.response_with::<204, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::delete(remove_group_member),
         )
         .add(
             "/users/{user_id}/policies/{policy_id}",
-            aide::axum::routing::put_with(attach_user_policy, |op| {
-                op.response_with::<204, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::put(attach_user_policy),
         )
         .add(
             "/users/{user_id}/policies/{policy_id}",
-            aide::axum::routing::delete_with(detach_user_policy, |op| {
-                op.response_with::<204, (), _>(|op| op.description(""))
-            }),
+            aide::axum::routing::delete(detach_user_policy),
         )
-        .add("/audit", aide::axum::routing::get_with(list_audit, |op| op))
+        .add("/audit", aide::axum::routing::get(list_audit))
+        .add("/groups", aide::axum::routing::post(create_group))
+        .add("/groups", aide::axum::routing::get(list_iam_groups))
+        .add("/groups/{group_id}", aide::axum::routing::put(rename_group))
         .add(
-            "/groups",
-            aide::axum::routing::post_with(create_group, |op| {
-                op.response::<201, Json<GroupRecord>>()
-            }),
-        )
-        .add(
-            "/groups",
-            aide::axum::routing::get_with(list_iam_groups, |op| op),
+            "/groups/{group_id}",
+            aide::axum::routing::delete(delete_group),
         )
         .add(
             "/groups/{group_id}",
-            aide::axum::routing::put_with(rename_group, |op| op),
+            aide::axum::routing::get(get_iam_group),
         )
-        .add(
-            "/groups/{group_id}",
-            aide::axum::routing::delete_with(delete_group, |op| {
-                op.response_with::<204, (), _>(|op| op.description(""))
-            }),
-        )
-        .add(
-            "/groups/{group_id}",
-            aide::axum::routing::get_with(get_iam_group, |op| op),
-        )
-        .add(
-            "/policies",
-            aide::axum::routing::post_with(create_policy, |op| {
-                op.response::<201, Json<PolicyRecord>>()
-            }),
-        )
-        .add(
-            "/policies",
-            aide::axum::routing::get_with(list_iam_policies, |op| op),
-        )
+        .add("/policies", aide::axum::routing::post(create_policy))
+        .add("/policies", aide::axum::routing::get(list_iam_policies))
 }
 
 async fn add_group_member(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Path(crate::dtos::common::GroupIdUserIdPath { group_id, user_id }): axum::extract::Path<crate::dtos::common::GroupIdUserIdPath<uuid::Uuid, uuid::Uuid>>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     crate::models::iam_group_memberships::Model::add_as(&ctx.db, &actor, group_id, user_id).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 async fn remove_group_member(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
     axum::extract::Path(crate::dtos::common::GroupIdUserIdPath { group_id, user_id }): axum::extract::Path<crate::dtos::common::GroupIdUserIdPath<uuid::Uuid, uuid::Uuid>>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     crate::models::iam_group_memberships::Model::remove_as(&ctx.db, &actor, group_id, user_id)
         .await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 async fn attach_group_policy(
@@ -250,12 +216,12 @@ async fn attach_group_policy(
         group_id,
         policy_id,
     }): axum::extract::Path<crate::dtos::common::GroupIdPolicyIdPath<uuid::Uuid, uuid::Uuid>>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     crate::models::iam_group_policy_attachments::Model::add_as(
         &ctx.db, &actor, group_id, policy_id,
     )
     .await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 async fn detach_group_policy(
@@ -265,12 +231,12 @@ async fn detach_group_policy(
         group_id,
         policy_id,
     }): axum::extract::Path<crate::dtos::common::GroupIdPolicyIdPath<uuid::Uuid, uuid::Uuid>>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     crate::models::iam_group_policy_attachments::Model::remove_as(
         &ctx.db, &actor, group_id, policy_id,
     )
     .await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 async fn list_iam_groups(

@@ -12,6 +12,25 @@ use axum::{body::Body, extract::Request, response::IntoResponse, routing::Route}
 use loco_rs::app::AppContext;
 use tower::{Layer, Service};
 
+/// The standard `ApiErrorBody` response for each status.
+pub(crate) fn error_responses(
+    ctx: &mut aide::generate::GenContext,
+    operation: &mut aide::openapi::Operation,
+    statuses: &[u16],
+) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
+    <axum::Json<ApiErrorBody> as aide::OperationOutput>::operation_response(ctx, operation)
+        .into_iter()
+        .flat_map(|response| {
+            statuses.iter().map(move |status| {
+                (
+                    Some(aide::openapi::StatusCode::Code(*status)),
+                    response.clone(),
+                )
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn extension(
     name: &'static str,
     value: serde_json::Value,

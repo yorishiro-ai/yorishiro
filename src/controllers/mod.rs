@@ -29,4 +29,4 @@ pub mod extractors;
 pub mod middleware;
 pub mod openapi;
 
-pub use error::ApiError;
+pub use error::{Accepted, ApiError, Created};

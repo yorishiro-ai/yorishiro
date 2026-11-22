@@ -1,8 +1,8 @@
 //! REST routes for entity relations.
 
+use crate::controllers::Created;
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 
@@ -18,7 +18,7 @@ pub(crate) async fn create_relation(
     State(ctx): State<AppContext>,
     verified: Verified<WriteScope>,
     Json(body): Json<CreateRelationRequest>,
-) -> Result<(StatusCode, Json<RelationRecord>), ApiError> {
+) -> Result<Created<RelationRecord>, ApiError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
         crate::models::entity_entities::workspace_for_actor(&ctx.db, &verified.ctx, body.source_id)
             .await?,
@@ -31,7 +31,7 @@ pub(crate) async fn create_relation(
     let input = body.into();
     let record = entity_relations::create(authorized.txn(), workspace_id, input).await?;
     authorized.commit().await?;
-    Ok((StatusCode::CREATED, Json(record)))
+    Ok(Created(record))
 }
 
 pub(crate) async fn get_relation(
@@ -57,7 +57,7 @@ pub(crate) async fn delete_relation(
     State(ctx): State<AppContext>,
     verified: Verified<WriteScope>,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     let mut authorized = Authorized::<WriteScope>::for_target(
         &ctx,
         verified.ctx,
@@ -70,7 +70,7 @@ pub(crate) async fn delete_relation(
     let workspace_id = authorized.ctx.require_workspace()?;
     entity_relations::delete(authorized.txn(), workspace_id, id).await?;
     authorized.commit().await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 pub(crate) async fn list_relations(
@@ -121,78 +121,45 @@ pub fn routes() -> Routes {
             "/",
             aide::axum::routing::post_with(create_relation, |op| {
                 op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["write"]),
-                ))
-                .with(crate::controllers::openapi::extension(
                     "x-yorishiro-required-actions",
                     serde_json::json!(["relation_create"]),
                 ))
-                .response::<201, Json<RelationRecord>>()
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/",
             aide::axum::routing::get_with(list_relations, |op| {
                 op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["read"]),
-                ))
-                .with(crate::controllers::openapi::extension(
                     "x-yorishiro-required-actions",
                     serde_json::json!(["relation_list"]),
                 ))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::get_with(get_relation, |op| {
                 op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["read"]),
-                ))
-                .with(crate::controllers::openapi::extension(
                     "x-yorishiro-required-actions",
                     serde_json::json!(["relation_get"]),
                 ))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}",
             aide::axum::routing::delete_with(delete_relation, |op| {
                 op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["write"]),
-                ))
-                .with(crate::controllers::openapi::extension(
                     "x-yorishiro-required-actions",
                     serde_json::json!(["relation_delete"]),
                 ))
-                .response_with::<204, (), _>(|op| op.description("Relation deleted"))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
             "/{id}/status",
             aide::axum::routing::put_with(set_relation_status, |op| {
                 op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-scopes",
-                    serde_json::json!(["write"]),
-                ))
-                .with(crate::controllers::openapi::extension(
                     "x-yorishiro-required-actions",
                     serde_json::json!(["relation_update"]),
                 ))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
-                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
 }

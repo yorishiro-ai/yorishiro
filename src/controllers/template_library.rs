@@ -1,8 +1,8 @@
 //! REST routes for the workspace template library.
 
+use crate::controllers::Created;
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 
@@ -61,7 +61,7 @@ async fn create_template(
         },
     )
     .await?;
-    Ok((StatusCode::CREATED, Json(template)))
+    Ok(Created(template))
 }
 
 ///
@@ -93,9 +93,9 @@ pub(crate) async fn delete_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::NoContent, ApiError> {
     template_templates::delete_as(&ctx.db, &auth, id).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(axum::response::NoContent)
 }
 
 ///
@@ -108,7 +108,7 @@ async fn fork_template(
     Json(body): Json<ForkTemplateRequest>,
 ) -> Result<impl aide::axum::IntoApiResponse, ApiError> {
     let template = template_templates::fork_as(&ctx.db, &auth, id, body.name).await?;
-    Ok((StatusCode::CREATED, Json(template)))
+    Ok(Created(template))
 }
 
 pub fn routes() -> Routes {
@@ -122,7 +122,6 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["template_library_list"]),
                 ))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -132,10 +131,6 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["template_library_create"]),
                 ))
-                .response::<201, Json<TemplateRecord>>()
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<403, Json<super::openapi::ApiErrorBody>>()
-                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -145,8 +140,6 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["template_library_get"]),
                 ))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -156,10 +149,6 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["template_library_update"]),
                 ))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<403, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
-                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -169,10 +158,6 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["template_library_delete"]),
                 ))
-                .response_with::<204, (), _>(|op| op.description("Template deleted"))
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<403, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -182,11 +167,6 @@ pub fn routes() -> Routes {
                     "x-yorishiro-required-actions",
                     serde_json::json!(["template_library_fork"]),
                 ))
-                .response::<201, Json<TemplateRecord>>()
-                .response::<401, Json<super::openapi::ApiErrorBody>>()
-                .response::<403, Json<super::openapi::ApiErrorBody>>()
-                .response::<404, Json<super::openapi::ApiErrorBody>>()
-                .response::<422, Json<super::openapi::ApiErrorBody>>()
             }),
         )
 }

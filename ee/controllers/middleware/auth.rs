@@ -2,6 +2,7 @@
 //!
 //! Key resolution itself is edition-neutral and lives on the base `DefaultAuthenticator`, so a tenant-scoped key works identically on community and enterprise routes.
 
+use axum::extract::FromRef;
 use axum::http::HeaderMap;
 use loco_rs::app::AppContext;
 
@@ -37,3 +38,41 @@ pub(crate) async fn authenticate_workspace(
     auth.require_workspace()?;
     Ok(auth)
 }
+
+/// Extractor form of [`authenticate`]: the caller, without requiring a workspace.
+pub struct Authenticated(pub AuthContext);
+
+/// Extractor form of [`authenticate_workspace`]: the caller, with its workspace.
+pub struct WorkspaceAuthenticated(pub AuthContext);
+
+macro_rules! authenticating_extractor {
+    ($ty:ident, $resolve:ident) => {
+        impl<S> axum::extract::FromRequestParts<S> for $ty
+        where
+            AppContext: axum::extract::FromRef<S>,
+            S: Send + Sync,
+        {
+            type Rejection = crate::controllers::ApiError;
+
+            async fn from_request_parts(
+                parts: &mut axum::http::request::Parts,
+                state: &S,
+            ) -> Result<Self, Self::Rejection> {
+                let ctx = AppContext::from_ref(state);
+                Ok(Self($resolve(&ctx, &parts.headers).await?))
+            }
+        }
+
+        impl aide::OperationInput for $ty {
+            fn operation_input(
+                ctx: &mut aide::generate::GenContext,
+                operation: &mut aide::openapi::Operation,
+            ) {
+                crate::controllers::extractors::document_authentication(ctx, operation, None);
+            }
+        }
+    };
+}
+
+authenticating_extractor!(Authenticated, authenticate);
+authenticating_extractor!(WorkspaceAuthenticated, authenticate_workspace);

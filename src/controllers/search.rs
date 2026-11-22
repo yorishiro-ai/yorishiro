@@ -32,16 +32,9 @@ pub fn routes() -> Routes {
         "/",
         aide::axum::routing::get_with(search_entities, |op| {
             op.with(crate::controllers::openapi::extension(
-                "x-yorishiro-required-scopes",
-                serde_json::json!(["read"]),
-            ))
-            .with(crate::controllers::openapi::extension(
                 "x-yorishiro-required-actions",
                 serde_json::json!(["search"]),
             ))
-            .response::<401, Json<super::openapi::ApiErrorBody>>()
-            .response::<422, Json<super::openapi::ApiErrorBody>>()
-            .response::<503, Json<super::openapi::ApiErrorBody>>()
         }),
     )
 }

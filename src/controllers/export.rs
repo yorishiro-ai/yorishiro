@@ -34,10 +34,6 @@ pub fn routes() -> Routes {
         "/api/export.jsonl",
         aide::axum::routing::get_with(export_jsonl, |op| {
             op.with(crate::controllers::openapi::extension(
-                "x-yorishiro-required-scopes",
-                serde_json::json!(["read"]),
-            ))
-            .with(crate::controllers::openapi::extension(
                 "x-yorishiro-required-actions",
                 serde_json::json!(["export"]),
             ))
@@ -55,8 +51,6 @@ pub fn routes() -> Routes {
                         op
                     })
             })
-            .response::<401, axum::Json<super::openapi::ApiErrorBody>>()
-            .response::<422, axum::Json<super::openapi::ApiErrorBody>>()
         }),
     )
 }

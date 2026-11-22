@@ -300,60 +300,56 @@ where
     }
 }
 
-/// Every authenticating extractor documents the bearer scheme and the 403 it can return.
-macro_rules! documents_bearer_auth {
-    ($($ty:ty),* $(,)?) => {$(
-        impl aide::OperationInput for $ty {
-            fn operation_input(
-                _: &mut aide::generate::GenContext,
-                operation: &mut aide::openapi::Operation,
-            ) {
-                let requirement = [("bearer_auth".to_owned(), Vec::new())].into_iter().collect();
-                if !operation.security.contains(&requirement) {
-                    operation.security.push(requirement);
-                }
-            }
-
-            fn inferred_early_responses(
-                _: &mut aide::generate::GenContext,
-                _: &mut aide::openapi::Operation,
-            ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
-                vec![(Some(aide::openapi::StatusCode::Code(403)), aide::openapi::Response::default())]
-            }
-        }
-    )*};
+/// Documents what every authenticating extractor does: the bearer scheme and, where the type names one, the scope.
+pub(crate) fn document_authentication(
+    _: &mut aide::generate::GenContext,
+    operation: &mut aide::openapi::Operation,
+    scope: Option<ApiKeyScope>,
+) {
+    let requirement = std::iter::once(("bearer_auth".to_owned(), Vec::new())).collect();
+    if !operation.security.contains(&requirement) {
+        operation.security.push(requirement);
+    }
+    if let Some(scope) = scope {
+        operation.extensions.insert(
+            "x-yorishiro-required-scopes".into(),
+            serde_json::json!([scope.as_db_str()]),
+        );
+    }
 }
 
-documents_bearer_auth!(AuthContext, AuditAuthorized);
-
-impl<R> aide::OperationInput for Authorized<R> {
+impl aide::OperationInput for AuthContext {
     fn operation_input(
         ctx: &mut aide::generate::GenContext,
         operation: &mut aide::openapi::Operation,
     ) {
-        <AuthContext as aide::OperationInput>::operation_input(ctx, operation);
-    }
-
-    fn inferred_early_responses(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
-        <AuthContext as aide::OperationInput>::inferred_early_responses(ctx, operation)
+        document_authentication(ctx, operation, None);
     }
 }
 
-impl<R> aide::OperationInput for Verified<R> {
+impl aide::OperationInput for AuditAuthorized {
     fn operation_input(
         ctx: &mut aide::generate::GenContext,
         operation: &mut aide::openapi::Operation,
     ) {
-        <AuthContext as aide::OperationInput>::operation_input(ctx, operation);
+        document_authentication(ctx, operation, None);
     }
+}
 
-    fn inferred_early_responses(
+impl<R: RequiredScope> aide::OperationInput for Authorized<R> {
+    fn operation_input(
         ctx: &mut aide::generate::GenContext,
         operation: &mut aide::openapi::Operation,
-    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
-        <AuthContext as aide::OperationInput>::inferred_early_responses(ctx, operation)
+    ) {
+        document_authentication(ctx, operation, Some(R::SCOPE));
+    }
+}
+
+impl<R: RequiredScope> aide::OperationInput for Verified<R> {
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        document_authentication(ctx, operation, Some(R::SCOPE));
     }
 }

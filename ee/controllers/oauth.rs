@@ -163,20 +163,13 @@ pub fn routes() -> Routes {
     Routes::new()
         .tag("enterprise")
         .prefix("auth/oauth")
-        .add(
-            "/status",
-            aide::axum::routing::get_with(status, |op| {
-                op.response::<500, Json<crate::controllers::openapi::ApiErrorBody>>()
-            }),
-        )
+        .add("/status", aide::axum::routing::get(status))
         .add(
             "/authorize",
             aide::axum::routing::get_with(authorize, |op| {
                 op.response_with::<302, (), _>(|op| {
                     op.description("Redirects to the configured identity provider")
                 })
-                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<500, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
         .add(
@@ -192,8 +185,6 @@ pub fn routes() -> Routes {
                 .response_with::<422, (), _>(|op| {
                     op.description("Workspace selection required or invalid provider claims")
                 })
-                .response::<404, Json<crate::controllers::openapi::ApiErrorBody>>()
-                .response::<500, Json<crate::controllers::openapi::ApiErrorBody>>()
             }),
         )
 }
