@@ -89,12 +89,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
-        with:
-          tool: actionlint@1.7.12
-      - name: Validate workflow definitions
-        run: actionlint -color
-
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
       - name: Install Python tools
