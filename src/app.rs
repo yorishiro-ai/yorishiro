@@ -176,11 +176,8 @@ impl RouteMounts {
 
 /// Mounts the MCP server under `/mcp` and the swagger docs.
 ///
-/// Rate limiting and the maintenance guard remain here because
-/// Loco's `MiddlewareLayer` trait requires `tower::Layer` implementations
-/// that `from_fn_with_state` does not provide (axum 0.8).  The
-/// `server.middlewares:` config block is used only for Loco's built-in
-/// middleware (`request_id`, `logger`, and shared REST/MCP CORS).
+/// Rate limiting and the maintenance guard are layered here because `/mcp` is mounted here: `Hooks::routes` layers would not cover it.
+/// The `server.middlewares:` config block is used only for Loco's built-in middleware (`request_id`, `logger`, and shared REST/MCP CORS).
 ///
 /// `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not
 /// something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted here
@@ -229,9 +226,7 @@ pub(crate) fn after_routes(
 }
 
 /// Enables Loco's built-in middleware stack (`request_id`, `logger`, etc.).
-/// Custom middleware (rate limiter, maintenance guard) stays in `after_routes`
-/// because Loco's `MiddlewareLayer` trait requires `tower::Layer`
-/// implementations that `from_fn_with_state` does not provide (axum 0.8).
+/// Custom middleware (rate limiter, maintenance guard) stays in `after_routes` so it also covers the `/mcp` mount.
 pub(crate) fn middlewares(
     ctx: &AppContext,
 ) -> Vec<Box<dyn loco_rs::controller::middleware::MiddlewareLayer>> {

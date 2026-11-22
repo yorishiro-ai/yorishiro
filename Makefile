@@ -45,6 +45,7 @@ fmt-check: patch-check
 python-lint:
 	uv run ruff check scripts tests/blackbox tests/ci patches/loco-rs/verify.py
 	uv run scripts/test_env_config.py
+	uv run scripts/test_harden_generated_entities.py
 	@for script in .cargo/env.sh scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-transitions.sh; do bash -n "$$script" || exit; done
 
 edition-boundary-check:

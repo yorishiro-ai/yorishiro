@@ -99,20 +99,8 @@ jobs:
           components: rustfmt, clippy
           cache-key: check
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Check generated entity hardener
-        run: uv run scripts/test_harden_generated_entities.py
-
-      - name: Python lint
-        run: make python-lint
-
-      - name: Check that tests live in tests/
-        run: make test-location-check
-
-      - name: Check the edition boundary
-        run: make edition-boundary-check
+      - name: Check formatting, scripts, boundaries, tests and Clippy
+        run: make check-all-ee
 
       - name: Check pinned versions agree
         # Service containers start before checkout and cannot read repository configuration.
@@ -133,10 +121,6 @@ jobs:
             -D rustdoc::broken_intra_doc_links
             -D rustdoc::invalid_html_tags
             -D rustdoc::bare_urls
-
-      - name: Clippy
-        # Keep CI aligned with rust-analyzer: every target and public API documentation.
-        run: make clippy-ee
 
   schema-generation:
     name: Schema generation (PostgreSQL)

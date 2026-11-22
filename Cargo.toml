@@ -164,14 +164,13 @@ base64 = { version = "0.23.1", optional = true }        # OAuth/PKCE encoding (e
 aide = { version = "0.16.0-alpha.4", features = ["axum-json", "axum-query", "swagger"] }
 tower = "0.5.3"
 
-serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
-
 [[bin]]
 name = "yorishiro"
 path = "src/bin/main.rs"
 required-features = []
 
 [dev-dependencies]
+serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test.workspace = true
 redis.workspace = true
