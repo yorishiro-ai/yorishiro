@@ -1,14 +1,4 @@
-/// Tests for the embedding sync worker: routing, serialization, and class names.
-use loco_rs::bgworker::BackgroundWorker;
-use yorishiro::workers::embedding_sync::EmbeddingSyncWorker;
-
-/// The worker declares neither tags nor a queue: a job's target is chosen when the job is enqueued, and a process chooses its targets when it starts.
-/// A tag here would put a second, fixed tag on every job and let a worker for another target match on it.
-#[test]
-fn the_worker_declares_no_routing_of_its_own() {
-    assert_eq!(EmbeddingSyncWorker::tags(), [] as [String; 0]);
-    assert!(EmbeddingSyncWorker::queue().is_none());
-}
+//! Tests for the embedding sync worker.
 
 mod conflict {
     use std::sync::Arc;

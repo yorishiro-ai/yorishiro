@@ -506,3 +506,22 @@ mod concurrency {
         .await;
     }
 }
+
+/// Loco stores the class name on every queued job and finds the handler by it, so renaming a worker strands whatever is already queued.
+#[test]
+fn worker_class_names_are_stable() {
+    use loco_rs::bgworker::BackgroundWorker;
+    use yorishiro::workers::{
+        embedding_sync::EmbeddingSyncWorker, query_embedding::QueryEmbeddingWorker,
+        reindex::ReindexWorker,
+    };
+
+    assert_eq!(EmbeddingSyncWorker::class_name(), "EmbeddingSyncWorker");
+    assert_eq!(QueryEmbeddingWorker::class_name(), "QueryEmbeddingWorker");
+    assert_eq!(ReindexWorker::class_name(), "ReindexWorker");
+    #[cfg(feature = "enterprise")]
+    assert_eq!(
+        yorishiro::edition::ee::workers::infer_fill::InferFillWorker::class_name(),
+        "InferFillWorker"
+    );
+}

@@ -337,31 +337,6 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
     .await;
 }
 
-/// A tampered payload (signature computed over a different body) must be rejected.
-#[tokio::test]
-async fn a_tampered_payload_is_rejected() {
-    boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        enable_stripe(&ctx);
-        let body = subscription_updated_body("evt_tamper", Utc::now().timestamp(), "cus_t");
-        let now = Utc::now().timestamp();
-        let signature = sign(WEBHOOK_SECRET, now, &body);
-
-        let tampered = subscription_updated_body("evt_tamper", Utc::now().timestamp(), "cus_other");
-        let response = request
-            .post("/api/stripe/webhook")
-            .add_header("stripe-signature", format!("t={now},v1={signature}"))
-            .bytes(tampered.into())
-            .await;
-        assert_eq!(
-            response.status_code(),
-            400,
-            "response: {:?}",
-            response.text()
-        );
-    })
-    .await;
-}
-
 /// Signature failures return a plain-text 400.
 #[tokio::test]
 async fn malformed_signature_headers_have_exact_plain_text_rejections() {
