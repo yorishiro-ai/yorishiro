@@ -1,6 +1,27 @@
-  # Keep the enterprise licence outside documentation paths excluded by minimal images.
-  - src: ./ee/LICENSE
-    dst: /etc/yorishiro/LICENSE.enterprise
 name: yorishiro-ee
 license: BUSL-1.1 AND LicenseRef-Yorishiro-EE
 conflicts: [yorishiro-ce]
+contents:
+  - src: ./target/release/yorishiro
+    dst: /usr/bin/yorishiro
+  - src: ./.github/packaging/yorishiro.service
+    dst: /lib/systemd/system/yorishiro.service
+  - src: ./.github/packaging/yorishiro-worker.service
+    dst: /lib/systemd/system/yorishiro-worker.service
+  - src: ./.github/packaging/yorishiro-jobs.service
+    dst: /lib/systemd/system/yorishiro-jobs.service
+  - src: ./.github/packaging/yorishiro-scheduler.service
+    dst: /lib/systemd/system/yorishiro-scheduler.service
+  # The binary embeds defaults; this file is reference material only.
+  - src: ./config/production.yaml
+    dst: /etc/yorishiro/production.yaml.example
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  # Debian minimal images preserve copyright but may exclude other documentation.
+  - src: ./LICENSE
+    dst: /usr/share/doc/yorishiro/copyright
+  # Minimal images may exclude documentation other than copyright.
+  - src: ./ee/LICENSE
+    dst: /etc/yorishiro/LICENSE.enterprise

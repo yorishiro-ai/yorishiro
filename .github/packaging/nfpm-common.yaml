@@ -1,53 +1,33 @@
-arch: ${ARCH}
-platform: linux
-version: ${VERSION}
-# Preserve date-based prerelease versions instead of normalizing them as SemVer.
-version_schema: none
-section: net
-priority: optional
-maintainer: Yorishiro Contributors
-description: An MCP-native, multi-tenant knowledge store with user-defined schemas.
-vendor: Yorishiro
-homepage: https://github.com/yorishiro-ai/yorishiro
+# Merge shared metadata without depending on the edition fragment's key order.
+<<:
+  arch: ${ARCH}
+  platform: linux
+  version: ${VERSION}
+  # Preserve date-based prerelease versions instead of normalizing them as SemVer.
+  version_schema: none
+  section: net
+  priority: optional
+  maintainer: Yorishiro Contributors
+  description: An MCP-native, multi-tenant knowledge store with user-defined schemas.
+  vendor: Yorishiro
+  homepage: https://github.com/yorishiro-ai/yorishiro
 
-# Match the AlmaLinux 10 build baseline and declare the linked C++ runtime explicitly.
-overrides:
-  deb:
-    depends:
-      - ca-certificates
-      - libc6 (>= 2.39)
-      - libgcc-s1
-      - libstdc++6
-  rpm:
-    depends:
-      - ca-certificates
-      - libc.so.6(GLIBC_2.39)(64bit)
-      - libgcc
-      - libstdc++
+  # The CI build uses AlmaLinux 10 so its glibc floor also works on supported Ubuntu deployments.
+  # Do not derive this floor from a developer binary linked against a newer host runtime.
+  overrides:
+    deb:
+      depends:
+        - ca-certificates
+        - libc6 (>= 2.39)
+        - libgcc-s1
+        - libstdc++6
+    rpm:
+      depends:
+        - ca-certificates
+        - libc.so.6(GLIBC_2.39)(64bit)
+        - libgcc
+        - libstdc++
 
-scripts:
-  preinstall: ./.github/packaging/preinstall.sh
-  postinstall: ./.github/packaging/postinstall.sh
-
-# Edition fragments follow this list and may append edition-owned files.
-contents:
-  - src: ./target/release/yorishiro
-    dst: /usr/bin/yorishiro
-  - src: ./.github/packaging/yorishiro.service
-    dst: /lib/systemd/system/yorishiro.service
-  - src: ./.github/packaging/yorishiro-worker.service
-    dst: /lib/systemd/system/yorishiro-worker.service
-  - src: ./.github/packaging/yorishiro-jobs.service
-    dst: /lib/systemd/system/yorishiro-jobs.service
-  - src: ./.github/packaging/yorishiro-scheduler.service
-    dst: /lib/systemd/system/yorishiro-scheduler.service
-  # The binary embeds defaults; this file is reference material only.
-  - src: ./config/production.yaml
-    dst: /etc/yorishiro/production.yaml.example
-    file_info:
-      mode: 0644
-      owner: root
-      group: root
-  # Debian minimal images preserve copyright but may exclude other documentation.
-  - src: ./LICENSE
-    dst: /usr/share/doc/yorishiro/copyright
+  scripts:
+    preinstall: ./.github/packaging/preinstall.sh
+    postinstall: ./.github/packaging/postinstall.sh

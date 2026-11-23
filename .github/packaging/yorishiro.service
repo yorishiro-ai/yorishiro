@@ -19,7 +19,6 @@ ExecStart=/usr/bin/yorishiro start
 Restart=on-failure
 RestartSec=5s
 
-
 # The process needs no write access outside its own state directory, and no new privileges.
 NoNewPrivileges=true
 PrivateTmp=true

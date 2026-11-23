@@ -1,4 +1,5 @@
 # Override ExecStart in a systemd drop-in to serve official or tenant-specific worker targets.
+# Use --worker=worker-target:official or --worker=worker-target:tenant:<tenant-id>.
 [Unit]
 Description=Yorishiro background worker
 After=network.target yorishiro.service

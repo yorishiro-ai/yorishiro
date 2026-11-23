@@ -15,14 +15,13 @@ x-yorishiro: &yorishiro
   environment:
     # Mount a complete production.yaml, optionally with production.local.yaml, to replace embedded defaults.
     DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
-    # `Redis` selects Loco's Redis-compatible queue provider. Without it the
-    # queue kind follows DATABASE_URL's scheme and lands on Postgres.
+    # `Redis` selects Loco's Redis-compatible queue provider.
+    # Without it the queue kind follows DATABASE_URL's scheme and lands on Postgres.
     YORISHIRO_QUEUE_KIND: Redis
     QUEUE_URL: redis://redis:6379
     HOST: http://localhost:5150
     # The image default is loopback-safe; compose publishes the port, so opt into container access.
     BINDING: 0.0.0.0
-    LOG_LEVEL: info
     YORISHIRO_EMBEDDING_PROVIDER:
 
 services:
@@ -68,8 +67,8 @@ services:
 
   worker:
     <<: *yorishiro
-    # The worker serves the shared target. To serve others, list them after `--worker=`, separated by
-    # commas (`worker-target:official`, `worker-target:tenant:<tenant-id>`), or add a service for them.
+    # The worker serves the shared target.
+    # To serve others, list them after `--worker=`, separated by commas (`worker-target:official`, `worker-target:tenant:<tenant-id>`), or add a service for them.
     command: ["start", "--worker=worker-target:shared"]
     # Only this role loads the embedding model.
     # To reuse local files, mount ./models:/app/models:ro containing both model.safetensors and tokenizer.json under models/<short_id>/.

@@ -1,12 +1,12 @@
 //! Measures PostgreSQL vector search against an existing workspace in a read-only transaction.
 //!
 //! ```sh
-//! cargo bench --bench postgres_search -- DATABASE_URL WORKSPACE_UUID QUERY_VECTOR_JSON
+//! cargo bench --bench postgres_search -- DATABASE_URL TENANT_UUID WORKSPACE_UUID QUERY_VECTOR_FILE
 //! ```
 
 use std::time::Instant;
 
-use sea_orm::{ConnectionTrait, Database, TransactionTrait};
+use sea_orm::{ConnectionTrait, Database, DatabaseBackend, Statement, TransactionTrait};
 use uuid::Uuid;
 use yorishiro::models::search::{SearchQuery, search_by_vector};
 
@@ -16,15 +16,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .skip(1)
         .filter(|arg| arg != "--bench")
         .collect();
-    let [url, workspace, vector_file] = args.as_slice() else {
+    let [url, tenant, workspace, vector_file] = args.as_slice() else {
         println!(
-            "usage: cargo bench --bench postgres_search -- DATABASE_URL WORKSPACE_UUID QUERY_VECTOR_JSON"
+            "usage: cargo bench --bench postgres_search -- DATABASE_URL TENANT_UUID WORKSPACE_UUID QUERY_VECTOR_FILE"
         );
         return Ok(());
     };
     if !url.starts_with("postgres://") && !url.starts_with("postgresql://") {
         return Err("PostgreSQL URL required".into());
     }
+    let tenant: Uuid = tenant.parse()?;
     let workspace: Uuid = workspace.parse()?;
     let vector: Vec<f32> = serde_json::from_slice(&std::fs::read(vector_file)?)?;
     if vector.is_empty() || !vector.iter().all(|value| value.is_finite()) {
@@ -33,6 +34,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = Database::connect(url).await?;
     let txn = db.begin().await?;
     txn.execute_unprepared("SET TRANSACTION READ ONLY").await?;
+    // The application's tenant-pool constructor is private; mirror its role and transaction-local RLS scope without booting jobs or migrations.
+    txn.execute_unprepared("SET LOCAL ROLE yorishiro_app")
+        .await?;
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "SELECT set_config('app.current_tenant', $1, true), set_config('app.current_workspace', $2, true)",
+        [tenant.to_string().into(), workspace.to_string().into()],
+    ))
+    .await?;
     let mut milliseconds = Vec::with_capacity(5);
     for _ in 0..5 {
         let query = SearchQuery {
