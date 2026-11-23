@@ -26,8 +26,6 @@ jobs:
     timeout-minutes: 120
     env:
       CARGO_TERM_COLOR: always
-      CARGO_HOME: ${{ github.workspace }}/.cargo-cache
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target
       YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
       DB_MAX_CONNECTIONS: "100"
       DB_CONNECT_TIMEOUT: "5000"
