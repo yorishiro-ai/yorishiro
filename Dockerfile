@@ -68,8 +68,7 @@ RUN apt-get update && apt-get install -y \
     && useradd --system --create-home --home-dir /home/yorishiro yorishiro
 
 COPY --from=builder /usr/local/bin/yorishiro /usr/local/bin/yorishiro
-# The state directory is root-owned and sticky, so the yorishiro user can create and update its own
-# files in it but cannot replace or rename anything root put there.
+# Root ownership and the sticky bit protect root-owned state files from the service account.
 RUN mkdir -p /var/lib/yorishiro \
     && chown root:yorishiro /var/lib/yorishiro \
     && chmod 1770 /var/lib/yorishiro

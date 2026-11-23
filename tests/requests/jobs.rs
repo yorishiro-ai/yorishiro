@@ -192,10 +192,7 @@ pub(crate) async fn queue_for_tag(
     queue
 }
 
-/// Configures and registers a shared-target consumer through Loco, without starting its loop.
-///
-/// A Redis worker polls only the queues its configuration names, which `yorishiro start --worker=...` fills in from the targets it serves.
-/// Updates the worker context before building its queue and running Loco's worker boot hooks over the already migrated database.
+/// Registers a shared-target consumer through Loco without starting its loop.
 pub(crate) async fn shared_target_queue(ctx: &mut AppContext) -> Arc<loco_rs::bgworker::Queue> {
     target_queue(ctx, WorkerTarget::Shared).await
 }

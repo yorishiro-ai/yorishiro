@@ -1,27 +1,6 @@
 #!/usr/bin/env bash
-#
-# Starts the service the way an operator does: `systemctl`, under systemd as PID 1.
-#
-# Separate from test-install.sh because this needs a privileged container, and the checks there
-# must stay runnable without one. What it covers is what `systemd-analyze verify` cannot: that a
-# unit whose syntax is valid actually brings the service up.
-#
+# Verify installed services under systemd as PID 1 in a privileged Ubuntu container.
 #   ./.github/packaging/test-systemd.sh <exact deb package file>
-#
-# Needs docker with --privileged. ubuntu:26.04 and the deb only: the rpm under systemd is
-# checked by hand, because putting an EOL Fedora's package repositories on the critical path of
-# every pull request trades a real dependency for a marginal case.
-#
-# The caller supplies one exact edition-first package filename.
-#
-# The first phase exercises the default SQLite deployment without external dependencies.
-# DATABASE_URL defaults to sqlite:///var/lib/yorishiro/yorishiro.sqlite3?mode=rwc.
-# HOST defaults to http://localhost.
-# The queue uses its separate packaged SQLite file.
-# The smoke test sets an OpenAI-compatible embedding configuration before this phase starts.
-# The provider is constructed synchronously without calling the configured endpoint.
-# This avoids downloading the approximately 1 GiB local model.
-# The later phase switches the database to PostgreSQL.
 
 set -uo pipefail
 
@@ -68,8 +47,7 @@ docker run -d --name "$PG" --network "$NET" \
   -e POSTGRES_USER=yorishiro -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=yorishiro \
   "$(docker compose -f "$REPO/docker-compose.test.yaml" --profile test config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["testdb"]["image"])')" >/dev/null
 
-# systemd has to be PID 1, which is what `exec` at the end of the command is for, and needs both
-# tmpfs mounts plus a cgroup namespace it can write.
+# systemd needs writable runtime mounts and access to the host cgroup namespace.
 docker run -d --name "$APP" --network "$NET" --privileged --cgroupns=host \
   --tmpfs /run --tmpfs /run/lock -v "$PKG_DIR":/pkg:ro "$SYSTEMD_IMAGE" >/dev/null || exit 1
 
@@ -114,37 +92,26 @@ echo "$scheduler_execstart" | grep -q '^ExecStart=/usr/bin/yorishiro scheduler$'
   && ok "yorishiro-scheduler.service starts the Loco scheduler" \
   || bad "yorishiro-scheduler.service has an unexpected ExecStart: $scheduler_execstart"
 
-# Integrity probes: /var/lib/yorishiro is root:yorishiro mode 1770.
-# Root records the probe file's checksum and creates a protected backup before
-# unprivileged probes.  After yorishiro's attempts, root verifies the
-# probe is intact and atomically restores from backup.  All assertions
-# happen on the host via markers returned from docker exec.
+# Verify the sticky state directory protects root-owned files from the service account.
 integrity=$(docker exec "$APP" bash -c '
   stat -c "%U:%G" /var/lib/yorishiro | grep -q "^root:yorishiro$" && echo "INTEG_OWNER" || echo "INTEG_OWNERFAIL"
   stat -c "%a" /var/lib/yorishiro | grep -q "^1770$" && echo "INTEG_PERMS" || echo "INTEG_PERMSFAIL"
   # The package ships no root-owned file in the state directory, so the probes use one the test creates.
   install -m 0755 -o root -g yorishiro /dev/null /var/lib/yorishiro/root-owned-probe
-  # Record probe metadata for post-probe verification.
   stat -c "%U:%G %a" /var/lib/yorishiro/root-owned-probe > /tmp/probe-meta.bak
   md5sum /var/lib/yorishiro/root-owned-probe > /tmp/probe-md5.bak
-  # Create a root-owned backup outside the state directory.
   cp /var/lib/yorishiro/root-owned-probe /root/root-owned-probe.backup
   echo "INTEG_BACKED"
 ')
-# Unprivileged probes as the yorishiro user via docker exec --user.
 unpriv=$(docker exec --user yorishiro "$APP" bash -c '
-  # State-file creation must succeed (directory is group-writable).
   touch /var/lib/yorishiro/writable-as-yorishiro && echo "UNPRIV_WRITE" || echo "UNPRIV_WRITEFAIL"
-  # rm test: probe is root-owned; yorishiro cannot delete it.
   rm -f /var/lib/yorishiro/root-owned-probe 2>/dev/null || true
   if [ -f /var/lib/yorishiro/root-owned-probe ]; then
     echo "UNPRIV_UNRMED"
   else
     echo "UNPRIV_GONE"
   fi
-  # Sticky-rename test: mv -f (force) as yorishiro over root-owned probe.
-  # The sticky bit on the directory blocks the rename because yorishiro does
-  # not own the target file.
+  # The sticky bit must also block replacing a root-owned target by rename.
   touch /var/lib/yorishiro/unpriv-tempfile
   mv -f /var/lib/yorishiro/unpriv-tempfile /var/lib/yorishiro/root-owned-probe 2>/dev/null || true
   if [ -f /var/lib/yorishiro/root-owned-probe ] \
@@ -153,17 +120,13 @@ unpriv=$(docker exec --user yorishiro "$APP" bash -c '
   else
     echo "UNPRIV_MV_CORRUPT"
   fi
-  # Shell redirection overwrite attempt as yorishiro.
   echo "tampered" > /var/lib/yorishiro/root-owned-probe 2>/dev/null && {
     echo "UNPRIV_REDIRECT_OK"
   } || echo "UNPRIV_REDIRECT_FAIL"
 ')
-# Root verifies probe is still intact after unprivileged probes, then
-# atomically restores from backup using cp-to-temp + mv.  set -e ensures
-# any restore step failure aborts the block rather than silently proceeding.
+# Fail closed if integrity verification or atomic restoration fails.
 restore=$(docker exec "$APP" bash -c '
   set -e
-  # Check probe metadata has not changed.
   meta=$(stat -c "%U:%G %a" /var/lib/yorishiro/root-owned-probe 2>/dev/null)
   orig=$(cat /tmp/probe-meta.bak)
   if [ "$meta" = "$orig" ]; then
@@ -171,14 +134,11 @@ restore=$(docker exec "$APP" bash -c '
   else
     echo "INTEG_META_CHANGED"
   fi
-  # Atomic restore: copy backup to a temp file in the same directory,
-  # set temp ownership to root:root, then mv -f over the probe.
   cp /root/root-owned-probe.backup /var/lib/yorishiro/root-owned-probe.tmp
   chown root:root /var/lib/yorishiro/root-owned-probe.tmp
   chmod 0755 /var/lib/yorishiro/root-owned-probe.tmp
   mv -f /var/lib/yorishiro/root-owned-probe.tmp /var/lib/yorishiro/root-owned-probe
   chown root:yorishiro /var/lib/yorishiro/root-owned-probe
-  # Verify restored file matches original checksum and exact metadata.
   restored_md5=$(md5sum /var/lib/yorishiro/root-owned-probe | cut -d" " -f1)
   orig_md5=$(cat /tmp/probe-md5.bak | cut -d" " -f1)
   restored_meta=$(stat -c "%U:%G %a" /var/lib/yorishiro/root-owned-probe)
@@ -198,11 +158,7 @@ for marker in INTEG_META_INTACT INTEG_RESTORED; do
   case "$restore" in *"$marker"*) ok "$marker" ;; *) bad "$marker ($restore)" ;; esac
 done
 
-# Use an OpenAI-compatible provider configuration so the server and worker construct the provider at startup without downloading the ~1 GiB local model.
-# `base_url` + `model` take priority over the enum in `build_embedding_provider`, so no `provider` variable is needed.
-# `none` is rejected (#524) because the server needs query embeddings in this smoke test.
-# The endpoint is not reachable.
-# The provider constructor is synchronous and never calls it.
+# Construct an OpenAI-compatible provider without downloading a local model or contacting the endpoint.
 docker exec "$APP" systemctl set-environment \
   YORISHIRO_EMBEDDING_BASE_URL=http://127.0.0.1:5151/v1 \
   YORISHIRO_EMBEDDING_MODEL=package-smoke-test
@@ -237,25 +193,15 @@ note "a configured service starts and serves (Postgres)"
 docker exec "$PG" psql -U yorishiro -d yorishiro \
   -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null 2>&1
 
-# By address, not by name. systemd-resolved takes over /etc/resolv.conf on boot and its stub
-# cannot reach Docker's embedded DNS from inside the container, so the container's own name
-# lookups stop working: an artefact of running systemd in Docker, not something an operator meets
-# on a real host.
+# Use an address because systemd-resolved cannot reach Docker's embedded DNS here.
 PGIP=$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
 
-# The package defaults are active without an administrator override.
-# Community builds also force the source-level tenant cap to one.
-# These environment overrides configure the packaged defaults at runtime.
 docker exec "$APP" systemctl set-environment \
   DATABASE_URL="postgres://yorishiro:secret@$PGIP:5432/yorishiro" \
   HOST=http://127.0.0.1:5150 \
   DB_CONNECT_TIMEOUT=5000
 
-# Use `restart` instead of `enable --now` because the packaged SQLite phase left the server running.
-# Starting an active unit would not reload the new environment while the old server kept answering /_ping.
-# Restart the server before the worker and wait for its ping.
-# Both processes run automigrate, and starting them together races on PostgreSQL role creation.
-# `After=yorishiro.service` only orders the systemd start jobs and does not wait for server readiness.
+# Restart to apply PostgreSQL settings, then wait for readiness before starting workers to avoid racing automigrations.
 docker exec "$APP" bash -c '
   systemctl reset-failed yorishiro
   systemctl daemon-reload
@@ -263,7 +209,6 @@ docker exec "$APP" bash -c '
   systemctl restart yorishiro' >/dev/null 2>&1
 
 server_ready=
-# Wait for the server before starting the worker.
 for _ in $(seq 1 120); do
   docker exec "$APP" curl --noproxy localhost -fsS http://localhost:5150/_ping >/dev/null 2>&1 \
     && server_ready=1
@@ -373,9 +318,7 @@ tables=$(docker exec "$PG" psql -U yorishiro -d yorishiro -Atc \
   && ok "it applied its migrations to PostgreSQL" \
   || bad "PostgreSQL has no tables: the service is not running against it"
 
-# It runs as the unpriviliged account the package creates, not as root: the unit says `User=`,
-# and a package that installed a unit systemd silently ran as root would look identical here
-# without this check.
+# Check the running process, not just the unit's User setting.
 owner=$(docker exec "$APP" systemctl show yorishiro -p MainPID --value 2>/dev/null)
 if [ -n "$owner" ] && [ "$owner" != 0 ]; then
   who=$(docker exec "$APP" ps -o user= -p "$owner" 2>/dev/null | tr -d ' ')

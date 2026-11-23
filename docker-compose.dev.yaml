@@ -1,10 +1,9 @@
-# Local development uses the distribution image's Dockerfile.
+# Local development builds the distribution image.
 #   docker compose -f docker-compose.dev.yaml up --build
 #
 # `app` serves HTTP, `worker` consumes embedding sync/query/reindex, `jobs` consumes import/maintenance/inference, and `scheduler` runs scheduled tasks.
 # Both consumers are required; the HTTP server consumes no queued jobs.
 
-# One image and shared configuration keep all four roles on the same database and queue.
 x-yorishiro: &yorishiro
   image: ${IMAGE:-yorishiro}:${TAG:-local}
   build:
@@ -15,12 +14,11 @@ x-yorishiro: &yorishiro
   environment:
     # Mount a complete production.yaml, optionally with production.local.yaml, to replace embedded defaults.
     DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
-    # `Redis` selects Loco's Redis-compatible queue provider.
-    # Without it the queue kind follows DATABASE_URL's scheme and lands on Postgres.
+    # Select Redis explicitly rather than the database-backed queue default.
     YORISHIRO_QUEUE_KIND: Redis
     QUEUE_URL: redis://redis:6379
     HOST: http://localhost:5150
-    # The image default is loopback-safe; compose publishes the port, so opt into container access.
+    # Published ports require listening beyond the container loopback interface.
     BINDING: 0.0.0.0
     YORISHIRO_EMBEDDING_PROVIDER:
 
@@ -47,7 +45,6 @@ services:
       POSTGRES_DB: yorishiro
     volumes:
       - pgdata:/var/lib/postgresql
-      # Installs the required extensions on first initialization.
       - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "yorishiro"]
@@ -67,7 +64,6 @@ services:
 
   app:
     <<: *yorishiro
-    # The HTTP server does not load an embedding model.
     ports:
       - "127.0.0.1:5150:5150"
     depends_on:
@@ -78,16 +74,12 @@ services:
 
   worker:
     <<: *consumer
-    # The worker serves the shared target.
     # To serve others, list them after `--worker=`, separated by commas (`worker-target:official`, `worker-target:tenant:<tenant-id>`), or add a service for them.
     command: ["start", "--worker=worker-target:shared"]
-    # Only this role loads the embedding model.
-    # To reuse local files, mount ./models:/app/models:ro containing both model.safetensors and tokenizer.json under models/<short_id>/.
-    # Without a mount, verified model files are downloaded into /app/models at worker startup.
+    # Mount ./models:/app/models:ro with models/<short_id>/{model.safetensors,tokenizer.json} to avoid downloads.
 
   jobs:
     <<: *consumer
-    # Durable application jobs run without loading an embedding model.
     # To serve other targets, list job-target:official or job-target:tenant:<tenant-id> after --worker=, separated by commas.
     command: ["start", "--worker=job-target:shared"]
 

@@ -98,7 +98,7 @@ if [[ $# -gt 0 ]]; then
       -v "$tmp/config:/app/config" \
       -v "$tmp/state:/var/lib/yorishiro" \
       -p 0:5150 \
-      --entrypoint yorishiro "$image" start >/dev/null 2>&1 >/dev/null
+      --entrypoint yorishiro "$image" start >/dev/null 2>&1
     host_port=""
     if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" = true ]]; then
       host_port=$(docker port "$container" 5150/tcp 2>/dev/null | sed 's/.*://' | head -1 || true)
