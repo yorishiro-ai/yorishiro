@@ -46,7 +46,7 @@ runs:
           -v "$HOME/.cargo/git:/usr/local/cargo/git" \
           -w "$GITHUB_WORKSPACE" \
           -e RUSTUP_TOOLCHAIN="$(rustup show active-toolchain | cut -d ' ' -f1)" \
-          -e CARGO_HOME=/usr/local/cargo -e CARGO_TARGET_DIR -e BUILD_SHA -e EDITION \
+          -e CARGO_HOME=/usr/local/cargo -e BUILD_SHA -e EDITION \
           yorishiro-package-builder bash -euc '
             if [ "$EDITION" = ce ]; then
               cargo build --locked --no-default-features --features community --release --bin yorishiro

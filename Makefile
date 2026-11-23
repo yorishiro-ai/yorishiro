@@ -6,7 +6,7 @@ TEST_COMPOSE := docker compose -f docker-compose.test.yaml
 # Select the edition for the test targets.
 EDITION ?= ee
 TEST_FEATURES = $(if $(filter ce,$(EDITION)),--no-default-features --features community,--features enterprise)
-export CARGO_TARGET_DIR := $(abspath target)
+CARGO_TARGET_DIR ?= $(abspath target)
 
 test-postgres task doctor migrate entities: export DATABASE_URL := $(DATABASE_URL)
 task doctor migrate entities: export LOCO_ENV = test
