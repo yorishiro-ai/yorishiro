@@ -6,9 +6,7 @@ TEST_COMPOSE := docker compose -f docker-compose.test.yaml
 # Select the edition for the test targets.
 EDITION ?= ee
 TEST_FEATURES = $(if $(filter ce,$(EDITION)),--no-default-features --features community,--features enterprise)
-export CARGO_HOME := $(abspath .cargo-cache)
 export CARGO_TARGET_DIR := $(abspath target)
-export PATH := $(CARGO_HOME)/bin:$(PATH)
 
 test-postgres task doctor migrate entities: export DATABASE_URL := $(DATABASE_URL)
 task doctor migrate entities: export LOCO_ENV = test
@@ -44,7 +42,7 @@ fmt-check: patch-check
 
 python-lint: test-python
 	uv run ruff check scripts tests/blackbox tests/ci patches/loco-rs/verify.py
-	@for script in .cargo/env.sh scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-package-lifecycle.sh; do bash -n "$$script" || exit; done
+	@for script in scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-package-lifecycle.sh; do bash -n "$$script" || exit; done
 
 .PHONY: test-python test-contract
 test-python:

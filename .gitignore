@@ -16,8 +16,6 @@ __pycache__/
 *.sqlite3-journal
 *.sqlite3-wal
 *.sqlite3-shm
-/.cargo-cache/*
-!/.cargo-cache/.gitkeep
 .worktrees/
 /models/*
 !/models/.gitkeep
