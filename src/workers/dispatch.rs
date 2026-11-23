@@ -263,11 +263,7 @@ pub(crate) async fn dispatch_job(
     let txn = caller_txn.or(owned_txn.as_ref()).ok_or_else(|| {
         loco_rs::Error::Message("dispatch requires a recording transaction".into())
     })?;
-    let tag = if super::registry::is_embedding_worker(&spec.worker_name) {
-        target.tag()
-    } else {
-        target.job_tag()
-    };
+    let tag = super::registry::routing_tag(&spec.worker_name, target);
     crate::models::queue_job_dispatch_outbox::record_in_transaction(
         txn,
         Enqueue {

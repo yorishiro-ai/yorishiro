@@ -27,7 +27,7 @@ for role in {"app", "worker", "jobs", "scheduler"}:
     assert "build" not in services[role]
     assert services[role]["environment"]["BINDING"] == "0.0.0.0"
 '
-  docker compose -f "$repo/docker-compose.test.yaml" --profile test config --format json |
+  docker compose -f "$repo/docker-compose.test.yaml" config --format json |
     python3 -c '
 import json
 import sys

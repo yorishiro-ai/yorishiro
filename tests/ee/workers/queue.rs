@@ -267,17 +267,17 @@ async fn each_worker_class_is_sent_to_its_own_target() {
             vec![
                 (
                     "EmbeddingSyncWorker".to_string(),
-                    vec!["worker-target:official".to_string()],
+                    vec![yorishiro::workers::target::WorkerTarget::Official.tag()],
                     200,
                 ),
                 (
                     "EmbeddingSyncWorker".to_string(),
-                    vec!["worker-target:shared".to_string()],
+                    vec![yorishiro::workers::target::WorkerTarget::Shared.tag()],
                     100,
                 ),
                 (
                     "EmbeddingSyncWorker".to_string(),
-                    vec![format!("worker-target:tenant:{tenant_id}")],
+                    vec![yorishiro::workers::target::WorkerTarget::Tenant(tenant_id).tag()],
                     300,
                 ),
             ]
@@ -345,17 +345,17 @@ async fn each_reindex_worker_class_is_sent_to_its_own_target() {
             vec![
                 (
                     "ReindexWorker".to_string(),
-                    vec!["worker-target:official".to_string()],
+                    vec![yorishiro::workers::target::WorkerTarget::Official.tag()],
                     200,
                 ),
                 (
                     "ReindexWorker".to_string(),
-                    vec!["worker-target:shared".to_string()],
+                    vec![yorishiro::workers::target::WorkerTarget::Shared.tag()],
                     100,
                 ),
                 (
                     "ReindexWorker".to_string(),
-                    vec![format!("worker-target:tenant:{tenant_id}")],
+                    vec![yorishiro::workers::target::WorkerTarget::Tenant(tenant_id).tag()],
                     300,
                 ),
             ]

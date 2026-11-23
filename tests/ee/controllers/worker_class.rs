@@ -132,15 +132,18 @@ async fn an_unconfigured_target_preserves_the_old_assignment() {
         let mut configured = ctx.clone();
         let mut settings = configured.config.settings::<serde_json::Value>().unwrap();
         settings["worker_targets"] = serde_json::json!([
-            "worker-target:shared",
-            "worker-target:official",
-            format!("worker-target:tenant:{}", setup.tenant_id)
+            yorishiro::workers::target::WorkerTarget::Shared.tag(),
+            yorishiro::workers::target::WorkerTarget::Official.tag(),
+            yorishiro::workers::target::WorkerTarget::Tenant(setup.tenant_id).tag()
         ]);
         configured.config.settings = Some(settings);
         let mut wrong_tenant = configured.clone();
         let mut settings = wrong_tenant.config.settings::<serde_json::Value>().unwrap();
         settings["worker_targets"] =
-            serde_json::json!([format!("worker-target:tenant:{}", uuid::Uuid::now_v7())]);
+            serde_json::json!([yorishiro::workers::target::WorkerTarget::Tenant(
+                uuid::Uuid::now_v7()
+            )
+            .tag()]);
         wrong_tenant.config.settings = Some(settings);
         assert!(matches!(
             yorishiro::edition::ee::models::workspace_worker_classes::set(

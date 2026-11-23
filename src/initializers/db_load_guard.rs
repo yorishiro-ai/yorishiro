@@ -1,7 +1,7 @@
 //! Automatic read-only mode under sustained PostgreSQL connection load.
 //!
 //! This is an opt-in safeguard because changing a deployment-wide maintenance state without an operator request is a significant operational action.
-//! It ports the pre-Loco guard's threshold, sustain window, ownership marker, and safe polling fallback onto the Loco two-pool architecture.
+//! It samples connections on the identity pool, requires a sustained threshold before acting, and marks the maintenance state it owns so it never overrides an operator.
 
 use std::time::{Duration, Instant};
 

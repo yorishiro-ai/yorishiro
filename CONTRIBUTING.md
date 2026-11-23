@@ -36,7 +36,7 @@ These limits apply per independent pool, so aggregate database connections are t
 ## Adding a table
 
 1. Write a migration under `migration/src/`.
-2. Run `make entities` to regenerate `_entities/`.
+2. Run `make entities` to regenerate `_entities/`; it needs Docker and the `sea-orm-cli` version pinned in `Cargo.lock`.
 3. Add a module under `src/models/`.
 
 ## Tests
@@ -65,7 +65,7 @@ If an external run cannot restore the verified E5 model cache, it still runs the
 ## Before you push
 
 Linux builds use the repository `.cargo/config.toml`, which requires `mold` and `sccache`.
-Install both tools before running Cargo locally.
+Install both tools, and `uv` for the Python checks, before running Cargo locally.
 
 ```console
 $ make check-all

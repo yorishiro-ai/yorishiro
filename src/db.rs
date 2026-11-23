@@ -433,10 +433,7 @@ pub async fn begin_workspace(
     if is_sqlite(&ctx.db) {
         return ctx.db.begin().await.internal();
     }
-    let handle = ctx
-        .shared_store
-        .get::<DbHandle>()
-        .ok_or_else(|| crate::YorishiroError::Internal("DbHandle missing".into()))?;
+    let handle = DbHandle::of(ctx)?;
     handle
         .tenant
         .begin_for_workspace(tenant_id, workspace_id)
@@ -455,10 +452,7 @@ pub(crate) async fn begin_workspace_list(
     if is_sqlite(&ctx.db) {
         return ctx.db.begin().await.internal();
     }
-    let handle = ctx
-        .shared_store
-        .get::<DbHandle>()
-        .ok_or_else(|| crate::YorishiroError::Internal("DbHandle missing".into()))?;
+    let handle = DbHandle::of(ctx)?;
     let txn = handle
         .tenant
         .orm
@@ -514,6 +508,16 @@ pub struct DbHandle {
 }
 
 impl DbHandle {
+    /// The pools installed by `after_context`.
+    ///
+    /// # Errors
+    /// Returns an internal error when the context was built without them.
+    pub(crate) fn of(ctx: &loco_rs::app::AppContext) -> Result<Self, crate::YorishiroError> {
+        ctx.shared_store
+            .get::<Self>()
+            .ok_or_else(|| crate::YorishiroError::Internal("DbHandle missing".into()))
+    }
+
     pub(crate) fn identity_connection(&self) -> DatabaseConnection {
         sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(self.identity.clone())
     }

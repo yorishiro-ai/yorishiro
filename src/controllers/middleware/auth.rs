@@ -112,10 +112,7 @@ impl Authenticator for DefaultAuthenticator {
         if is_sqlite(&app.db) {
             Entity::authenticate_sqlite(&app.db, presented_key, requested).await
         } else {
-            let db = app
-                .shared_store
-                .get::<DbHandle>()
-                .ok_or_else(|| YorishiroError::Internal("DbHandle missing".into()))?;
+            let db = DbHandle::of(app)?;
             Entity::authenticate(&db, presented_key, requested).await
         }
     }

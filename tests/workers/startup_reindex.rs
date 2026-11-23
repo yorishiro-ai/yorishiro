@@ -256,20 +256,13 @@ async fn dimensions_only_mismatch_is_queued_and_matching_stamp_is_not() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let workspace = tenant.workspace_id;
-        let matching_workspace = {
-            let transaction = ctx.db.begin().await.unwrap();
-            let workspace = yorishiro::models::tenancy::create_workspace(
-                &transaction,
-                tenant.tenant_id,
-                "matching-stamp-workspace",
-                None,
-                None,
-            )
-            .await
-            .unwrap();
-            transaction.commit().await.unwrap();
-            workspace.id
-        };
+        let matching_workspace = crate::requests::fixtures::create_workspace(
+            &ctx,
+            tenant.tenant_id,
+            "matching-stamp-workspace",
+        )
+        .await
+        .id;
         let old = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
             base_url: "http://unused.invalid".into(),
             api_key: "key".into(),

@@ -98,7 +98,7 @@ impl WorkerTarget {
     /// Routing tag for durable non-embedding jobs on separate Loco consumers.
     #[must_use]
     pub fn job_tag(self) -> String {
-        self.tag().replacen("worker-target:", "job-target:", 1)
+        format!("job-target:{}", self.name())
     }
 
     /// Parses a non-embedding execution target with the same tenant validation.

@@ -120,7 +120,7 @@ pub(crate) async fn finish_job(
     let joined = tokio::time::timeout(Duration::from_secs(10), worker).await;
     let closed = queue.close().await;
     match result {
-        Ok(outcome) => outcome.expect("migration must complete on the configured queue provider"),
+        Ok(outcome) => outcome.expect("the job must complete on the configured queue provider"),
         Err(panic) => std::panic::resume_unwind(panic),
     }
     shutdown.expect("shutdown worker queue");

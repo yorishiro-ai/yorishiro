@@ -14,7 +14,6 @@ use loco_rs::{
     task::Tasks,
 };
 use migration::Migrator;
-use std::path::Path;
 
 use crate::controllers;
 use crate::controllers::mcp::McpToolSet;
@@ -285,28 +284,6 @@ pub(crate) async fn on_shutdown(ctx: &AppContext) {
     initializers::queue::shutdown(ctx).await;
     initializers::db_load_guard::shutdown(ctx).await;
     // Loco drains queue workers after this hook; their contexts keep the pools alive.
-}
-
-/// Seeds the demo tenant and workspace from `fixtures/`.
-pub(crate) async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
-    let fixtures = base.join("fixtures");
-    let tenants = fixtures.join("tenant_tenants.yaml");
-    if tenants.exists() {
-        loco_rs::db::seed::<crate::models::tenant_tenants::ActiveModel>(
-            &ctx.db,
-            &tenants.display().to_string(),
-        )
-        .await?;
-    }
-    let workspaces = fixtures.join("workspace_workspaces.yaml");
-    if workspaces.exists() {
-        loco_rs::db::seed::<crate::models::workspace_workspaces::ActiveModel>(
-            &ctx.db,
-            &workspaces.display().to_string(),
-        )
-        .await?;
-    }
-    Ok(())
 }
 
 /// Builds the pools and shared services every entry point, tasks included, depends on.

@@ -63,10 +63,11 @@ async fn production_dispatch_records_each_resolved_target() {
             .unwrap()
             .expect("production dispatch records the delivery");
             let expected = match class {
-                WorkerClass::Shared => "worker-target:shared".to_owned(),
-                WorkerClass::Official => "worker-target:official".to_owned(),
-                WorkerClass::TenantPrivate => format!("worker-target:tenant:{}", fixture.tenant_id),
-            };
+                WorkerClass::Shared => WorkerTarget::Shared,
+                WorkerClass::Official => WorkerTarget::Official,
+                WorkerClass::TenantPrivate => WorkerTarget::Tenant(fixture.tenant_id),
+            }
+            .tag();
             assert_eq!(row.queue_name.as_deref(), Some(expected.as_str()));
             assert_eq!(row.tags, Some(serde_json::json!([expected])));
             assert_eq!(

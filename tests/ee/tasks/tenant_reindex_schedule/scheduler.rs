@@ -253,7 +253,7 @@ async fn postgres_tick_waits_for_disable_and_rechecks_tenant_activity() {
         );
         let tick_after_disable_locks = async {
             // Disable owns the membership fence but cannot update its tenant until we release the row.
-            wait_for_membership_lock(&ctx.db, &fence, true).await;
+            crate::requests::fixtures::wait_for_membership_lock(&ctx.db, &fence, true).await;
             let vars = loco_rs::task::Vars::default();
             let tick = TenantReindexScheduler.run_at(
                 &ctx,
@@ -261,7 +261,7 @@ async fn postgres_tick_waits_for_disable_and_rechecks_tenant_activity() {
                 schedule.scheduled_for.unwrap().to_utc(),
             );
             let release_disable = async {
-                wait_for_membership_lock(&ctx.db, &fence, false).await;
+                crate::requests::fixtures::wait_for_membership_lock(&ctx.db, &fence, false).await;
                 row_lock.rollback().await.unwrap();
             };
             let (result, ()) = tokio::join!(tick, release_disable);
@@ -313,30 +313,6 @@ async fn workspace_dispatch_ids(
         lifecycles.into_iter().map(|row| row.id).collect(),
         outbox.into_iter().map(|row| row.id).collect(),
     )
-}
-
-async fn wait_for_membership_lock(db: &sea_orm::DatabaseConnection, fence: &str, granted: bool) {
-    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
-
-    tokio::time::timeout(std::time::Duration::from_secs(20), async {
-        loop {
-            let row = db
-                .query_one_raw(Statement::from_sql_and_values(
-                    DatabaseBackend::Postgres,
-                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted = $2 AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS observed",
-                    [fence.into(), granted.into()],
-                ))
-                .await
-                .unwrap()
-                .unwrap();
-            if row.try_get::<bool>("", "observed").unwrap() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("expected membership fence holder or waiter was not observed");
 }
 
 #[test]
@@ -405,7 +381,7 @@ fn dispatch_failure_remains_primary_when_release_also_fails() {
 
 #[tokio::test]
 async fn sqlite_task_rolls_back_schedule_when_dispatch_fails() {
-    use sea_orm::{ConnectionTrait, TransactionTrait};
+    use sea_orm::ConnectionTrait;
     use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
@@ -414,13 +390,7 @@ async fn sqlite_task_rolls_back_schedule_when_dispatch_fails() {
 
 
     let crate::requests::fixtures::TestTenant { tenant_id, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
-    let transaction = ctx.db.begin().await.unwrap();
-    for name in ["second"] {
-        yorishiro::models::tenancy::create_workspace(&transaction, tenant_id, name, None, None)
-            .await
-            .unwrap();
-    }
-    transaction.commit().await.unwrap();
+    crate::requests::fixtures::create_workspace(&ctx, tenant_id, "second").await;
     // Direct write (c): a failed outbox insert, injected deterministically, must roll back both schedule advancement and all jobs.
     ctx.db.execute_unprepared(
         "CREATE TRIGGER refuse_test_dispatch BEFORE INSERT ON queue_job_dispatch_outbox BEGIN SELECT RAISE(ABORT, 'test outbox unavailable'); END"

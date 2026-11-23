@@ -3,28 +3,13 @@ use crate::requests::fixtures::{self, TenantArgs, TestTenant};
 use axum::http::StatusCode;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    TransactionTrait,
 };
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::_entities::{
     entity_entities, tenant_tenants, workspace_schema_fork_heads, workspace_schema_forks,
-    workspace_workspaces,
 };
 use yorishiro::models::api_keys::ApiKeyScope;
-
-async fn create_workspace(
-    ctx: &loco_rs::app::AppContext,
-    tenant_id: Uuid,
-    name: &str,
-) -> workspace_workspaces::Model {
-    let txn = ctx.db.begin().await.expect("begin workspace creation");
-    let workspace = yorishiro::models::tenancy::create_workspace(&txn, tenant_id, name, None, None)
-        .await
-        .expect("create workspace");
-    txn.commit().await.expect("commit workspace creation");
-    workspace
-}
 
 // Fork heads are archived, so normal entity creation cannot reference them.
 // Inject an existing historical reference to exercise deletion's integrity guard.
@@ -81,7 +66,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let schema: serde_json::Value = schema_response.json();
         let source_schema_id: Uuid = schema["schema"]["id"].as_str().unwrap().parse().unwrap();
 
-        let target = create_workspace(&ctx, tenant_id, "target").await;
+        let target = fixtures::create_workspace(&ctx, tenant_id, "target").await;
         let target_key =
             fixtures::issue_api_key(&ctx, target.id, owner_id, ApiKeyScope::Schema, false).await;
         let read_key = fixtures::issue_api_key(
@@ -437,7 +422,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
         assert_eq!(source_response.status_code(), StatusCode::CREATED);
         let source: serde_json::Value = source_response.json();
         let source_schema_id = source["schema"]["id"].as_str().unwrap();
-        let target = create_workspace(&ctx, tenant_a, "fork-http-target").await;
+        let target = fixtures::create_workspace(&ctx, tenant_a, "fork-http-target").await;
         let target_key =
             fixtures::issue_api_key(&ctx, target.id, owner_a, ApiKeyScope::Schema, false).await;
         let created = request
@@ -540,8 +525,8 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
             },
         )
         .await;
-        let workspace_b = create_workspace(&ctx, tenant_id, "workspace-b").await;
-        let workspace_c = create_workspace(&ctx, tenant_id, "workspace-c").await;
+        let workspace_b = fixtures::create_workspace(&ctx, tenant_id, "workspace-b").await;
+        let workspace_c = fixtures::create_workspace(&ctx, tenant_id, "workspace-c").await;
         let key_b =
             fixtures::issue_api_key(&ctx, workspace_b.id, owner_id, ApiKeyScope::Schema, false)
                 .await;
@@ -644,7 +629,7 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
             },
         )
         .await;
-        let workspace_b = create_workspace(&ctx, tenant_id, "opposite-cycle-b").await;
+        let workspace_b = fixtures::create_workspace(&ctx, tenant_id, "opposite-cycle-b").await;
         let key_b =
             fixtures::issue_api_key(&ctx, workspace_b.id, owner_id, ApiKeyScope::Schema, false)
                 .await;
@@ -775,7 +760,7 @@ async fn fork_creation_shares_the_schema_version_lock() {
             .parse::<Uuid>()
             .unwrap();
         let definition = serde_json::from_value(source["schema"]["definition"].clone()).unwrap();
-        let target = create_workspace(&ctx, tenant_id, "version-race-target").await;
+        let target = fixtures::create_workspace(&ctx, tenant_id, "version-race-target").await;
 
         let db = ctx.shared_store.get::<yorishiro::db::DbHandle>().unwrap();
         let first = db
@@ -868,7 +853,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
             .await;
         let source: serde_json::Value = source_response.json();
         let source_schema_id = source["schema"]["id"].as_str().unwrap();
-        let target = create_workspace(&ctx, tenant_a, "target-a").await;
+        let target = fixtures::create_workspace(&ctx, tenant_a, "target-a").await;
         let target_key =
             fixtures::issue_api_key(&ctx, target.id, owner_a, ApiKeyScope::Schema, false).await;
         let created = request
@@ -993,7 +978,7 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
         let source: serde_json::Value = source_response.json();
-        let target = create_workspace(&ctx, tenant_a, "sqlite-target").await;
+        let target = fixtures::create_workspace(&ctx, tenant_a, "sqlite-target").await;
         let target_key =
             fixtures::issue_api_key(&ctx, target.id, owner_id, ApiKeyScope::Schema, false).await;
         let created = request

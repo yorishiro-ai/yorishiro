@@ -45,7 +45,7 @@ DOCKERFILE
 docker network create "$NET" >/dev/null 2>&1
 docker run -d --name "$PG" --network "$NET" \
   -e POSTGRES_USER=yorishiro -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=yorishiro \
-  "$(docker compose -f "$REPO/docker-compose.test.yaml" --profile test config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["testdb"]["image"])')" >/dev/null
+  "$(docker compose -f "$REPO/docker-compose.test.yaml" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["testdb"]["image"])')" >/dev/null
 
 # systemd needs writable runtime mounts and access to the host cgroup namespace.
 docker run -d --name "$APP" --network "$NET" --privileged --cgroupns=host \

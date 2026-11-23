@@ -1022,8 +1022,7 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
             .expect("response must contain a job_id string");
 
         // Poll the dedicated status endpoint with that real job_id.
-        // Before the fix this would have been a 404 because the route was on
-        // `/active/{name}/infer-fill` (the POST path), not `/inference-jobs/{job_id}`.
+        // Status is served from `/inference-jobs/{job_id}`, not from the POST path.
         let status = request
             .get(&format!("/api/inference-jobs/{job_id}"))
             .add_header("Authorization", format!("Bearer {}", setup.api_key))

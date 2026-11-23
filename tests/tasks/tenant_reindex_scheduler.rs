@@ -1,7 +1,7 @@
 use loco_rs::{app::Hooks, task::Tasks};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
-    QueryFilter, QuerySelect, QueryTrait, TransactionTrait,
+    QueryFilter, QuerySelect, QueryTrait,
 };
 use yorishiro::services::embedding::{
     EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
@@ -128,17 +128,7 @@ async fn enqueue_rejection_is_workspace_scoped_and_scan_continues() {
             },
         )
         .await;
-        let transaction = ctx.db.begin().await.unwrap();
-        let second_workspace = yorishiro::models::tenancy::create_workspace(
-            &transaction,
-            first.tenant_id,
-            "z-successful-workspace",
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        transaction.commit().await.unwrap();
+        let second_workspace = crate::requests::fixtures::create_workspace(&ctx, first.tenant_id, "z-successful-workspace").await;
         let settings = ctx.config.settings::<yorishiro::data::settings::Settings>().unwrap();
         let metadata = yorishiro::services::embedding::deployment_embedding_metadata(&settings)
             .unwrap()
@@ -191,17 +181,7 @@ async fn all_enqueue_failures_are_aggregated_with_each_workspace_id() {
         let mut ctx = ctx;
         configure_deployment_metadata(&mut ctx);
         let first = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
-        let transaction = ctx.db.begin().await.unwrap();
-        let second_workspace = yorishiro::models::tenancy::create_workspace(
-            &transaction,
-            first.tenant_id,
-            "second-workspace",
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        transaction.commit().await.unwrap();
+        let second_workspace = crate::requests::fixtures::create_workspace(&ctx, first.tenant_id, "second-workspace").await;
         let settings = ctx.config.settings::<yorishiro::data::settings::Settings>().unwrap();
         let metadata = yorishiro::services::embedding::deployment_embedding_metadata(&settings)
             .unwrap().unwrap();

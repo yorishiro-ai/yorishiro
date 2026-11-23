@@ -169,21 +169,16 @@ fi
 note "rpm on almalinux:10 — the current RPM-family release this supports"
 # --------------------------------------------------------------------------------------------
 # This project supports the current LTS releases, which on the RPM side is AlmaLinux 10: glibc
-# 2.39, measured, against a declared floor of 2.39. There is no GLIBCXX floor to check against:
+# 2.39, which is the declared floor. There is no GLIBCXX floor to check against:
 # the candle-based embedding provider links no C++ standard library dynamically.
 #
 # This is the only block that installs an rpm at all: the others install its counterpart deb. So
 # it is not a second opinion on the deb tests, it is the only evidence that the other half of
 # what a release publishes can be unpacked and run.
-# The image is pulled first, and its progress goes to the terminal rather than into `$out`.
-# Docker writes that to stderr, and folding it in with `2>&1` below puts a paragraph of layer
-# names in front of every assertion's failure message, which is what this looked like the first
-# time it failed for a real reason.
+# Pull first: progress is written to stderr, and `2>&1` below would put layer names in front of every failure message.
 docker pull -q almalinux:10 >/dev/null 2>&1 || true
 # The exit code is captured into a variable and always printed, rather than being consumed by an
-# `if`. When this first failed, `RUNS` was simply absent: no marker said whether the binary had
-# been run at all, and an `if` with an `echo` in both branches would have been just as silent if
-# the command never reached either. A line that is always emitted cannot fail to appear.
+# `if`, so a command that never ran is still visible as a missing marker.
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro almalinux:10 bash -c '
   dnf install -y -q /pkg/'"$(basename "$(rpm)")"' >/dev/null 2>&1 || { echo "INSTALL_FAILED"; exit 1; }
   /usr/bin/yorishiro --help >/dev/null 2>/tmp/help.err
@@ -276,7 +271,7 @@ docker rm -f "pg-$$" "app-$$" >/dev/null 2>&1
 # A private network and no published ports: this runs beside CI's own service containers.
 docker run -d --name "pg-$$" --network "$NET" \
   -e POSTGRES_USER=yorishiro -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=yorishiro \
-  "$(docker compose -f "$REPO/docker-compose.test.yaml" --profile test config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["testdb"]["image"])')" >/dev/null
+  "$(docker compose -f "$REPO/docker-compose.test.yaml" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["testdb"]["image"])')" >/dev/null
 
 ready=
 for _ in $(seq 1 60); do

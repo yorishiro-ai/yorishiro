@@ -120,11 +120,7 @@ where
     let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id)
         .await
         .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    let tag = if super::registry::is_embedding_worker(&W::class_name()) {
-        target.tag()
-    } else {
-        target.job_tag()
-    };
+    let tag = super::registry::routing_tag(&W::class_name(), target);
     crate::models::queue_job_dispatch_outbox::record_lifecycle_payload(
         &txn,
         lifecycle_id,

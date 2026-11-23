@@ -260,3 +260,48 @@ pub(crate) fn note_schema(name: &str, embedded: bool) -> serde_json::Value {
         "entity_types": {"note": {"fields": {"title": title}}}
     })
 }
+
+/// Waits until a session holds (`granted`) or queues for (`!granted`) the advisory lock named `fence`.
+///
+/// PostgreSQL only: it reads `pg_locks`.
+pub(crate) async fn wait_for_membership_lock(
+    db: &sea_orm::DatabaseConnection,
+    fence: &str,
+    granted: bool,
+) {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            let row = db
+                .query_one_raw(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted = $2 AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS observed",
+                    [fence.into(), granted.into()],
+                ))
+                .await
+                .unwrap()
+                .unwrap();
+            if row.try_get::<bool>("", "observed").unwrap() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("expected membership fence holder or waiter was not observed");
+}
+
+/// Creates a workspace under `tenant_id` and commits it.
+pub(crate) async fn create_workspace(
+    ctx: &AppContext,
+    tenant_id: Uuid,
+    name: &str,
+) -> yorishiro::models::_entities::workspace_workspaces::Model {
+    let txn = ctx.db.begin().await.expect("begin workspace creation");
+    let workspace = tenancy::create_workspace(&txn, tenant_id, name, None, None)
+        .await
+        .expect("create workspace");
+    txn.commit().await.expect("commit workspace creation");
+    workspace
+}

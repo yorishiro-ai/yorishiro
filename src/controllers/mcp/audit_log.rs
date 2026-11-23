@@ -52,10 +52,13 @@ impl YorishiroMcpServer {
         match crate::models::api_key_audit_log::list_for_actor(self.app_context(), &actor, page)
             .await
         {
-            Ok(records) => ok_json(crate::controllers::audit_log::render_records(
+            Ok(records) => match crate::controllers::audit_log::render_records(
                 records,
                 crate::data::time::configured(self.app_context()),
-            )),
+            ) {
+                Ok(rendered) => ok_json(rendered),
+                Err(error) => Ok(err_to_tool_result(error)),
+            },
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }

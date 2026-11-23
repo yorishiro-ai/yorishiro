@@ -114,3 +114,11 @@ pub(crate) fn is_embedding_worker(name: &str) -> bool {
     .iter()
     .any(|embedding| embedding == name)
 }
+
+pub(crate) fn routing_tag(name: &str, target: super::target::WorkerTarget) -> String {
+    if is_embedding_worker(name) {
+        target.tag()
+    } else {
+        target.job_tag()
+    }
+}

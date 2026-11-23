@@ -164,10 +164,7 @@ impl Entity {
             Self::touch_last_used(&app.db, auth.api_key_id).await;
             return Ok(());
         }
-        let db = app
-            .shared_store
-            .get::<DbHandle>()
-            .ok_or_else(|| YorishiroError::Internal("DbHandle missing".into()))?;
+        let db = DbHandle::of(app)?;
         let connection = match auth.workspace_id {
             Some(workspace_id) => {
                 db.tenant

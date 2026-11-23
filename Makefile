@@ -14,11 +14,9 @@ test-postgres migrate entities: export DB_MAX_CONNECTIONS ?= 100
 test-postgres migrate entities: export DB_CONNECT_TIMEOUT ?= 5000
 test-postgres test-sqlite test-valkey: export RUST_BACKTRACE ?= 1
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check test-location-check test-postgres test-sqlite test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check test-location-check test-postgres test-sqlite test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check patch-check test-python test-contract
 
 check: check-ce
-
-.PHONY: patch-check
 
 check-ce: patch-check
 	cargo check --locked --no-default-features --features community --workspace
@@ -44,7 +42,6 @@ python-lint: test-python
 	uv run ruff check scripts tests/blackbox tests/ci patches/loco-rs/verify.py
 	@for script in scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-package-lifecycle.sh; do bash -n "$$script" || exit; done
 
-.PHONY: test-python test-contract
 test-python:
 	uv run scripts/test_env_config.py
 	uv run scripts/test_harden_generated_entities.py
@@ -62,7 +59,7 @@ edition-boundary-check:
 	uv run scripts/check_edition_boundary.py
 
 test-location-check:
-	@if git grep -n -E '#\[[[:space:]]*((tokio|async_std)::)?test([[:space:]]|\]|\()|#\[[[:space:]]*cfg[[:space:]]*\([[:space:]]*test[[:space:]]*\)' -- src ee edition migration/src; then \
+	@if git grep -n -E '#\[[[:space:]]*((tokio|async_std)::)?test([[:space:]]|\]|\()|#\[[[:space:]]*cfg[[:space:]]*\([[:space:]]*test[[:space:]]*\)' -- src ee migration/src; then \
 		echo 'ERROR: tests and test-only code belong in tests/' >&2; exit 1; \
 	fi
 

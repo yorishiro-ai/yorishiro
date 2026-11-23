@@ -1,5 +1,5 @@
 use loco_rs::app::AppContext;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait, sea_query::Expr};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::query_embedding_requests::{
@@ -346,18 +346,13 @@ async fn expired_rows_are_purged_and_live_rows_are_kept() {
 async fn a_request_is_invisible_to_another_workspace() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (tenant, mine) = workspace(&request, &ctx, "qe-mine").await;
-        let txn = ctx.db.begin().await.expect("begin workspace creation");
-        let theirs = yorishiro::models::tenancy::create_workspace(
-            &txn,
+        let theirs = crate::requests::fixtures::create_workspace(
+            &ctx,
             tenant,
             &format!("other-workspace-{}", Uuid::new_v4()),
-            None,
-            None,
         )
         .await
-        .expect("create separate workspace")
         .id;
-        txn.commit().await.expect("commit workspace creation");
         let id = Entity::open(
             &ctx.db,
             mine,

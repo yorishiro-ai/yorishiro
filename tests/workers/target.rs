@@ -227,7 +227,7 @@ fn production_start_configuration_selects_roles_and_rejects_mixed_targets() {
 
 /// Target keys group a tenant's workspaces, while shared and official keys span the deployment; limits are opt-in.
 mod concurrency {
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use uuid::Uuid;
     use yorishiro::models::queue_job_lifecycles::{
         Admission, Column, Entity, LifecycleStatus, Model,
@@ -253,18 +253,13 @@ mod concurrency {
     }
 
     async fn workspace_of(ctx: &loco_rs::app::AppContext, tenant_id: Uuid) -> Uuid {
-        let txn = ctx.db.begin().await.expect("begin workspace setup");
-        let workspace = yorishiro::models::tenancy::create_workspace(
-            &txn,
+        crate::requests::fixtures::create_workspace(
+            ctx,
             tenant_id,
             &format!("target-test-{}", Uuid::now_v7()),
-            None,
-            None,
         )
         .await
-        .expect("create workspace");
-        txn.commit().await.expect("commit workspace setup");
-        workspace.id
+        .id
     }
 
     /// Dispatches one reindex job through the production dispatcher and returns the lifecycle row it recorded.
