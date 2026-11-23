@@ -10,7 +10,7 @@
 //! | `official` | `Official` | `official:official` |
 //! | `tenant:<tenant-id>` | `TenantPrivate` | `tenant_private:tenant:<tenant-id>` |
 //!
-//! The class is still recorded on the job's lifecycle row, but it no longer takes part in choosing a worker.
+//! The lifecycle row records the class; worker selection uses the target tag.
 //! The concurrency key is the same name used for the tag, so the set of workers a job can reach and the set of jobs counted against its limit are always the same set.
 
 use std::fmt;

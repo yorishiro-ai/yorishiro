@@ -19,8 +19,7 @@ User documentation: [English and Japanese wiki](https://yorishiro-ai.github.io/w
 
 - Only `src/lib.rs` assembles `ee/`; other base modules have no enterprise branches or references, enforced by `make edition-boundary-check`.
 - `src/models/_entities/` is auto-generated. Never edit by hand.
-- Table extensions live in `src/models/<table>.rs`; large ones may contain private submodules.
-- Business logic goes in `src/models/<table>.rs` next to the generated entity.
+- Table-owned persistence and business logic live in `src/models/<table>.rs`; large models may contain private submodules.
 - Use SeaORM by default; explain raw SQL where backend primitives, atomic writes, or query shape require it.
 - `src/db.rs` handles connections, not tables.
 
@@ -31,10 +30,8 @@ On PostgreSQL, `AppContext.db` and `DbHandle.identity` share the migration-role 
 The Loco queue provider owns another independent pool.
 SQLite has no `DbHandle`; it uses `AppContext.db` plus the queue provider's separate SQLite pool.
 
-Production defaults to at most 10 connections on SQLite and 100 on PostgreSQL.
-Pool settings live in `config/production.yaml` and `config/test.yaml`; CI supplies its overrides in `.github/workflows/ci.yml`.
+Pool limits and timeouts live in `config/production.yaml` and `config/test.yaml`; CI supplies its overrides in `.github/workflows/ci.yml`.
 These limits apply per independent pool, so aggregate database connections are the sum of the pools a process creates.
-Async waits release the task to do other work, but one physical connection still executes one SQL operation at a time.
 
 ## Adding a table
 
@@ -47,9 +44,6 @@ Async waits release the task to do other work, but one physical connection still
 Run the local development stack with `docker compose -f docker-compose.dev.yaml up --build`.
 The Makefile starts only test dependencies from `docker-compose.test.yaml` when using the default local URLs.
 The separate `docker-compose.yaml` deploys published images and requires a release `TAG` and a production `DATABASE_URL`.
-`YORISHIRO_HTTP_ALLOWED_NETWORKS` restricts REST (including webhooks), MCP, Swagger, authentication, and setup to a JSON list of peer CIDRs.
-The default `[]` allows all peers without bypassing authentication.
-Behind a reverse proxy, enforce client IP policy at the proxy because the app uses the socket peer and ignores forwarding headers.
 
 Use `make test-sqlite` or `make test-postgres` locally; `EDITION=ce` selects the community edition.
 The backend comes from `DATABASE_URL` and the edition from the feature set; there is no other test selector.
@@ -65,10 +59,6 @@ Run the optional SQLite search benchmark with `cargo bench --bench sqlite_ann --
 Run the PostgreSQL benchmark with `cargo bench --bench postgres_search -- DATABASE_URL TENANT_UUID WORKSPACE_UUID QUERY_VECTOR_FILE`, using a JSON file of vector coordinates and an existing populated workspace.
 The connection role must be allowed to assume `yorishiro_app`; the benchmark applies that restricted role and transaction-local tenant/workspace scope inside a read-only transaction.
 
-Metaschema validation includes property-based tests for arbitrary schema-shaped definitions and rejection of empty `entity_types`.
-
-The main CI workflow runs when pull requests open, reopen, or receive new commits, and on pushes to `develop`.
-It also supports merge queue checks targeting `develop` if the queue is enabled.
 Licensed checks run on trusted same-repository pull requests and pushes to `develop`, not fork pull requests or merge queue refs.
 If an external run cannot restore the verified E5 model cache, it still runs the tests that do not require the model.
 

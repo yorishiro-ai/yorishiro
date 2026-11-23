@@ -68,7 +68,7 @@ impl Default for Dispatch {
     }
 }
 
-/// Operator-tunable defaults that used to be fixed in code.
+/// Operator-tunable deployment limits.
 /// Every field has a default so a configuration file written before this section existed keeps loading.
 #[derive(Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields, default)]

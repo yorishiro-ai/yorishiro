@@ -2,21 +2,21 @@
 
 ## Test commands
 
-All commands run from the repository root. `make -C . <target>` works from any directory (the Makefile sets CWD so Loco tasks find `config/`).
+Run commands from the repository root, or use `make -C /path/to/repo <target>`.
 
 | Command | What it does | Backend |
 |---|---|---|
 | `make test-sqlite` | The whole suite on SQLite (`cargo test`); `EDITION=ce` selects community, the default is `ee` | SQLite |
 | `make test-valkey` | Only the Valkey queue provider tests, with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` (default: the compose `redis` service) | SQLite + Valkey |
 | `make test-postgres` | The whole suite on PostgreSQL; every test creates and drops its own database | PostgreSQL |
-| `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
+| `make check-ce` | `cargo check --locked --no-default-features --features community --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
 | `make clippy-ce` | Strict Clippy for every CE target, including tests | CE |
 | `make clippy-ee` | Strict Clippy for every EE target, including tests | EE |
-| `make fmt-check` | `cargo fmt --all -- --check` |: |
+| `make fmt-check` | `cargo fmt --all -- --check` | Both |
 | `make check-all` | Formatting, Python/boundary checks, CE check, and CE Clippy | CE |
 | `make check-all-ee` | Formatting, Python/boundary checks, EE check, and EE Clippy | EE |
-| `make build-ce` | `cargo build --locked --no-default-features --workspace` | CE |
+| `make build-ce` | Community debug build; see `Makefile` for feature flags | CE |
 | `make build-ee` | `cargo build --locked --features enterprise --workspace` | EE |
 | `make entities` | Spin up pgvector container, migrate, generate entities, tear down | PostgreSQL |
 
@@ -58,12 +58,11 @@ A test that creates more than one tenant in one boot therefore only passes on a 
 
 ```rust
 boot_request::<App, _, _>(|request, ctx| async move {
-    if super::skip_unlicensed(&ctx) {
+    if crate::requests::skip_unlicensed(&ctx) {
         return;
     }
 ```
 
-Outside `tests/requests/`, call it as `crate::requests::skip_unlicensed(&ctx)`.
 A test that must observe the unlicensed cap boots with `crate::requests::unlicensed()`, so the gate never sees a key.
 A test changes the booted app's configuration by passing overrides to `boot_request_with(&[crate::requests::max_tenants(1)], ...)`; each override is a dotted path into `Config` such as `queue.num_workers`, applied to that one boot; the process environment is touched only by tests of configuration loading itself, which take `serial(process_environment)`.
 
@@ -71,9 +70,9 @@ A test changes the booted app's configuration by passing overrides to `boot_requ
 
 CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus a licensed EE PostgreSQL job.
 Each job runs every test; nothing is assigned or inventoried per test, so a new test needs no registration.
-The real-binary REST/MCP/CLI contracts live in `tests/blackbox/` and use owned SQLite processes.
+The real-binary REST/MCP/CLI contracts live in `tests/blackbox/`; common suites own SQLite processes and the licensed tenant suite owns a PostgreSQL database.
 Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
-The package and Docker installability checks (about 90 minutes) are their own workflow, `packaging.yml`: a pull request runs it only when packaging inputs change, and `develop` always runs it.
+The package and Docker installability checks run in `packaging.yml`, selected by its path filters on pull requests and on pushes to `develop`.
 
 The integration tests are one binary rooted at `tests/mod.rs`.
 A test file sits at the same path as the source file it covers; not every source file has tests.

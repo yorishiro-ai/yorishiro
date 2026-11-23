@@ -22,7 +22,7 @@ Through MCP, you can create schemas, write data, and search by meaning for the i
 
 ## Get started
 
-Run the server, worker, and scheduler with Docker Compose.
+Run the server, embedding worker, application-jobs worker, and scheduler with Docker Compose.
 Save a configuration from the [Docker Compose guide](https://yorishiro-ai.github.io/wiki/installation/docker-compose/) as `compose.yml` and replace the image's `<VERSION>` with the release tag you want to use.
 Run this in the directory containing that file:
 
@@ -39,7 +39,6 @@ For installation without Docker, see [packages](https://yorishiro-ai.github.io/w
 ## Documentation
 
 Usage, configuration, and operations documentation lives in the [wiki](https://yorishiro-ai.github.io/wiki/).
-This README covers the overview and getting started; detailed documentation is maintained in the wiki.
 
 [Installation](https://yorishiro-ai.github.io/wiki/installation/) · [Configuration](https://yorishiro-ai.github.io/wiki/configuration/) · [Embeddings](https://yorishiro-ai.github.io/wiki/configuration/embedding/) · [Workers and queues](https://yorishiro-ai.github.io/wiki/configuration/workers-and-queues/) · [MCP tools](https://yorishiro-ai.github.io/wiki/reference/mcp-tools/)
 
