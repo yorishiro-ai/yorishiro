@@ -45,12 +45,23 @@ dump_logs() { docker exec "$APP" journalctl -u yorishiro -u yorishiro-worker -u 
 
 DEB="$(basename "$PKG_FILE")"
 NET="ysr-sd-$$" APP="ysr-sd-app-$$" PG="ysr-sd-pg-$$"
+SYSTEMD_IMAGE="yorishiro-systemd-test:$$"
 
 cleanup() {
   docker rm -f "$APP" "$PG" >/dev/null 2>&1
   docker network rm "$NET" >/dev/null 2>&1
+  docker image rm "$SYSTEMD_IMAGE" >/dev/null 2>&1
 }
 trap cleanup EXIT INT TERM
+
+# Keep network-dependent package preparation outside the systemd boot deadline.
+docker build -t "$SYSTEMD_IMAGE" - <<'DOCKERFILE' || exit 1
+FROM ubuntu:26.04
+RUN apt-get -o Acquire::Retries=5 update -qq \
+    && apt-get -o Acquire::Retries=5 install -y -qq systemd systemd-sysv curl \
+    && rm -rf /var/lib/apt/lists/*
+CMD ["/lib/systemd/systemd"]
+DOCKERFILE
 
 docker network create "$NET" >/dev/null 2>&1
 docker run -d --name "$PG" --network "$NET" \
@@ -60,10 +71,7 @@ docker run -d --name "$PG" --network "$NET" \
 # systemd has to be PID 1, which is what `exec` at the end of the command is for, and needs both
 # tmpfs mounts plus a cgroup namespace it can write.
 docker run -d --name "$APP" --network "$NET" --privileged --cgroupns=host \
-  --tmpfs /run --tmpfs /run/lock -v "$PKG_DIR":/pkg:ro ubuntu:26.04 \
-  bash -c 'apt-get -o Acquire::Retries=5 update -qq >/dev/null 2>&1
-           apt-get -o Acquire::Retries=5 install -y -qq systemd systemd-sysv curl >/dev/null 2>&1
-           exec /lib/systemd/systemd' >/dev/null
+  --tmpfs /run --tmpfs /run/lock -v "$PKG_DIR":/pkg:ro "$SYSTEMD_IMAGE" >/dev/null || exit 1
 
 booted=
 for _ in $(seq 1 60); do
@@ -74,6 +82,8 @@ for _ in $(seq 1 60); do
 done
 if [ -z "$booted" ]; then
   docker logs "$APP" >&2 || true
+  docker exec "$APP" systemctl list-jobs --no-pager >&2 || true
+  docker exec "$APP" journalctl -b -n 80 --no-pager >&2 || true
   echo "systemd never finished booting in the container" >&2
   exit 1
 fi
