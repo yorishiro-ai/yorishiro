@@ -324,7 +324,7 @@ mod input_parity_tests {
     }
 }
 
-fn assert_inventory_contract(label: &str, tools: &[Tool]) {
+pub(crate) fn assert_inventory_contract(label: &str, tools: &[Tool]) {
     let names: Vec<_> = tools.iter().map(|tool| tool.name.to_string()).collect();
     let mut sorted = names.clone();
     sorted.sort();
