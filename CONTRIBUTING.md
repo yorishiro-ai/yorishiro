@@ -44,8 +44,8 @@ Async waits release the task to do other work, but one physical connection still
 
 ## Tests
 
-Run the local development stack with `docker compose -f docker-compose.test.yaml up --build`.
-The Makefile starts the test database or Valkey from the same Compose file when using the default local URLs.
+Run the local development stack with `docker compose -f docker-compose.dev.yaml up --build`.
+The Makefile starts only test dependencies from `docker-compose.test.yaml` when using the default local URLs.
 The separate `docker-compose.yaml` deploys published images and requires a release `TAG` and a production `DATABASE_URL`.
 `YORISHIRO_HTTP_ALLOWED_NETWORKS` restricts REST (including webhooks), MCP, Swagger, authentication, and setup to a JSON list of peer CIDRs.
 The default `[]` allows all peers without bypassing authentication.

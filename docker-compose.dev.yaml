@@ -1,0 +1,117 @@
+# Local development use the distribution image's Dockerfile.
+#   docker compose -f docker-compose.dev.yaml up --build
+#
+# `app` serves HTTP, `worker` consumes embedding sync/query/reindex, `jobs` consumes import/maintenance/inference, and `scheduler` runs scheduled tasks.
+# Both consumers are required; the HTTP server consumes no queued jobs.
+
+# One image and shared configuration keep all four roles on the same database and queue.
+x-yorishiro: &yorishiro
+  image: ${IMAGE:-yorishiro}:${TAG:-local}
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      EDITION: ${EDITION:-ee}
+  environment:
+    # These override the embedded/example defaults. Mount a complete administrator-owned
+    # /app/config/production.yaml or production.local.yaml when file configuration is needed.
+    DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
+    # `Redis` selects Loco's Redis-compatible queue provider. Without it the
+    # queue kind follows DATABASE_URL's scheme and lands on Postgres.
+    YORISHIRO_QUEUE_KIND: Redis
+    QUEUE_URL: redis://redis:6379
+    HOST: http://localhost:5150
+    # The image default is loopback-safe; compose publishes the port, so opt into container access.
+    BINDING: 0.0.0.0
+    LOG_LEVEL: info
+    # Explicitly retain the packaged default: run the local embedding provider and fetch its
+    # model into the container cache when no read-only model mount is supplied.
+    # Set YORISHIRO_EMBEDDING_PROVIDER=none to skip the model download.
+    YORISHIRO_EMBEDDING_PROVIDER: ${YORISHIRO_EMBEDDING_PROVIDER:-local}
+    # Loco configuration defaults to one tenant, keeping the first-run setup wizard reachable.
+    # Set to "0" for multiple tenants on a licensed PostgreSQL deployment, disabling that wizard.
+    YORISHIRO_MAX_TENANTS: "1"
+
+services:
+  db:
+    image: pgvector/pgvector:pg18
+    shm_size: 1gb
+    # Reap orphan children outside PostgreSQL so their exit cannot trigger cluster recovery.
+    init: true
+    environment:
+      POSTGRES_USER: yorishiro
+      POSTGRES_PASSWORD: yorishiro
+      POSTGRES_DB: yorishiro
+    volumes:
+      - pgdata:/var/lib/postgresql
+      # Installs the required extensions on first initialization.
+      - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "yorishiro"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: valkey/valkey:9.1.3
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  app:
+    <<: *yorishiro
+    # The HTTP server does not load an embedding model.
+    ports:
+      - "127.0.0.1:5150:5150"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *yorishiro
+    # The worker serves the shared target. To serve others, list them after `--worker=`, separated by
+    # commas (`worker-target:official`, `worker-target:tenant:<tenant-id>`), or add a service for them.
+    command: ["start", "--worker=worker-target:shared"]
+    # Only this role loads the embedding model.
+    # To reuse local files, mount ./models:/app/models:ro containing both model.safetensors and tokenizer.json under models/<short_id>/.
+    # Without a mount, verified model files are downloaded into /app/models at worker startup.
+    # Workers do not serve the image's HTTP health check.
+    healthcheck:
+      disable: true
+    depends_on:
+      app:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  jobs:
+    <<: *yorishiro
+    # Durable application jobs run without loading an embedding model.
+    # To serve other targets, list job-target:official or job-target:tenant:<tenant-id> after --worker=, separated by commas.
+    command: ["start", "--worker=job-target:shared"]
+    # Workers do not serve the image's HTTP health check.
+    healthcheck:
+      disable: true
+    depends_on:
+      app:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    <<: *yorishiro
+    command: ["scheduler"]
+    healthcheck:
+      disable: true
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  pgdata:

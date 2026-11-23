@@ -30,8 +30,20 @@ import json
 import sys
 
 config = json.load(sys.stdin)
-assert config["services"]["app"]["build"]["context"]
+assert set(config["services"]) == {"testdb", "redis"}
+assert all("build" not in service for service in config["services"].values())
 assert any(mount["source"] == "test_pgdata" for mount in config["services"]["testdb"]["volumes"])
+'
+  docker compose -f "$repo/docker-compose.dev.yaml" config --format json |
+    python3 -c '
+import json
+import sys
+
+services = json.load(sys.stdin)["services"]
+assert set(services) == {"app", "worker", "jobs", "scheduler", "db", "redis"}
+for role in {"app", "worker", "jobs", "scheduler"}:
+    assert services[role]["build"]["context"]
+assert any(mount["source"] == "pgdata" for mount in services["db"]["volumes"])
 '
 fi
 
