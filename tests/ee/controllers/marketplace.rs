@@ -98,8 +98,8 @@ async fn the_marketplace_answers_501_on_sqlite() {
         assert_eq!(listing.status_code(), StatusCode::NOT_IMPLEMENTED);
         let body: serde_json::Value = listing.json();
         assert_eq!(body["error"]["code"], "backend_unsupported");
-        let session = super::mcp::initialize(&request).await;
-        let response = super::mcp::mcp_call(
+        let session = crate::controllers::mcp::initialize(&request).await;
+        let response = crate::controllers::mcp::mcp_call(
             &request,
             &session,
             &owner.api_key,
@@ -141,7 +141,7 @@ async fn publish_list_fork_and_review_round_trip() {
                 .await;
 
         // Publishing a version of a template that doesn't exist must 404.
-        let session = super::mcp::initialize(&request).await;
+        let session = crate::controllers::mcp::initialize(&request).await;
         let draft = request
             .post("/api/marketplace/00000000-0000-0000-0000-000000000000/versions")
             .add_header("Authorization", format!("Bearer {}", owner.api_key))
@@ -296,7 +296,7 @@ async fn publish_list_fork_and_review_round_trip() {
             .into_iter()
             .enumerate()
             {
-                let response = super::mcp::mcp_call(
+                let response = crate::controllers::mcp::mcp_call(
                     &request,
                     &session,
                     &delegated_key,
@@ -483,7 +483,7 @@ async fn publish_list_fork_and_review_round_trip() {
                 .add_header("Authorization", format!("Bearer {}", owner.api_key))
                 .await
                 .json();
-            let mcp = super::mcp::mcp_call(
+            let mcp = crate::controllers::mcp::mcp_call(
                 &request,
                 &session,
                 &owner.api_key,
@@ -492,7 +492,7 @@ async fn publish_list_fork_and_review_round_trip() {
                 json!({"name":name,"arguments":arguments}),
             )
             .await;
-            assert_eq!(super::mcp::tool_result_json(&mcp), rest, "{name}");
+            assert_eq!(crate::controllers::mcp::tool_result_json(&mcp), rest, "{name}");
         }
 
         // A second tenant forks it.

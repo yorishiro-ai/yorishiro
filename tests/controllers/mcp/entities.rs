@@ -136,7 +136,7 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             .await
             .unwrap();
         assert_eq!(pending.data, json!({"title": "before"}));
-        crate::requests::fill_defaults::finish_via_api(
+        crate::workers::fill_defaults::finish_via_api(
             &request,
             &ctx,
             job_id,
@@ -213,7 +213,7 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             serde_json::from_str(undo["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(undo["snapshot_job_id"], job_id.to_string());
         let undo_id = undo["job_id"].as_str().unwrap().parse().unwrap();
-        crate::requests::fill_defaults::finish_via_api(
+        crate::workers::fill_defaults::finish_via_api(
             &request,
             &ctx,
             undo_id,

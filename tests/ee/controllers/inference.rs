@@ -155,8 +155,8 @@ async fn infer_fill_without_a_configured_key_is_refused() {
             "response: {:?}",
             infer.text()
         );
-        let session = super::mcp::initialize(&request).await;
-        let mcp = super::mcp::mcp_call(
+        let session = crate::controllers::mcp::initialize(&request).await;
+        let mcp = crate::controllers::mcp::mcp_call(
             &request,
             &session,
             &setup.api_key,
@@ -351,7 +351,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
                 request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                     .await.assert_status(StatusCode::NO_CONTENT);
             }
-            crate::requests::fill_defaults::fail_via_api(&request, &ctx, id, &setup.api_key,
+            crate::workers::fill_defaults::fail_via_api(&request, &ctx, id, &setup.api_key,
                 &format!("/api/inference-jobs/confirmations/{id}")).await;
             let unchanged = request.get(&format!("/api/entities/{entity}"))
                 .add_header("Authorization", format!("Bearer {}", setup.api_key)).await;
@@ -385,7 +385,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         yorishiro::models::api_keys::Entity::revoke(&ctx.db, revoked.id)
             .await
             .expect("revoke queued confirmation actor");
-        crate::requests::fill_defaults::fail_via_api(
+        crate::workers::fill_defaults::fail_via_api(
             &request,
             &ctx,
             denied_id,
@@ -403,12 +403,12 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             fetched["data"]
         );
 
-        let session = super::mcp::initialize(&request).await;
-        let confirm = super::mcp::mcp_call(&request, &session, &setup.api_key, 40, "tools/call",
+        let session = crate::controllers::mcp::initialize(&request).await;
+        let confirm = crate::controllers::mcp::mcp_call(&request, &session, &setup.api_key, 40, "tools/call",
             serde_json::json!({"name":"confirm_inference_proposals","arguments":{"job_id":job_id}})).await;
-        let accepted = super::mcp::tool_result_json(&confirm);
+        let accepted = crate::controllers::mcp::tool_result_json(&confirm);
         let confirmation_id = accepted["job_id"].as_str().unwrap().parse().unwrap();
-        crate::requests::fill_defaults::finish_via_api(
+        crate::workers::fill_defaults::finish_via_api(
             &request,
             &ctx,
             confirmation_id,
@@ -438,7 +438,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         );
         let undo_report: serde_json::Value = undo.json();
         let undo_id = undo_report["job_id"].as_str().unwrap().parse().unwrap();
-        crate::requests::fill_defaults::finish_via_api(
+        crate::workers::fill_defaults::finish_via_api(
             &request,
             &ctx,
             undo_id,
@@ -563,7 +563,7 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
         if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
-        let session = super::mcp::initialize(&request).await;
+        let session = crate::controllers::mcp::initialize(&request).await;
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = create_entity(&request, &setup).await;
         let rejected_job = Uuid::new_v4();
@@ -630,7 +630,7 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
             }
             for (index, name) in ["get_inference_job", "list_inference_proposals", "get_inference_confirmation",
                 "reject_inference_proposals", "discard_inference_proposals", "confirm_inference_proposals"].into_iter().enumerate() {
-                let mcp = super::mcp::mcp_call(&request, &session, &key.plaintext, i64::try_from(index).unwrap() + 10, "tools/call",
+                let mcp = crate::controllers::mcp::mcp_call(&request, &session, &key.plaintext, i64::try_from(index).unwrap() + 10, "tools/call",
                     serde_json::json!({"name":name,"arguments":{"job_id":rejected_job}})).await;
                 assert_eq!(mcp["result"]["structuredContent"]["error"]["code"], "scope_insufficient", "{name}: {mcp}");
             }
@@ -657,9 +657,9 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
             listed.text()
         );
         let proposals: serde_json::Value = listed.json();
-        let mcp = super::mcp::mcp_call(&request, &session, &key.plaintext, 30, "tools/call",
+        let mcp = crate::controllers::mcp::mcp_call(&request, &session, &key.plaintext, 30, "tools/call",
             serde_json::json!({"name":"list_inference_proposals","arguments":{"job_id":rejected_job}})).await;
-        assert_eq!(super::mcp::tool_result_json(&mcp), proposals);
+        assert_eq!(crate::controllers::mcp::tool_result_json(&mcp), proposals);
         assert_eq!(proposals.as_array().unwrap().len(), 1);
         assert_eq!(proposals[0]["status"], "pending");
         assert_eq!(proposals[0]["proposed"], "reject me");
@@ -1211,7 +1211,7 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
             .unwrap()
             .expect("infer-fill dispatch records a lifecycle");
         let path = format!("/api/inference-jobs/{job_id}");
-        crate::requests::fill_defaults::finish_via_api(
+        crate::workers::fill_defaults::finish_via_api(
             &request,
             &ctx,
             lifecycle.id,

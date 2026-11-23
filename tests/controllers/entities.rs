@@ -1,11 +1,11 @@
-use super::boot_request;
+use crate::requests::boot_request;
 #[cfg(feature = "enterprise")]
 use sea_orm::{ColumnTrait, QueryFilter};
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::{entity_entities, schema_schemas};
 
-use super::fixtures::{TenantArgs, TestTenant};
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 
 #[cfg(feature = "enterprise")]
 #[tokio::test]
@@ -42,7 +42,7 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
             .text(jsonl).await;
         import.assert_status(StatusCode::ACCEPTED);
         let id: Uuid = import.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
-        super::fill_defaults::fail_via_api(&request, &ctx, id, &tenant.api_key, &format!("/api/import-jobs/{id}")).await;
+        crate::workers::fill_defaults::fail_via_api(&request, &ctx, id, &tenant.api_key, &format!("/api/import-jobs/{id}")).await;
         assert_eq!(entity_entities::count(&ctx.db, tenant.workspace_id).await.unwrap(), 500);
         licence(chrono::Utc::now().timestamp() - 1);
         request.post("/api/entities").add_header("Authorization", format!("Bearer {}",tenant.api_key))
@@ -161,7 +161,7 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
             .await
             .unwrap();
         assert_eq!(before.data["title"], "overwritten");
-        super::fill_defaults::finish_via_api(
+        crate::workers::fill_defaults::finish_via_api(
             &request,
             &ctx,
             body["job_id"].as_str().unwrap().parse().unwrap(),

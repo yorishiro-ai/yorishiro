@@ -78,17 +78,17 @@ The package and Docker installability checks (about 90 minutes) are their own wo
 The integration tests are one binary rooted at `tests/mod.rs`.
 A test file sits at the same path as the source file it covers; not every source file has tests.
 
-- `tests/controllers/` — MCP tool routing, middleware, route inventory, OpenAPI assembly
+- `tests/controllers/` — REST handlers, MCP tools, middleware, route inventory, OpenAPI assembly
 - `tests/data/` — configuration loading and validation (`config/`), typed settings, time, built-in templates
 - `tests/db.rs`, `tests/db/` — connection primitives and migrations
 - `tests/initializers/` — process-lifetime initializers
 - `tests/models/` — one file per table module, with sub-modules for backend-specific or sub-module coverage (`entity_entities/sqlite.rs`, `schema_schemas/metaschema/`)
-- `tests/requests/` — one file per REST feature, driven through `boot_request`
+- `tests/requests/` — shared `boot_request` harness and public-path fixtures
 - `tests/services/` — embedding providers
 - `tests/tasks/` — task commands, named after the task they run
 - `tests/workers/` — embedding sync, reindex, queue, dispatch, lifecycle, targets
 - `tests/integration/` — real child processes
-- `tests/ee/` — mirrors `ee/`, including `ee/requests/` (REST) and `ee/requests/mcp/` (one file per MCP tool group); compiled only with the `enterprise` feature
+- `tests/ee/` — mirrors `ee/`, including REST and MCP tests under `ee/controllers/`; compiled only with the `enterprise` feature
 
 There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
 
@@ -158,7 +158,7 @@ A non-superuser role is required. A superuser bypasses RLS regardless of `FORCE`
 Provider routing tests use the request harness's owned throwaway database rather than clearing the database named by `DATABASE_URL` or `QUEUE_URL`.
 Process-local serial locks do not isolate separate CE and EE test processes.
 
-Queue tests (`tests/requests/queue.rs`) use separate temporary SQLite application and queue files for provider-specific inspection.
+Queue tests (`tests/workers/queue/`) use separate temporary SQLite application and queue files for provider-specific inspection.
 Teardown drains workers and closes queue and application pools before removing those files.
 
 ## Gate testing

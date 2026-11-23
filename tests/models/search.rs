@@ -284,12 +284,10 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
                     )).await.unwrap().unwrap();
                     assert!(state.try_get::<bool>("", "indisvalid").unwrap(), "the high-dimensional halfvec HNSW index must be valid before the recall run");
                 }
-                let started = std::time::Instant::now();
                 let hits =
                     search::search_by_vector(&txn, fixture.workspace_id, vector.clone(), "", query)
                         .await
                         .unwrap();
-                println!("genuine dimensions={dimensions} build={build} query={i} search_ms={:.3}", started.elapsed().as_secs_f64()*1000.0);
                 txn.execute_unprepared(
                     "SET LOCAL enable_indexscan=off; SET LOCAL enable_bitmapscan=off",
                 )
@@ -1643,7 +1641,7 @@ async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
 /// SQLite end-to-end: entity create → document embed via test provider → persisted vector → vector search hit.
 ///
 /// Drives the public `sync_embedding_for_record` directly, not the worker.
-/// `tests/requests/search.rs` covers the worker and the HTTP search on both backends.
+/// `tests/controllers/search.rs` covers the worker and the HTTP search on both backends.
 #[tokio::test]
 async fn sqlite_document_embed_persist_and_search() {
     if !crate::require_sqlite_backend() {

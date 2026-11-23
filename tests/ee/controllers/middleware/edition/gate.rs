@@ -35,9 +35,9 @@
 //! this code can produce, it guards the change that widens where the layer is applied. Without it,
 //! moving the gate up to cover every enterprise route would be a silent product change that no test
 //! notices.
+use crate::controllers::mcp;
 use crate::requests::boot_request;
 use crate::requests::boot_request_with;
-use crate::requests::mcp;
 use yorishiro::App;
 use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 

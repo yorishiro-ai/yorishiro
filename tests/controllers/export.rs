@@ -7,7 +7,7 @@ use yorishiro::{
     models::{_entities::entity_entities::Column, entity_entities},
 };
 
-use super::{
+use crate::requests::{
     boot_request,
     fixtures::{TenantArgs, TestTenant},
 };

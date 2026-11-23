@@ -26,7 +26,7 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/rustup-in
 COPY Cargo.toml Cargo.lock ./
 COPY .cargo/config.toml .cargo/config.toml
 COPY config/production.yaml config/production.yaml
-COPY benches/sqlite_ann.rs benches/sqlite_ann.rs
+COPY benches/ benches/
 COPY src/ src/
 COPY ee/ ee/
 COPY migration/ migration/

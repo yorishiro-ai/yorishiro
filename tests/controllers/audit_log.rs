@@ -1,4 +1,4 @@
-use super::{boot_request, boot_request_with_timezone};
+use crate::requests::{boot_request, boot_request_with_timezone};
 use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
 use sea_orm::{EntityTrait, TransactionTrait};
@@ -6,7 +6,7 @@ use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
 
-use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
+use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
 
 struct Setup {
     owner_id: Uuid,
@@ -58,11 +58,11 @@ async fn audit_reads_require_iam_and_preserve_the_configured_timezone() {
         let txn = ctx.db.begin().await.unwrap();
         // A policy-free member: an admin carries the built-in wildcard policy and would pass the pre-attachment read.
         let member = yorishiro::models::tenancy::register_member(
-            &txn, setup.tenant_id, &super::fixtures::unique_email("audit-reader"),
+            &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("audit-reader"),
             "audit-reader-password", None).await.unwrap();
         txn.commit().await.unwrap();
         let delegated = issue_api_key(&ctx, setup.workspace_id, member.id, ApiKeyScope::Read, true).await;
-        let root_key = super::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
+        let root_key = crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
         let document = serde_json::json!({"statements":[{"effect":"allow","actions":["audit_log_list"],
             "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
         let policy = request.post("/api/iam/policies")
@@ -193,7 +193,7 @@ async fn undo_migration_job_is_recorded() {
             .unwrap()
             .parse()
             .unwrap();
-        super::fill_defaults::finish_via_api(
+        crate::workers::fill_defaults::finish_via_api(
             &request,
             &ctx,
             queued_id,
@@ -286,7 +286,8 @@ async fn reindex_audit_detail_is_workspace_id_and_is_recorded_before_relay_publi
 async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = setup(&request, &ctx).await;
-        let administrator = super::fixtures::create_iam_administrator(&ctx, setup.tenant_id).await;
+        let administrator =
+            crate::requests::fixtures::create_iam_administrator(&ctx, setup.tenant_id).await;
         let key = issue_api_key(
             &ctx,
             setup.workspace_id,
@@ -320,7 +321,7 @@ async fn an_audit_key_cannot_read_another_tenants_audit_log() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let tenant_a = setup(&request, &ctx).await;

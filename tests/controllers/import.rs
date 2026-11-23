@@ -1,10 +1,10 @@
-use super::boot_request;
+use crate::requests::boot_request;
 use axum::http::StatusCode;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, IntoActiveModel, TransactionTrait};
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
 
-use super::fixtures::{self, TenantArgs, TestTenant};
+use crate::requests::fixtures::{self, TenantArgs, TestTenant};
 
 #[test]
 fn concurrent_import_workers_keep_each_apps_database() {
@@ -30,7 +30,7 @@ fn concurrent_import_workers_keep_each_apps_database() {
                 .unwrap()
                 .parse()
                 .unwrap();
-            super::fill_defaults::finish_via_api(
+            crate::workers::fill_defaults::finish_via_api(
                 &request,
                 &ctx,
                 id,
@@ -239,7 +239,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             before.json::<Vec<serde_json::Value>>(),
             [] as [serde_json::Value; 0]
         );
-        super::fill_defaults::finish_via_api(
+        crate::workers::fill_defaults::finish_via_api(
             &request,
             &ctx,
             id,
@@ -297,7 +297,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
         .await
         .unwrap();
         replay.commit().await.unwrap();
-        super::fill_defaults::finish_via_api(
+        crate::workers::fill_defaults::finish_via_api(
             &request,
             &ctx,
             id,

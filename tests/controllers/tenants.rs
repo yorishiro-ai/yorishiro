@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use serde_json::{Value, json};
 use yorishiro::App;
 
-use super::boot_request;
-use super::fixtures::{TenantArgs, TestTenant};
+use crate::requests::boot_request;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 
 #[tokio::test]
 #[cfg(feature = "enterprise")]
@@ -14,12 +14,13 @@ async fn owner_can_inspect_and_confirm_disablement_without_deleting_data() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let target_admin =
-            super::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id)
+                .await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         request
             .get("/api/tenants/current/retirement")

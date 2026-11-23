@@ -1,5 +1,5 @@
-use super::fixtures::{TenantArgs, TestTenant, issue_api_key};
-use super::{boot_request, boot_request_with_timezone};
+use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
+use crate::requests::{boot_request, boot_request_with_timezone};
 use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
 use uuid::Uuid;
@@ -20,7 +20,7 @@ async fn member_key(
     tenant_memberships::add_member(&ctx.db, tenant_id, member.id)
         .await
         .expect("add member");
-    super::fixtures::grant_workspace(
+    crate::requests::fixtures::grant_workspace(
         ctx,
         workspace_id,
         member.id,
@@ -39,7 +39,8 @@ async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
     crate::requests::boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
         let set_licence = |exp| {
             ctx.shared_store
                 .insert(Arc::new(LicenceState::licensed(LicenceClaims {
@@ -82,7 +83,8 @@ async fn disabled_plan_policy_ignores_free_quota_but_keeps_manual_cap() {
     crate::requests::boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
         ctx.shared_store
             .insert(Arc::new(LicenceState::licensed(LicenceClaims {
                 sub: "quota-disabled".into(),
@@ -127,7 +129,8 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
         let tenant_id = tenant.tenant_id;
         let owner_id = tenant.owner_id;
         let tenant_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
         let owner_auth = format!("Bearer {tenant_key}");
 
         let response = request
@@ -244,7 +247,7 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
         let admin = tenancy::register_member(
             &txn,
             tenant.tenant_id,
-            &super::fixtures::unique_email("workspace-stale-admin"),
+            &crate::requests::fixtures::unique_email("workspace-stale-admin"),
             "hunter2-hunter2",
             None,
         )
@@ -333,7 +336,8 @@ async fn cannot_delete_a_tenants_only_workspace() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let main_id = tenant.workspace_id;
         let owner_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
 
         let response = request
             .delete(&format!("/api/workspaces/{main_id}"))
@@ -400,7 +404,7 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
     use yorishiro::models::workspace_memberships::WorkspaceRole;
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let administrator_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let administrator_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let local = user_users::create_user(
             &ctx.db,
             &format!("local-{}@example.com", Uuid::new_v4()),
@@ -532,7 +536,7 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
             .json(&serde_json::json!({"user_name":"denied","password":"workspace-bound-key"}))
             .await
             .assert_status(StatusCode::FORBIDDEN);
-        let administrator = super::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let administrator = crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
         let tenant_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
             &ctx.db,
             tenant.tenant_id,
@@ -581,7 +585,7 @@ async fn workspace_grant_management_requires_iam_and_respects_credential_binding
             false,
         )
         .await;
-        super::fixtures::grant_workspace(
+        crate::requests::fixtures::grant_workspace(
             &ctx,
             sibling_id.parse().unwrap(),
             local.id,
@@ -641,7 +645,7 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let TestTenant {
@@ -677,7 +681,8 @@ async fn a_new_workspace_becomes_active_on_first_schema() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
 
         let listed = request
             .get("/api/workspaces")

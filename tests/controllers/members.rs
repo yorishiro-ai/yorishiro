@@ -1,5 +1,5 @@
-use super::boot_request;
-use super::fixtures::{TenantArgs, TestTenant};
+use crate::requests::boot_request;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
 use yorishiro::App;
 use yorishiro::models::api_keys::ApiKeyScope;
@@ -14,14 +14,14 @@ async fn competing_tenant_memberships_allow_only_one() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if super::skip_unlicensed(&ctx) {
+        if crate::requests::skip_unlicensed(&ctx) {
             return;
         }
         let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let second = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user = yorishiro::models::user_users::create_user(
             &ctx.db,
-            &super::fixtures::unique_email("competing-tenants"),
+            &crate::requests::fixtures::unique_email("competing-tenants"),
             "hunter2-hunter2",
             None,
         )
@@ -121,7 +121,7 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user = yorishiro::models::user_users::create_user(
             &ctx.db,
-            &super::fixtures::unique_email("issuance-race"),
+            &crate::requests::fixtures::unique_email("issuance-race"),
             "hunter2-hunter2",
             None,
         )
@@ -130,7 +130,7 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id)
             .await
             .unwrap();
-        super::fixtures::grant_workspace(
+        crate::requests::fixtures::grant_workspace(
             &ctx,
             tenant.workspace_id,
             user.id,
@@ -255,7 +255,7 @@ async fn tenant_users_sign_in_with_tenant_id_and_name_until_removed() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_admin_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let auth = format!("Bearer {tenant_admin_key}");
         request
             .put(&format!("/api/members/users/{}/password", tenant.owner_id))

@@ -2,22 +2,7 @@ mod sqlite;
 #[cfg(feature = "enterprise")]
 pub(crate) use sqlite::close_app_pools_sqlite;
 use sqlite::{boot_sqlite, remove_sqlite_files, sqlite_queue_path};
-mod api_keys;
-mod audit_log;
-mod auth;
-mod entities;
-mod export;
-pub(crate) mod fill_defaults;
 pub(crate) mod fixtures;
-mod iam;
-mod import;
-pub(crate) mod mcp;
-mod members;
-mod schemas;
-mod search;
-mod setup;
-mod template_library;
-mod workspaces;
 
 #[cfg(feature = "enterprise")]
 fn licence_active(ctx: &loco_rs::app::AppContext) -> bool {
@@ -261,5 +246,3 @@ pub(crate) async fn workspace_txn(
         .await
         .expect("begin workspace transaction")
 }
-
-pub(crate) mod tenants;

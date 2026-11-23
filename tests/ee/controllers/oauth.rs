@@ -1,4 +1,4 @@
-//! Covers what is reachable without a live identity provider: the unconfigured/configured `status` shape, the `authorize`/`callback` unconfigured `404`, an unreachable issuer failing loudly rather than redirecting, `callback`'s rejection paths (provider error, missing `code`/`state`, a badly-signed `state`, an expired `state`), and `find_or_create`'s provisioning rules called directly against `ctx.db` (the tenant cap, matching how `tests/requests/stripe.rs` calls `tenant_billing::` functions directly alongside HTTP requests).
+//! Covers what is reachable without a live identity provider: the unconfigured/configured `status` shape, the `authorize`/`callback` unconfigured `404`, an unreachable issuer failing loudly rather than redirecting, `callback`'s rejection paths (provider error, missing `code`/`state`, a badly-signed `state`, an expired `state`), and `find_or_create`'s provisioning rules called directly against `ctx.db` (the tenant cap, matching how `tests/ee/controllers/stripe.rs` calls `tenant_billing::` functions directly alongside HTTP requests).
 //! The redirect `authorize` builds on a reachable issuer, the CSRF cookie it sets, and a full authorization-code round trip through `callback` all need a real or mocked `IdP` and are not covered here.
 
 use crate::requests::boot_request;
@@ -395,3 +395,5 @@ async fn oauth_entry_points_are_rate_limited_and_status_is_not() {
     })
     .await;
 }
+
+mod state_token;

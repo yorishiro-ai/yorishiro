@@ -349,7 +349,7 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
             crate::requests::fixtures::TenantArgs::default(),
         )
         .await;
-        let _entity_id = crate::ee::requests::inference::create_entity(&request, &setup).await;
+        let _entity_id = crate::ee::controllers::inference::create_entity(&request, &setup).await;
         let first_update = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
@@ -536,7 +536,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
                 crate::requests::fixtures::TenantArgs::default(),
             )
             .await;
-            crate::ee::requests::inference::create_entity(&request, &setup).await;
+            crate::ee::controllers::inference::create_entity(&request, &setup).await;
             // A second version leaves the entity on an outdated schema, which is what infer-fill walks.
             let next = request
                 .post("/api/schemas")
@@ -715,7 +715,7 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
                     .json(&serde_json::json!({"name":mode,"document":deny})).await.assert_status_ok();
             }
         }
-        crate::requests::fill_defaults::finish_with_status(&ctx, lifecycle, "failed").await;
+        crate::workers::fill_defaults::finish_with_status(&ctx, lifecycle, "failed").await;
         let job = yorishiro::edition::ee::models::inference_jobs::get(&ctx.db, job_id)
             .await
             .unwrap()
@@ -779,7 +779,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
     let (llm, entered, release) = gated_llm().await;
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let setup = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
-        let entity_id = crate::ee::requests::inference::create_entity(&request, &setup).await;
+        let entity_id = crate::ee::controllers::inference::create_entity(&request, &setup).await;
         let response = request.post("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({"name":"note", "entity_types":{"note":{"fields":{
@@ -840,7 +840,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
             changed.expect("permission changes must not wait for the LLM reply");
         };
         tokio::join!(
-            crate::requests::fill_defaults::finish_with_status(&ctx, lifecycle, "failed"),
+            crate::workers::fill_defaults::finish_with_status(&ctx, lifecycle, "failed"),
             revoke,
         );
         let job = inference_jobs::get(&ctx.db, job_id).await.unwrap().unwrap();

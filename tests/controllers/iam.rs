@@ -14,7 +14,7 @@ pub(crate) async fn iam_mcp_call(
     tool: &str,
     arguments: serde_json::Value,
 ) -> serde_json::Value {
-    super::mcp::mcp_call(
+    crate::controllers::mcp::mcp_call(
         request,
         session,
         key,
@@ -1123,7 +1123,7 @@ async fn assigned_roles_change_user_permissions_without_changing_identity() {
         roles.assert_status_ok();
         let roles = roles.json::<Vec<Value>>();
         assert_eq!(roles.len(), 3);
-        let session = super::mcp::initialize(&request).await;
+        let session = crate::controllers::mcp::initialize(&request).await;
         let listed = iam_mcp_call(&request, &session, &root, "list_iam_roles", json!({})).await;
         assert_ne!(listed["result"]["isError"], true, "{listed}");
         let listed: Value = serde_json::from_str(listed["result"]["content"][0]["text"].as_str().unwrap()).unwrap();

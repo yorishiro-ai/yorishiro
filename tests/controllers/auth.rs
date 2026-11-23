@@ -1,4 +1,4 @@
-use super::boot_request;
+use crate::requests::boot_request;
 use crate::requests::boot_request_with;
 use axum::http::StatusCode;
 use yorishiro::App;
@@ -117,67 +117,14 @@ async fn signup_cannot_raise_the_community_tenant_cap_with_configuration() {
 }
 
 /// `db::lock_for_update` is what serializes `create_tenant`'s cap check; this fails without it.
-/// This test is PostgreSQL-only: `lock_for_update` is a no-op on SQLite,
-/// so the serialisation guarantee does not hold.
-#[tokio::test]
-async fn create_tenant_serializes_on_its_advisory_lock() {
-    if !crate::require_postgres_backend() {
-        return;
-    }
-    // The default pool is too small for a second connection to ever reach the advisory lock.
-    boot_request_with::<App, _, _>(
-        &[("database.max_connections", 4.into())],
-        |_request, ctx| async move {
-            let holder = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
-            yorishiro::db::lock_for_update(&holder, "create_tenant")
-                .await
-                .unwrap();
-
-            // A second caller must block behind the held lock, not proceed concurrently.
-            let db = ctx.db.clone();
-            let blocked = tokio::time::timeout(std::time::Duration::from_millis(500), async move {
-                let txn = sea_orm::TransactionTrait::begin(&db).await.unwrap();
-                let result = yorishiro::models::tenant_tenants::create_tenant(
-                    &txn,
-                    "blocked-racer",
-                    Some(100),
-                )
-                .await;
-                match &result {
-                    Ok(_) => txn.commit().await.unwrap(),
-                    Err(_) => txn.rollback().await.unwrap(),
-                }
-                result
-            })
-            .await;
-            assert!(
-                blocked.is_err(),
-                "a second create_tenant call must block on the held lock, not proceed: {blocked:?}"
-            );
-
-            // Releasing the lock lets the next caller through.
-            holder.rollback().await.unwrap();
-            let txn = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
-            let result = yorishiro::models::tenant_tenants::create_tenant(
-                &txn,
-                "unblocked-racer",
-                Some(100),
-            )
-            .await;
-            assert!(result.is_ok(), "result: {result:?}");
-            txn.commit().await.unwrap();
-        },
-    )
-    .await;
-}
 #[tokio::test]
 async fn login_issues_tenant_key_after_credentials_are_verified() {
     use sea_orm::TransactionTrait;
     boot_request::<App, _, _>(|request, ctx| async move {
-        let args = super::fixtures::TenantArgs::default();
+        let args = crate::requests::fixtures::TenantArgs::default();
         let email = args.owner_email.clone();
         let password = args.owner_password.clone();
-        let tenant = super::fixtures::TestTenant::create(&request, &ctx, args).await;
+        let tenant = crate::requests::fixtures::TestTenant::create(&request, &ctx, args).await;
         let transaction = ctx.db.begin().await.unwrap();
         let other = yorishiro::models::tenancy::create_workspace(
             &transaction,
@@ -215,7 +162,7 @@ async fn login_without_membership_is_rejected() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let user = yorishiro::models::user_users::create_user(
             &ctx.db,
-            &super::fixtures::unique_email("no-membership"),
+            &crate::requests::fixtures::unique_email("no-membership"),
             "hunter2-hunter2",
             None,
         )

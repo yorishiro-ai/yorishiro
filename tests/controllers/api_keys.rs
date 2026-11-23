@@ -6,8 +6,8 @@ use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::api_keys::WORKSPACE_HEADER;
 
-use super::fixtures::{self, TenantArgs, TestTenant};
-use super::{boot_request, boot_request_with_timezone};
+use crate::requests::fixtures::{self, TenantArgs, TestTenant};
+use crate::requests::{boot_request, boot_request_with_timezone};
 
 mod issuance_race;
 

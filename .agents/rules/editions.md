@@ -86,7 +86,8 @@ Ungated (serve regardless):
 
 ## Licence tests
 
-Tests live in `tests/requests/licence_gate.rs`, covering verification, expiry-boundary exclusivity (`exp > now`, not `>=`), and config-file key parsing. The suite generates its own throwaway RSA keypair per test via `openssl genrsa`/`openssl rsa -pubout` into a `tempfile::TempDir`, never a checked-in `.pem`: a committed private key reads as a leaked secret to a scanner regardless of what it actually signs, so nothing under `tests/` is a key file.
+Tests live in `tests/ee/controllers/middleware/edition/`, covering verification, expiry-boundary exclusivity (`exp > now`, not `>=`), and config-file key parsing.
+The suite generates its own throwaway RSA keypair per test via `openssl genrsa`/`openssl rsa -pubout` into a `tempfile::TempDir`, never a checked-in `.pem`: a committed private key reads as a leaked secret to a scanner regardless of what it actually signs, so nothing under `tests/` is a key file.
 
 ## Config file
 

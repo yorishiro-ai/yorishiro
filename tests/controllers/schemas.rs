@@ -1,10 +1,10 @@
-use super::boot_request;
+use crate::requests::boot_request;
 use axum::http::StatusCode;
 use yorishiro::App;
 use yorishiro::data::templates::TEMPLATES;
 use yorishiro::models::api_keys::ApiKeyScope;
 
-use super::fixtures::{TenantArgs, TestTenant};
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 
 mod deletion;
 
@@ -68,10 +68,10 @@ async fn schema_deletion_refuses_active_versions_and_references() {
             .delete(&format!("/api/schemas/{v2_id}"))
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
-        let read_key = super::fixtures::issue_api_key(
+        let read_key = crate::requests::fixtures::issue_api_key(
             &ctx,
             workspace_id,
-            super::fixtures::create_iam_administrator(&ctx, tenant_id).await,
+            crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await,
             ApiKeyScope::Read,
             false,
         )
@@ -309,7 +309,8 @@ async fn create_schema_from_a_library_template_links_the_origin() {
         .await;
         let key = tenant.api_key;
         let library_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
 
         let response = request
             .post("/api/template-library")
@@ -369,7 +370,8 @@ async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
         .await;
         let key = tenant.api_key;
         let library_key =
-            super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
 
         let response = request
             .post("/api/template-library")

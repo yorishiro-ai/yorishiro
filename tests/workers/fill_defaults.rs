@@ -5,7 +5,7 @@ use loco_rs::app::{AppContext, Hooks};
 use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
 use uuid::Uuid;
 
-pub(crate) use super::boot_request;
+pub(crate) use crate::requests::boot_request;
 
 #[cfg(feature = "enterprise")]
 #[expect(
@@ -203,9 +203,9 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
     use yorishiro::models::{api_keys::ApiKeyScope, entity_entities, schema_schemas};
 
     boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let super::fixtures::TestTenant { tenant_id: tenant, workspace_id: workspace, api_key: key, owner_id,  } = super::fixtures::TestTenant::create(&request, &ctx, super::fixtures::TenantArgs { key_scope: ApiKeyScope::Migration, ..Default::default() },
+        let crate::requests::fixtures::TestTenant { tenant_id: tenant, workspace_id: workspace, api_key: key, owner_id,  } = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs { key_scope: ApiKeyScope::Migration, ..Default::default() },
         ).await;
-        let iam_key = super::fixtures::issue_tenant_key(&ctx, tenant, owner_id).await;
+        let iam_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant, owner_id).await;
         let mut entity_id = None;
         for (version, fields) in [json!({"title": {"type": "string", "required": true}}),
             json!({"title": {"type": "string", "required": true}, "rank": {"type": "integer", "required": true, "default": 7}})]
@@ -262,7 +262,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         let txn = ctx.db.begin().await.unwrap();
         // A policy-free member: an admin carries the built-in wildcard policy and would survive the attachment removal.
         let member = yorishiro::models::tenancy::register_member(
-            &txn, tenant, &super::fixtures::unique_email("queued-member"),
+            &txn, tenant, &crate::requests::fixtures::unique_email("queued-member"),
             "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
         let document = json!({"statements":[{"effect":"allow","actions":["migration_fill_defaults"],
@@ -369,7 +369,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
             request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);
             let undo_id: Uuid = if explicit_deny {
-                let queued = super::iam::iam_mcp_call(&request, &session, &attributed.plaintext,
+                let queued = crate::controllers::iam::iam_mcp_call(&request, &session, &attributed.plaintext,
                     "undo_migration_job", json!({"job_id":filled_id})).await;
                 assert_ne!(queued["result"]["isError"], true, "{queued}");
                 let queued: serde_json::Value = serde_json::from_str(queued["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -401,7 +401,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
                 .add_header("Authorization", format!("Bearer {iam_key}"))
                 .json(&json!({"name":"queued-fill","document":document})).await.assert_status_ok();
             let id: Uuid = if explicit_deny {
-                let queued = super::iam::iam_mcp_call(&request, &session, &attributed.plaintext,
+                let queued = crate::controllers::iam::iam_mcp_call(&request, &session, &attributed.plaintext,
                     "reindex_workspace", json!({})).await;
                 assert_ne!(queued["result"]["isError"], true, "{queued}");
                 let queued: serde_json::Value = serde_json::from_str(queued["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -458,10 +458,10 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
     use yorishiro::models::{api_keys, schema_schemas};
 
     boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let tenant = super::fixtures::TestTenant::create(
+        let tenant = crate::requests::fixtures::TestTenant::create(
             &request,
             &ctx,
-            super::fixtures::TenantArgs {
+            crate::requests::fixtures::TenantArgs {
                 key_scope: api_keys::ApiKeyScope::Schema,
                 ..Default::default()
             },
@@ -542,10 +542,10 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
     };
 
     boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let tenant = super::fixtures::TestTenant::create(
+        let tenant = crate::requests::fixtures::TestTenant::create(
             &request,
             &ctx,
-            super::fixtures::TenantArgs::default(),
+            crate::requests::fixtures::TenantArgs::default(),
         )
         .await;
         let txn = ctx.db.begin().await.unwrap();
@@ -553,7 +553,7 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
         let member = tenancy::register_member(
             &txn,
             tenant.tenant_id,
-            &super::fixtures::unique_email("queued-workspace"),
+            &crate::requests::fixtures::unique_email("queued-workspace"),
             "hunter2-hunter2",
             None)
         .await
@@ -579,7 +579,7 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
             "origin_snapshot":null,"origin_updated_at":null,"created_at":chrono::Utc::now()
         }})
         .to_string();
-        let iam_key = super::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let iam_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let document = json!({"statements":[{"effect":"allow","actions":["import_create"],
             "resources":[{"type":"workspace","tenant_id":tenant.tenant_id,"workspace_id":tenant.workspace_id}]}]});
         let policy = request.post("/api/iam/policies")
@@ -599,7 +599,7 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
             request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);
             let id: Uuid = if explicit_deny {
-                let queued = super::iam::iam_mcp_call(&request, &session, &key.plaintext,
+                let queued = crate::controllers::iam::iam_mcp_call(&request, &session, &key.plaintext,
                     "import_jsonl", json!({"jsonl":jsonl})).await;
                 assert_ne!(queued["result"]["isError"], true, "{queued}");
                 let queued: serde_json::Value = serde_json::from_str(queued["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
