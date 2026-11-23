@@ -1,4 +1,4 @@
-# Local development use the distribution image's Dockerfile.
+# Local development uses the distribution image's Dockerfile.
 #   docker compose -f docker-compose.dev.yaml up --build
 #
 # `app` serves HTTP, `worker` consumes embedding sync/query/reindex, `jobs` consumes import/maintenance/inference, and `scheduler` runs scheduled tasks.
@@ -13,8 +13,7 @@ x-yorishiro: &yorishiro
     args:
       EDITION: ${EDITION:-ee}
   environment:
-    # These override the embedded/example defaults. Mount a complete administrator-owned
-    # /app/config/production.yaml or production.local.yaml when file configuration is needed.
+    # Mount a complete production.yaml, optionally with production.local.yaml, to replace embedded defaults.
     DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
     # `Redis` selects Loco's Redis-compatible queue provider. Without it the
     # queue kind follows DATABASE_URL's scheme and lands on Postgres.
@@ -24,13 +23,7 @@ x-yorishiro: &yorishiro
     # The image default is loopback-safe; compose publishes the port, so opt into container access.
     BINDING: 0.0.0.0
     LOG_LEVEL: info
-    # Explicitly retain the packaged default: run the local embedding provider and fetch its
-    # model into the container cache when no read-only model mount is supplied.
-    # Set YORISHIRO_EMBEDDING_PROVIDER=none to skip the model download.
-    YORISHIRO_EMBEDDING_PROVIDER: ${YORISHIRO_EMBEDDING_PROVIDER:-local}
-    # Loco configuration defaults to one tenant, keeping the first-run setup wizard reachable.
-    # Set to "0" for multiple tenants on a licensed PostgreSQL deployment, disabling that wizard.
-    YORISHIRO_MAX_TENANTS: "1"
+    YORISHIRO_EMBEDDING_PROVIDER:
 
 services:
   db:

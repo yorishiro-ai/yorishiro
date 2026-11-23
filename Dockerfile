@@ -62,10 +62,9 @@ COPY --from=builder /usr/local/bin/yorishiro /usr/local/bin/yorishiro
 RUN mkdir -p /var/lib/yorishiro \
     && chown root:yorishiro /var/lib/yorishiro \
     && chmod 1770 /var/lib/yorishiro
-COPY config/production.yaml /app/config/production.yaml
 
 WORKDIR /app
-RUN install -d -o yorishiro -g yorishiro /var/lib/yorishiro/state /app/models
+RUN install -d -o yorishiro -g yorishiro /var/lib/yorishiro/state /app/models /app/config
 
 ENV HOME=/home/yorishiro
 ENV LOCO_ENV=production

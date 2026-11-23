@@ -3,7 +3,10 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-grep -q 'COPY config/production.yaml /app/config/production.yaml' "$repo/Dockerfile"
+if grep -q 'COPY config/production.yaml /app/config/' "$repo/Dockerfile"; then
+  echo 'Runtime defaults must come from the application, not a second configuration copy' >&2
+  exit 1
+fi
 grep -q '^logger:' "$repo/config/production.yaml"
 grep -q '^server:' "$repo/config/production.yaml"
 grep -q '^database:' "$repo/config/production.yaml"
@@ -57,12 +60,10 @@ if [[ $# -gt 0 ]]; then
   }
   trap cleanup EXIT
   docker run --rm \
-    -v "$repo/config/production.yaml:/canonical-example.yaml:ro" \
     --entrypoint sh "$image" -ec '
-      test -f /app/config/production.yaml
-      cmp /app/config/production.yaml /canonical-example.yaml
+      test ! -e /app/config/production.yaml
       test ! -e /app/config/production.local.yaml
-      test "$(find /app -type f)" = /app/config/production.yaml
+      test -z "$(find /app -type f)"
       test "$(find /usr/local/bin -type f)" = /usr/local/bin/yorishiro
     '
 
