@@ -6,14 +6,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "tenant_billing")]
 pub struct Model {
-    #[sea_orm(column_type = "Text", nullable, unique)]
-    pub stripe_customer_id: Option<String>,
     #[sea_orm(primary_key, auto_increment = false)]
     pub tenant_id: Uuid,
-    pub created_at: DateTimeWithTimeZone,
-    pub updated_at: DateTimeWithTimeZone,
     #[sea_orm(column_type = "Text", nullable)]
     pub plan: Option<String>,
+    #[sea_orm(column_type = "Text", nullable, unique)]
+    pub stripe_customer_id: Option<String>,
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

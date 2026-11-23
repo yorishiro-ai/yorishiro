@@ -6,14 +6,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "stripe_events")]
 pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]
+    pub event_id: String,
+    #[sea_orm(column_type = "Text")]
+    pub event_type: String,
     #[sea_orm(column_type = "Text", nullable)]
     pub customer_id: Option<String>,
     pub stripe_created: DateTimeWithTimeZone,
-    #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]
-    pub event_id: String,
     pub created_at: DateTimeWithTimeZone,
-    #[sea_orm(column_type = "Text")]
-    pub event_type: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

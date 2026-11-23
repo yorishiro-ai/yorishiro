@@ -6,26 +6,26 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "inference_proposals")]
 pub struct Model {
-    #[sea_orm(column_type = "JsonBinary")]
-    pub proposed: Json,
-    #[sea_orm(unique_key = "inference_proposals_delivery_key")]
-    pub schema_version: i32,
-    #[sea_orm(unique_key = "inference_proposals_delivery_key")]
-    pub entity_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     #[sea_orm(unique_key = "inference_proposals_delivery_key")]
-    pub workspace_id: Uuid,
-    #[sea_orm(column_type = "Text")]
-    pub status: String,
-    #[sea_orm(column_type = "Text", unique_key = "inference_proposals_delivery_key")]
-    pub source_field: String,
-    pub updated_at: DateTimeWithTimeZone,
-    pub created_at: DateTimeWithTimeZone,
-    #[sea_orm(unique_key = "inference_proposals_delivery_key")]
     pub job_id: Uuid,
     #[sea_orm(unique_key = "inference_proposals_delivery_key")]
+    pub workspace_id: Uuid,
+    #[sea_orm(unique_key = "inference_proposals_delivery_key")]
+    pub entity_id: Uuid,
+    #[sea_orm(unique_key = "inference_proposals_delivery_key")]
     pub schema_id: Uuid,
+    #[sea_orm(unique_key = "inference_proposals_delivery_key")]
+    pub schema_version: i32,
+    #[sea_orm(column_type = "Text", unique_key = "inference_proposals_delivery_key")]
+    pub source_field: String,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub proposed: Json,
+    #[sea_orm(column_type = "Text")]
+    pub status: String,
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -6,16 +6,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "iam_audit_events")]
 pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
     pub tenant_id: Uuid,
+    pub user_id: Option<Uuid>,
+    pub api_key_id: Uuid,
     #[sea_orm(column_type = "Text")]
     pub action: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub detail: Json,
     pub created_at: DateTimeWithTimeZone,
-    pub user_id: Option<Uuid>,
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
-    pub api_key_id: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

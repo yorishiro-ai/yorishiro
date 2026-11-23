@@ -6,19 +6,19 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "iam_policies")]
 pub struct Model {
-    pub created_at: DateTimeWithTimeZone,
-    #[sea_orm(unique_key = "uq_iam_policies_tenant_id_name")]
-    pub tenant_id: Uuid,
     #[sea_orm(
         primary_key,
         auto_increment = false,
         unique_key = "uq_iam_policies_tenant_id_id"
     )]
     pub id: Uuid,
-    #[sea_orm(column_type = "JsonBinary")]
-    pub document: Json,
+    #[sea_orm(unique_key = "uq_iam_policies_tenant_id_name")]
+    pub tenant_id: Uuid,
     #[sea_orm(column_type = "Text", unique_key = "uq_iam_policies_tenant_id_name")]
     pub name: String,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub document: Json,
+    pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }
 

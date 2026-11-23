@@ -6,23 +6,23 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "workspace_embedding_keys")]
 pub struct Model {
-    pub send_dimensions_param: bool,
     #[sea_orm(column_type = "Text")]
-    #[serde(skip_serializing)]
-    pub api_key: String,
+    pub query_instruction: String,
+    #[sea_orm(column_type = "Text")]
+    pub document_prefix: String,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub workspace_id: Uuid,
     #[sea_orm(column_type = "Text")]
     pub base_url: String,
     #[sea_orm(column_type = "Text")]
-    pub query_instruction: String,
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub workspace_id: Uuid,
-    pub created_at: DateTimeWithTimeZone,
-    pub dimensions: i32,
-    pub updated_at: DateTimeWithTimeZone,
-    #[sea_orm(column_type = "Text")]
-    pub document_prefix: String,
-    #[sea_orm(column_type = "Text")]
     pub model: String,
+    #[sea_orm(column_type = "Text")]
+    #[serde(skip_serializing)]
+    pub api_key: String,
+    pub dimensions: i32,
+    pub send_dimensions_param: bool,
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

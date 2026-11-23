@@ -6,22 +6,22 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "user_users")]
 pub struct Model {
-    #[sea_orm(column_type = "Text", nullable)]
-    pub user_name: Option<String>,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub oauth_subject_id: Option<String>,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub display_name: Option<String>,
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub password_hash: Option<String>,
-    pub created_at: DateTimeWithTimeZone,
-    pub tenant_id: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable, unique)]
     pub email: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
+    pub password_hash: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub display_name: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
     pub oauth_provider: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub oauth_subject_id: Option<String>,
+    pub tenant_id: Option<Uuid>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub user_name: Option<String>,
+    pub created_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

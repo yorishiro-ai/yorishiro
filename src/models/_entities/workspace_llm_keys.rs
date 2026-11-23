@@ -6,17 +6,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "workspace_llm_keys")]
 pub struct Model {
-    #[sea_orm(column_type = "Text")]
-    pub base_url: String,
-    pub created_at: DateTimeWithTimeZone,
-    pub updated_at: DateTimeWithTimeZone,
-    #[sea_orm(column_type = "Text")]
-    pub model: String,
     #[sea_orm(primary_key, auto_increment = false)]
     pub workspace_id: Uuid,
     #[sea_orm(column_type = "Text")]
+    pub base_url: String,
+    #[sea_orm(column_type = "Text")]
+    pub model: String,
+    #[sea_orm(column_type = "Text")]
     #[serde(skip_serializing)]
     pub api_key: String,
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -6,21 +6,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "entity_relations")]
 pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
     #[sea_orm(unique_key = "entity_relations_unique")]
     pub workspace_id: Uuid,
+    #[sea_orm(unique_key = "entity_relations_unique")]
+    pub source_id: Uuid,
+    #[sea_orm(unique_key = "entity_relations_unique")]
+    pub target_id: Uuid,
     #[sea_orm(column_type = "Text", unique_key = "entity_relations_unique")]
     pub relation_type: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub properties: Json,
-    pub created_at: DateTimeWithTimeZone,
     #[sea_orm(column_type = "Text")]
     pub status: String,
-    #[sea_orm(unique_key = "entity_relations_unique")]
-    pub source_id: Uuid,
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
-    #[sea_orm(unique_key = "entity_relations_unique")]
-    pub target_id: Uuid,
+    pub created_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

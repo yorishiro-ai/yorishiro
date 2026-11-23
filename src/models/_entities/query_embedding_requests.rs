@@ -6,25 +6,25 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "query_embedding_requests")]
 pub struct Model {
-    #[sea_orm(column_type = "Text")]
-    pub status: String,
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    pub workspace_id: Uuid,
     #[sea_orm(column_type = "Text")]
     pub query_text: String,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub model: Option<String>,
-    pub expires_at: DateTimeWithTimeZone,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub error: Option<String>,
-    pub dimensions: Option<i32>,
+    #[sea_orm(column_type = "Text")]
+    pub status: String,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub result_vector: Option<Json>,
-    pub updated_at: DateTimeWithTimeZone,
-    pub completed_at: Option<DateTimeWithTimeZone>,
-    pub workspace_id: Uuid,
+    pub dimensions: Option<i32>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub model: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub error: Option<String>,
+    pub expires_at: DateTimeWithTimeZone,
     pub deadline_at: DateTimeWithTimeZone,
+    pub completed_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

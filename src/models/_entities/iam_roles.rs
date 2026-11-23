@@ -12,12 +12,12 @@ pub struct Model {
         unique_key = "uq_iam_roles_tenant_id_id"
     )]
     pub id: Uuid,
-    pub created_at: DateTimeWithTimeZone,
-    #[sea_orm(column_type = "Text", unique_key = "uq_iam_roles_tenant_id_name")]
-    pub name: String,
-    pub updated_at: DateTimeWithTimeZone,
     #[sea_orm(unique_key = "uq_iam_roles_tenant_id_name")]
     pub tenant_id: Uuid,
+    #[sea_orm(column_type = "Text", unique_key = "uq_iam_roles_tenant_id_name")]
+    pub name: String,
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

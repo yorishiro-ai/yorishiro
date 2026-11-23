@@ -6,15 +6,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "workspace_schema_fork_heads")]
 pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
     pub tenant_id: Uuid,
+    pub workspace_id: Uuid,
+    #[sea_orm(unique_key = "workspace_schema_fork_heads_fork_schema_key")]
+    pub fork_id: Uuid,
     #[sea_orm(unique_key = "workspace_schema_fork_heads_fork_schema_key")]
     pub schema_id: Uuid,
     pub created_at: DateTimeWithTimeZone,
-    #[sea_orm(unique_key = "workspace_schema_fork_heads_fork_schema_key")]
-    pub fork_id: Uuid,
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
-    pub workspace_id: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

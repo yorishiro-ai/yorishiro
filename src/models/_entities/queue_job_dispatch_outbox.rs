@@ -6,23 +6,23 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "queue_job_dispatch_outbox")]
 pub struct Model {
-    #[sea_orm(column_type = "JsonBinary")]
-    pub payload: Json,
-    pub published_at: Option<DateTimeWithTimeZone>,
-    pub last_attempt_at: Option<DateTimeWithTimeZone>,
-    pub worker_name: String,
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    pub lifecycle_id: Option<Uuid>,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub payload: Json,
+    pub worker_name: String,
+    pub queue_name: Option<String>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub tags: Option<Json>,
+    pub last_attempt_at: Option<DateTimeWithTimeZone>,
     pub deadline_at: Option<DateTimeWithTimeZone>,
-    pub workspace_id: Option<Uuid>,
-    pub queue_name: Option<String>,
-    pub claim_until: Option<DateTimeWithTimeZone>,
+    pub published_at: Option<DateTimeWithTimeZone>,
     #[serde(skip_serializing)]
     pub claim_token: Option<String>,
+    pub claim_until: Option<DateTimeWithTimeZone>,
     pub priority: Option<i32>,
-    pub lifecycle_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

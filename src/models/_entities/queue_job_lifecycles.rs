@@ -6,31 +6,31 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "queue_job_lifecycles")]
 pub struct Model {
-    pub concurrency_limit: Option<i32>,
-    pub failed_at: Option<DateTimeWithTimeZone>,
-    pub workspace_id: Option<Uuid>,
-    pub created_at: DateTimeWithTimeZone,
-    pub retry_at: Option<DateTimeWithTimeZone>,
-    pub attempt: i32,
-    pub lease_until: Option<DateTimeWithTimeZone>,
-    #[sea_orm(unique)]
-    pub provider_job_id: Option<String>,
-    pub concurrency_key: Option<String>,
-    pub admitted_at: Option<DateTimeWithTimeZone>,
-    pub start_at: Option<DateTimeWithTimeZone>,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub error: Option<String>,
-    pub completed_at: Option<DateTimeWithTimeZone>,
-    pub job_name: String,
-    pub status: String,
-    pub claim_at: Option<DateTimeWithTimeZone>,
-    pub worker_class: String,
-    pub cancelled_at: Option<DateTimeWithTimeZone>,
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    pub updated_at: DateTimeWithTimeZone,
+    #[sea_orm(unique)]
+    pub provider_job_id: Option<String>,
+    pub job_name: String,
+    pub worker_class: String,
+    pub workspace_id: Option<Uuid>,
     pub plan: Option<String>,
+    pub status: String,
     pub enqueue_at: DateTimeWithTimeZone,
+    pub claim_at: Option<DateTimeWithTimeZone>,
+    pub admitted_at: Option<DateTimeWithTimeZone>,
+    pub lease_until: Option<DateTimeWithTimeZone>,
+    pub start_at: Option<DateTimeWithTimeZone>,
+    pub retry_at: Option<DateTimeWithTimeZone>,
+    pub completed_at: Option<DateTimeWithTimeZone>,
+    pub failed_at: Option<DateTimeWithTimeZone>,
+    pub cancelled_at: Option<DateTimeWithTimeZone>,
+    pub attempt: i32,
+    pub concurrency_key: Option<String>,
+    pub concurrency_limit: Option<i32>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub error: Option<String>,
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

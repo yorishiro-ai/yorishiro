@@ -6,18 +6,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "template_reviews")]
 pub struct Model {
-    pub updated_at: DateTimeWithTimeZone,
-    pub created_by: Option<Uuid>,
-    pub rating: i16,
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     #[sea_orm(unique_key = "template_reviews_template_id_tenant_id_key")]
-    pub tenant_id: Uuid,
-    pub created_at: DateTimeWithTimeZone,
-    #[sea_orm(unique_key = "template_reviews_template_id_tenant_id_key")]
     pub template_id: Uuid,
+    #[sea_orm(unique_key = "template_reviews_template_id_tenant_id_key")]
+    pub tenant_id: Uuid,
+    pub rating: i16,
     #[sea_orm(column_type = "Text", nullable)]
     pub comment: Option<String>,
+    pub created_by: Option<Uuid>,
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
