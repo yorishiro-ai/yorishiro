@@ -125,6 +125,28 @@ impl ImportWorker {
     }
 }
 
+/// Opens the caller's schema-scope session, enqueues an import and commits.
+///
+/// # Errors
+/// Returns the session, authorization or enqueue error.
+pub(crate) async fn enqueue_for_actor(
+    ctx: &AppContext,
+    actor: AuthContext,
+    jsonl: String,
+) -> Result<Uuid, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::ImportCreate,
+        ),
+        None,
+        async |session| enqueue(ctx, session.txn(), &session.ctx, jsonl).await,
+    )
+    .await
+}
+
 pub(crate) async fn enqueue(
     ctx: &AppContext,
     txn: &DatabaseTransaction,

@@ -7,7 +7,7 @@ use loco_rs::app::AppContext;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{AuthContext, Authorized, ReadScope, Verified, WriteScope};
+use crate::controllers::extractors::{AuthContext, ReadScope, Verified, WriteScope};
 use crate::controllers::openapi::Routes;
 use crate::dtos::relations::{
     CreateRelationRequest, ListRelationsParams, SetRelationStatusRequest,
@@ -19,19 +19,9 @@ pub(crate) async fn create_relation(
     verified: Verified<WriteScope>,
     Json(body): Json<CreateRelationRequest>,
 ) -> Result<Created<RelationRecord>, ApiError> {
-    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
-        crate::models::entity_entities::workspace_for_actor(&ctx.db, &verified.ctx, body.source_id)
-            .await?,
-    );
-    let mut authorized = Authorized::<WriteScope>::for_target(&ctx, verified.ctx, target).await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::RelationCreate)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let input = body.into();
-    let record = entity_relations::create(authorized.txn(), workspace_id, input).await?;
-    authorized.commit().await?;
-    Ok(Created(record))
+    Ok(Created(
+        entity_relations::create_for_actor(&ctx, verified.ctx, body.into()).await?,
+    ))
 }
 
 pub(crate) async fn get_relation(
@@ -39,18 +29,9 @@ pub(crate) async fn get_relation(
     verified: Verified<ReadScope>,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<Json<RelationRecord>, ApiError> {
-    let mut authorized = Authorized::<ReadScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Relation(id),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::RelationGet)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let record = entity_relations::get(authorized.txn(), workspace_id, id).await?;
-    Ok(Json(record))
+    Ok(Json(
+        entity_relations::get_for_actor(&ctx, verified.ctx, id).await?,
+    ))
 }
 
 pub(crate) async fn delete_relation(
@@ -58,18 +39,7 @@ pub(crate) async fn delete_relation(
     verified: Verified<WriteScope>,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<axum::response::NoContent, ApiError> {
-    let mut authorized = Authorized::<WriteScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Relation(id),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::RelationDelete)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    entity_relations::delete(authorized.txn(), workspace_id, id).await?;
-    authorized.commit().await?;
+    entity_relations::delete_for_actor(&ctx, verified.ctx, id).await?;
     Ok(axum::response::NoContent)
 }
 
@@ -90,27 +60,17 @@ pub(crate) async fn set_relation_status(
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<SetRelationStatusRequest>,
 ) -> Result<Json<RelationRecord>, ApiError> {
-    let mut authorized = Authorized::<WriteScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Relation(id),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::RelationUpdate)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let record = entity_relations::set_status(
-        authorized.txn(),
-        workspace_id,
-        entity_relations::SetRelationStatusInput {
-            id,
-            status: body.status,
-        },
-    )
-    .await?;
-    authorized.commit().await?;
-    Ok(Json(record))
+    Ok(Json(
+        entity_relations::set_status_for_actor(
+            &ctx,
+            verified.ctx,
+            entity_relations::SetRelationStatusInput {
+                id,
+                status: body.status,
+            },
+        )
+        .await?,
+    ))
 }
 
 pub fn routes() -> Routes {

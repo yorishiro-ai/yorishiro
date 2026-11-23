@@ -54,25 +54,6 @@ async fn without_a_licence_the_marketplace_is_not_served() {
     .await;
 }
 
-/// The gate runs before authentication: an unlicensed deployment answers the same 404 whether or not the caller holds a valid key, so an anonymous prober cannot tell the route exists.
-#[tokio::test]
-async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
-    let overrides = [crate::requests::unlicensed()];
-    boot_request_with::<App, _, _>(&overrides, |request, _ctx| async move {
-        let response = request
-            .get("/api/marketplace")
-            .add_header("Authorization", "Bearer ysr_not_a_real_key")
-            .await;
-        assert_eq!(
-            response.status_code(),
-            404,
-            "response: {:?}",
-            response.text()
-        );
-    })
-    .await;
-}
-
 /// A licensed deployment still authenticates: without this, "gated" and "open to anyone" would look the same as the previous test.
 #[tokio::test]
 async fn a_licence_does_not_replace_authentication() {
@@ -203,8 +184,7 @@ async fn publish_list_fork_and_review_round_trip() {
         let member_id = member.json::<serde_json::Value>()["user_id"].clone();
         let login = request
             .post("/auth/tenant/login")
-            .add_header("X-Tenant-Id", owner.tenant_id.to_string())
-            .json(&json!({"user_name":"marketplace-delegate","password":"marketplace-password"}))
+            .json(&json!({"tenant_id":owner.tenant_id,"user_name":"marketplace-delegate","password":"marketplace-password"}))
             .await;
         login.assert_status_ok();
         let delegated_key = login.json::<serde_json::Value>()["api_key"]

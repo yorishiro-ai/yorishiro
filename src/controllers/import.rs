@@ -4,7 +4,7 @@ use axum::{Json, extract::State};
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{Authorized, SchemaScope, Verified};
+use crate::controllers::extractors::{SchemaScope, Verified};
 use crate::controllers::openapi::Routes;
 use crate::dtos::jobs::QueuedJobResponse;
 
@@ -17,17 +17,7 @@ pub(crate) async fn import_jsonl(
     verified: Verified<SchemaScope>,
     body: String,
 ) -> Result<Accepted<QueuedJobResponse>, ApiError> {
-    let authorized = Authorized::<SchemaScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::ImportCreate,
-        ),
-    )
-    .await?;
-    let job_id =
-        crate::workers::import::enqueue(&ctx, authorized.txn(), &authorized.ctx, body).await?;
-    authorized.commit().await?;
+    let job_id = crate::workers::import::enqueue_for_actor(&ctx, verified.ctx, body).await?;
     Ok(Accepted(QueuedJobResponse { job_id }))
 }
 
@@ -61,22 +51,8 @@ async fn import_job_status(
         crate::dtos::common::JobIdPath<uuid::Uuid>,
     >,
 ) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
-    let mut authorized = Authorized::<SchemaScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Job(id),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::ImportJobGet)
-        .await?;
     Ok(Json(
-        crate::models::queue_job_lifecycles::bulk_job_status(
-            authorized.txn(),
-            authorized.ctx.require_workspace()?,
-            id,
-            &["import"],
-        )
-        .await?,
+        crate::models::queue_job_lifecycles::import_job_status_for_actor(&ctx, verified.ctx, id)
+            .await?,
     ))
 }

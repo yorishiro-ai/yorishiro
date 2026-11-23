@@ -96,10 +96,6 @@ pub mod edition {
             env!("CARGO_CRATE_NAME")
         }
 
-        fn init_logger(ctx: &AppContext) -> Result<bool> {
-            crate::initializers::logger::init::<Self>(ctx)
-        }
-
         async fn load_config(env: &Environment) -> Result<Config> {
             base::load_config(env)
         }

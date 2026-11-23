@@ -5,7 +5,6 @@
 use crate::controllers::Created;
 use axum::Json;
 use axum::extract::State;
-use axum::http::HeaderMap;
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
@@ -60,18 +59,9 @@ async fn root_login(
 
 async fn tenant_login(
     State(ctx): State<AppContext>,
-    headers: HeaderMap,
     Json(body): Json<TenantLoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
-    let mut tenant_headers = headers.get_all("x-tenant-id").iter();
-    let tenant_id = tenant_headers
-        .next()
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse().ok())
-        .ok_or(YorishiroError::Unauthenticated)?;
-    if tenant_headers.next().is_some() {
-        return Err(YorishiroError::Unauthenticated.into());
-    }
+    let tenant_id = body.tenant_id;
     let user = user_users::verify_tenant_login(&ctx.db, tenant_id, &body.user_name, &body.password)
         .await?
         .ok_or(YorishiroError::Unauthenticated)?;
@@ -98,29 +88,11 @@ async fn finish_login(
     }))
 }
 
-/// # Panics
-/// Panics if the static tenant header metadata is invalid.
 pub fn routes() -> Routes {
-    Routes::new().tag("community")
+    Routes::new()
+        .tag("community")
         .prefix("auth")
-        .add(
-            "/signup",
-            aide::axum::routing::post(signup),
-        )
-        .add(
-            "/root/login",
-            aide::axum::routing::post(root_login),
-        )
-        .add(
-            "/tenant/login",
-            aide::axum::routing::post_with(tenant_login, |op| {
-                op
-                    .with(|mut op| {
-                        op.inner_mut().parameters.push(aide::openapi::ReferenceOr::Item(
-                            serde_json::from_value(serde_json::json!({"in": "header", "name": "x-tenant-id", "required": true, "schema": {"type": "string", "format": "uuid"}})).expect("tenant login header"),
-                        ));
-                        op
-                    })
-            }),
-        )
+        .add("/signup", aide::axum::routing::post(signup))
+        .add("/root/login", aide::axum::routing::post(root_login))
+        .add("/tenant/login", aide::axum::routing::post(tenant_login))
 }

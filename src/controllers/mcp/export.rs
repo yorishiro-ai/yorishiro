@@ -1,3 +1,4 @@
+use crate::controllers::mcp::{try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -5,7 +6,7 @@ use rmcp::model::CallToolResult;
 use rmcp::model::ContentBlock;
 use rmcp::{tool, tool_router};
 
-use super::{YorishiroMcpServer, err_to_tool_result};
+use super::YorishiroMcpServer;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::transfer::export;
 
@@ -19,35 +20,8 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("export_jsonl")?;
-        let actor = match super::verify(self.app_context(), &parts, required).await? {
-            super::VerifyOutcome::Verified(actor) => actor,
-            super::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        let mut authorized = match super::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Permission(
-                crate::models::iam::policy::Action::Export,
-            ),
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::Export)
-            .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
-
-        let lines = match export::export_jsonl(authorized.txn(), authorized.workspace_id()).await {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let actor = verified!(self, parts, "export_jsonl");
+        let lines = try_tool!(export::export_jsonl_for_actor(self.app_context(), actor).await);
         Ok(CallToolResult::success(vec![ContentBlock::text(lines)]))
     }
 }

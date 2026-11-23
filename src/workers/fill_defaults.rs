@@ -1,5 +1,6 @@
 //! Durable schema-default migration, executed by the selected Loco queue provider.
 
+use crate::models::iam::session::WorkspaceSession;
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker, prelude::async_trait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -113,6 +114,28 @@ impl FillDefaultsWorker {
         }
         Ok(())
     }
+}
+
+/// Opens the caller's migration session, enqueues a fill-defaults job and commits.
+///
+/// # Errors
+/// Returns the session, authorization or enqueue error.
+pub(crate) async fn enqueue_for_actor(
+    ctx: &AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    schema_name: String,
+) -> Result<Uuid, crate::YorishiroError> {
+    WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Migration,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::MigrationFillDefaults,
+        ),
+        None,
+        async |session| enqueue(ctx, session.txn(), &session.ctx, schema_name).await,
+    )
+    .await
 }
 
 pub(crate) async fn enqueue(

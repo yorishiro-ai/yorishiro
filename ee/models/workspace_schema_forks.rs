@@ -622,3 +622,128 @@ pub async fn delete<C: ConnectionTrait>(
     Entity::delete_by_id(fork_id).exec(conn).await.internal()?;
     Ok(())
 }
+
+/// Reads one fork of the caller's workspace.
+///
+/// # Errors
+/// Returns the session, authorization or lookup error.
+pub(crate) async fn get_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    fork_id: Uuid,
+) -> Result<ForkRecord, YorishiroError> {
+    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
+        workspace_for_actor(&ctx.db, &actor, fork_id).await?,
+    );
+    crate::models::iam::session::WorkspaceSession::read(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        target,
+        crate::models::iam::policy::Action::SchemaForkGet,
+        async |session| {
+            get(
+                session.txn(),
+                session.ctx.tenant_id,
+                session.workspace_id()?,
+                fork_id,
+            )
+            .await
+        },
+    )
+    .await
+}
+
+/// Creates a fork in the caller's workspace.
+///
+/// # Errors
+/// Returns the session, authorization or create error.
+pub(crate) async fn create_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    input: CreateInput,
+) -> Result<ForkRecord, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::SchemaForkCreate,
+        ),
+        Some(crate::models::iam::policy::Action::SchemaForkCreate),
+        async |session| {
+            create(
+                session.txn(),
+                session.ctx.tenant_id,
+                session.workspace_id()?,
+                input,
+            )
+            .await
+        },
+    )
+    .await
+}
+
+/// Updates one fork of the caller's workspace.
+///
+/// # Errors
+/// Returns the session, authorization or update error.
+pub(crate) async fn update_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    fork_id: Uuid,
+    input: UpdateInput,
+) -> Result<ForkRecord, YorishiroError> {
+    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
+        workspace_for_actor(&ctx.db, &actor, fork_id).await?,
+    );
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        target,
+        Some(crate::models::iam::policy::Action::SchemaForkUpdate),
+        async |session| {
+            update(
+                session.txn(),
+                session.ctx.tenant_id,
+                session.workspace_id()?,
+                fork_id,
+                input,
+            )
+            .await
+        },
+    )
+    .await
+}
+
+/// Deletes one fork of the caller's workspace.
+///
+/// # Errors
+/// Returns the session, authorization or delete error.
+pub(crate) async fn delete_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    fork_id: Uuid,
+) -> Result<(), YorishiroError> {
+    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
+        workspace_for_actor(&ctx.db, &actor, fork_id).await?,
+    );
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        target,
+        Some(crate::models::iam::policy::Action::SchemaForkDelete),
+        async |session| {
+            delete(
+                session.txn(),
+                session.ctx.tenant_id,
+                session.workspace_id()?,
+                fork_id,
+            )
+            .await
+        },
+    )
+    .await
+}

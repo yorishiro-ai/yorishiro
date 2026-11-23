@@ -138,8 +138,7 @@ pub(crate) async fn grant_iam_administrator(
         document: Set(
             serde_json::json!({"statements":[{"effect":"allow","actions":["*"],
             "resources":[{"type":"tenant","tenant_id":tenant_id},
-                {"type":"all_workspaces","tenant_id":tenant_id},
-                {"type":"all_roles","tenant_id":tenant_id}]}]}),
+                {"type":"all_workspaces","tenant_id":tenant_id}]}]}),
         ),
         ..Default::default()
     }

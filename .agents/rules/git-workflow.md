@@ -88,7 +88,7 @@ When unclear, prefer a merge commit: losing an empirical record is the more expe
 
 ## Versioning
 
-- `version = "0.60.0"` in the root `[package]` is the source of truth.
+- The root `Cargo.toml` package version is the source of truth.
 - 0.x: minor bump = breaking change, patch bump = compatible addition/fix.
 - Tag format: `YYYYMMDD-N` (e.g. `20260830-1`), always a prerelease.
 - The `Release (prerelease)` workflow takes only a `dry_run` boolean and publishes date-based `YYYYMMDD-N` tags as prereleases.

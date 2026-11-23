@@ -1,100 +1,11 @@
 //! Authenticating a request's bearer key and authorizing each tool call against its scope and the active policy.
 
 use super::{
-    ApiKeyScope, AppContext, AuthContext, CallToolResult, DatabaseTransaction, ErrorData, Parts,
-    YorishiroError, auth, err_to_tool_result,
+    ApiKeyScope, AppContext, AuthContext, CallToolResult, ErrorData, Parts, YorishiroError, auth,
+    err_to_tool_result,
 };
 
-/// Auth context plus a transaction with RLS already configured, held by calls that passed authentication and scope checks.
-pub(crate) struct Authorized {
-    ctx: AuthContext,
-    txn: DatabaseTransaction,
-    identity: sea_orm::DatabaseConnection,
-    authorization: Option<DatabaseTransaction>,
-    inferred_resource: bool,
-    required: ApiKeyScope,
-    workspace_id: uuid::Uuid,
-}
-
-impl Authorized {
-    pub(crate) async fn for_target(
-        app: &AppContext,
-        actor: &AuthContext,
-        required: ApiKeyScope,
-        target: crate::models::iam::access::WorkspaceTarget,
-    ) -> Result<Self, YorishiroError> {
-        auth::require_scope(actor, required)?;
-        let inferred_resource = target.inferred_resource(actor);
-        let mut actor = actor.clone();
-        let workspace_id = target
-            .resolve(&app.db, &actor, required)
-            .await
-            .map_err(|error| {
-                crate::models::iam::access::hide_inferred_resource(inferred_resource, error)
-            })?;
-        actor.workspace_id = Some(workspace_id);
-        let (ctx, txn) = auth::RequestAuth::new(app)
-            .begin(actor, required >= ApiKeyScope::Write)
-            .await?;
-        Ok(Self {
-            ctx,
-            txn,
-            identity: app.db.clone(),
-            authorization: None,
-            inferred_resource,
-            required,
-            workspace_id,
-        })
-    }
-    pub(crate) const fn txn(&self) -> &DatabaseTransaction {
-        &self.txn
-    }
-
-    /// Commits the transaction.
-    /// Every write handler must call this before returning `Ok`.
-    pub(crate) async fn commit(self) -> Result<(), ErrorData> {
-        self.txn
-            .commit()
-            .await
-            .map_err(crate::error::mcp_internal)?;
-        if let Some(authorization) = self.authorization {
-            authorization
-                .commit()
-                .await
-                .map_err(crate::error::mcp_internal)?;
-        }
-        Ok(())
-    }
-
-    pub(crate) async fn require_action(
-        &mut self,
-        action: crate::models::iam::policy::Action,
-    ) -> Result<(), YorishiroError> {
-        self.authorization = crate::models::iam::access::authorize_workspace_action(
-            &self.txn,
-            &self.identity,
-            &self.ctx,
-            self.required,
-            action,
-        )
-        .await
-        .map_err(|error| {
-            crate::models::iam::access::hide_inferred_resource(self.inferred_resource, error)
-        })?;
-        Ok(())
-    }
-
-    pub(crate) const fn auth_context(&self) -> &AuthContext {
-        &self.ctx
-    }
-
-    pub(crate) const fn workspace_id(&self) -> uuid::Uuid {
-        self.workspace_id
-    }
-}
-
-/// A connection-less version of `Authorized`: only authenticates and verifies scope, without opening a transaction.
-/// Tools that do slow work before touching the database (embedding generation) use this instead and call `TenantDb::acquire_for_workspace` afterward.
+/// The outcome of authenticating a tool call and checking its scope, before any transaction is opened.
 pub(crate) enum VerifyOutcome {
     Verified(AuthContext),
     ScopeDenied(CallToolResult),

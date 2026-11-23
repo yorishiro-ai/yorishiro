@@ -1,6 +1,7 @@
 //! MCP tools for LLM-assisted fill: starting an inference job and reviewing, confirming or rejecting its proposals.
 //! These tools are licence-gated like their REST routes.
 
+use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json, render, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -11,9 +12,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::controllers::mcp::{
-    VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json, verify,
-};
 use crate::edition::ee::dtos::inference::{
     InferFillResponse, InferFillStatus, InferJobStatusResponse,
 };
@@ -50,16 +48,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("infer_fill")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(self, parts, "infer_fill");
         match crate::edition::ee::workers::infer_fill::enqueue_infer_fill(
             self.app_context(),
             &actor,
@@ -81,16 +70,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("get_inference_job")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(self, parts, "get_inference_job");
         match inference_jobs::get_as(&self.app_context().db, &actor, input.job_id).await {
             Ok(record) => {
                 let completed = record.status == inference_jobs::InferenceJobStatus::Completed;
@@ -113,20 +93,8 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_inference_proposals")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match inference_proposals::for_job_as(&self.app_context().db, &actor, input.job_id).await {
-            Ok(records) => ok_json(records),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        let actor = verified!(self, parts, "list_inference_proposals");
+        render(inference_proposals::for_job_as(&self.app_context().db, &actor, input.job_id).await)
     }
 
     #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Queue application of reviewed inference proposals; poll get_inference_confirmation with the returned job_id (requires an active licence, schema scope and inference_confirm IAM permission on the selected workspace)")]
@@ -135,16 +103,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("confirm_inference_proposals")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(self, parts, "confirm_inference_proposals");
         match crate::edition::ee::workers::confirm_proposals::enqueue(
             self.app_context(),
             &actor,
@@ -163,20 +122,8 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("reject_inference_proposals")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match inference_proposals::reject_as(&self.app_context().db, &actor, input.job_id).await {
-            Ok(report) => ok_json(report),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        let actor = verified!(self, parts, "reject_inference_proposals");
+        render(inference_proposals::reject_as(&self.app_context().db, &actor, input.job_id).await)
     }
 
     #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Discard inference proposals without applying them (requires an active licence, schema scope and inference_discard IAM permission on the selected workspace)")]
@@ -185,20 +132,8 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("discard_inference_proposals")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match inference_proposals::discard_as(&self.app_context().db, &actor, input.job_id).await {
-            Ok(report) => ok_json(report),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        let actor = verified!(self, parts, "discard_inference_proposals");
+        render(inference_proposals::discard_as(&self.app_context().db, &actor, input.job_id).await)
     }
 
     #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Poll durable inference confirmation results (requires an active licence, schema scope and inference_confirmation_get IAM permission on the selected workspace)")]
@@ -207,21 +142,10 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("get_inference_confirmation")?,
+        let actor = verified!(self, parts, "get_inference_confirmation");
+        render(
+            inference_jobs::confirmation_status_as(&self.app_context().db, &actor, input.job_id)
+                .await,
         )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match inference_jobs::confirmation_status_as(&self.app_context().db, &actor, input.job_id)
-            .await
-        {
-            Ok(record) => ok_json(record),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 }

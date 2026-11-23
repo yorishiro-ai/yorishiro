@@ -167,11 +167,6 @@ impl Entity {
                 message: "login sessions cannot be rotated; sign in again".into(),
             });
         }
-        if old.role_id.is_some() {
-            return Err(YorishiroError::Conflict {
-                message: "legacy role credentials cannot be rotated".into(),
-            });
-        }
         let root_session = Model::is_root_credential(&txn, actor.api_key_id).await?;
         if !root_session && old.user_id != actor.user_id {
             return Err(YorishiroError::ScopeInsufficient {

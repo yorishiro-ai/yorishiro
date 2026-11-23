@@ -6,8 +6,8 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::Created;
+use crate::controllers::extractors::AuthContext;
 use crate::controllers::openapi::Routes;
-use crate::edition::ee::controllers::middleware::auth::Authenticated;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use loco_rs::app::AppContext;
@@ -26,7 +26,7 @@ use crate::models::template_templates::TemplateVisibility;
 /// `GET /api/marketplace`: community-visible templates from every tenant, ordered by name then id.
 async fn list_marketplace(
     State(ctx): State<AppContext>,
-    Authenticated(actor): Authenticated,
+    AuthContext(actor): AuthContext,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<MarketplaceListing>>, ApiError> {
     let listings = marketplace_models::list_as(&ctx.db, &actor, page.try_into()?).await?;
@@ -36,7 +36,7 @@ async fn list_marketplace(
 /// `GET /api/marketplace/{id}/versions`: published versions, plus the caller's own drafts when it owns the template.
 async fn list_versions(
     State(ctx): State<AppContext>,
-    Authenticated(actor): Authenticated,
+    AuthContext(actor): AuthContext,
     Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<TemplateVersionRecord>>, ApiError> {
@@ -48,7 +48,7 @@ async fn list_versions(
 /// `POST /api/marketplace/{id}/versions`: publish the next version of your own template.
 async fn publish_version(
     State(ctx): State<AppContext>,
-    Authenticated(actor): Authenticated,
+    AuthContext(actor): AuthContext,
     Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<PublishVersionInput>,
 ) -> Result<Created<TemplateVersionRecord>, ApiError> {
@@ -64,7 +64,7 @@ async fn publish_version(
 /// `GET /api/marketplace/{id}/reviews`
 async fn list_reviews(
     State(ctx): State<AppContext>,
-    Authenticated(actor): Authenticated,
+    AuthContext(actor): AuthContext,
     Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<TemplateReviewRecord>>, ApiError> {
@@ -76,7 +76,7 @@ async fn list_reviews(
 /// `POST /api/marketplace/{id}/reviews`: leave or replace this tenant's review.
 async fn submit_review(
     State(ctx): State<AppContext>,
-    Authenticated(actor): Authenticated,
+    AuthContext(actor): AuthContext,
     Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<SubmitReviewRequest>,
 ) -> Result<Json<TemplateReviewRecord>, ApiError> {
@@ -87,7 +87,7 @@ async fn submit_review(
 /// `POST /api/marketplace/{id}/fork`: copy a published version into your own library.
 async fn fork_template(
     State(ctx): State<AppContext>,
-    Authenticated(actor): Authenticated,
+    AuthContext(actor): AuthContext,
     Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Query(params): Query<ForkParams>,
 ) -> Result<Created<ForkResponse>, ApiError> {
@@ -100,7 +100,7 @@ async fn fork_template(
 /// `PUT /api/marketplace/{id}/visibility`: list your own template, or take it back down.
 async fn set_visibility(
     State(ctx): State<AppContext>,
-    Authenticated(actor): Authenticated,
+    AuthContext(actor): AuthContext,
     Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<SetVisibilityRequest>,
 ) -> Result<axum::response::NoContent, ApiError> {

@@ -42,6 +42,7 @@ impl std::fmt::Debug for Model {
 
 pub(crate) use migration::fill_defaults;
 pub use migration::{drift, migration_dry_run};
+pub(crate) use migration::{drift_for_actor, migration_dry_run_for_actor};
 pub(crate) use operations::create_for_actor;
 pub(crate) use operations::create_with_quota;
 pub(crate) use operations::get_for_actor;

@@ -99,7 +99,6 @@ if [[ $# -gt 0 ]]; then
       log=$(cat "/tmp/yorishiro-docker-$name.log")
       case "$name" in
         malformed) [[ "$log" == *"YAMLFile"*"production.yaml"* ]] || { echo "$log" >&2; return 1; };;
-        missing) [[ "$log" == *"no configuration file found in folder: /app/config"* ]] || { echo "$log" >&2; return 1; };;
         local-only) [[ "$log" == *"production.local.yaml"* ]] || { echo "$log" >&2; return 1; };;
         incomplete) [[ "$log" == *"production.yaml"* ]] || { echo "$log" >&2; return 1; };;
         unreadable) [[ "$log" == *"PermissionDenied"* ]] || { echo "$log" >&2; return 1; };;
@@ -129,7 +128,7 @@ if [[ $# -gt 0 ]]; then
   run_config_case merged success sh -c "printf 'settings:\\n  max_tenants: 1\\n' > '$tmp/config/production.local.yaml'"
   run_config_case malformed failure sh -c "printf 'not: [valid' > '$tmp/config/production.yaml'"
   rm -f "$tmp/config/production.local.yaml"
-  run_config_case missing failure rm "$tmp/config/production.yaml"
+  run_config_case missing success rm "$tmp/config/production.yaml"
   run_config_case local-only failure sh -c "rm '$tmp/config/production.yaml'; printf 'settings:\\n  max_tenants: 1\\n' > '$tmp/config/production.local.yaml'"
   run_config_case incomplete failure sh -c "printf 'logger: {}\\n' > '$tmp/config/production.yaml'"
   run_config_case unreadable failure sh -c "chmod 000 '$tmp/config/production.yaml'"

@@ -28,7 +28,7 @@ mod sqlite_pool_tests {
 
 mod advisory_lock_tests {
     use sea_orm::TransactionTrait;
-    use yorishiro::db::{AppContextBackend, lock_for_update, try_lock_for_update};
+    use yorishiro::db::{lock_for_update, try_lock_for_update};
 
     use crate::requests::boot_request;
 
@@ -38,7 +38,6 @@ mod advisory_lock_tests {
             return;
         }
         boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
-            assert!(!ctx.is_postgres());
             let key = format!("lock-test-{}", uuid::Uuid::now_v7());
             let first = ctx.db.begin().await.expect("first transaction");
             let second = ctx.db.begin().await.expect("second transaction");
@@ -62,7 +61,6 @@ mod advisory_lock_tests {
             return;
         }
         boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
-            assert!(ctx.is_postgres());
             let key = format!("lock-test-{}", uuid::Uuid::now_v7());
 
             let first = ctx.db.begin().await.expect("first transaction");

@@ -19,8 +19,7 @@ async fn auth_endpoints_are_rate_limited() {
         );
         request
             .post("/auth/tenant/login")
-            .add_header("x-tenant-id", uuid::Uuid::new_v4().to_string())
-            .json(&serde_json::json!({"user_name":"nobody", "password":"wrong"}))
+            .json(&serde_json::json!({"tenant_id":uuid::Uuid::new_v4(),"user_name":"nobody", "password":"wrong"}))
             .await
             .assert_status(StatusCode::TOO_MANY_REQUESTS);
     })

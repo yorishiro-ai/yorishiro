@@ -21,22 +21,6 @@ pub(crate) fn is_postgres(conn: &impl ConnectionTrait) -> bool {
     conn.get_database_backend() == sea_orm::DatabaseBackend::Postgres
 }
 
-/// Common backend predicates for request and service code.
-pub trait AppContextBackend {
-    fn is_sqlite(&self) -> bool;
-    fn is_postgres(&self) -> bool;
-}
-
-impl AppContextBackend for loco_rs::app::AppContext {
-    fn is_sqlite(&self) -> bool {
-        is_sqlite(&self.db)
-    }
-
-    fn is_postgres(&self) -> bool {
-        is_postgres(&self.db)
-    }
-}
-
 /// The control-plane transaction an IAM check runs in.
 ///
 /// PostgreSQL hides the IAM tables from the tenant pool, so the check runs in its own write transaction on the identity pool, which the caller keeps open until the workspace mutation commits.
@@ -90,7 +74,7 @@ pub(crate) async fn replace_app_pool(ctx: &mut loco_rs::app::AppContext) -> loco
     let config = &ctx.config.database;
     let mut options = connection_options(config);
     let zone = crate::data::time::configured(ctx);
-    if ctx.is_sqlite() {
+    if is_sqlite(&ctx.db) {
         require_min_sqlite_connections(config.max_connections).map_err(loco_rs::Error::Message)?;
         // Keep Loco's per-connection PRAGMAs and its busy_timeout-aware acquire budget.
         let loco_pool = ctx.db.get_sqlite_connection_pool();
@@ -111,7 +95,7 @@ pub(crate) async fn replace_app_pool(ctx: &mut loco_rs::app::AppContext) -> loco
                 })
             })
         });
-    } else if ctx.is_postgres() {
+    } else if is_postgres(&ctx.db) {
         postgres_session_options(&mut options, zone.to_string(), PoolRole::Identity);
     } else {
         return Ok(());
@@ -446,7 +430,7 @@ pub async fn begin_workspace(
 ) -> Result<DatabaseTransaction, crate::YorishiroError> {
     use crate::error::ResultExt;
 
-    if ctx.is_sqlite() {
+    if is_sqlite(&ctx.db) {
         return ctx.db.begin().await.internal();
     }
     let handle = ctx
@@ -468,7 +452,7 @@ pub(crate) async fn begin_workspace_list(
 ) -> Result<DatabaseTransaction, crate::YorishiroError> {
     use crate::error::ResultExt;
 
-    if ctx.is_sqlite() {
+    if is_sqlite(&ctx.db) {
         return ctx.db.begin().await.internal();
     }
     let handle = ctx
@@ -513,7 +497,7 @@ pub(crate) async fn begin_workspace_write(
 ) -> Result<DatabaseTransaction, crate::YorishiroError> {
     use crate::error::ResultExt;
 
-    if ctx.is_sqlite() {
+    if is_sqlite(&ctx.db) {
         begin_write(&ctx.db).await.internal()
     } else {
         begin_workspace(ctx, tenant_id, workspace_id).await

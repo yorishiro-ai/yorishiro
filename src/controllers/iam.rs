@@ -6,7 +6,9 @@ use loco_rs::app::AppContext;
 
 use crate::controllers::openapi::Routes;
 use crate::controllers::{ApiError, extractors::AuthContext};
-use crate::dtos::iam::{CreateGroup, CreatePolicy, GroupRecord, PolicyRecord};
+use crate::dtos::iam::{
+    CreateGroup, CreatePolicy, CreateRole, GroupRecord, PolicyRecord, RoleRecord,
+};
 
 async fn update_policy(
     State(ctx): State<AppContext>,
@@ -188,6 +190,35 @@ pub(crate) fn routes() -> Routes {
         )
         .add("/policies", aide::axum::routing::post(create_policy))
         .add("/policies", aide::axum::routing::get(list_iam_policies))
+        .add(
+            "/roles/{role_id}/policies",
+            aide::axum::routing::get(list_iam_role_policies),
+        )
+        .add(
+            "/roles/{role_id}/members",
+            aide::axum::routing::get(list_iam_role_members),
+        )
+        .add(
+            "/roles/{role_id}/policies/{policy_id}",
+            aide::axum::routing::put(attach_role_policy),
+        )
+        .add(
+            "/roles/{role_id}/policies/{policy_id}",
+            aide::axum::routing::delete(detach_role_policy),
+        )
+        .add(
+            "/roles/{role_id}/members/{user_id}",
+            aide::axum::routing::put(add_role_member),
+        )
+        .add(
+            "/roles/{role_id}/members/{user_id}",
+            aide::axum::routing::delete(remove_role_member),
+        )
+        .add("/roles", aide::axum::routing::post(create_role))
+        .add("/roles", aide::axum::routing::get(list_iam_roles))
+        .add("/roles/{role_id}", aide::axum::routing::put(rename_role))
+        .add("/roles/{role_id}", aide::axum::routing::delete(delete_role))
+        .add("/roles/{role_id}", aide::axum::routing::get(get_iam_role))
 }
 
 async fn add_group_member(
@@ -344,6 +375,153 @@ async fn get_iam_policy(
 ) -> Result<Json<PolicyRecord>, ApiError> {
     Ok(Json(
         crate::models::iam_policies::Model::get_as(&ctx.db, &actor, id)
+            .await?
+            .into(),
+    ))
+}
+
+async fn rename_role(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    axum::extract::Path(crate::dtos::common::RoleIdPath { role_id: id }): axum::extract::Path<
+        crate::dtos::common::RoleIdPath<uuid::Uuid>,
+    >,
+    Json(input): Json<CreateRole>,
+) -> Result<Json<RoleRecord>, ApiError> {
+    Ok(Json(
+        crate::models::iam_roles::Model::rename_as(&ctx.db, &actor, id, input.name)
+            .await?
+            .into(),
+    ))
+}
+
+async fn delete_role(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    axum::extract::Path(crate::dtos::common::RoleIdPath { role_id: id }): axum::extract::Path<
+        crate::dtos::common::RoleIdPath<uuid::Uuid>,
+    >,
+) -> Result<axum::response::NoContent, ApiError> {
+    crate::models::iam_roles::Model::delete_as(&ctx.db, &actor, id).await?;
+    Ok(axum::response::NoContent)
+}
+
+async fn create_role(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    Json(body): Json<CreateRole>,
+) -> Result<Created<RoleRecord>, ApiError> {
+    let role = crate::models::iam_roles::Model::create_as(&ctx.db, &actor, body.name).await?;
+    Ok(Created(role.into()))
+}
+
+async fn add_role_member(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    axum::extract::Path(crate::dtos::common::RoleIdUserIdPath { role_id, user_id }): axum::extract::Path<crate::dtos::common::RoleIdUserIdPath<uuid::Uuid, uuid::Uuid>>,
+) -> Result<axum::response::NoContent, ApiError> {
+    crate::models::iam_user_role_attachments::Model::add_as(&ctx.db, &actor, role_id, user_id)
+        .await?;
+    Ok(axum::response::NoContent)
+}
+
+async fn remove_role_member(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    axum::extract::Path(crate::dtos::common::RoleIdUserIdPath { role_id, user_id }): axum::extract::Path<crate::dtos::common::RoleIdUserIdPath<uuid::Uuid, uuid::Uuid>>,
+) -> Result<axum::response::NoContent, ApiError> {
+    crate::models::iam_user_role_attachments::Model::remove_as(&ctx.db, &actor, role_id, user_id)
+        .await?;
+    Ok(axum::response::NoContent)
+}
+
+async fn attach_role_policy(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    axum::extract::Path(crate::dtos::common::RoleIdPolicyIdPath {
+        role_id,
+        policy_id,
+    }): axum::extract::Path<crate::dtos::common::RoleIdPolicyIdPath<uuid::Uuid, uuid::Uuid>>,
+) -> Result<axum::response::NoContent, ApiError> {
+    crate::models::iam_role_policy_attachments::Model::add_as(&ctx.db, &actor, role_id, policy_id)
+        .await?;
+    Ok(axum::response::NoContent)
+}
+
+async fn detach_role_policy(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    axum::extract::Path(crate::dtos::common::RoleIdPolicyIdPath {
+        role_id,
+        policy_id,
+    }): axum::extract::Path<crate::dtos::common::RoleIdPolicyIdPath<uuid::Uuid, uuid::Uuid>>,
+) -> Result<axum::response::NoContent, ApiError> {
+    crate::models::iam_role_policy_attachments::Model::remove_as(
+        &ctx.db, &actor, role_id, policy_id,
+    )
+    .await?;
+    Ok(axum::response::NoContent)
+}
+
+async fn list_iam_roles(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    axum::extract::Query(input): axum::extract::Query<crate::dtos::iam::ListIam>,
+) -> Result<Json<Vec<RoleRecord>>, ApiError> {
+    let rows = crate::models::iam_roles::Model::list_as(
+        &ctx.db,
+        &actor,
+        crate::models::pagination::ListParams::new(input.limit, input.offset),
+    )
+    .await?;
+    Ok(Json(rows.into_iter().map(Into::into).collect()))
+}
+
+async fn list_iam_role_members(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    axum::extract::Path(crate::dtos::common::RoleIdPath { role_id }): axum::extract::Path<
+        crate::dtos::common::RoleIdPath<uuid::Uuid>,
+    >,
+    axum::extract::Query(input): axum::extract::Query<crate::dtos::iam::ListIam>,
+) -> Result<Json<Vec<crate::dtos::iam::RoleMemberRecord>>, ApiError> {
+    let rows = crate::models::iam_user_role_attachments::Model::list_as(
+        &ctx.db,
+        &actor,
+        role_id,
+        crate::models::pagination::ListParams::new(input.limit, input.offset),
+    )
+    .await?;
+    Ok(Json(rows.into_iter().map(Into::into).collect()))
+}
+
+async fn list_iam_role_policies(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    axum::extract::Path(crate::dtos::common::RoleIdPath { role_id }): axum::extract::Path<
+        crate::dtos::common::RoleIdPath<uuid::Uuid>,
+    >,
+    axum::extract::Query(input): axum::extract::Query<crate::dtos::iam::ListIam>,
+) -> Result<Json<Vec<crate::dtos::iam::RolePolicyRecord>>, ApiError> {
+    let rows = crate::models::iam_role_policy_attachments::Model::list_as(
+        &ctx.db,
+        &actor,
+        role_id,
+        crate::models::pagination::ListParams::new(input.limit, input.offset),
+    )
+    .await?;
+    Ok(Json(rows.into_iter().map(Into::into).collect()))
+}
+
+async fn get_iam_role(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    axum::extract::Path(crate::dtos::common::RoleIdPath { role_id: id }): axum::extract::Path<
+        crate::dtos::common::RoleIdPath<uuid::Uuid>,
+    >,
+) -> Result<Json<RoleRecord>, ApiError> {
+    Ok(Json(
+        crate::models::iam_roles::Model::get_as(&ctx.db, &actor, id)
             .await?
             .into(),
     ))

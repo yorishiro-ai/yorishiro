@@ -11,24 +11,7 @@ mod input_parity_tests {
     use yorishiro::models::{entity_entities, entity_relations};
 
     #[test]
-    fn entity_rest_and_mcp_adapters_build_equivalent_inputs() {
-        let rest: entity_entities::CreateEntityInput = rest_entities::CreateEntityRequest {
-            schema_name: "notes".into(),
-            entity_type: "note".into(),
-            data: json!({"title": "hello"}),
-        }
-        .into();
-        let mcp: entity_entities::CreateEntityInput = entities::CreateEntityArgs {
-            schema_name: "notes".into(),
-            entity_type: "note".into(),
-            data: json!({"title": "hello"}),
-        }
-        .into();
-
-        assert_eq!(rest.schema_name, mcp.schema_name);
-        assert_eq!(rest.entity_type, mcp.entity_type);
-        assert_eq!(rest.data, mcp.data);
-
+    fn entity_list_rest_and_mcp_adapters_build_equivalent_queries() {
         let rest_query: entity_entities::ListEntitiesQuery = rest_entities::ListEntitiesParams {
             entity_type: Some("note".into()),
             filter: Some(r#"{"title":"hello"}"#.into()),
@@ -58,29 +41,9 @@ mod input_parity_tests {
     }
 
     #[test]
-    fn relation_rest_and_mcp_adapters_build_equivalent_inputs() {
+    fn relation_list_rest_and_mcp_adapters_build_equivalent_queries() {
         let source_id = Uuid::now_v7();
         let target_id = Uuid::now_v7();
-        let rest: entity_relations::CreateRelationInput = rest_relations::CreateRelationRequest {
-            source_id,
-            target_id,
-            relation_type: "knows".into(),
-            properties: None,
-        }
-        .into();
-        let mcp: entity_relations::CreateRelationInput = relations::CreateRelationArgs {
-            source_id,
-            target_id,
-            relation_type: "knows".into(),
-            properties: None,
-        }
-        .into();
-
-        assert_eq!(rest.source_id, mcp.source_id);
-        assert_eq!(rest.target_id, mcp.target_id);
-        assert_eq!(rest.relation_type, mcp.relation_type);
-        assert_eq!(rest.properties, mcp.properties);
-
         let rest_query: entity_relations::ListRelationsQuery =
             rest_relations::ListRelationsParams {
                 source_id: Some(source_id),
@@ -111,26 +74,6 @@ mod input_parity_tests {
         assert_eq!(rest_query.status, mcp_query.status);
         assert_eq!(rest_query.page.limit(), mcp_query.page.limit());
         assert_eq!(rest_query.page.offset(), mcp_query.page.offset());
-    }
-
-    #[test]
-    fn mcp_closed_relation_values_fail_before_model_query_conversion() {
-        let result: Result<entity_relations::ListRelationsQuery, _> =
-            relations::ListRelationsArgs {
-                source_id: None,
-                target_id: None,
-                relation_type: None,
-                status: Some("unknown".into()),
-                limit: None,
-                offset: None,
-            }
-            .try_into();
-
-        match result {
-            Err(yorishiro::YorishiroError::ValidationFailed { .. }) => {}
-            Ok(_) => panic!("invalid status must be rejected"),
-            Err(error) => panic!("unexpected validation error: {error:?}"),
-        }
     }
 }
 

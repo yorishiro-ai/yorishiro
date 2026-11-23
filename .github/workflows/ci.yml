@@ -41,6 +41,7 @@ jobs:
     outputs:
       enabled: ${{ steps.eligibility.outputs.enabled }}
       matrix: ${{ steps.eligibility.outputs.matrix }}
+      regenerate-schema: ${{ steps.schema-changes.outputs.regenerate }}
     steps:
       - id: eligibility
         env:
@@ -64,6 +65,27 @@ jobs:
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           if [[ "$enabled" != true ]]; then
             echo 'Licensed checks run after merge on develop. No licence is exposed to this run.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check migration and generated entity changes
+        id: schema-changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          # Without a usable base, verify by regenerating rather than skipping.
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo 'regenerate=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          migrations=$(git diff --name-only --no-renames "$BASE_SHA" HEAD -- migration/src)
+          if [[ -n "$migrations" ]]; then
+            echo 'regenerate=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'regenerate=false' >> "$GITHUB_OUTPUT"
+            git diff --exit-code "$BASE_SHA" HEAD -- src/models/_entities
           fi
 
   ce:
@@ -99,20 +121,8 @@ jobs:
           components: rustfmt, clippy
           cache-key: check
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Check generated entity hardener
-        run: uv run scripts/test_harden_generated_entities.py
-
-      - name: Python lint
-        run: make python-lint
-
-      - name: Check that tests live in tests/
-        run: make test-location-check
-
-      - name: Check the edition boundary
-        run: make edition-boundary-check
+      - name: Check formatting, scripts, boundaries, tests and Clippy
+        run: make check-all-ee
 
       - name: Check pinned versions agree
         # Service containers start before checkout and cannot read repository configuration.
@@ -134,13 +144,10 @@ jobs:
             -D rustdoc::invalid_html_tags
             -D rustdoc::bare_urls
 
-      - name: Clippy
-        # Keep CI aligned with rust-analyzer: every target and public API documentation.
-        run: make clippy-ee
-
   schema-generation:
     name: Schema generation (PostgreSQL)
-    needs: build-ce
+    needs: [licensed-validation, build-ce]
+    if: needs.licensed-validation.outputs.regenerate-schema == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
@@ -190,23 +197,13 @@ jobs:
       - name: Regenerate entities
         id: regenerate-entities
         run: |
-          # Diagnose: confirm the migration-created tables actually exist.
-          # This is the branching point if db entities ever produces 0 files again.
-          docker exec ${{ job.services.db.id }} psql -U postgres -d yorishiro -c '\dt'
-          # Run db entities (the determinism check).
-          count_before=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
           rm -f src/models/_entities/*.rs
           ./target/debug/yorishiro db entities
           python3 scripts/harden_generated_entities.py
-          count=$(ls src/models/_entities/*.rs 2>/dev/null | wc -l)
-          if [ "$count" -lt 10 ]; then
-            echo "ERROR: Expected at least 10 entity files, got $count after db entities."
-            exit 1
-          fi
-          echo "Generated $count entity files (had $count_before before)"
 
       - name: Verify _entities/ matches a fresh regen
         run: |
+          git add --intent-to-add -- src/models/_entities
           git diff --exit-code -- src/models/_entities
 
       - name: Upload generated entities on mismatch
@@ -302,12 +299,12 @@ jobs:
         with:
           container: ${{ job.services.db.id }}
       - name: Run the tests
-        run: make test-${{ matrix.database }} EDITION=${{ matrix.edition }}
-      - name: Test signed Stripe webhooks
-        if: matrix.name == 'ee-postgres'
-        env:
-          QUEUE_URL: ${{ env.DATABASE_URL }}
-        run: cargo test --locked --features stripe-tests --test mod -- '::stripe::'
+        run: |
+          # Bound concurrent database setup and teardown without changing the worker races inside each test.
+          if [[ '${{ matrix.name }}' == 'ee-postgres' ]]; then
+            export RUST_TEST_THREADS=2
+          fi
+          make test-${{ matrix.database }} EDITION=${{ matrix.edition }}
 
   test-valkey:
     name: Test (ee-valkey)
@@ -341,7 +338,7 @@ jobs:
         include:
           - {edition: ce, suite: rest}
           - {edition: ce, suite: mcp}
-          - {edition: ce, suite: cli}
+          - {edition: ce, suite: management}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -352,11 +349,11 @@ jobs:
         run: tar -xzf "$RUNNER_TEMP/binary/public-contract-${{ matrix.edition }}.tar.gz" -C "$RUNNER_TEMP/binary"
       - name: Exercise the public interface through real processes
         run: >-
-          python3 tests/blackbox/run.py
-          --binary "$RUNNER_TEMP/binary/yorishiro"
-          --suite "${{ matrix.suite }}"
-          --edition "${{ matrix.edition }}"
-          --artifacts "$RUNNER_TEMP/contracts"
+          make test-contract
+          BINARY="$RUNNER_TEMP/binary/yorishiro"
+          SUITE="${{ matrix.suite }}"
+          EDITION="${{ matrix.edition }}"
+          ARTIFACTS="$RUNNER_TEMP/contracts"
       - name: Upload redacted logs and scenario results
         if: always()
         uses: actions/upload-artifact@v7
@@ -380,7 +377,7 @@ jobs:
       - name: Exercise the enterprise delta through real processes
         run: |
           tar -xzf "$RUNNER_TEMP/binary/public-contract-ee.tar.gz" -C "$RUNNER_TEMP/binary"
-          python3 tests/blackbox/run.py --binary "$RUNNER_TEMP/binary/yorishiro" --suite mcp --edition ee --artifacts "$RUNNER_TEMP/contracts"
+          make test-contract BINARY="$RUNNER_TEMP/binary/yorishiro" SUITE=mcp EDITION=ee ARTIFACTS="$RUNNER_TEMP/contracts"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -424,7 +421,7 @@ jobs:
         run: |
           test -n "$YORISHIRO_LICENSE_KEY"
           tar -xzf "$RUNNER_TEMP/binary/public-contract-ee.tar.gz" -C "$RUNNER_TEMP/binary"
-          python3 tests/blackbox/run.py --binary "$RUNNER_TEMP/binary/yorishiro" --suite tenant-postgres --edition ee --artifacts "$RUNNER_TEMP/contracts"
+          make test-contract BINARY="$RUNNER_TEMP/binary/yorishiro" SUITE=tenant-postgres EDITION=ee ARTIFACTS="$RUNNER_TEMP/contracts"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -450,8 +447,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           jq -e '
             .["licensed-validation"].outputs.enabled as $licensed
+            | .["licensed-validation"].outputs["regenerate-schema"] as $regenerate
             | to_entries | all(
                 .value.result == "success" or
+                (.key == "schema-generation" and .value.result == "skipped" and $regenerate == "false") or
                 (.key == "public-contract-tenant" and .value.result == "skipped" and $licensed == "false")
               )
           ' <<< "$RESULTS"

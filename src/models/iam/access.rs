@@ -319,11 +319,7 @@ impl<'a> IamEvaluation<'a> {
             });
         }
         let workspace = match target {
-            Resource::Tenant { tenant_id }
-            | Resource::Role { tenant_id, .. }
-            | Resource::AllRoles { tenant_id }
-                if tenant_id == self.current.tenant_id =>
-            {
+            Resource::Tenant { tenant_id } if tenant_id == self.current.tenant_id => {
                 if self.bound_workspace_id.is_some() {
                     return Err(YorishiroError::ScopeInsufficient {
                         message: "workspace-bound credentials cannot access tenant resources"

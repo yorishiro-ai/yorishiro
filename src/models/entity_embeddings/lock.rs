@@ -123,7 +123,7 @@ pub(crate) async fn reindex_workspace_with_actor(
     actor: Option<&crate::models::api_keys::AuthContext>,
     startup: bool,
 ) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
-    let lock = if crate::db::AppContextBackend::is_sqlite(ctx) {
+    let lock = if crate::db::is_sqlite(&ctx.db) {
         None
     } else {
         let handle = ctx

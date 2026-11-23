@@ -38,7 +38,6 @@ use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ServerHandler, tool_handler};
-use sea_orm::DatabaseTransaction;
 
 use crate::controllers::middleware::auth;
 use crate::error::YorishiroError;
@@ -122,6 +121,35 @@ pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
     let mut result = CallToolResult::error(vec![ContentBlock::text(message)]);
     result.structured_content = Some(body);
     result
+}
+
+/// Unwraps a verified caller, or returns the scope denial as the tool result.
+macro_rules! verified {
+    ($server:expr, $parts:expr, $tool:literal) => {
+        match $server.verify(&$parts, $tool).await? {
+            $crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
+            $crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+        }
+    };
+}
+
+/// Unwraps a model result, or returns its error as the tool result.
+macro_rules! try_tool {
+    ($result:expr) => {
+        match $result {
+            Ok(value) => value,
+            Err(error) => return Ok($crate::controllers::mcp::err_to_tool_result(error)),
+        }
+    };
+}
+
+pub(crate) use {try_tool, verified};
+
+/// Renders a model result as the tool result.
+pub(crate) fn render<T: serde::Serialize>(
+    result: Result<T, YorishiroError>,
+) -> Result<CallToolResult, ErrorData> {
+    result.map_or_else(|error| Ok(err_to_tool_result(error)), ok_json)
 }
 
 pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData> {

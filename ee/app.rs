@@ -98,7 +98,7 @@ pub(crate) fn tenant_cap_for_licence(configured: i32, licensed: bool) -> Option<
 /// Installs the enterprise services that override base shared-store seams.
 pub(crate) fn compose_context(ctx: &AppContext) -> Result<()> {
     crate::edition::ee::initializers::queue::install(ctx)?;
-    crate::edition::ee::initializers::auth::install(ctx);
+    crate::edition::ee::initializers::licence::install(ctx);
     Ok(())
 }
 

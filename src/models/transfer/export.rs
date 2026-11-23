@@ -146,3 +146,24 @@ fn export_too_large() -> YorishiroError {
             .into(),
     }
 }
+
+/// Opens the caller's read session and exports the workspace as JSON Lines.
+///
+/// # Errors
+/// Returns the session, authorization or export error.
+pub(crate) async fn export_jsonl_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+) -> Result<String, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::read(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::Export,
+        ),
+        crate::models::iam::policy::Action::Export,
+        async |session| export_jsonl(session.txn(), session.workspace_id()?).await,
+    )
+    .await
+}

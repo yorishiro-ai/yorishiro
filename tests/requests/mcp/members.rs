@@ -107,8 +107,7 @@ async fn mcp_membership_tools_treat_tenant_users_as_tenant_bound_accounts() {
         // The tenant user's own key reads its tenant-bound profile.
         let login = request
             .post("/auth/tenant/login")
-            .add_header("x-tenant-id", tenant.tenant_id.to_string())
-            .json(&json!({"user_name":user_name,"password":"tenant-user-password"}))
+            .json(&json!({"tenant_id":tenant.tenant_id,"user_name":user_name,"password":"tenant-user-password"}))
             .await;
         login.assert_status_ok();
         let own_key = login.json::<Value>()["api_key"]
@@ -141,8 +140,7 @@ async fn mcp_membership_tools_treat_tenant_users_as_tenant_bound_accounts() {
         assert_eq!(tool_result_json(&removed)["removed"], true);
         request
             .post("/auth/tenant/login")
-            .add_header("x-tenant-id", tenant.tenant_id.to_string())
-            .json(&json!({"user_name":user_name,"password":"tenant-user-password"}))
+            .json(&json!({"tenant_id":tenant.tenant_id,"user_name":user_name,"password":"tenant-user-password"}))
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
     })

@@ -2,43 +2,25 @@
 
 pub mod implementation {
 
+    use super::super::operations_mut;
     use aide::openapi::OpenApi;
     use axum::{Json, Router, routing::get};
 
-    use super::super::route_inventory::RouteInventory;
     use crate::models::iam::policy::{Action, Resource};
 
-    /// Build the document for the operations in the runtime route inventory.
+    /// Completes the document the routes generated: the workspace header, the security scheme and the info block.
     ///
     /// # Panics
-    /// Panics if route metadata or component schemas are inconsistent.
+    /// Panics if static metadata is invalid.
     #[must_use]
-    pub fn openapi_for(inventory: &RouteInventory) -> OpenApi {
-        let mut api = inventory.api.clone();
+    pub fn openapi_for(generated: &OpenApi) -> OpenApi {
+        let mut api = generated.clone();
         let mut components = api.components.take().unwrap_or_default();
-        for entry in inventory.public() {
-            let path = api
-                .paths
-                .as_mut()
-                .expect("generated paths")
-                .paths
-                .get_mut(&entry.path)
-                .and_then(|path| path.as_item_mut())
-                .expect("generated path");
-            let target = match entry.method {
-                axum::http::Method::GET => &mut path.get,
-                axum::http::Method::POST => &mut path.post,
-                axum::http::Method::PUT => &mut path.put,
-                axum::http::Method::DELETE => &mut path.delete,
-                axum::http::Method::PATCH => &mut path.patch,
-                _ => panic!("unsupported API method"),
-            };
-            let operation = target.as_mut().expect("generated operation");
-            operation.operation_id = Some(entry.operation_id.clone());
-            let workspace = Resource::Workspace {
-                tenant_id: uuid::Uuid::nil(),
-                workspace_id: uuid::Uuid::nil(),
-            };
+        let workspace = Resource::Workspace {
+            tenant_id: uuid::Uuid::nil(),
+            workspace_id: uuid::Uuid::nil(),
+        };
+        for (path, method, operation) in operations_mut(&mut api) {
             let workspace_operation = operation
                 .extensions
                 .get("x-yorishiro-required-actions")
@@ -48,8 +30,7 @@ pub mod implementation {
                 .flatten()
                 .filter_map(|value| serde_json::from_value::<Action>(value.clone()).ok())
                 .any(|action| action.applies_to(workspace));
-            let key_creation =
-                entry.path == "/api/api-keys" && entry.method == axum::http::Method::POST;
+            let key_creation = path == "/api/api-keys" && method == "post";
             if workspace_operation || key_creation {
                 let description = if key_creation {
                     "Workspace binding for the new key. Do not send this header with tenant_scoped: true."
@@ -79,8 +60,8 @@ pub mod implementation {
         }
     }
 
-    pub(crate) fn mount(router: Router, inventory: &RouteInventory) -> Router {
-        let document = openapi_for(inventory);
+    pub(crate) fn mount(router: Router, generated: &OpenApi) -> Router {
+        let document = openapi_for(generated);
         router
             .route(
                 "/docs",

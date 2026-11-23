@@ -8,9 +8,8 @@ use std::sync::Arc;
 use axum::http::HeaderMap;
 use loco_rs::app::AppContext;
 use loco_rs::prelude::async_trait;
-use sea_orm::DatabaseTransaction;
 
-use crate::db::{AppContextBackend, DbHandle};
+use crate::db::{DbHandle, is_sqlite};
 use crate::error::YorishiroError;
 use crate::models::api_keys::{ApiKeyScope, AuthContext, Entity, WORKSPACE_HEADER};
 use uuid::Uuid;
@@ -110,7 +109,7 @@ impl Authenticator for DefaultAuthenticator {
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
         let requested = requested_workspace(headers)?;
-        if app.is_sqlite() {
+        if is_sqlite(&app.db) {
             Entity::authenticate_sqlite(&app.db, presented_key, requested).await
         } else {
             let db = app
@@ -187,17 +186,6 @@ impl<'a> RequestAuth<'a> {
         Ok(ctx)
     }
 
-    pub(crate) async fn authorize(
-        &self,
-        key: &str,
-        required: ApiKeyScope,
-        headers: &[(String, String)],
-    ) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
-        let ctx = self.resolve(key, headers).await?;
-        require_scope(&ctx, required)?;
-        self.begin(ctx, required >= ApiKeyScope::Write).await
-    }
-
     pub(crate) async fn verify_audit(
         &self,
         key: &str,
@@ -207,21 +195,5 @@ impl<'a> RequestAuth<'a> {
         require_audit(&ctx)?;
         Entity::touch_authenticated(self.app, &ctx).await?;
         Ok(ctx)
-    }
-
-    pub(crate) async fn begin(
-        &self,
-        ctx: AuthContext,
-        write: bool,
-    ) -> Result<(AuthContext, DatabaseTransaction), YorishiroError> {
-        let workspace_id = ctx.require_workspace()?;
-        // Touch independently: read handlers roll their workspace transaction back on drop.
-        Entity::touch_authenticated(self.app, &ctx).await?;
-        let txn = if write {
-            crate::db::begin_workspace_write(self.app, ctx.tenant_id, workspace_id).await?
-        } else {
-            crate::db::begin_workspace(self.app, ctx.tenant_id, workspace_id).await?
-        };
-        Ok((ctx, txn))
     }
 }

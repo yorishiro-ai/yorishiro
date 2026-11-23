@@ -7,19 +7,18 @@ The report verifier writes `tool-coverage.json`, listing each tool's observed ou
 An observed successful call is not proof of complete behavior coverage, and each edition reports its missing successful calls explicitly.
 
 `rest.builtin-template-relations` creates every builtin template's entity and relation types through public HTTP using Write credentials after schema creation.
-The graph scenarios also cover Read-scoped MCP entity filtering, invalid relation-list status and missing-entity diagnostics.
-Their internal predecessors were retired after the expanded replacement passed GHA run `41735414722` at commit `d5e1982291eda5a4bbcdad29790af5d699f2e60f`.
+The graph scenario also covers Read-scoped MCP entity filtering, invalid relation-list status and missing-entity diagnostics.
 
 Requires Python 3.10+ and an already-built SQLite-capable application binary.
 No Python dependencies, database access library, network embedding provider, model download, licence, or running external service is needed.
 The runner reads the repository's `config/test.yaml` and copies it into its owned temporary working directory.
-Run from any directory, retaining this repository checkout beside the runner.
+Run the Make targets from the repository root, or use `make -C`.
 
 ```sh
-python3 tests/blackbox/run.py --binary /absolute/path/to/yorishiro --suite rest --edition ce --artifacts /absolute/path/to/artifacts
-python3 tests/blackbox/run.py --binary /absolute/path/to/yorishiro --suite mcp --edition ce --artifacts /absolute/path/to/artifacts
-python3 tests/blackbox/run.py --binary /absolute/path/to/yorishiro --suite cli --edition ce --artifacts /absolute/path/to/artifacts
-python3 tests/blackbox/run.py --binary /absolute/path/to/yorishiro-ee --suite mcp --edition ee --artifacts /absolute/path/to/ee-artifacts
+make test-contract BINARY=/absolute/path/to/yorishiro SUITE=rest EDITION=ce
+make test-contract BINARY=/absolute/path/to/yorishiro SUITE=mcp EDITION=ce
+make test-contract BINARY=/absolute/path/to/yorishiro SUITE=management EDITION=ce
+make test-contract BINARY=/absolute/path/to/yorishiro-ee SUITE=mcp EDITION=ee
 ```
 
 Common contracts run on CE/SQLite; enterprise-only composition and behavior belong in explicit EE checks, not a duplicate common matrix.
@@ -33,11 +32,11 @@ Its deterministic vectors test transport and worker integration, not semantic mo
 The EE composition scenario adopts a library template, changes its upstream definition, previews and applies a merge, and checks immutable schema history.
 It then creates a second-workspace fork, checks scoped visibility and stale-head rejection, updates and deletes the fork without changing source history.
 
-Each invocation runs public `db migrate` and CLI tenant/workspace/key creation against separate owned file-backed SQLite application and queue databases.
-The CLI suite proves migration and normal tasks succeed.
+Each SQLite invocation migrates separate owned application and queue databases and bootstraps an account through the setup API.
+The management suite proves migration and normal tasks succeed.
 It starts one server and reuses it for the whole suite.
-Loco 1.2.0 defaults `start --no-banner` to server-only mode.
-REST and MCP additionally start a separate `--environment test start --worker=job-target:shared --no-banner` process only after import submission and queued/empty-destination assertions.
+The server starts separately from job workers.
+The MCP suite additionally starts a separate `--environment test start --worker=job-target:shared --no-banner` process only after import submission and queued/empty-destination assertions.
 The worker uses the server's exact environment, application database and separate queue database.
 Children receive an allowlisted environment, an owned home directory, and embedding provider `none`.
 The owned config disables auto-migration after explicit migration, and the auth rate limit is raised for these isolated checks.
@@ -59,15 +58,15 @@ Its required GHA job owns a non-superuser PostgreSQL service and its own databas
 The MCP migration lifecycle checks drift and a read-only dry-run, queues fill-defaults before starting a real worker, compares completed status through REST, and restores the original snapshot through queued undo.
 Scenario counts alone are not a public-tool completeness guarantee.
 
-Every suite checks CLI key issuance, REST and MCP acceptance, CLI revocation, and immediate rejection by both surfaces using the existing server and MCP session.
+Every suite bootstraps its own credentials; the MCP suite alone checks revocation and immediate rejection through both surfaces using the existing server and MCP session.
 
 | Suite | Additional checks |
 | --- | --- |
 | `rest` | Schema create/read/archive/delete and entity create/list/read/update/delete through REST, cross-checked through MCP; unauthenticated/invalid credentials, insufficient scope, malformed entity input |
 | `mcp` | Same CRUD through MCP, cross-checked through REST; initialize/session header/initialized notification, tool discovery, authentication protocol errors, scope tool errors, invalid UUID argument-deserialization tool error, missing schema arguments |
-| `cli` | Registered bootstrap/key tasks, unknown flag/task, missing/invalid/malformed arguments, success/failure exits and diagnostics, UUID and one-time credential stdout, key listing without plaintext, revoked ID retained in listing and REST rejection |
+| `management` | CLI bootstrap/key tasks, argument and exit contracts, human key management, MCP profile/settings/template/workspace/audit/membership lifecycles |
 
-`cli.human-key-management` creates an Owner invite through the CLI, accepts it through public signup and issues a user-attributed Schema key through the CLI.
+`management.human-key-management` checks human-attributed key issuance, identity and lifecycle through the public interfaces.
 REST and MCP identity readback must name that human.
 An expiring delegated Read key cannot raise scope, add audit, omit its expiry ceiling or extend it through either transport; an unattributed service key cannot delegate management credentials.
 MCP rotation must preserve grant metadata, invalidate the predecessor through both transports and retain its successor link in secret-free REST/MCP history.
@@ -79,25 +78,15 @@ Both CRUD scenarios reject active-schema deletion, create an evolved version, ch
 Both reject stale entity updates through REST and MCP and verify unchanged data.
 The human management scenario also creates, renames, caps, grants/revokes membership and deletes a workspace, checking list/get visibility and preservation of the other workspace's credential.
 The shared fixture is an inline schema with one required string field.
-The additional `rest.relation-export-import-worker` and `mcp.relation-export-import-worker` scenarios share one implementation with thin transport adapters.
-Each creates a dedicated source workspace through the public CLI, a `graph` schema with `person.name` and `knows`, and Alice/Bob entities through its selected surface.
+The `api.relation-export-import-worker` scenario runs once in the MCP suite with thin REST/MCP transport adapters.
+It creates a dedicated source workspace, a `graph` schema with `person.name` and `knows`, and Alice/Bob entities through REST.
 Relation create/read/list/delete and active/deprecated/archived status changes are read back through both surfaces, including omitted properties defaulting to `{}`, read-scope rejection, missing authentication, invalid status and missing endpoints.
 Export while deprecated must return exactly one schema, two entities and one relation in kind order, preserving IDs/data/properties/status, with identical raw REST NDJSON and MCP text.
-A new CLI-created destination workspace and schema service key submit the raw document through the selected surface before the real worker starts.
+A new destination workspace and schema service key submit the raw document through MCP and an empty import through REST before one real worker starts.
 Both surfaces must report queued with an empty destination, then completed with job name `import` and counts 1/2/1.
 Restored records must have new IDs, remapped schema/endpoints, destination ownership and matching data/properties, while the source export stays unchanged.
 Imported relations are active even when exported as deprecated; this is not lossless history restoration.
 No database files are inspected or written directly by the tests.
-
-### Retired request tests
-
-The request tests `relations_are_created_listed_statused_exported_and_deleted_over_rest` and `relation_write_requires_write_scope_and_read_authentication` were retired after successful GHA run `41693102412`, with replacement coverage in both `rest.relation-export-import-worker` and `mcp.relation-export-import-worker`, including Write-scoped relation status changes and deletion.
-GHA run `41735414722` at commit `d5e1982291eda5a4bbcdad29790af5d699f2e60f` also proved the following replacements before retirement:
-
-| Retired Rust test | Retained black-box assertions |
-| --- | --- |
-| `requests::relations::every_builtin_relation_type_can_be_created` | `rest.builtin-template-relations` creates each builtin schema and every entity/relation type with required fixture data, separate endpoints for same-type relations, Schema-scoped schema creation and Write-scoped entity/relation creation, asserting HTTP 201 throughout |
-| `requests::mcp::community_mcp_entities_relations_and_schema_tools_execute_over_protocol` | `mcp.relation-export-import-worker` creates the graph schema, two entities and a relation, lists exactly two `person` entities with Read scope, checks invalid relation-list status and missing-entity tool errors and their diagnostics, and persists archived relation status for Read-scoped readback; successful MCP calls reject tool errors |
 
 Existing export limits, history, security and race tests remain internal.
 
@@ -126,18 +115,16 @@ python3 tests/blackbox/run.py --self-check
 Runner-only checks use stdlib unittest and do not launch the application:
 
 ```sh
-python3 -m unittest discover -s tests/blackbox -p 'test_*.py'
-python3 -m py_compile tests/blackbox/run.py tests/blackbox/test_runner.py
+make test-python
 ```
 
-Application and unittest execution are reserved for CI for this batch.
-Static syntax/lint checks may run locally.
+GHA and local checks use these same Make targets.
 
 ## Limits
 
-These additive batches do not cover PostgreSQL/RLS, enterprise-only features, embedding/search quality, concurrent writes, pagination boundaries, schema version evolution, or comprehensive route/task inventory.
-Import replay/rollback, quotas, provider faults and races remain with the existing Rust tests; none are retired by this slice.
-MCP discovery asserts a required subset, not a frozen complete inventory.
+The public contracts cover selected workflows, not exhaustive route behavior, semantic search quality or concurrency safety.
+PostgreSQL isolation, import replay/rollback, quotas, provider faults and races retain dedicated Rust tests.
+MCP discovery asserts the reviewed complete inventory and correlates two concurrent responses on one session; it is not a load test.
 It supports JSON and POST-response SSE with matching JSON-RPC IDs, not resumable server-push streams.
 The temporary loopback port is selected by binding port zero and releasing it before startup; a competing bind causes an explicit startup failure rather than a retry against another port.
 Cleanup cannot recover from SIGKILL of the Python runner itself.

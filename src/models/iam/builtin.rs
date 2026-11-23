@@ -8,7 +8,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::iam_policies;
+use crate::models::_entities::{iam_policies, iam_role_policy_attachments, iam_roles};
 use crate::models::iam::policy::{Action, Policy};
 
 pub(crate) const ADMINISTRATOR_POLICY_NAME: &str = "Tenant Administrator";
@@ -73,6 +73,9 @@ const fn is_admin_only_action(action: Action) -> bool {
             | Action::RolePolicyList
             | Action::RolePolicyAttach
             | Action::RolePolicyDetach
+            | Action::UserRoleList
+            | Action::UserRoleAdd
+            | Action::UserRoleRemove
     )
 }
 
@@ -98,8 +101,7 @@ pub(crate) fn policy_documents(tenant_id: Uuid) -> Vec<(String, serde_json::Valu
     let tenant = json!({"type": "tenant", "tenant_id": tenant_id});
     let all_workspaces = json!({"type": "all_workspaces", "tenant_id": tenant_id});
     let tenant_resources = json!([tenant]);
-    let all_roles = json!({"type": "all_roles", "tenant_id": tenant_id});
-    let both_resources = json!([tenant, all_workspaces, all_roles]);
+    let both_resources = json!([tenant, all_workspaces]);
     let wildcard = json!([json!("*")]);
 
     let reads = Action::ALL
@@ -196,6 +198,41 @@ pub(crate) async fn bootstrap(
             tenant_id: Set(tenant_id),
             name: Set(name),
             document: Set(document),
+            ..Default::default()
+        }
+        .insert(txn)
+        .await
+        .internal()?;
+    }
+    for name in [
+        ADMINISTRATOR_POLICY_NAME,
+        WRITER_POLICY_NAME,
+        READER_POLICY_NAME,
+    ] {
+        let policy = find_policy(txn, tenant_id, name)
+            .await?
+            .ok_or_else(|| YorishiroError::not_found("managed IAM policy was not found"))?;
+        let role = iam_roles::Entity::find()
+            .filter(iam_roles::Column::TenantId.eq(tenant_id))
+            .filter(iam_roles::Column::Name.eq(name))
+            .one(txn)
+            .await
+            .internal()?;
+        if role.is_some() {
+            continue;
+        }
+        let role = iam_roles::ActiveModel {
+            tenant_id: Set(tenant_id),
+            name: Set(name.to_owned()),
+            ..Default::default()
+        }
+        .insert(txn)
+        .await
+        .internal()?;
+        iam_role_policy_attachments::ActiveModel {
+            tenant_id: Set(tenant_id),
+            role_id: Set(role.id),
+            policy_id: Set(policy.id),
             ..Default::default()
         }
         .insert(txn)

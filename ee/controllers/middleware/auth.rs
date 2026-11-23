@@ -1,78 +1,42 @@
 //! Authentication adapters for enterprise routes.
 //!
-//! Key resolution itself is edition-neutral and lives on the base `DefaultAuthenticator`, so a tenant-scoped key works identically on community and enterprise routes.
+//! Key resolution itself is edition-neutral and lives on the base `AuthContext` extractor, so a tenant-scoped key works identically on community and enterprise routes.
 
-use axum::extract::FromRef;
-use axum::http::HeaderMap;
+use axum::extract::{FromRef, FromRequestParts};
+use axum::http::request::Parts;
 use loco_rs::app::AppContext;
 
-use crate::YorishiroError;
-use crate::controllers::middleware::auth as base_auth;
+use crate::controllers::ApiError;
+use crate::controllers::extractors::AuthContext as Authenticated;
 use crate::models::api_keys::AuthContext;
 
 /// The header naming which workspace a tenant-scoped API key should act on.
 pub use crate::models::api_keys::WORKSPACE_HEADER;
 
-pub(crate) async fn authenticate(
-    ctx: &AppContext,
-    headers: &HeaderMap,
-) -> Result<AuthContext, YorishiroError> {
-    let token = base_auth::extract_bearer_key(headers).ok_or(YorishiroError::Unauthenticated)?;
-    let forwarded = base_auth::header_pairs(headers)?;
-    base_auth::RequestAuth::new(ctx)
-        .resolve(token, &forwarded)
-        .await
-}
-
-/// Authenticates the bearer API key and returns the full context, **workspace included**.
+/// The caller **with its workspace**: a workspace-scoped key names its own, a tenant-scoped one names it per request with `X-Workspace-Id`.
 ///
-/// Goes through the installed authenticator, the same seam every authenticated path in this process resolves through, so both key kinds work on these routes: a workspace-scoped key names its own workspace, and a tenant-scoped one names it per request with `X-Workspace-Id`.
-/// Resolving it any other way here would make a REST route and an MCP tool disagree about who the caller is.
-///
-/// Use this one whenever the work touches a workspace's own content, since that is what the RLS-scoped connection has to be opened against.
-pub(crate) async fn authenticate_workspace(
-    ctx: &AppContext,
-    headers: &HeaderMap,
-) -> Result<AuthContext, YorishiroError> {
-    let auth = authenticate(ctx, headers).await?;
-    auth.require_workspace()?;
-    Ok(auth)
-}
-
-/// Extractor form of [`authenticate`]: the caller, without requiring a workspace.
-pub struct Authenticated(pub AuthContext);
-
-/// Extractor form of [`authenticate_workspace`]: the caller, with its workspace.
+/// Use this whenever the work touches a workspace's own content, since that is what the RLS-scoped connection has to be opened against.
 pub struct WorkspaceAuthenticated(pub AuthContext);
 
-macro_rules! authenticating_extractor {
-    ($ty:ident, $resolve:ident) => {
-        impl<S> axum::extract::FromRequestParts<S> for $ty
-        where
-            AppContext: axum::extract::FromRef<S>,
-            S: Send + Sync,
-        {
-            type Rejection = crate::controllers::ApiError;
+impl<S> FromRequestParts<S> for WorkspaceAuthenticated
+where
+    AppContext: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
 
-            async fn from_request_parts(
-                parts: &mut axum::http::request::Parts,
-                state: &S,
-            ) -> Result<Self, Self::Rejection> {
-                let ctx = AppContext::from_ref(state);
-                Ok(Self($resolve(&ctx, &parts.headers).await?))
-            }
-        }
-
-        impl aide::OperationInput for $ty {
-            fn operation_input(
-                ctx: &mut aide::generate::GenContext,
-                operation: &mut aide::openapi::Operation,
-            ) {
-                crate::controllers::extractors::document_authentication(ctx, operation, None);
-            }
-        }
-    };
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Authenticated(auth) = Authenticated::from_request_parts(parts, state).await?;
+        auth.require_workspace()?;
+        Ok(Self(auth))
+    }
 }
 
-authenticating_extractor!(Authenticated, authenticate);
-authenticating_extractor!(WorkspaceAuthenticated, authenticate_workspace);
+impl aide::OperationInput for WorkspaceAuthenticated {
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        <Authenticated as aide::OperationInput>::operation_input(ctx, operation);
+    }
+}

@@ -2,7 +2,7 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::Created;
-use crate::controllers::extractors::{Authorized, ReadScope, SchemaScope, Verified};
+use crate::controllers::extractors::{ReadScope, SchemaScope, Verified};
 use crate::controllers::openapi::Routes;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -26,21 +26,8 @@ async fn get(
     verified: Verified<ReadScope>,
     Path(crate::dtos::common::ForkIdPath { fork_id }): Path<crate::dtos::common::ForkIdPath<Uuid>>,
 ) -> Result<Json<model::ForkRecord>, ApiError> {
-    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
-        model::workspace_for_actor(&ctx.db, &verified.ctx, fork_id).await?,
-    );
-    let mut authorized = Authorized::<ReadScope>::for_target(&ctx, verified.ctx, target).await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaForkGet)
-        .await?;
     Ok(Json(
-        model::get(
-            authorized.txn(),
-            authorized.ctx.tenant_id,
-            authorized.ctx.require_workspace()?,
-            fork_id,
-        )
-        .await?,
+        model::get_for_actor(&ctx, verified.ctx, fork_id).await?,
     ))
 }
 
@@ -49,22 +36,9 @@ async fn create(
     verified: Verified<SchemaScope>,
     Json(input): Json<model::CreateInput>,
 ) -> Result<Created<model::ForkRecord>, ApiError> {
-    let target = crate::models::iam::access::WorkspaceTarget::Permission(
-        crate::models::iam::policy::Action::SchemaForkCreate,
-    );
-    let mut authorized = Authorized::<SchemaScope>::for_target(&ctx, verified.ctx, target).await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaForkCreate)
-        .await?;
-    let fork = model::create(
-        authorized.txn(),
-        authorized.ctx.tenant_id,
-        authorized.ctx.require_workspace()?,
-        input,
-    )
-    .await?;
-    authorized.commit().await?;
-    Ok(Created(fork))
+    Ok(Created(
+        model::create_for_actor(&ctx, verified.ctx, input).await?,
+    ))
 }
 
 async fn update(
@@ -73,23 +47,9 @@ async fn update(
     Path(crate::dtos::common::ForkIdPath { fork_id }): Path<crate::dtos::common::ForkIdPath<Uuid>>,
     Json(input): Json<model::UpdateInput>,
 ) -> Result<Json<model::ForkRecord>, ApiError> {
-    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
-        model::workspace_for_actor(&ctx.db, &verified.ctx, fork_id).await?,
-    );
-    let mut authorized = Authorized::<SchemaScope>::for_target(&ctx, verified.ctx, target).await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaForkUpdate)
-        .await?;
-    let fork = model::update(
-        authorized.txn(),
-        authorized.ctx.tenant_id,
-        authorized.ctx.require_workspace()?,
-        fork_id,
-        input,
-    )
-    .await?;
-    authorized.commit().await?;
-    Ok(Json(fork))
+    Ok(Json(
+        model::update_for_actor(&ctx, verified.ctx, fork_id, input).await?,
+    ))
 }
 
 async fn delete(
@@ -97,21 +57,7 @@ async fn delete(
     verified: Verified<SchemaScope>,
     Path(crate::dtos::common::ForkIdPath { fork_id }): Path<crate::dtos::common::ForkIdPath<Uuid>>,
 ) -> Result<axum::response::NoContent, ApiError> {
-    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
-        model::workspace_for_actor(&ctx.db, &verified.ctx, fork_id).await?,
-    );
-    let mut authorized = Authorized::<SchemaScope>::for_target(&ctx, verified.ctx, target).await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::SchemaForkDelete)
-        .await?;
-    model::delete(
-        authorized.txn(),
-        authorized.ctx.tenant_id,
-        authorized.ctx.require_workspace()?,
-        fork_id,
-    )
-    .await?;
-    authorized.commit().await?;
+    model::delete_for_actor(&ctx, verified.ctx, fork_id).await?;
     Ok(axum::response::NoContent)
 }
 

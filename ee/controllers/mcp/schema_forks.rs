@@ -1,5 +1,6 @@
 //! MCP tools for workspace schema forks: listing, creating, updating and deleting a fork of an upstream schema.
 
+use crate::controllers::mcp::{YorishiroMcpServer, ok_json, render, try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -10,7 +11,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::edition::ee::models::workspace_schema_forks as model;
 use crate::models::api_keys::ApiKeyScope;
 
@@ -40,26 +40,15 @@ impl YorishiroMcpServer {
         Parameters(page): Parameters<crate::dtos::iam::ListIam>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match crate::controllers::mcp::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_schema_forks")?,
+        let actor = verified!(self, parts, "list_schema_forks");
+        render(
+            model::list_for_actor(
+                self.app_context(),
+                &actor,
+                crate::models::pagination::ListParams::new(page.limit, page.offset),
+            )
+            .await,
         )
-        .await?
-        {
-            crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
-            crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match model::list_for_actor(
-            self.app_context(),
-            &actor,
-            crate::models::pagination::ListParams::new(page.limit, page.offset),
-        )
-        .await
-        {
-            Ok(records) => ok_json(records),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 
     #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Read a schema fork owned by the selected workspace, including its immutable current head (requires read scope and schema_fork_get IAM permission)")]
@@ -68,48 +57,8 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ForkIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("get_schema_fork")?;
-        let actor =
-            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
-                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
-                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
-        let target = crate::models::iam::access::WorkspaceTarget::Workspace(
-            match model::workspace_for_actor(&self.app_context().db, &actor, args.fork_id).await {
-                Ok(id) => id,
-                Err(error) => return Ok(err_to_tool_result(error)),
-            },
-        );
-        let mut authorized = match crate::controllers::mcp::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            target,
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaForkGet)
-            .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
-
-        let actor = authorized.auth_context();
-        match model::get(
-            authorized.txn(),
-            actor.tenant_id,
-            authorized.workspace_id(),
-            args.fork_id,
-        )
-        .await
-        {
-            Ok(record) => ok_json(record),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        let actor = verified!(self, parts, "get_schema_fork");
+        render(model::get_for_actor(self.app_context(), actor, args.fork_id).await)
     }
 
     #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Create a workspace-owned fork of a same-tenant source schema (requires schema scope and schema_fork_create IAM permission); validates source identity and workspace cycles without modifying the source")]
@@ -118,47 +67,8 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<model::CreateInput>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("create_schema_fork")?;
-        let actor =
-            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
-                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
-                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
-        let target = crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::SchemaForkCreate,
-        );
-        let mut authorized = match crate::controllers::mcp::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            target,
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaForkCreate)
-            .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
-
-        let actor = authorized.auth_context();
-        let record = match model::create(
-            authorized.txn(),
-            actor.tenant_id,
-            authorized.workspace_id(),
-            input,
-        )
-        .await
-        {
-            Ok(record) => record,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        authorized.commit().await?;
-        ok_json(record)
+        let actor = verified!(self, parts, "create_schema_fork");
+        render(model::create_for_actor(self.app_context(), actor, input).await)
     }
 
     #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Update a selected-workspace schema fork with a definition or action=follow using the REST model's history and expected-head guards (requires schema scope and schema_fork_update IAM permission); force is required to discard local edits")]
@@ -167,42 +77,12 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<UpdateForkArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("update_schema_fork")?;
-        let actor =
-            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
-                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
-                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
-        let target = crate::models::iam::access::WorkspaceTarget::Workspace(
-            match model::workspace_for_actor(&self.app_context().db, &actor, args.fork_id).await {
-                Ok(id) => id,
-                Err(error) => return Ok(err_to_tool_result(error)),
-            },
-        );
-        let mut authorized = match crate::controllers::mcp::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            target,
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaForkUpdate)
-            .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
-
+        let actor = verified!(self, parts, "update_schema_fork");
         let definition = args
             .definition
             .map(serde_json::from_value)
             .transpose()
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-        let actor = authorized.auth_context();
         let input = model::UpdateInput {
             definition,
             action: args.action,
@@ -210,20 +90,7 @@ impl YorishiroMcpServer {
             expected_fork_schema_id: args.expected_fork_schema_id,
             expected_source_schema_id: args.expected_source_schema_id,
         };
-        let record = match model::update(
-            authorized.txn(),
-            actor.tenant_id,
-            authorized.workspace_id(),
-            args.fork_id,
-            input,
-        )
-        .await
-        {
-            Ok(record) => record,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        authorized.commit().await?;
-        ok_json(record)
+        render(model::update_for_actor(self.app_context(), actor, args.fork_id, input).await)
     }
 
     #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Delete a selected-workspace fork association using the REST reference-preserving model (requires schema scope and schema_fork_delete IAM permission); does not delete the source schema")]
@@ -232,48 +99,8 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ForkIdArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("delete_schema_fork")?;
-        let actor =
-            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
-                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
-                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
-        let target = crate::models::iam::access::WorkspaceTarget::Workspace(
-            match model::workspace_for_actor(&self.app_context().db, &actor, args.fork_id).await {
-                Ok(id) => id,
-                Err(error) => return Ok(err_to_tool_result(error)),
-            },
-        );
-        let mut authorized = match crate::controllers::mcp::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            target,
-        )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaForkDelete)
-            .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
-
-        let actor = authorized.auth_context();
-        if let Err(error) = model::delete(
-            authorized.txn(),
-            actor.tenant_id,
-            authorized.workspace_id(),
-            args.fork_id,
-        )
-        .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
-        authorized.commit().await?;
+        let actor = verified!(self, parts, "delete_schema_fork");
+        try_tool!(model::delete_for_actor(self.app_context(), actor, args.fork_id).await);
         ok_json(serde_json::json!({"deleted":true}))
     }
 }

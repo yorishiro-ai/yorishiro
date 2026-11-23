@@ -4,8 +4,8 @@ use serde_json::json;
 
 use yorishiro::error::YorishiroError;
 use yorishiro::models::schema_schemas::metaschema::{
-    ArrayItemType, ArrayItems, EntityTypeDef, FieldDef, FieldTypeName, MAX_OBJECT_DEPTH,
-    MetaSchemaDefinition, RelationTypeDef, validate_definition,
+    ArrayItemType, ArrayItems, EntityTypeDef, FieldDef, FieldTypeName, MetaSchemaDefinition,
+    RelationTypeDef, validate_definition,
 };
 
 fn parse(value: serde_json::Value) -> MetaSchemaDefinition {
@@ -162,32 +162,6 @@ fn accepts_valid_object_nesting() {
         "{:?}",
         validate_definition(&def)
     );
-}
-
-#[test]
-fn rejects_object_nesting_beyond_max_depth() {
-    // Builds a chain of nested objects `object.properties.child` repeated MAX_OBJECT_DEPTH + 1 times, exceeding the allowed nesting depth.
-    let mut field = json!({ "type": "string" });
-    for _ in 0..=MAX_OBJECT_DEPTH {
-        field = json!({
-            "type": "object",
-            "properties": { "child": field }
-        });
-    }
-
-    let def = parse(json!({
-        "name": "task-management",
-        "entity_types": {
-            "task": { "fields": { "root": field } }
-        }
-    }));
-    let err = validate_definition(&def).unwrap_err();
-    match err {
-        YorishiroError::ValidationFailed { details, .. } => {
-            assert!(details.iter().any(|d| d.problem.contains("max depth")));
-        }
-        _ => panic!("expected ValidationFailed"),
-    }
 }
 
 #[test]

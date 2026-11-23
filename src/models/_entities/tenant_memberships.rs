@@ -23,6 +23,8 @@ pub enum Relation {
     IamTenantRoots,
     #[sea_orm(has_many = "super::iam_user_policy_attachments::Entity")]
     IamUserPolicyAttachments,
+    #[sea_orm(has_many = "super::iam_user_role_attachments::Entity")]
+    IamUserRoleAttachments,
     #[sea_orm(
         belongs_to = "super::tenant_tenants::Entity",
         from = "Column::TenantId",
@@ -56,6 +58,12 @@ impl Related<super::iam_tenant_roots::Entity> for Entity {
 impl Related<super::iam_user_policy_attachments::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IamUserPolicyAttachments.def()
+    }
+}
+
+impl Related<super::iam_user_role_attachments::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::IamUserRoleAttachments.def()
     }
 }
 

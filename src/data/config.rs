@@ -20,40 +20,30 @@ use crate::error::YorishiroError;
 /// Returns an error if the operation cannot be completed.
 pub fn load(environment: &Environment) -> Result<Config> {
     let folder = crate::data::env::config_folder().map(PathBuf::from);
-    let config = if let Some(folder) = folder.as_ref()
-        && matches!(environment, Environment::Production)
-        && !folder.join("production.yaml").exists()
-        && !folder.join("production.local.yaml").exists()
-        && folder.join("production.yaml.example").exists()
+    let path = folder.as_deref().unwrap_or_else(|| Path::new("config"));
+    let config = if matches!(environment, Environment::Production)
+        && !path.join("production.yaml").try_exists()?
+        && !path.join("production.local.yaml").try_exists()?
     {
-        load_example(folder, environment)?
+        load_production_defaults(environment)?
     } else {
-        Config::from_folder(
-            environment,
-            folder.as_deref().unwrap_or_else(|| Path::new("config")),
-        )?
+        match folder.as_deref() {
+            Some(folder) => Config::from_folder(environment, folder)?,
+            None => Config::new(environment)?,
+        }
     };
     validate(&config)?;
     Ok(config)
 }
 
-fn load_example(folder: &Path, environment: &Environment) -> Result<Config> {
-    let example_folder =
-        std::env::temp_dir().join(format!("yorishiro-config-{}", uuid::Uuid::now_v7()));
-    fs::create_dir(&example_folder)?;
-    let result = (|| {
-        fs::copy(
-            folder.join("production.yaml.example"),
-            example_folder.join("production.yaml"),
-        )?;
-        let local = folder.join("production.local.yaml");
-        if local.exists() {
-            fs::copy(&local, example_folder.join("production.local.yaml"))?;
-        }
-        Config::from_folder(environment, &example_folder)
-    })();
-    fs::remove_dir_all(example_folder)?;
-    result
+fn load_production_defaults(environment: &Environment) -> Result<Config> {
+    // Loco's loader takes a directory and applies its environment templating.
+    let folder = tempfile::tempdir()?;
+    fs::write(
+        folder.path().join("production.yaml"),
+        include_str!("../../config/production.yaml"),
+    )?;
+    Config::from_folder(environment, folder.path())
 }
 
 /// Validates application-owned settings that are stricter than Loco's generic config.
@@ -67,16 +57,6 @@ pub fn validate(config: &Config) -> Result<()> {
 }
 
 fn validate_http_config(config: &Config) -> Result<()> {
-    if config
-        .logger
-        .file_appender
-        .as_ref()
-        .is_some_and(|file| file.enable)
-    {
-        return Err(Error::Message(
-            "logger.file_appender is not supported; the application logs to stdout only".into(),
-        ));
-    }
     if let Some(cors) = config
         .server
         .middlewares

@@ -3,6 +3,7 @@
 //! Exposes the three origin operations: list pending upstream changes, preview a merge,
 //! and apply the merge, so MCP clients can discover and act on template updates.
 
+use crate::controllers::mcp::{YorishiroMcpServer, ok_json, render, try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -14,7 +15,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::api_keys::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
@@ -48,23 +48,16 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListUpstreamChangesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("list_upstream_changes")?;
-        let actor =
-            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
-                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
-                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
+        let actor = verified!(self, parts, "list_upstream_changes");
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        let changes = match crate::edition::ee::models::schema_schemas::list_for_actor(
-            self.app_context(),
-            &actor,
-            page,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
+        let changes = try_tool!(
+            crate::edition::ee::models::schema_schemas::list_for_actor(
+                self.app_context(),
+                &actor,
+                page,
+            )
+            .await
+        );
         ok_json(changes)
     }
 
@@ -77,48 +70,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MergePreviewArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("merge_preview")?;
-        let actor =
-            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
-                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
-                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
-        let mut authorized = match crate::controllers::mcp::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
+        let actor = verified!(self, parts, "merge_preview");
+        render(
+            crate::edition::ee::models::schema_schemas::merge_preview_for_actor(
+                self.app_context(),
+                actor,
+                args.schema_id,
+            )
+            .await,
         )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaMergePreview)
-            .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
-
-        let auth_ctx = authorized.auth_context();
-        let plan = match crate::edition::ee::models::schema_schemas::merge_preview(
-            authorized.txn(),
-            self.app_context(),
-            auth_ctx.tenant_id,
-            match auth_ctx.require_workspace() {
-                Ok(workspace_id) => workspace_id,
-                Err(error) => return Ok(err_to_tool_result(error)),
-            },
-            args.schema_id,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
-        // Read-only: rolling back a transaction that made no writes is equivalent.
-        ok_json(plan)
     }
 
     #[tool(
@@ -130,51 +90,14 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MergeApplyArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let required = self.required_scope("merge_apply")?;
-        let actor =
-            match crate::controllers::mcp::verify(self.app_context(), &parts, required).await? {
-                crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
-                crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-            };
-        let mut authorized = match crate::controllers::mcp::authorize::Authorized::for_target(
-            self.app_context(),
-            &actor,
-            required,
-            crate::models::iam::access::WorkspaceTarget::Schema(args.schema_id),
+        let actor = verified!(self, parts, "merge_apply");
+        render(
+            crate::edition::ee::models::schema_schemas::merge_apply_for_actor(
+                self.app_context(),
+                actor,
+                args.schema_id,
+            )
+            .await,
         )
-        .await
-        {
-            Ok(authorized) => authorized,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
-        if let Err(error) = authorized
-            .require_action(crate::models::iam::policy::Action::SchemaMergeApply)
-            .await
-        {
-            return Ok(err_to_tool_result(error));
-        }
-
-        let auth_ctx = authorized.auth_context();
-        let (schema, diff, summary) = match crate::edition::ee::models::schema_schemas::merge_apply(
-            authorized.txn(),
-            self.app_context(),
-            auth_ctx.tenant_id,
-            match auth_ctx.require_workspace() {
-                Ok(workspace_id) => workspace_id,
-                Err(error) => return Ok(err_to_tool_result(error)),
-            },
-            args.schema_id,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
-        authorized.commit().await?;
-        ok_json(serde_json::json!({
-            "schema": schema,
-            "diff": diff,
-            "summary": summary,
-        }))
     }
 }

@@ -7,7 +7,6 @@ use axum::http::StatusCode;
 use axum::http::header;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
 use yorishiro::App;
-use yorishiro::db::AppContextBackend;
 use yorishiro::models::_entities::{tenant_memberships, workspace_workspaces};
 
 /// A loopback address nothing listens on, so `authorize`'s discovery fetch fails fast with a connection refusal rather than depending on real DNS/network reachability in CI.
@@ -261,7 +260,7 @@ async fn find_or_create_refuses_a_new_tenant_past_the_cap() {
 
         // `find_or_create` takes a transaction because the advisory locks it and `create_workspace` rely on are transaction-scoped, which is also how `controllers::oauth` calls it.
         for max_tenants in [Some(1), None] {
-            if max_tenants.is_none() && !ctx.is_sqlite() {
+            if max_tenants.is_none() && crate::require_postgres_backend() {
                 continue;
             }
             let txn = ctx.db.begin().await.expect("begin");

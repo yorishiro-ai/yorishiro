@@ -318,3 +318,48 @@ fn empty_value_for_type(type_name: metaschema::FieldTypeName) -> Value {
         metaschema::FieldTypeName::Array => Value::Array(vec![]),
     }
 }
+
+/// Opens the caller's read session and reports an entity's drift from the active schema.
+///
+/// # Errors
+/// Returns the session, authorization or lookup error.
+pub(crate) async fn drift_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<EntityDrift, YorishiroError> {
+    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
+        super::workspace_for_actor(&ctx.db, &actor, id).await?,
+    );
+    crate::models::iam::session::WorkspaceSession::read(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        target,
+        crate::models::iam::policy::Action::EntityDriftGet,
+        async |session| drift(session.txn(), session.workspace_id()?, id).await,
+    )
+    .await
+}
+
+/// Opens the caller's read session and counts what migrating a schema's entities would face.
+///
+/// # Errors
+/// Returns the session, authorization or lookup error.
+pub(crate) async fn migration_dry_run_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    name: &str,
+) -> Result<MigrationDryRun, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::read(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::MigrationDryRun,
+        ),
+        crate::models::iam::policy::Action::MigrationDryRun,
+        async |session| migration_dry_run(session.txn(), session.workspace_id()?, name).await,
+    )
+    .await
+}

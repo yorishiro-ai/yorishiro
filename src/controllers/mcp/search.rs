@@ -1,3 +1,4 @@
+use crate::controllers::mcp::{try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -9,7 +10,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, ok_json};
 use crate::controllers::extractors::search_token_limiter;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::search;
@@ -39,16 +40,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SearchEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth_ctx = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("search_entities")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth_ctx) => auth_ctx,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth_ctx = verified!(self, parts, "search_entities");
 
         let default = search::SearchQuery::default();
         let query = search::SearchQuery {
@@ -57,22 +49,17 @@ impl YorishiroMcpServer {
             limit: args.limit.unwrap_or(default.limit),
         };
 
-        let limiter = match search_token_limiter(self.app_context()).map_err(|err| err.0) {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
-        let hits = match search::search_for_actor(
-            self.app_context(),
-            &auth_ctx,
-            &args.query_text,
-            query,
-            &limiter,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => return Ok(err_to_tool_result(err)),
-        };
+        let limiter = try_tool!(search_token_limiter(self.app_context()).map_err(|err| err.0));
+        let hits = try_tool!(
+            search::search_for_actor(
+                self.app_context(),
+                &auth_ctx,
+                &args.query_text,
+                query,
+                &limiter,
+            )
+            .await
+        );
 
         ok_json(hits)
     }

@@ -8,7 +8,7 @@ use aws_lc_rs::digest::{SHA256, digest};
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect};
 
-use crate::db::{AppContextBackend, DbHandle};
+use crate::db::DbHandle;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::db_enum::db_enum;
 
@@ -55,16 +55,13 @@ impl Model {
     }
 
     pub(crate) fn is_login_session(&self) -> bool {
-        self.role_id.is_none() && self.key_prefix.starts_with(LOGIN_KEY_PREFIX)
+        self.key_prefix.starts_with(LOGIN_KEY_PREFIX)
     }
 
     pub(crate) async fn has_root_principal(
         &self,
         conn: &impl ConnectionTrait,
     ) -> Result<bool, YorishiroError> {
-        if self.role_id.is_some() {
-            return Ok(false);
-        }
         match self.user_id {
             Some(user_id) => {
                 crate::models::iam_tenant_roots::Model::contains(conn, self.tenant_id, user_id)
@@ -228,10 +225,7 @@ impl AuthContext {
             .await
             .internal()?
             .filter(|key| {
-                key.is_active()
-                    && key.role_id.is_none()
-                    && key.tenant_id == self.tenant_id
-                    && key.user_id == self.user_id
+                key.is_active() && key.tenant_id == self.tenant_id && key.user_id == self.user_id
             })
             .ok_or(YorishiroError::Unauthenticated)?;
         crate::models::tenant_tenants::Model::require_active(conn, self.tenant_id).await?;

@@ -1,5 +1,6 @@
 //! MCP tools for tenant membership: creating tenant users, resetting their passwords and previewing or removing members.
 
+use crate::controllers::mcp::{render, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -10,7 +11,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::tenant_memberships;
 
@@ -46,21 +47,10 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::members::CreateTenantUserRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("create_tenant_user")?,
+        let auth = verified!(self, parts, "create_tenant_user");
+        render(
+            tenant_memberships::create_tenant_user_as(&self.app_context().db, &auth, &input).await,
         )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match tenant_memberships::create_tenant_user_as(&self.app_context().db, &auth, &input).await
-        {
-            Ok(member) => ok_json(member),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 
     #[tool(
@@ -72,16 +62,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<ResetTenantUserPasswordArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("reset_tenant_user_password")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(self, parts, "reset_tenant_user_password");
         match tenant_memberships::reset_tenant_user_password(
             &self.app_context().db,
             &auth,
@@ -104,22 +85,10 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<ListMembersArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_members")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(self, parts, "list_members");
         let db = &self.app_context().db;
         let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
-        match tenant_memberships::list_members_as(db, &auth, page).await {
-            Ok(members) => ok_json(members),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        render(tenant_memberships::list_members_as(db, &auth, page).await)
     }
 
     #[tool(
@@ -131,21 +100,10 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MemberArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("preview_member_removal")?,
+        let auth = verified!(self, parts, "preview_member_removal");
+        render(
+            tenant_memberships::preview_removal(&self.app_context().db, &auth, args.user_id).await,
         )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match tenant_memberships::preview_removal(&self.app_context().db, &auth, args.user_id).await
-        {
-            Ok(preview) => ok_json(preview),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 
     #[tool(
@@ -157,16 +115,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MemberArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("remove_member")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(self, parts, "remove_member");
         match tenant_memberships::remove_member_as(&self.app_context().db, &auth, args.user_id)
             .await
         {

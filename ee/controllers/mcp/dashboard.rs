@@ -1,10 +1,10 @@
+use crate::controllers::mcp::{YorishiroMcpServer, render, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
 use rmcp::model::CallToolResult;
 use rmcp::{tool, tool_router};
 
-use crate::controllers::mcp::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::models::api_keys::ApiKeyScope;
 
 #[tool_router(vis = "pub(crate)", router = tool_router_dashboard)]
@@ -17,21 +17,10 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match crate::controllers::mcp::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("get_tenant_overview")?,
+        let auth = verified!(self, parts, "get_tenant_overview");
+        render(
+            crate::edition::ee::models::tenant_tenants::overview_as(self.app_context(), &auth)
+                .await,
         )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match crate::edition::ee::models::tenant_tenants::overview_as(self.app_context(), &auth)
-            .await
-        {
-            Ok(overview) => ok_json(overview),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 }

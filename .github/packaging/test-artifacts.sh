@@ -25,10 +25,18 @@ for edition in ce ee; do
 done
 test "$(find "$DIST" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)" -eq 8
 for f in "$DIST"/*.deb; do
-  dpkg-deb -f "$f" Conflicts | grep -q yorishiro
-  dpkg-deb -f "$f" Replaces | grep -q yorishiro
+  case "$(dpkg-deb -f "$f" Package)" in
+    yorishiro-ce) peer=yorishiro-ee ;;
+    yorishiro-ee) peer=yorishiro-ce ;;
+  esac
+  test "$(dpkg-deb -f "$f" Conflicts)" = "$peer"
+  test -z "$(dpkg-deb -f "$f" Replaces)"
 done
 for f in "$DIST"/*.rpm; do
-  rpm -qp --conflicts "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
-  rpm -qp --obsoletes "$f" | grep -Eq '^(yorishiro|yorishiro-ce|yorishiro-ee)$'
+  case "$(rpm -qp --qf '%{NAME}' "$f")" in
+    yorishiro-ce) peer=yorishiro-ee ;;
+    yorishiro-ee) peer=yorishiro-ce ;;
+  esac
+  test "$(rpm -qp --conflicts "$f")" = "$peer"
+  test -z "$(rpm -qp --obsoletes "$f")"
 done

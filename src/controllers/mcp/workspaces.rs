@@ -1,5 +1,6 @@
 //! MCP tools for workspaces and their members.
 
+use crate::controllers::mcp::{render, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -10,7 +11,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::dtos::workspaces::CreateWorkspaceRequest;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::{tenancy, workspace_workspaces};
 
@@ -37,14 +39,6 @@ pub(crate) struct GrantWorkspaceMemberArgs {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct CreateWorkspaceArgs {
-    pub name: String,
-    pub max_entities: Option<i32>,
-    pub schema_id: Option<Uuid>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct UpdateWorkspaceArgs {
     pub workspace_id: Uuid,
     pub name: Option<String>,
@@ -64,26 +58,15 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<WorkspaceArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_workspace_members")?,
+        let auth = verified!(self, parts, "list_workspace_members");
+        render(
+            crate::models::workspace_memberships::Model::list_as(
+                &self.app_context().db,
+                &auth,
+                args.workspace_id,
+            )
+            .await,
         )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match crate::models::workspace_memberships::Model::list_as(
-            &self.app_context().db,
-            &auth,
-            args.workspace_id,
-        )
-        .await
-        {
-            Ok(records) => ok_json(records),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 
     #[tool(
@@ -95,16 +78,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GrantWorkspaceMemberArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("grant_workspace_member")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(self, parts, "grant_workspace_member");
         match crate::models::workspace_memberships::Model::grant_as(
             &self.app_context().db,
             &auth,
@@ -128,16 +102,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<WorkspaceMemberArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("revoke_workspace_member")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(self, parts, "revoke_workspace_member");
         match crate::models::workspace_memberships::Model::revoke_as(
             &self.app_context().db,
             &auth,
@@ -159,16 +124,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("list_workspaces")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(self, parts, "list_workspaces");
         match workspace_workspaces::list_for_actor(&self.app_context().db, &auth).await {
             Ok(records) => ok_json(
                 records
@@ -196,22 +152,11 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<WorkspaceArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("get_workspace")?,
+        let auth = verified!(self, parts, "get_workspace");
+        render(
+            workspace_workspaces::detail_for_actor(self.app_context(), &auth, args.workspace_id)
+                .await,
         )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match workspace_workspaces::detail_for_actor(self.app_context(), &auth, args.workspace_id)
-            .await
-        {
-            Ok(detail) => ok_json(detail),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 
     #[tool(
@@ -220,19 +165,10 @@ impl YorishiroMcpServer {
     )]
     pub(crate) async fn create_workspace(
         &self,
-        Parameters(args): Parameters<CreateWorkspaceArgs>,
+        Parameters(args): Parameters<CreateWorkspaceRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("create_workspace")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(self, parts, "create_workspace");
         match tenancy::create_workspace_in_context(
             self.app_context(),
             &auth,
@@ -242,10 +178,7 @@ impl YorishiroMcpServer {
         )
         .await
         {
-            Ok(workspace) => match workspace_workspaces::WorkspaceRecord::try_from(workspace) {
-                Ok(record) => ok_json(record),
-                Err(error) => Ok(err_to_tool_result(error)),
-            },
+            Ok(workspace) => render(workspace_workspaces::WorkspaceRecord::try_from(workspace)),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
@@ -259,31 +192,20 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<UpdateWorkspaceArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("update_workspace")?,
+        let auth = verified!(self, parts, "update_workspace");
+        render(
+            workspace_workspaces::update_as(
+                &self.app_context().db,
+                &auth,
+                args.workspace_id,
+                crate::dtos::workspaces::UpdateWorkspaceRequest {
+                    name: args.name,
+                    replace_max_entities: args.replace_max_entities,
+                    max_entities: args.max_entities,
+                },
+            )
+            .await,
         )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match workspace_workspaces::update_as(
-            &self.app_context().db,
-            &auth,
-            args.workspace_id,
-            crate::dtos::workspaces::UpdateWorkspaceRequest {
-                name: args.name,
-                replace_max_entities: args.replace_max_entities,
-                max_entities: args.max_entities,
-            },
-        )
-        .await
-        {
-            Ok(record) => ok_json(record),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
     }
 
     #[tool(
@@ -295,16 +217,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<WorkspaceArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("delete_workspace")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(self, parts, "delete_workspace");
         match tenancy::delete_workspace_as(&self.app_context().db, &auth, args.workspace_id).await {
             Ok(()) => ok_json(serde_json::json!({"deleted":true})),
             Err(error) => Ok(err_to_tool_result(error)),

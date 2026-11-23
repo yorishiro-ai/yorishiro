@@ -27,3 +27,28 @@ pub(crate) struct UpdateTemplateRequest {
 pub(crate) struct ForkTemplateRequest {
     pub(crate) name: String,
 }
+
+impl From<CreateTemplateRequest> for crate::models::template_templates::CreateTemplateInput {
+    fn from(request: CreateTemplateRequest) -> Self {
+        Self {
+            name: request.name,
+            description: request.description,
+            definition: request.definition,
+            tags: request.tags,
+            locale: request.locale,
+            author: request.author,
+        }
+    }
+}
+
+impl From<UpdateTemplateRequest> for crate::models::template_templates::UpdateTemplateInput {
+    fn from(request: UpdateTemplateRequest) -> Self {
+        Self {
+            name: request.name,
+            description: request.description,
+            definition: request.definition,
+            tags: request.tags,
+            locale: request.locale,
+        }
+    }
+}

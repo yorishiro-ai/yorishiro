@@ -124,3 +124,20 @@ pub struct UserIdPolicyIdPath<T0, T1> {
     pub user_id: T0,
     pub policy_id: T1,
 }
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct RoleIdPath<T0> {
+    pub role_id: T0,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct RoleIdPolicyIdPath<T0, T1> {
+    pub role_id: T0,
+    pub policy_id: T1,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct RoleIdUserIdPath<T0, T1> {
+    pub role_id: T0,
+    pub user_id: T1,
+}

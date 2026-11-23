@@ -3,7 +3,7 @@ use axum::http::header;
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{Authorized, ReadScope, Verified};
+use crate::controllers::extractors::{ReadScope, Verified};
 use crate::controllers::openapi::Routes;
 use crate::models::transfer::export;
 
@@ -12,19 +12,7 @@ pub(crate) async fn export_jsonl(
     State(ctx): State<AppContext>,
     verified: Verified<ReadScope>,
 ) -> Result<impl aide::axum::IntoApiResponse, ApiError> {
-    let mut authorized = Authorized::<ReadScope>::for_target(
-        &ctx,
-        verified.ctx,
-        crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::Export,
-        ),
-    )
-    .await?;
-    authorized
-        .require_action(crate::models::iam::policy::Action::Export)
-        .await?;
-    let workspace_id = authorized.ctx.require_workspace()?;
-    let body = export::export_jsonl(authorized.txn(), workspace_id).await?;
+    let body = export::export_jsonl_for_actor(&ctx, verified.ctx).await?;
 
     Ok(([(header::CONTENT_TYPE, "application/x-ndjson")], body))
 }

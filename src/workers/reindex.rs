@@ -8,6 +8,7 @@
 //! **Routing**: like `embedding_sync`, a reindex job carries one `worker-target:<name>` tag chosen when it is enqueued,
 //! so `--worker=worker-target:tenant:<id>` picks up only that tenant's reindex jobs.
 
+use crate::models::iam::session::WorkspaceSession;
 use loco_rs::app::AppContext;
 use loco_rs::bgworker::BackgroundWorker;
 use loco_rs::prelude::async_trait;
@@ -195,6 +196,27 @@ pub async fn enqueue_reindex(
             actor: None,
         },
         txn,
+    )
+    .await
+}
+
+/// Opens the caller's migration session, enqueues a reindex of its workspace and commits.
+///
+/// # Errors
+/// Returns the session, authorization or enqueue error.
+pub(crate) async fn enqueue_requested_for_actor(
+    ctx: &AppContext,
+    actor: crate::models::api_keys::AuthContext,
+) -> Result<String, crate::YorishiroError> {
+    WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Migration,
+        crate::models::iam::access::WorkspaceTarget::Permission(
+            crate::models::iam::policy::Action::WorkspaceReindex,
+        ),
+        None,
+        async |session| enqueue_requested(ctx, session.txn(), &session.ctx).await,
     )
     .await
 }

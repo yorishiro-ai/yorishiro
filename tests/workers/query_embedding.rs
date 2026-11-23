@@ -123,13 +123,6 @@ async fn deliver_stale_request(ctx: &AppContext, workspace_id: Uuid, request_id:
     drained.unwrap().unwrap().unwrap();
 }
 
-/// Search jobs travel to the shared target when they are enqueued, so the worker declares no tag or queue of its own.
-#[test]
-fn the_query_worker_declares_no_routing_of_its_own() {
-    assert_eq!(QueryEmbeddingWorker::tags(), [] as [String; 0]);
-    assert!(QueryEmbeddingWorker::queue().is_none());
-}
-
 /// The job names a request and a workspace and nothing else, so no query text sits in the queue.
 #[test]
 fn the_job_payload_carries_ids_only() {

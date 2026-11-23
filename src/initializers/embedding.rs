@@ -17,10 +17,7 @@ pub(crate) async fn install_provider(ctx: &AppContext) -> Result<()> {
     {
         return Ok(());
     }
-    let settings = ctx
-        .shared_store
-        .get::<crate::data::settings::Settings>()
-        .ok_or_else(|| loco_rs::Error::Message("application settings missing".into()))?;
+    let settings = crate::data::settings::configured(ctx)?;
     let provider = crate::services::embedding::build_embedding_provider(&settings)
         .await
         .map_err(|error| {

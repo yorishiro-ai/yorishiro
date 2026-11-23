@@ -19,6 +19,7 @@ pub mod iam_role_policy_attachments;
 pub mod iam_roles;
 pub mod iam_tenant_roots;
 pub mod iam_user_policy_attachments;
+pub mod iam_user_role_attachments;
 pub mod inference_jobs;
 pub mod inference_proposals;
 pub mod query_embedding_requests;

@@ -183,7 +183,7 @@ pub(crate) async fn tick(
     app_context: &AppContext,
     tick: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
-    use crate::db::AppContextBackend;
+    use crate::db::is_postgres;
 
     use crate::models::_entities::tenant_tenants as TenantEntity;
     use crate::models::_entities::workspace_workspaces as WorkspaceEntity;
@@ -212,7 +212,7 @@ pub(crate) async fn tick(
     };
     tracing::info!(
         ownership_key = "yorishiro:tenant-reindex-scheduler",
-        ownership_backend = if app_context.is_postgres() {
+        ownership_backend = if is_postgres(&app_context.db) {
             "postgres"
         } else {
             "sqlite"

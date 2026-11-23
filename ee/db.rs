@@ -9,7 +9,7 @@ use std::str::FromStr;
 use sea_orm::sqlx::sqlite::SqliteConnectOptions;
 use sea_orm::sqlx::{ConnectOptions, Connection, PgConnection, PgPool};
 
-use crate::db::{AppContextBackend, DbHandle};
+use crate::db::{DbHandle, is_postgres, is_sqlite};
 
 /// Ownership held for the complete scheduler task, including queue dispatch.
 pub enum SchedulerOwnership {
@@ -90,14 +90,14 @@ pub async fn acquire_scheduler_ownership(
     ctx: &loco_rs::app::AppContext,
     key: &str,
 ) -> Result<Option<SchedulerOwnership>, String> {
-    if ctx.is_postgres() {
+    if is_postgres(&ctx.db) {
         let db = ctx
             .shared_store
             .get::<DbHandle>()
             .ok_or_else(|| "scheduler ownership requires the PostgreSQL DbHandle".to_string())?;
         return acquire_postgres_scheduler_lock(db.identity.clone(), key).await;
     }
-    if ctx.is_sqlite() {
+    if is_sqlite(&ctx.db) {
         return acquire_sqlite_scheduler_lock(&ctx.config.database.uri, key);
     }
     Err("scheduler ownership is unsupported for this database backend".into())

@@ -256,24 +256,26 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
                 let mut nodes = vec![&plan[0]["Plan"]];
                 let mut hnsw_used = false;
                 let mut candidates_used = false;
+                let mut candidates_bounded = false;
                 while let Some(node) = nodes.pop() {
                     if node["Index Name"].as_str() == Some(&index) {
                         assert!(node["Actual Loops"].as_f64().unwrap() > 0.0);
-                        assert!(
-                            node["Actual Rows"].as_f64().unwrap()
-                                * node["Actual Loops"].as_f64().unwrap()
-                                <= 1000.0
-                        );
                         hnsw_used = true;
                     }
                     if node["CTE Name"].as_str() == Some("ann_candidates") {
                         candidates_used |= node["Actual Loops"].as_f64().unwrap() > 0.0;
                     }
+                    if node["Subplan Name"].as_str() == Some("CTE ann_candidates") {
+                        candidates_bounded = true;
+                        assert_eq!(node["Node Type"], "Limit", "{plan}");
+                        assert!(node["Actual Rows"].as_f64().unwrap()
+                            * node["Actual Loops"].as_f64().unwrap() <= 1000.0, "{plan}");
+                    }
                     if let Some(children) = node["Plans"].as_array() {
                         nodes.extend(children);
                     }
                 }
-                assert!(hnsw_used && candidates_used, "{plan}");
+                assert!(hnsw_used && candidates_used && candidates_bounded, "{plan}");
                 } else {
                     let state = txn.query_one_raw(Statement::from_sql_and_values(
                         sea_orm::DatabaseBackend::Postgres,
@@ -1381,7 +1383,9 @@ async fn reindex_overwrites_existing_entity_embeddings() {
         let old_v1 = model_vector(&old_provider.model_name());
         for entity_id in [e1.id, e2.id] {
             use yorishiro::models::_entities::entity_embeddings as vectors;
-            let owner = vectors::Entity::find_by_id((workspace_id, entity_id))
+            let owner = vectors::Entity::find()
+                .filter(vectors::Column::WorkspaceId.eq(workspace_id))
+                .filter(vectors::Column::EntityId.eq(entity_id))
                 .select_only().column(vectors::Column::TenantId)
                 .into_tuple::<uuid::Uuid>().one(&ctx.db).await.unwrap().unwrap();
             assert_eq!(owner, tenant_id);

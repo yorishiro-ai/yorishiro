@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::error::{ResultExt, ValidationDetail, ValidationErrorCode, YorishiroError};
+use crate::error::{ResultExt, YorishiroError};
 pub use crate::models::_entities::entity_relations::{ActiveModel, Entity, Model};
 use crate::models::db_enum::db_enum;
 use crate::models::entity_entities::{self, EntityRecord};
@@ -63,20 +63,6 @@ impl ActiveModelBehavior for ActiveModel {
         this.id = crate::db::sqlite_generated_id(db, this.id);
         Ok(this)
     }
-}
-
-pub(crate) fn parse_relation_status(value: &str) -> Result<RelationStatus, YorishiroError> {
-    RelationStatus::from_db_str(value).ok_or_else(|| YorishiroError::ValidationFailed {
-        message: format!("'{value}' is not a relation status"),
-        details: vec![ValidationDetail {
-            field: "/status".into(),
-            problem: "expected active, deprecated, or archived".into(),
-            code: ValidationErrorCode::Other,
-            expected: Some("active, deprecated, archived".into()),
-            actual: Some(value.into()),
-        }],
-        hint: "use active, deprecated, or archived".into(),
-    })
 }
 
 pub(crate) async fn workspace_for_actor(
@@ -576,4 +562,88 @@ async fn neighbor_rows(
     .all(conn)
     .await
     .internal()
+}
+
+/// Creates a relation in the workspace of its source entity.
+///
+/// # Errors
+/// Returns the session, authorization or insert error.
+pub(crate) async fn create_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    input: CreateRelationInput,
+) -> Result<RelationRecord, YorishiroError> {
+    let target = crate::models::iam::access::WorkspaceTarget::Workspace(
+        entity_entities::workspace_for_actor(&ctx.db, &actor, input.source_id).await?,
+    );
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Write,
+        target,
+        Some(crate::models::iam::policy::Action::RelationCreate),
+        async |session| create(session.txn(), session.workspace_id()?, input).await,
+    )
+    .await
+}
+
+/// Reads one relation.
+///
+/// # Errors
+/// Returns the session, authorization or lookup error.
+pub(crate) async fn get_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<RelationRecord, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::read(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::access::WorkspaceTarget::Relation(id),
+        crate::models::iam::policy::Action::RelationGet,
+        async |session| get(session.txn(), session.workspace_id()?, id).await,
+    )
+    .await
+}
+
+/// Deletes one relation.
+///
+/// # Errors
+/// Returns the session, authorization or delete error.
+pub(crate) async fn delete_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    id: Uuid,
+) -> Result<(), YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Write,
+        crate::models::iam::access::WorkspaceTarget::Relation(id),
+        Some(crate::models::iam::policy::Action::RelationDelete),
+        async |session| delete(session.txn(), session.workspace_id()?, id).await,
+    )
+    .await
+}
+
+/// Changes one relation's status.
+///
+/// # Errors
+/// Returns the session, authorization or update error.
+pub(crate) async fn set_status_for_actor(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    input: SetRelationStatusInput,
+) -> Result<RelationRecord, YorishiroError> {
+    let id = input.id;
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Write,
+        crate::models::iam::access::WorkspaceTarget::Relation(id),
+        Some(crate::models::iam::policy::Action::RelationUpdate),
+        async |session| set_status(session.txn(), session.workspace_id()?, input).await,
+    )
+    .await
 }

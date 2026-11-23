@@ -158,3 +158,67 @@ pub(crate) async fn merge_apply(
 
     Ok((schema, diff, plan.summary))
 }
+
+/// Opens the caller's read session and previews merging the schema's origin template.
+///
+/// # Errors
+/// Returns the session, authorization or preview error.
+pub(crate) async fn merge_preview_for_actor(
+    ctx: &AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    schema_id: Uuid,
+) -> Result<MergePlan, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::read(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Read,
+        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
+        crate::models::iam::policy::Action::SchemaMergePreview,
+        async |session| {
+            // Workspace content uses the scoped transaction; templates require the identity pool.
+            merge_preview(
+                session.txn(),
+                ctx,
+                session.ctx.tenant_id,
+                session.workspace_id()?,
+                schema_id,
+            )
+            .await
+        },
+    )
+    .await
+}
+
+/// Opens the caller's schema-scope session and writes the merged definition as the next version.
+///
+/// # Errors
+/// Returns the session, authorization or merge error.
+pub(crate) async fn merge_apply_for_actor(
+    ctx: &AppContext,
+    actor: crate::models::api_keys::AuthContext,
+    schema_id: Uuid,
+) -> Result<crate::edition::ee::dtos::origin::MergeResponse, YorishiroError> {
+    crate::models::iam::session::WorkspaceSession::run(
+        ctx,
+        actor,
+        crate::models::api_keys::ApiKeyScope::Schema,
+        crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
+        Some(crate::models::iam::policy::Action::SchemaMergeApply),
+        async |session| {
+            let (schema, diff, summary) = merge_apply(
+                session.txn(),
+                ctx,
+                session.ctx.tenant_id,
+                session.workspace_id()?,
+                schema_id,
+            )
+            .await?;
+            Ok(crate::edition::ee::dtos::origin::MergeResponse {
+                schema,
+                diff,
+                summary,
+            })
+        },
+    )
+    .await
+}

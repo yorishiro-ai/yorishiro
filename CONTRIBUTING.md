@@ -27,13 +27,12 @@ User documentation: [English and Japanese wiki](https://yorishiro-ai.github.io/w
 ### Database pools
 
 Database connection pools are unrelated to worker pools and the queue.
-On PostgreSQL, `AppContext.db` is Loco's SeaORM pool using the migration role, `TenantDb` is the separate RLS pool that sets `ROLE yorishiro_app`, and `DbHandle.identity` is a second migration-role raw sqlx pool.
+On PostgreSQL, `AppContext.db` and `DbHandle.identity` share the migration-role pool; `TenantDb` is the separate RLS pool that sets `ROLE yorishiro_app`.
 The Loco queue provider owns another independent pool.
 SQLite has no `DbHandle`; it uses `AppContext.db` plus the queue provider's separate SQLite pool.
 
-Production defaults `database.max_connections` to `100` on either backend unless configuration overrides it.
-The minimum default is `1`.
-CI overrides PostgreSQL `DB_MAX_CONNECTIONS` to `100`, and the SQLite test configuration sets its application pool maximum to `10`.
+Production defaults to at most 10 connections on SQLite and 100 on PostgreSQL.
+Pool settings live in `config/production.yaml` and `config/test.yaml`; CI supplies its overrides in `.github/workflows/ci.yml`.
 These limits apply per independent pool, so aggregate database connections are the sum of the pools a process creates.
 Async waits release the task to do other work, but one physical connection still executes one SQL operation at a time.
 
@@ -52,26 +51,23 @@ The separate `docker-compose.yaml` deploys published images and requires a relea
 The default `[]` allows all peers without bypassing authentication.
 Behind a reverse proxy, enforce client IP policy at the proxy because the app uses the socket peer and ignores forwarding headers.
 
-Run the full suite with Rust's default parallel test execution.
-
 Use `make test-sqlite` or `make test-postgres` locally; `EDITION=ce` selects the community edition.
 The backend comes from `DATABASE_URL` and the edition from the feature set; there is no other test selector.
+`RUST_TEST_THREADS` controls test parallelism; CI limits the unlicensed EE PostgreSQL job to two threads.
 
 Request tests boot through `boot_request`: SQLite gets its own database file and PostgreSQL its own throwaway database per test, both torn down with the test.
 An app booted by other means must call `close_app_pools` before it returns, or teardown panics even on a passing test.
 
 Licensed tests skip without `YORISHIRO_LICENSE_KEY`, and the E5 model tests skip without `models/multilingual-e5-base/`.
-Run the opt-in Stripe tests with `cargo test --locked --features stripe-tests --test mod -- ::stripe::`.
-The Stripe request tests install a test licence state and do not require a Stripe account or a signed EE licence.
-`UPDATE_FIXTURES=1 cargo test --features enterprise enterprise_inventory_contract` rewrites `tests/fixtures/mcp-inventory.md`; review the diff before committing.
-`UPDATE_FIXTURES=1 cargo test --features enterprise openapi_document_is_mounted_with_enterprise_routes` updates `tests/fixtures/openapi-operations.txt` with the paths, methods, parameters, and response codes from the served OpenAPI document.
+Stripe tests run in the ordinary EE suite, install their own test licence state and require no Stripe account.
+`make test-python` runs the Python checks, and `make test-contract` runs the real-binary public contracts described in `tests/blackbox/README.md`.
 Run the optional SQLite search benchmark with `cargo bench --bench sqlite_ann -- sqlite:///path/to/database.sqlite3 WORKSPACE_UUID`; it opens the database read-only.
 
 Metaschema validation includes property-based tests for arbitrary schema-shaped definitions and rejection of empty `entity_types`.
 
 The main CI workflow runs when pull requests open, reopen, or receive new commits, and on pushes to `develop`.
 It also supports merge queue checks targeting `develop` if the queue is enabled.
-Licensed checks are not run against fork pull requests or merge queue refs; the full licensed suite runs after merge on `develop`.
+Licensed checks run on trusted same-repository pull requests and pushes to `develop`, not fork pull requests or merge queue refs.
 If an external run cannot restore the verified E5 model cache, it still runs the tests that do not require the model.
 
 ## Before you push

@@ -94,7 +94,6 @@ enterprise = [
   "dep:base64",
   "dep:jsonwebtoken",
 ]
-stripe-tests = ["enterprise"]
 
 [workspace.dependencies]
 sea-orm-migration = { version = "2.0.4", features = [
@@ -134,7 +133,6 @@ futures = "0.3.34"
 hex = "0.4.3"
 axum.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
 sea-orm.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
@@ -163,8 +161,7 @@ base64 = { version = "0.23.1", optional = true }        # OAuth/PKCE encoding (e
 # OpenAPI is shared by both editions.
 aide = { version = "0.16.0-alpha.4", features = ["axum-json", "axum-query", "swagger"] }
 tower = "0.5.3"
-
-serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
+tempfile = "3.27.0"
 
 [[bin]]
 name = "yorishiro"
@@ -172,11 +169,11 @@ path = "src/bin/main.rs"
 required-features = []
 
 [dev-dependencies]
+tracing-subscriber.workspace = true
+serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test.workspace = true
 redis.workspace = true
-# Used by queue and integration tests for isolated temporary databases.
-tempfile = { version = "3.27.0" }
 # Property-based testing (issue #358).
 proptest = "=1.12.0"
 

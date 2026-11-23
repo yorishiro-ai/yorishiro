@@ -1,3 +1,4 @@
+use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -5,9 +6,6 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::{tool, tool_router};
 
-use crate::controllers::mcp::{
-    VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json, verify,
-};
 use crate::edition::ee::dtos::worker_class::SetWorkerClassRequest;
 use crate::edition::ee::models::workspace_worker_classes;
 use crate::error::YorishiroError;
@@ -20,16 +18,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("get_worker_class")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(self, parts, "get_worker_class");
         match workspace_worker_classes::describe_as(&self.app_context().db, &actor).await {
             Ok(Some(record)) => ok_json(record),
             Ok(None) => Ok(err_to_tool_result(YorishiroError::not_found(
@@ -45,16 +34,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<SetWorkerClassRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("set_worker_class")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(self, parts, "set_worker_class");
         match workspace_worker_classes::set_as(self.app_context(), &actor, input.worker_class).await
         {
             Ok(()) => ok_json(serde_json::json!({"saved":true})),
@@ -67,16 +47,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = match verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("reset_worker_class")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(actor) => actor,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let actor = verified!(self, parts, "reset_worker_class");
         match workspace_worker_classes::clear_as(&self.app_context().db, &actor).await {
             Ok(()) => ok_json(serde_json::json!({"reset":true})),
             Err(error) => Ok(err_to_tool_result(error)),

@@ -36,9 +36,9 @@ db_enum! {
         /// Serving normally.
         Off = "off",
         /// Reads served, writes refused with 423.
-        ReadOnly = "read_only" | "read-only",
+        ReadOnly = "read_only",
         /// Everything refused with 503.
-        FullLock = "full_lock" | "full-lock",
+        FullLock = "full_lock",
     }
 }
 

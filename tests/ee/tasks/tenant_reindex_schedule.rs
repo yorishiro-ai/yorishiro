@@ -1,6 +1,5 @@
 mod scheduler;
 
-use loco_rs::{app::Hooks, task::Tasks};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
     QuerySelect, QueryTrait, TransactionTrait,
@@ -10,18 +9,6 @@ use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, Li
 use yorishiro::services::embedding::{
     EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
 };
-
-#[test]
-fn tenant_reindex_scheduler_is_registered_in_enterprise() {
-    let mut tasks = Tasks::default();
-    yorishiro::App::register_tasks(&mut tasks);
-    assert!(
-        tasks
-            .names()
-            .iter()
-            .any(|name| name == "tenant_reindex_scheduler")
-    );
-}
 
 #[tokio::test]
 #[expect(

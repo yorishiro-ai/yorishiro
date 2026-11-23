@@ -1,25 +1,17 @@
 //! MCP tools for the current tenant: reading and updating it, and inspecting or starting its retirement.
 
+use crate::controllers::mcp::{render, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::{tool, tool_router};
-use schemars::JsonSchema;
-use serde::Deserialize;
-use uuid::Uuid;
 
-use super::{VerifyOutcome, YorishiroMcpServer, err_to_tool_result, ok_json};
+use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
+use crate::dtos::tenants::DisableTenantRequest;
 use crate::models::api_keys::ApiKeyScope;
 use crate::models::tenant_tenants::retirement;
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct DisableTenantArgs {
-    /// Must equal the current tenant UUID, not its display name.
-    pub confirmed_tenant_id: Uuid,
-}
 
 #[tool_router(vis = "pub(crate)", router = tool_router_tenants)]
 impl YorishiroMcpServer {
@@ -31,16 +23,7 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("get_tenant")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(self, parts, "get_tenant");
         match crate::models::tenant_tenants::detail_as(&self.app_context().db, &auth).await {
             Ok(tenant) => ok_json(crate::dtos::tenants::TenantRecord::render(
                 self.app_context(),
@@ -59,16 +42,7 @@ impl YorishiroMcpServer {
         Parameters(input): Parameters<crate::dtos::tenants::UpdateTenantRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("update_tenant")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(self, parts, "update_tenant");
         match crate::models::tenant_tenants::update_as(&self.app_context().db, &auth, input).await {
             Ok(tenant) => ok_json(crate::dtos::tenants::TenantRecord::render(
                 self.app_context(),
@@ -86,20 +60,8 @@ impl YorishiroMcpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("tenant_retirement_inventory")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
-        match retirement::inventory_as(&self.app_context().db, &auth).await {
-            Ok(inventory) => ok_json(inventory),
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        let auth = verified!(self, parts, "tenant_retirement_inventory");
+        render(retirement::inventory_as(&self.app_context().db, &auth).await)
     }
 
     #[tool(
@@ -108,19 +70,10 @@ impl YorishiroMcpServer {
     )]
     pub(crate) async fn disable_tenant(
         &self,
-        Parameters(args): Parameters<DisableTenantArgs>,
+        Parameters(args): Parameters<DisableTenantRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = match super::verify(
-            self.app_context(),
-            &parts,
-            self.required_scope("disable_tenant")?,
-        )
-        .await?
-        {
-            VerifyOutcome::Verified(auth) => auth,
-            VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
-        };
+        let auth = verified!(self, parts, "disable_tenant");
         match retirement::disable_as(&self.app_context().db, &auth, args.confirmed_tenant_id).await
         {
             Ok(()) => ok_json(serde_json::json!({"disabled": true})),

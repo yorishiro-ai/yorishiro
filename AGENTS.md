@@ -86,7 +86,6 @@ Examples:
 - `src/db.rs`: connection primitives (`SET ROLE`, `RESET`, advisory locks)
 - `src/models/api_keys/authenticate.rs`: `authenticate_api_key($1)` — the SECURITY DEFINER function that bypasses RLS
 - `src/models/entity_embeddings/` and `src/tasks/resync_embeddings.rs`: pgvector `embedding` column operations
-- `ee/controllers/middleware/auth.rs`: `authenticate_api_key($1, $2)` two-argument overload
 
 ### MCP placement
 

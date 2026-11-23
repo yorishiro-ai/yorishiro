@@ -1,3 +1,4 @@
+use crate::controllers::mcp::try_tool;
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -42,13 +43,12 @@ impl YorishiroMcpServer {
             }
             Err(error) => return Ok(err_to_tool_result(error)),
         };
-        let page = match crate::models::pagination::ListParams::from_pagination_query(
-            args.page.unwrap_or(1),
-            args.page_size.unwrap_or(50),
-        ) {
-            Ok(page) => page,
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
+        let page = try_tool!(
+            crate::models::pagination::ListParams::from_pagination_query(
+                args.page.unwrap_or(1),
+                args.page_size.unwrap_or(50),
+            )
+        );
         match crate::models::api_key_audit_log::list_for_actor(self.app_context(), &actor, page)
             .await
         {

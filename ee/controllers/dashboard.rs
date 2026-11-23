@@ -1,6 +1,6 @@
 //! `GET /api/tenant/overview`: the sole read the admin dashboard's landing page needs, plan, cap, usage counters and the member list, in one round trip.
 
-use crate::edition::ee::controllers::middleware::auth::Authenticated;
+use crate::controllers::extractors::AuthContext;
 use axum::Json;
 use axum::extract::State;
 use loco_rs::app::AppContext;
@@ -12,7 +12,7 @@ use crate::edition::ee::models::tenant_tenants;
 
 async fn tenant_overview(
     State(ctx): State<AppContext>,
-    Authenticated(auth): Authenticated,
+    AuthContext(auth): AuthContext,
 ) -> Result<Json<TenantOverview>, ApiError> {
     Ok(Json(tenant_tenants::overview_as(&ctx, &auth).await?))
 }
