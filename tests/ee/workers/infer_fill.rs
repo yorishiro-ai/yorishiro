@@ -715,7 +715,7 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
                     .json(&serde_json::json!({"name":mode,"document":deny})).await.assert_status_ok();
             }
         }
-        crate::workers::fill_defaults::finish_with_status(&ctx, lifecycle, "failed").await;
+        crate::workers::queue::harness::finish_with_status(&ctx, lifecycle, "failed").await;
         let job = yorishiro::edition::ee::models::inference_jobs::get(&ctx.db, job_id)
             .await
             .unwrap()
@@ -840,7 +840,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
             changed.expect("permission changes must not wait for the LLM reply");
         };
         tokio::join!(
-            crate::workers::fill_defaults::finish_with_status(&ctx, lifecycle, "failed"),
+            crate::workers::queue::harness::finish_with_status(&ctx, lifecycle, "failed"),
             revoke,
         );
         let job = inference_jobs::get(&ctx.db, job_id).await.unwrap().unwrap();

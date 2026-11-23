@@ -351,7 +351,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
                 request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                     .await.assert_status(StatusCode::NO_CONTENT);
             }
-            crate::workers::fill_defaults::fail_via_api(&request, &ctx, id, &setup.api_key,
+            crate::workers::queue::harness::fail_via_api(&request, &ctx, id, &setup.api_key,
                 &format!("/api/inference-jobs/confirmations/{id}")).await;
             let unchanged = request.get(&format!("/api/entities/{entity}"))
                 .add_header("Authorization", format!("Bearer {}", setup.api_key)).await;
@@ -385,7 +385,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         yorishiro::models::api_keys::Entity::revoke(&ctx.db, revoked.id)
             .await
             .expect("revoke queued confirmation actor");
-        crate::workers::fill_defaults::fail_via_api(
+        crate::workers::queue::harness::fail_via_api(
             &request,
             &ctx,
             denied_id,
@@ -408,7 +408,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             serde_json::json!({"name":"confirm_inference_proposals","arguments":{"job_id":job_id}})).await;
         let accepted = crate::controllers::mcp::tool_result_json(&confirm);
         let confirmation_id = accepted["job_id"].as_str().unwrap().parse().unwrap();
-        crate::workers::fill_defaults::finish_via_api(
+        crate::workers::queue::harness::finish_via_api(
             &request,
             &ctx,
             confirmation_id,
@@ -438,7 +438,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         );
         let undo_report: serde_json::Value = undo.json();
         let undo_id = undo_report["job_id"].as_str().unwrap().parse().unwrap();
-        crate::workers::fill_defaults::finish_via_api(
+        crate::workers::queue::harness::finish_via_api(
             &request,
             &ctx,
             undo_id,
@@ -1211,7 +1211,7 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
             .unwrap()
             .expect("infer-fill dispatch records a lifecycle");
         let path = format!("/api/inference-jobs/{job_id}");
-        crate::workers::fill_defaults::finish_via_api(
+        crate::workers::queue::harness::finish_via_api(
             &request,
             &ctx,
             lifecycle.id,

@@ -193,7 +193,7 @@ async fn undo_migration_job_is_recorded() {
             .unwrap()
             .parse()
             .unwrap();
-        crate::workers::fill_defaults::finish_via_api(
+        crate::workers::queue::harness::finish_via_api(
             &request,
             &ctx,
             queued_id,

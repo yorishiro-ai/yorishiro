@@ -64,7 +64,7 @@ async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
         .await;
         let accepted = tool_result_json(&result);
         let id = accepted["job_id"].as_str().unwrap().parse().unwrap();
-        crate::workers::fill_defaults::fail_via_api(
+        crate::workers::queue::harness::fail_via_api(
             &request,
             &ctx,
             id,

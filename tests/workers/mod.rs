@@ -1,8 +1,9 @@
 mod dispatch;
-mod queue;
+pub(crate) mod queue;
 
 mod embedding_sync;
-pub(crate) mod fill_defaults;
+mod fill_defaults;
+mod import;
 pub(crate) mod query_embedding;
 mod reindex;
 mod startup_reindex;
