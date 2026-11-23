@@ -415,9 +415,7 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
             ctx.shared_store.insert(provider);
             let mut worker_ctx = ctx.clone();
             // Ordering is observable with one consumer, as with a single-worker deployment.
-            let queue =
-                crate::workers::query_embedding::harness::shared_target_queue(&mut worker_ctx)
-                    .await;
+            let queue = crate::requests::jobs::shared_target_queue(&mut worker_ctx).await;
             let mut ids = Vec::new();
             // Fault-inject competing provider deliveries with explicit priorities; request creation and execution use production models and workers.
             for (text, priority) in [("low", 100), ("high", 300)] {

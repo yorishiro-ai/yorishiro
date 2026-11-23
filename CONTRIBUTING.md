@@ -62,6 +62,8 @@ Licensed tests skip without `YORISHIRO_LICENSE_KEY`, and the E5 model tests skip
 Stripe tests run in the ordinary EE suite, install their own test licence state and require no Stripe account.
 `make test-python` runs the Python checks, and `make test-contract` runs the real-binary public contracts described in `tests/blackbox/README.md`.
 Run the optional SQLite search benchmark with `cargo bench --bench sqlite_ann -- sqlite:///path/to/database.sqlite3 WORKSPACE_UUID`; it opens the database read-only.
+Run the PostgreSQL benchmark with `cargo bench --bench postgres_search -- DATABASE_URL TENANT_UUID WORKSPACE_UUID QUERY_VECTOR_FILE`, using a JSON file of vector coordinates and an existing populated workspace.
+The connection role must be allowed to assume `yorishiro_app`; the benchmark applies that restricted role and transaction-local tenant/workspace scope inside a read-only transaction.
 
 Metaschema validation includes property-based tests for arbitrary schema-shaped definitions and rejection of empty `entity_types`.
 

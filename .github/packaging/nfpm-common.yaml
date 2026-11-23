@@ -8,7 +8,6 @@
   section: net
   priority: optional
   maintainer: Yorishiro Contributors
-  description: An MCP-native, multi-tenant knowledge store with user-defined schemas.
   vendor: Yorishiro
   homepage: https://github.com/yorishiro-ai/yorishiro
 

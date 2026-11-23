@@ -1,5 +1,5 @@
 mod dispatch;
-pub(crate) mod queue;
+mod queue;
 
 mod embedding_sync;
 mod fill_defaults;

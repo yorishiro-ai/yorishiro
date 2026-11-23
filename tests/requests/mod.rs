@@ -1,3 +1,4 @@
+pub(crate) mod jobs;
 mod sqlite;
 #[cfg(feature = "enterprise")]
 pub(crate) use sqlite::close_app_pools_sqlite;

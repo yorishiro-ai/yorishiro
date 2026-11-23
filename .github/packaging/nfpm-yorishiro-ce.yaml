@@ -1,6 +1,9 @@
 name: yorishiro-ce
 license: BUSL-1.1
 conflicts: [yorishiro-ee]
+description: |
+  An MCP-native, multi-tenant knowledge store with user-defined schemas.
+  Includes the community server features.
 contents:
   - src: ./target/release/yorishiro
     dst: /usr/bin/yorishiro

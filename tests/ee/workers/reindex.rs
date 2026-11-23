@@ -110,7 +110,7 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
         .one(&ctx.db).await.expect("read durable payload").expect("outbox exists");
     let encoded = outbox.payload.to_string();
     assert!(!encoded.contains("key") && !encoded.contains("secret"));
-    crate::workers::queue::harness::finish(&ctx, lifecycle_id).await;
+    crate::requests::jobs::finish_job(&ctx, lifecycle_id, "completed", None).await;
     let row = workspace_workspaces::Entity::find_by_id(workspace_id)
         .one(&ctx.db)
         .await
@@ -162,7 +162,7 @@ async fn disabled_provider_is_a_terminal_worker_error() {
             )
             .await;
         let lifecycle_id = record_delivery(&ctx, workspace_id).await;
-        crate::workers::queue::harness::finish_with_status(&ctx, lifecycle_id, "failed").await;
+        crate::requests::jobs::finish_job(&ctx, lifecycle_id, "failed", None).await;
         let lifecycle = yorishiro::models::queue_job_lifecycles::Entity::find_by_id(lifecycle_id)
             .one(&ctx.db)
             .await

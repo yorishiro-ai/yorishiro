@@ -1,27 +1,10 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures::FutureExt;
 use loco_rs::app::{AppContext, Hooks};
 use sea_orm::{ConnectionTrait, EntityTrait};
 use uuid::Uuid;
-
-#[cfg(feature = "enterprise")]
-#[expect(
-    clippy::future_not_send,
-    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
-)]
-pub(crate) async fn finish(ctx: &AppContext, id: Uuid) {
-    finish_with_status(ctx, id, "completed").await;
-}
-
-#[cfg(feature = "enterprise")]
-#[expect(
-    clippy::future_not_send,
-    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
-)]
-pub(crate) async fn finish_with_status(ctx: &AppContext, id: Uuid, expected: &str) {
-    finish_job(ctx, id, expected, None).await;
-}
+use yorishiro::{App, workers::target::WorkerTarget};
 
 #[expect(
     clippy::future_not_send,
@@ -83,8 +66,7 @@ pub(crate) async fn finish_job(
         .unwrap();
     let tag = outbox.tags.unwrap()[0].as_str().unwrap().to_owned();
     let mut worker_ctx = ctx.clone();
-    let queue =
-        crate::workers::query_embedding::harness::queue_for_tag(&mut worker_ctx, tag.clone()).await;
+    let queue = queue_for_tag(&mut worker_ctx, tag.clone()).await;
     let running = queue.clone();
     let worker = tokio::spawn(async move { running.run(vec![tag]).await });
     let result =
@@ -133,7 +115,7 @@ pub(crate) async fn finish_job(
     if matches!(&result, Ok(Err(_))) {
         log_worker_timeout(ctx, id, &queue).await;
     }
-    yorishiro::App::on_shutdown(&worker_ctx).await;
+    App::on_shutdown(&worker_ctx).await;
     let shutdown = queue.shutdown();
     let joined = tokio::time::timeout(Duration::from_secs(10), worker).await;
     let closed = queue.close().await;
@@ -188,4 +170,47 @@ async fn log_worker_timeout(ctx: &AppContext, id: Uuid, queue: &loco_rs::bgworke
         )).await.map(|row| row.map(|row| row.try_get::<serde_json::Value>("", "activity")));
         eprintln!("worker timeout database activity: {activity:?}");
     }
+}
+
+pub(crate) async fn queue_for_tag(
+    ctx: &mut AppContext,
+    tag: String,
+) -> Arc<loco_rs::bgworker::Queue> {
+    let mode = loco_rs::boot::StartMode::WorkerOnly { tags: vec![tag] };
+    yorishiro::workers::start::configure(&mut ctx.config, &mode)
+        .expect("configure production worker role");
+    let queue = loco_rs::bgworker::create_queue_provider(&ctx.config)
+        .await
+        .expect("create worker queue")
+        .expect("background queue mode");
+    queue.setup().await.expect("set up worker queue");
+    ctx.queue_provider = Some(queue.clone());
+    let boot = loco_rs::boot::run_app::<App>(&mode, ctx.clone())
+        .await
+        .expect("boot production worker through Loco");
+    *ctx = boot.app_context;
+    queue
+}
+
+/// Configures and registers a shared-target consumer through Loco, without starting its loop.
+///
+/// A Redis worker polls only the queues its configuration names, which `yorishiro start --worker=...` fills in from the targets it serves.
+/// Updates the worker context before building its queue and running Loco's worker boot hooks over the already migrated database.
+pub(crate) async fn shared_target_queue(ctx: &mut AppContext) -> Arc<loco_rs::bgworker::Queue> {
+    target_queue(ctx, WorkerTarget::Shared).await
+}
+
+pub(crate) async fn target_queue(
+    ctx: &mut AppContext,
+    target: WorkerTarget,
+) -> Arc<loco_rs::bgworker::Queue> {
+    queue_for_tag(ctx, target.queue()).await
+}
+
+#[cfg(feature = "enterprise")]
+pub(crate) async fn job_target_queue(
+    ctx: &mut AppContext,
+    target: WorkerTarget,
+) -> Arc<loco_rs::bgworker::Queue> {
+    queue_for_tag(ctx, target.job_tag()).await
 }

@@ -1,6 +1,17 @@
 # syntax=docker/dockerfile:1.29.0
 
 ARG DEBIAN_IMAGE=debian:trixie-slim
+
+# Package binaries use the oldest supported glibc, independently of the container runtime.
+FROM almalinux:10 AS package-builder
+RUN dnf install -y gcc gcc-c++ openssl-devel pkgconf-pkg-config git binutils \
+    && dnf clean all
+ENV PATH=/usr/local/cargo/bin:$PATH
+ENV RUSTUP_HOME=/usr/local/rustup
+# CI mounts its toolchain; bfd is available here without the host's mold or sccache.
+ENV RUSTC_WRAPPER=""
+ENV RUSTFLAGS="-C link-arg=-fuse-ld=bfd"
+
 FROM ${DEBIAN_IMAGE} AS builder
 
 RUN apt-get update && apt-get install -y \

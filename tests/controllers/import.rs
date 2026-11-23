@@ -30,7 +30,7 @@ fn concurrent_import_workers_keep_each_apps_database() {
                 .unwrap()
                 .parse()
                 .unwrap();
-            crate::workers::queue::harness::finish_via_api(
+            crate::requests::jobs::finish_via_api(
                 &request,
                 &ctx,
                 id,
@@ -239,7 +239,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             before.json::<Vec<serde_json::Value>>(),
             [] as [serde_json::Value; 0]
         );
-        crate::workers::queue::harness::finish_via_api(
+        crate::requests::jobs::finish_via_api(
             &request,
             &ctx,
             id,
@@ -297,7 +297,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
         .await
         .unwrap();
         replay.commit().await.unwrap();
-        crate::workers::queue::harness::finish_via_api(
+        crate::requests::jobs::finish_via_api(
             &request,
             &ctx,
             id,

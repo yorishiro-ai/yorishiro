@@ -46,6 +46,12 @@ services = json.load(sys.stdin)["services"]
 assert set(services) == {"app", "worker", "jobs", "scheduler", "db", "redis"}
 for role in {"app", "worker", "jobs", "scheduler"}:
     assert services[role]["build"]["context"]
+assert set(services["app"]["depends_on"]) == {"db", "redis"}
+for role in {"worker", "jobs"}:
+    assert services[role]["healthcheck"]["disable"]
+    assert set(services[role]["depends_on"]) == {"app", "redis"}
+    assert all(dependency["condition"] == "service_healthy" for dependency in services[role]["depends_on"].values())
+assert set(services["scheduler"]["depends_on"]) == {"app"}
 assert any(mount["source"] == "pgdata" for mount in services["db"]["volumes"])
 '
 fi

@@ -24,6 +24,17 @@ x-yorishiro: &yorishiro
     BINDING: 0.0.0.0
     YORISHIRO_EMBEDDING_PROVIDER:
 
+x-consumer: &consumer
+  <<: *yorishiro
+  depends_on:
+    app:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+  healthcheck:
+    disable: true
+
 services:
   db:
     image: pgvector/pgvector:pg18
@@ -66,35 +77,19 @@ services:
         condition: service_healthy
 
   worker:
-    <<: *yorishiro
+    <<: *consumer
     # The worker serves the shared target.
     # To serve others, list them after `--worker=`, separated by commas (`worker-target:official`, `worker-target:tenant:<tenant-id>`), or add a service for them.
     command: ["start", "--worker=worker-target:shared"]
     # Only this role loads the embedding model.
     # To reuse local files, mount ./models:/app/models:ro containing both model.safetensors and tokenizer.json under models/<short_id>/.
     # Without a mount, verified model files are downloaded into /app/models at worker startup.
-    # Workers do not serve the image's HTTP health check.
-    healthcheck:
-      disable: true
-    depends_on:
-      app:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
   jobs:
-    <<: *yorishiro
+    <<: *consumer
     # Durable application jobs run without loading an embedding model.
     # To serve other targets, list job-target:official or job-target:tenant:<tenant-id> after --worker=, separated by commas.
     command: ["start", "--worker=job-target:shared"]
-    # Workers do not serve the image's HTTP health check.
-    healthcheck:
-      disable: true
-    depends_on:
-      app:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
   scheduler:
     <<: *yorishiro

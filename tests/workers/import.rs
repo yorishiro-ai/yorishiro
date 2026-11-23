@@ -2,7 +2,7 @@ use sea_orm::TransactionTrait;
 use uuid::Uuid;
 
 use crate::requests::boot_request;
-use crate::workers::queue::harness::finish_job;
+use crate::requests::jobs::finish_job;
 
 #[tokio::test]
 async fn queued_import_rechecks_revoked_credentials_before_writing() {

@@ -46,7 +46,7 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
         let db = ctx.db.clone();
         let target = WorkerTarget::Shared;
         let mut ctx = ctx;
-        let queue = crate::workers::query_embedding::harness::job_target_queue(&mut ctx, target).await;
+        let queue = crate::requests::jobs::job_target_queue(&mut ctx, target).await;
         let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &fixture.api_key).await, "note".into())
             .await
             .unwrap();
@@ -235,8 +235,7 @@ async fn deliver_lifecycle(ctx: &AppContext, lifecycle_id: Uuid) {
 
     let target = WorkerTarget::Shared;
     let mut worker_ctx = ctx.clone();
-    let queue =
-        crate::workers::query_embedding::harness::job_target_queue(&mut worker_ctx, target).await;
+    let queue = crate::requests::jobs::job_target_queue(&mut worker_ctx, target).await;
     let running = queue.clone();
     let worker = tokio::spawn(async move { running.run(vec![target.job_tag()]).await });
     let directory = tempfile::tempdir().unwrap();
@@ -575,11 +574,9 @@ async fn two_jobs_for_one_workspace_never_run_together() {
             let jobs = [jobs[0], jobs[1]];
             // Two real consumers must contend while the first external call is held.
             let mut worker_ctx = ctx.clone();
-            let queue = crate::workers::query_embedding::harness::job_target_queue(
-                &mut worker_ctx,
-                WorkerTarget::Shared,
-            )
-            .await;
+            let queue =
+                crate::requests::jobs::job_target_queue(&mut worker_ctx, WorkerTarget::Shared)
+                    .await;
             let running = queue.clone();
             let runner =
                 tokio::spawn(
@@ -715,7 +712,7 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
                     .json(&serde_json::json!({"name":mode,"document":deny})).await.assert_status_ok();
             }
         }
-        crate::workers::queue::harness::finish_with_status(&ctx, lifecycle, "failed").await;
+        crate::requests::jobs::finish_job(&ctx, lifecycle, "failed", None).await;
         let job = yorishiro::edition::ee::models::inference_jobs::get(&ctx.db, job_id)
             .await
             .unwrap()
@@ -840,7 +837,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
             changed.expect("permission changes must not wait for the LLM reply");
         };
         tokio::join!(
-            crate::workers::queue::harness::finish_with_status(&ctx, lifecycle, "failed"),
+            crate::requests::jobs::finish_job(&ctx, lifecycle, "failed", None),
             revoke,
         );
         let job = inference_jobs::get(&ctx.db, job_id).await.unwrap().unwrap();

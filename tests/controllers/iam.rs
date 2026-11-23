@@ -323,21 +323,10 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
             .add_header("x-workspace-id", &workspace)
             .await
             .assert_status_ok();
-        let initialized = request
-            .post("/mcp")
-            .add_header("Accept", "application/json, text/event-stream")
-            .json(
-                &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
-                    "protocolVersion":"2025-03-26","capabilities":{},
-                    "clientInfo":{"name":"root-test","version":"1"}
-                }}),
-            )
-            .await;
-        initialized.assert_status_ok();
-        let session = initialized.headers()["mcp-session-id"].to_str().unwrap();
+        let session = crate::controllers::mcp::initialize(&request).await;
         let result = iam_mcp_call(
             &request,
-            session,
+            &session,
             &root,
             "list_schemas",
             serde_json::json!({"workspace_id":workspace}),
@@ -347,7 +336,7 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
         assert!(result.get("error").is_none(), "{result}");
         let result = iam_mcp_call(
             &request,
-            session,
+            &session,
             &root,
             "list_schemas",
             serde_json::json!({}),
@@ -362,7 +351,7 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
                 .await;
         let result = iam_mcp_call(
             &request,
-            session,
+            &session,
             &delegated,
             "list_schemas",
             serde_json::json!({}),
@@ -492,21 +481,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 "group_create"
             );
 
-            let initialized = request
-                .post("/mcp")
-                .add_header("Accept", "application/json, text/event-stream")
-                .json(
-                    &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
-                        "protocolVersion":"2025-03-26","capabilities":{},
-                        "clientInfo":{"name":"iam-test","version":"1"}
-                    }}),
-                )
-                .await;
-            initialized.assert_status_ok();
-            let session = initialized.headers()["mcp-session-id"]
-                .to_str()
-                .unwrap()
-                .to_owned();
+            let session = crate::controllers::mcp::initialize(&request).await;
             let audit_mcp = iam_mcp_call(
                 &request,
                 &session,

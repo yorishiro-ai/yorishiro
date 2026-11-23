@@ -2,7 +2,7 @@ use sea_orm::{EntityTrait, TransactionTrait};
 use uuid::Uuid;
 
 use crate::requests::boot_request;
-use crate::workers::queue::harness::{finish_job, finish_via_api};
+use crate::requests::jobs::{finish_job, finish_via_api};
 
 #[tokio::test]
 #[expect(

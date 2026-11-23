@@ -13,7 +13,7 @@ All commands run from the repository root. `make -C . <target>` works from any d
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
 | `make clippy-ce` | Strict Clippy for every CE target, including tests | CE |
 | `make clippy-ee` | Strict Clippy for every EE target, including tests | EE |
-| `make fmt-check` | `cargo fmt --all -- --check` | — |
+| `make fmt-check` | `cargo fmt --all -- --check` |: |
 | `make check-all` | Formatting, Python/boundary checks, CE check, and CE Clippy | CE |
 | `make check-all-ee` | Formatting, Python/boundary checks, EE check, and EE Clippy | EE |
 | `make build-ce` | `cargo build --locked --no-default-features --workspace` | CE |
@@ -78,17 +78,17 @@ The package and Docker installability checks (about 90 minutes) are their own wo
 The integration tests are one binary rooted at `tests/mod.rs`.
 A test file sits at the same path as the source file it covers; not every source file has tests.
 
-- `tests/controllers/` — REST handlers, MCP tools, middleware, route inventory, OpenAPI assembly
-- `tests/data/` — configuration loading and validation (`config/`), typed settings, time, built-in templates
-- `tests/db.rs`, `tests/db/` — connection primitives and migrations
-- `tests/initializers/` — process-lifetime initializers
-- `tests/models/` — one file per table module, with sub-modules for backend-specific or sub-module coverage (`entity_entities/sqlite.rs`, `schema_schemas/metaschema/`)
-- `tests/requests/` — shared `boot_request` harness and public-path fixtures
-- `tests/services/` — embedding providers
-- `tests/tasks/` — task commands, named after the task they run
-- `tests/workers/` — embedding sync, reindex, queue, dispatch, lifecycle, targets
-- `tests/integration/` — real child processes
-- `tests/ee/` — mirrors `ee/`, including REST and MCP tests under `ee/controllers/`; compiled only with the `enterprise` feature
+- `tests/controllers/`: REST handlers, MCP tools, middleware, route inventory, OpenAPI assembly
+- `tests/data/`: configuration loading and validation (`config/`), typed settings, time, built-in templates
+- `tests/db.rs`, `tests/db/`: connection primitives and migrations
+- `tests/initializers/`: process-lifetime initializers
+- `tests/models/`: one file per table module, with sub-modules for backend-specific or sub-module coverage (`entity_entities/sqlite.rs`, `schema_schemas/metaschema/`)
+- `tests/requests/`: shared `boot_request` harness, queue/job harness (`jobs.rs`), and public-path fixtures
+- `tests/services/`: embedding providers
+- `tests/tasks/`: task commands, named after the task they run
+- `tests/workers/`: embedding sync, reindex, queue, dispatch, lifecycle, targets
+- `tests/integration/`: real child processes
+- `tests/ee/`: mirrors `ee/`, including REST and MCP tests under `ee/controllers/`; compiled only with the `enterprise` feature
 
 There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
 
@@ -125,9 +125,9 @@ if !require_sqlite_backend() { return; }
 ```
 
 Files that need a specific backend guard with it:
-- `tests/models/content_entities_sqlite.rs` — entity CRUD seeded via raw SQL
-- `tests/models/tenancy_sqlite.rs` — the SQLite tenancy cap
-- `tests/models/search.rs` — PostgreSQL-only query shapes, guarded the other way
+- `tests/models/content_entities_sqlite.rs`: entity CRUD seeded via raw SQL
+- `tests/models/tenancy_sqlite.rs`: the SQLite tenancy cap
+- `tests/models/search.rs`: PostgreSQL-only query shapes, guarded the other way
 
 
 ## `close_app_pools` (required)
