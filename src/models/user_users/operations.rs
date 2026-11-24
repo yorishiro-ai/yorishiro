@@ -2,7 +2,7 @@
 
 use loco_rs::hash;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, SqlErr,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
 };
 use sea_orm::{Condition, QuerySelect};
 
@@ -262,13 +262,10 @@ pub async fn create_user(
     };
 
     active.insert(conn).await.map_err(|err| {
-        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-            YorishiroError::Conflict {
-                message: format!("a user with email '{email}' already exists"),
-            }
-        } else {
-            YorishiroError::Internal(err.into())
-        }
+        YorishiroError::conflict_on_unique(
+            err,
+            format!("a user with email '{email}' already exists"),
+        )
     })
 }
 
@@ -377,13 +374,10 @@ pub(crate) async fn create_tenant_user(
         ..Default::default()
     };
     active.insert(conn).await.map_err(|err| {
-        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-            YorishiroError::Conflict {
-                message: format!("a user named '{user_name}' already exists in this tenant"),
-            }
-        } else {
-            YorishiroError::Internal(err.into())
-        }
+        YorishiroError::conflict_on_unique(
+            err,
+            format!("a user named '{user_name}' already exists in this tenant"),
+        )
     })
 }
 

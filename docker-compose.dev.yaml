@@ -1,0 +1,96 @@
+# Local development builds the distribution image.
+#   docker compose -f docker-compose.dev.yaml up --build
+#
+# `app` serves HTTP, `worker` consumes embedding sync/query/reindex, `jobs` consumes import/maintenance/inference, and `scheduler` runs scheduled tasks.
+# Both consumers are required; the HTTP server consumes no queued jobs.
+
+x-yorishiro: &yorishiro
+  image: ${IMAGE:-yorishiro}:${TAG:-local}
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      EDITION: ${EDITION:-ee}
+  environment:
+    # Mount a complete production.yaml, optionally with production.local.yaml, to replace embedded defaults.
+    DATABASE_URL: postgres://yorishiro:yorishiro@db:5432/yorishiro
+    # Select Redis explicitly rather than the database-backed queue default.
+    YORISHIRO_QUEUE_KIND: Redis
+    QUEUE_URL: redis://redis:6379
+    HOST: http://localhost:5150
+    # Published ports require listening beyond the container loopback interface.
+    BINDING: 0.0.0.0
+    YORISHIRO_EMBEDDING_PROVIDER:
+
+x-consumer: &consumer
+  <<: *yorishiro
+  depends_on:
+    app:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+  healthcheck:
+    disable: true
+
+services:
+  db:
+    image: pgvector/pgvector:pg18
+    shm_size: 1gb
+    # Reap orphan children outside PostgreSQL so their exit cannot trigger cluster recovery.
+    init: true
+    environment:
+      POSTGRES_USER: yorishiro
+      POSTGRES_PASSWORD: yorishiro
+      POSTGRES_DB: yorishiro
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "yorishiro"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: valkey/valkey:9.1.3
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  app:
+    <<: *yorishiro
+    ports:
+      - "127.0.0.1:5150:5150"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *consumer
+    # To serve others, list them after `--worker=`, separated by commas (`worker-target:official`, `worker-target:tenant:<tenant-id>`), or add a service for them.
+    command: ["start", "--worker=worker-target:shared"]
+    # Mount ./models:/app/models:ro with models/<short_id>/{model.safetensors,tokenizer.json} to avoid downloads.
+
+  jobs:
+    <<: *consumer
+    # To serve other targets, list job-target:official or job-target:tenant:<tenant-id> after --worker=, separated by commas.
+    command: ["start", "--worker=job-target:shared"]
+
+  scheduler:
+    <<: *yorishiro
+    command: ["scheduler"]
+    healthcheck:
+      disable: true
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  pgdata:

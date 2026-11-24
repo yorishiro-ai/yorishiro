@@ -45,7 +45,7 @@ async fn a_target_drains_its_own_jobs_behind_a_backlog_of_another_target() {
             .unwrap()
             .unwrap();
         let client = redis::Client::open(config.uri.clone()).unwrap();
-        let mut observer = client.get_multiplexed_async_connection().await.unwrap();
+        let observer = client.get_multiplexed_async_connection().await.unwrap();
         let keys: Vec<_> = backlog
             .iter()
             .chain(std::iter::once(&shared))
@@ -54,39 +54,38 @@ async fn a_target_drains_its_own_jobs_behind_a_backlog_of_another_target() {
         {
             let target = WorkerTarget::Shared;
             let mut worker_ctx = ctx.clone();
-            let queue =
-                crate::workers::query_embedding::harness::target_queue(&mut worker_ctx, target)
-                    .await;
+            let queue = crate::requests::jobs::target_queue(&mut worker_ctx, target).await;
             let running = queue.clone();
             let worker = tokio::spawn(async move { running.run(vec![target.tag()]).await });
             let outcome = std::panic::AssertUnwindSafe(async {
-                let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-                loop {
-                    // Observe only this case's deliveries, not every retained job in the shared deployment.
-                    let records: Vec<String> = redis::cmd("MGET")
-                        .arg(&keys)
-                        .query_async(&mut observer)
-                        .await
-                        .unwrap();
-                    let jobs: Vec<Job> = records
-                        .iter()
-                        .map(|record| serde_json::from_str(record).unwrap())
-                        .collect();
-                    let shared_job = jobs.iter().find(|job| job.id == shared).unwrap();
-                    assert_ne!(shared_job.status, JobStatus::Failed, "{}", shared_job.data);
-                    if shared_job.status == JobStatus::Completed {
-                        assert!(backlog.iter().all(|id| {
-                            jobs.iter()
-                                .any(|job| job.id == *id && job.status == JobStatus::Queued)
-                        }));
-                        break;
-                    }
-                    assert!(
-                        tokio::time::Instant::now() < deadline,
-                        "the shared target completes independently of the official backlog"
-                    );
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
+                crate::requests::jobs::wait_until(
+                    "the shared target to complete independently of the official backlog",
+                    Duration::from_secs(10),
+                    || async {
+                        let mut observer = observer.clone();
+                        // Observe only this case's deliveries, not every retained job in the shared deployment.
+                        let records: Vec<String> = redis::cmd("MGET")
+                            .arg(&keys)
+                            .query_async(&mut observer)
+                            .await
+                            .unwrap();
+                        let jobs: Vec<Job> = records
+                            .iter()
+                            .map(|record| serde_json::from_str(record).unwrap())
+                            .collect();
+                        let shared_job = jobs.iter().find(|job| job.id == shared).unwrap();
+                        assert_ne!(shared_job.status, JobStatus::Failed, "{}", shared_job.data);
+                        if shared_job.status == JobStatus::Completed {
+                            assert!(backlog.iter().all(|id| {
+                                jobs.iter()
+                                    .any(|job| job.id == *id && job.status == JobStatus::Queued)
+                            }));
+                            return Some(());
+                        }
+                        None
+                    },
+                )
+                .await;
             })
             .catch_unwind()
             .await;

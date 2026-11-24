@@ -195,13 +195,7 @@ impl Model {
         .insert(txn)
         .await
         .map_err(|error| {
-            if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-                YorishiroError::Conflict {
-                    message: "an IAM group with this name already exists".into(),
-                }
-            } else {
-                YorishiroError::Internal(error.into())
-            }
+            YorishiroError::conflict_on_unique(error, "an IAM group with this name already exists")
         })
     }
 
@@ -235,13 +229,10 @@ impl Model {
             .exec(txn)
             .await
             .map_err(|error| {
-                if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-                    YorishiroError::Conflict {
-                        message: "an IAM group with this name already exists".into(),
-                    }
-                } else {
-                    YorishiroError::Internal(error.into())
-                }
+                YorishiroError::conflict_on_unique(
+                    error,
+                    "an IAM group with this name already exists",
+                )
             })?
             .rows_affected
             != 0)

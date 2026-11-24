@@ -1,6 +1,6 @@
+use crate::controllers::mcp;
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
-use crate::requests::mcp;
 use axum::http::StatusCode;
 use sea_orm::EntityTrait;
 use yorishiro::App;

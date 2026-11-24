@@ -164,9 +164,8 @@ pub mod edition {
             Ok(())
         }
 
-        async fn seed(ctx: &AppContext, base_path: &Path) -> Result<()> {
-            active::seed(ctx).await?;
-            base::seed(ctx, base_path).await
+        async fn seed(ctx: &AppContext, _base_path: &Path) -> Result<()> {
+            active::seed(ctx).await
         }
     }
 

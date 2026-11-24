@@ -239,15 +239,14 @@ async fn concurrent_fetches_use_distinct_staging_paths_and_rename_only_verified_
             let staged = staged.clone();
             async move {
                 let body = futures::stream::once(async move {
-                    tokio::time::timeout(Duration::from_secs(5), async {
-                        while partial_files(&partial_dir).len() != 2 {
-                            tokio::time::sleep(Duration::from_millis(20)).await;
-                        }
-                        assert!(!partial_dir.join("test.bin").exists());
-                        staged.wait().await;
-                    })
-                    .await
-                    .expect("both clients must stage before either body is sent");
+                    crate::requests::jobs::wait_until(
+                        "both clients to stage before either body is sent",
+                        Duration::from_secs(5),
+                        || async { (partial_files(&partial_dir).len() == 2).then_some(()) },
+                    )
+                    .await;
+                    assert!(!partial_dir.join("test.bin").exists());
+                    staged.wait().await;
                     Ok::<_, std::io::Error>("payload")
                 });
                 (

@@ -38,14 +38,7 @@ Changing the pinned version requires reviewing these fixes against the new upstr
 Call `close().await` after the `run()` future has drained; do not close a SQL pool underneath active jobs.
 The force-quit signal intentionally still bypasses graceful draining.
 These fixes do not make job effects exactly-once: application transactions and idempotence remain necessary.
-They do not prove or fix the separate, unexplained PostgreSQL authentication/cleanup delays seen in previous tests.
 Do not mix patched and unpatched Redis workers during rollout: drain and replace the worker fleet because unpatched workers do not participate in attempt fencing.
-
-## Fixes retired by upstream
-
-Loco 1.3.0 serialises PostgreSQL queue initialisation under a transaction-scoped advisory lock, so the former LQ-06 fix is gone.
-The local test-database cleanup runtime change, the `converge` refactor, the extra PostgreSQL queue indexes and the private Redis `connect` signature change were not defect fixes and were dropped with the 1.3.1 port.
-Each remaining fix was re-checked against the 1.3.1 source: the Redis enqueue, claim, reaper and error-log defects and the missing awaited `close()` are all still present upstream.
 
 ## Removal condition
 

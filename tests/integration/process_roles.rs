@@ -64,7 +64,7 @@ async fn a_job_consumer_does_not_build_the_embedding_provider() {
         .unwrap();
         let log_path = dir.path().join("jobs.log");
         let log = std::fs::File::create(&log_path).unwrap();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_yorishiro"))
+        let child = Command::new(env!("CARGO_BIN_EXE_yorishiro"))
             .args(["start", "--worker=job-target:shared"])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .env("LOCO_ENV", "development")
@@ -73,35 +73,32 @@ async fn a_job_consumer_does_not_build_the_embedding_provider() {
             .stderr(log)
             .spawn()
             .unwrap();
-        let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
+        let child = std::cell::RefCell::new(child);
+        let outcome = std::panic::AssertUnwindSafe(crate::requests::jobs::try_wait_until(
             std::time::Duration::from_secs(20),
-            async {
-                loop {
-                    assert!(
-                        child.try_wait().unwrap().is_none(),
-                        "job consumer exited before completing import"
-                    );
-                    let response = request
-                        .get(&format!("/api/import-jobs/{id}"))
-                        .add_header("Authorization", format!("Bearer {}", fixture.api_key))
-                        .await;
-                    response.assert_status(axum::http::StatusCode::OK);
-                    let status = response.json::<serde_json::Value>();
-                    assert_ne!(status["status"], "failed", "{status}");
-                    if status["status"] == "completed" {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                }
+            || async {
+                assert!(
+                    child.borrow_mut().try_wait().unwrap().is_none(),
+                    "job consumer exited before completing import"
+                );
+                let response = request
+                    .get(&format!("/api/import-jobs/{id}"))
+                    .add_header("Authorization", format!("Bearer {}", fixture.api_key))
+                    .await;
+                response.assert_status(axum::http::StatusCode::OK);
+                let status = response.json::<serde_json::Value>();
+                assert_ne!(status["status"], "failed", "{status}");
+                (status["status"] == "completed").then_some(())
             },
         ))
         .catch_unwind()
         .await;
+        let mut child = child.into_inner();
         if child.try_wait().unwrap().is_none() {
             child.kill().unwrap();
         }
         child.wait().unwrap();
-        if !matches!(&outcome, Ok(Ok(()))) {
+        if !matches!(&outcome, Ok(Some(()))) {
             eprintln!(
                 "job consumer log: {}",
                 std::fs::read_to_string(log_path).unwrap()

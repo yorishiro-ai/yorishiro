@@ -10,7 +10,7 @@
 //! | `official` | `Official` | `official:official` |
 //! | `tenant:<tenant-id>` | `TenantPrivate` | `tenant_private:tenant:<tenant-id>` |
 //!
-//! The class is still recorded on the job's lifecycle row, but it no longer takes part in choosing a worker.
+//! The lifecycle row records the class; worker selection uses the target tag.
 //! The concurrency key is the same name used for the tag, so the set of workers a job can reach and the set of jobs counted against its limit are always the same set.
 
 use std::fmt;
@@ -98,7 +98,7 @@ impl WorkerTarget {
     /// Routing tag for durable non-embedding jobs on separate Loco consumers.
     #[must_use]
     pub fn job_tag(self) -> String {
-        self.tag().replacen("worker-target:", "job-target:", 1)
+        format!("job-target:{}", self.name())
     }
 
     /// Parses a non-embedding execution target with the same tenant validation.

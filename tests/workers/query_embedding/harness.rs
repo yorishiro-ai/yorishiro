@@ -16,50 +16,7 @@ use yorishiro::App;
 use yorishiro::services::embedding::EmbeddingProvider;
 use yorishiro::workers::target::WorkerTarget;
 
-use crate::requests::boot_request;
-
-/// Configures and registers a shared-target consumer through Loco, without starting its loop.
-///
-/// A Redis worker polls only the queues its configuration names, which `yorishiro start --worker=...` fills in from the targets it serves.
-/// Updates the worker context before building its queue and running Loco's worker boot hooks over the already migrated database.
-pub(crate) async fn shared_target_queue(ctx: &mut AppContext) -> Arc<loco_rs::bgworker::Queue> {
-    target_queue(ctx, WorkerTarget::Shared).await
-}
-
-pub(crate) async fn target_queue(
-    ctx: &mut AppContext,
-    target: WorkerTarget,
-) -> Arc<loco_rs::bgworker::Queue> {
-    queue_for_tag(ctx, target.queue()).await
-}
-
-#[cfg(feature = "enterprise")]
-pub(crate) async fn job_target_queue(
-    ctx: &mut AppContext,
-    target: WorkerTarget,
-) -> Arc<loco_rs::bgworker::Queue> {
-    queue_for_tag(ctx, target.job_tag()).await
-}
-
-pub(crate) async fn queue_for_tag(
-    ctx: &mut AppContext,
-    tag: String,
-) -> Arc<loco_rs::bgworker::Queue> {
-    let mode = loco_rs::boot::StartMode::WorkerOnly { tags: vec![tag] };
-    yorishiro::workers::start::configure(&mut ctx.config, &mode)
-        .expect("configure production worker role");
-    let queue = loco_rs::bgworker::create_queue_provider(&ctx.config)
-        .await
-        .expect("create worker queue")
-        .expect("background queue mode");
-    queue.setup().await.expect("set up worker queue");
-    ctx.queue_provider = Some(queue.clone());
-    let boot = loco_rs::boot::run_app::<App>(&mode, ctx.clone())
-        .await
-        .expect("boot production worker through Loco");
-    *ctx = boot.app_context;
-    queue
-}
+use crate::requests::{boot_request, jobs::shared_target_queue};
 
 /// Boots the app, installs `provider` as the worker's deployment default, and runs a query embedding worker against the app's queue until `callback` returns.
 #[expect(

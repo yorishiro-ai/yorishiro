@@ -277,11 +277,9 @@ fn fill_fields_in_value(
 ) -> i64 {
     let mut count = 0i64;
 
-    if !data.is_object() {
+    let Some(obj) = data.as_object_mut() else {
         return count;
-    }
-
-    let obj = data.as_object_mut().unwrap();
+    };
 
     for (name, prop_def) in fields {
         if obj.contains_key(name) {

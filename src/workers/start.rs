@@ -92,8 +92,7 @@ pub(crate) fn worker_start_from_mode(mode: &StartMode) -> Result<WorkerStart, St
 /// # Errors
 /// Returns an error if the start mode does not select valid worker targets.
 pub fn configure(config: &mut loco_rs::config::Config, mode: &StartMode) -> loco_rs::Result<()> {
-    let start =
-        worker_start_from_mode(mode).map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    let start = worker_start_from_mode(mode).map_err(loco_rs::Error::wrap)?;
     configure_start(config, start);
     Ok(())
 }

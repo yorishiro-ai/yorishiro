@@ -98,7 +98,7 @@ async fn list_audit(
     let events = crate::models::iam_audit_events::Model::list_as(
         &ctx.db,
         &actor,
-        crate::models::pagination::ListParams::new(input.limit, input.offset),
+        crate::models::pagination::ListParams::from(&input),
     )
     .await?;
     Ok(Json(events.into_iter().map(Into::into).collect()))
@@ -278,7 +278,7 @@ async fn list_iam_groups(
     let rows = crate::models::iam_groups::Model::list_as(
         &ctx.db,
         &actor,
-        crate::models::pagination::ListParams::new(input.limit, input.offset),
+        crate::models::pagination::ListParams::from(&input),
     )
     .await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
@@ -292,7 +292,7 @@ async fn list_iam_policies(
     let rows = crate::models::iam_policies::Model::list_as(
         &ctx.db,
         &actor,
-        crate::models::pagination::ListParams::new(input.limit, input.offset),
+        crate::models::pagination::ListParams::from(&input),
     )
     .await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
@@ -310,7 +310,7 @@ async fn list_iam_group_members(
         &ctx.db,
         &actor,
         group_id,
-        crate::models::pagination::ListParams::new(input.limit, input.offset),
+        crate::models::pagination::ListParams::from(&input),
     )
     .await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
@@ -328,7 +328,7 @@ async fn list_iam_user_policies(
         &ctx.db,
         &actor,
         user_id,
-        crate::models::pagination::ListParams::new(input.limit, input.offset),
+        crate::models::pagination::ListParams::from(&input),
     )
     .await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
@@ -346,7 +346,7 @@ async fn list_iam_group_policies(
         &ctx.db,
         &actor,
         group_id,
-        crate::models::pagination::ListParams::new(input.limit, input.offset),
+        crate::models::pagination::ListParams::from(&input),
     )
     .await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
@@ -471,7 +471,7 @@ async fn list_iam_roles(
     let rows = crate::models::iam_roles::Model::list_as(
         &ctx.db,
         &actor,
-        crate::models::pagination::ListParams::new(input.limit, input.offset),
+        crate::models::pagination::ListParams::from(&input),
     )
     .await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
@@ -489,7 +489,7 @@ async fn list_iam_role_members(
         &ctx.db,
         &actor,
         role_id,
-        crate::models::pagination::ListParams::new(input.limit, input.offset),
+        crate::models::pagination::ListParams::from(&input),
     )
     .await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
@@ -507,7 +507,7 @@ async fn list_iam_role_policies(
         &ctx.db,
         &actor,
         role_id,
-        crate::models::pagination::ListParams::new(input.limit, input.offset),
+        crate::models::pagination::ListParams::from(&input),
     )
     .await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))

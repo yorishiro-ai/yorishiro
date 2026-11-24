@@ -21,7 +21,7 @@ impl Task for SeedOfficialTemplates {
     async fn run(&self, app_context: &AppContext, _vars: &Vars) -> Result<()> {
         let outcome = official_templates::seed_official_templates(app_context)
             .await
-            .map_err(|err| Error::Message(err.to_string()))?;
+            .map_err(Error::wrap)?;
 
         println!(
             "official templates: {} published, {} updated, {} unchanged",

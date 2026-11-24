@@ -1,3 +1,17 @@
-mod mcp;
+mod api_keys;
+mod audit_log;
+mod auth;
+mod entities;
+mod export;
+pub(crate) mod iam;
+mod import;
+pub(crate) mod mcp;
+mod members;
 mod middleware;
 mod openapi;
+mod schemas;
+mod search;
+mod setup;
+mod template_library;
+mod tenants;
+mod workspaces;

@@ -14,7 +14,6 @@ use loco_rs::{
     task::Tasks,
 };
 use migration::Migrator;
-use std::path::Path;
 
 use crate::controllers;
 use crate::controllers::mcp::McpToolSet;
@@ -41,23 +40,23 @@ pub(crate) fn app_version() -> String {
 pub(crate) fn load_config(env: &Environment) -> Result<Config> {
     let mut config = crate::data::config::load(env)?;
     let start = crate::workers::start::worker_start_from_args(std::env::args_os())
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(loco_rs::Error::wrap)?;
     crate::workers::start::configure_start(&mut config, start);
     Ok(config)
 }
 
-/// Validates the queue policy and the worker targets, then boots through Loco as `H`.
+/// Validates the worker targets, then boots through Loco as `H`.
 ///
-/// The command line does not call this (see [`load_config`]); a caller that boots with a [`StartMode`], such as the test harness, does, and gets the same checks.
+/// The configuration was validated when it was loaded (see [`load_config`]).
+/// The command line does not call this; a caller that boots with a [`StartMode`], such as the test harness, does, and gets the same worker-target checks.
 ///
 /// # Errors
-/// Returns an error when the queue policy is invalid or the mode starts workers without a valid worker target.
+/// Returns an error when the mode starts workers without a valid worker target.
 pub(crate) async fn boot<H: Hooks>(
     mode: StartMode,
     environment: &Environment,
     mut config: Config,
 ) -> Result<BootResult> {
-    crate::data::config::validate(&config)?;
     crate::workers::start::configure(&mut config, &mode)?;
     // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
     // The call site in main.rs already covers all CLI subcommands.
@@ -285,28 +284,6 @@ pub(crate) async fn on_shutdown(ctx: &AppContext) {
     initializers::queue::shutdown(ctx).await;
     initializers::db_load_guard::shutdown(ctx).await;
     // Loco drains queue workers after this hook; their contexts keep the pools alive.
-}
-
-/// Seeds the demo tenant and workspace from `fixtures/`.
-pub(crate) async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
-    let fixtures = base.join("fixtures");
-    let tenants = fixtures.join("tenant_tenants.yaml");
-    if tenants.exists() {
-        loco_rs::db::seed::<crate::models::tenant_tenants::ActiveModel>(
-            &ctx.db,
-            &tenants.display().to_string(),
-        )
-        .await?;
-    }
-    let workspaces = fixtures.join("workspace_workspaces.yaml");
-    if workspaces.exists() {
-        loco_rs::db::seed::<crate::models::workspace_workspaces::ActiveModel>(
-            &ctx.db,
-            &workspaces.display().to_string(),
-        )
-        .await?;
-    }
-    Ok(())
 }
 
 /// Builds the pools and shared services every entry point, tasks included, depends on.

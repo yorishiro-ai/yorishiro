@@ -22,6 +22,7 @@ mod conflict {
     use yorishiro::workers::embedding_sync::{EmbeddingSyncArgs, EmbeddingSyncWorker, WorkerClass};
     use yorishiro::workers::target::WorkerTarget;
 
+    use crate::requests::jobs::{try_wait_until, wait_until};
     use crate::requests::{boot_request, boot_request_with};
 
     struct BackendObservation(Arc<bgworker::Queue>);
@@ -60,8 +61,7 @@ mod conflict {
 
     impl QueueHarness {
         async fn lane(mut ctx: AppContext) -> Self {
-            let queue =
-                crate::workers::query_embedding::harness::shared_target_queue(&mut ctx).await;
+            let queue = crate::requests::jobs::shared_target_queue(&mut ctx).await;
             let running = queue.clone();
             let runner =
                 tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
@@ -85,36 +85,36 @@ mod conflict {
             )
             .await
             .expect("enqueue through production dispatch");
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                loop {
+            let db = &self.ctx.db;
+            wait_until(
+                "production relay to publish the lifecycle",
+                std::time::Duration::from_secs(10),
+                || async move {
                     use yorishiro::models::_entities::queue_job_dispatch_outbox as outbox;
                     let rows = outbox::Entity::find()
                         .filter(outbox::Column::WorkspaceId.eq(workspace_id))
-                        .all(&self.ctx.db)
+                        .all(db)
                         .await
                         .expect("read this workspace's durable dispatches");
-                    if let Some(row) = rows.iter().find(|row| {
+                    let row = rows.iter().find(|row| {
                         row.payload["entity_id"] == entity_id.to_string()
                             && row.published_at.is_some()
-                    }) {
-                        let lifecycle_id = row.lifecycle_id.expect("embedding lifecycle ID");
-                        let lifecycle = Entity::find_by_id(lifecycle_id)
-                            .one(&self.ctx.db)
-                            .await
-                            .expect("read published lifecycle")
-                            .expect("published lifecycle exists");
-                        return (
-                            lifecycle_id,
-                            lifecycle
-                                .provider_job_id
-                                .expect("relay records provider job ID"),
-                        );
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                }
-            })
+                    })?;
+                    let lifecycle_id = row.lifecycle_id.expect("embedding lifecycle ID");
+                    let lifecycle = Entity::find_by_id(lifecycle_id)
+                        .one(db)
+                        .await
+                        .expect("read published lifecycle")
+                        .expect("published lifecycle exists");
+                    Some((
+                        lifecycle_id,
+                        lifecycle
+                            .provider_job_id
+                            .expect("relay records provider job ID"),
+                    ))
+                },
+            )
             .await
-            .expect("production relay publishes the lifecycle")
         }
 
         async fn shutdown(self) {
@@ -582,6 +582,7 @@ mod conflict {
                 tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
                     .await
                     .expect("embedding reached provider");
+                // Direct write (c): the bare `disabled_at` flag, deliberately not the full disable operation, which would also cancel the work this test needs in flight.
                 let result = yorishiro::models::tenant_tenants::ActiveModel {
                     id: Set(workspace.tenant_id),
                     disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
@@ -619,7 +620,7 @@ mod conflict {
                 let (provider, _server) = failing_provider(kind).await;
                 ctx.shared_store.insert(provider);
                 let mut worker_ctx = ctx.clone();
-                let queue = crate::workers::query_embedding::harness::shared_target_queue(&mut worker_ctx).await;
+                let queue = crate::requests::jobs::shared_target_queue(&mut worker_ctx).await;
                 yorishiro::workers::embedding_sync::enqueue_for_class(
                     &ctx,
                     EmbeddingSyncArgs {
@@ -632,18 +633,21 @@ mod conflict {
                 let running = queue.clone();
                 let worker = tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
                 let directory = tempfile::tempdir().unwrap();
+                let queue_ref = &queue;
+                let dir = directory.path();
                 let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                    let lifecycle_id = loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                    let lifecycle_id = wait_until("provider failure to be recorded", std::time::Duration::from_secs(10), || async move {
+                        let dump = queue_ref.dump(dir, None, None).await.unwrap();
                         let jobs: Vec<bgworker::Job> = serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         let owned: Vec<_> = jobs.iter().filter(|job| job.data["entity_id"] == entity_id.to_string()
                             && job.data["workspace_id"] == workspace_id.to_string()).collect();
                         if owned.iter().any(|job| job.status == JobStatus::Failed) {
                             assert_eq!(owned.len(), 1, "provider failure must not requeue");
-                            break serde_json::from_value::<Uuid>(owned[0].data["lifecycle_id"].clone()).unwrap();
+                            Some(serde_json::from_value::<Uuid>(owned[0].data["lifecycle_id"].clone()).unwrap())
+                        } else {
+                            None
                         }
-                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                    };
+                    }).await;
                     let lifecycle = Entity::find_by_id(lifecycle_id).one(&ctx.db).await.unwrap().unwrap();
                     assert_eq!(lifecycle.status, LifecycleStatus::Failed.as_db_str());
                     assert!(lifecycle.error.is_some());
@@ -710,38 +714,30 @@ mod conflict {
                 lifecycle_ids.push(lifecycle_id);
                 queue_ids.push(queue_id);
             }
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                while provider.calls.load(Ordering::SeqCst) == 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                }
-            })
-            .await
-            .expect("first provider call entered");
-            let processing = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                loop {
-                    let count = harness
-                        .observation
-                        .owned_count(
-                            &queue_ids,
-                            Some(vec![bgworker::JobStatus::Processing]),
-                        )
-                        .await;
-                    if count == 3 {
-                        break count;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                }
+            let calls = &provider.calls;
+            wait_until(
+                "first provider call to enter",
+                std::time::Duration::from_secs(10),
+                || async move { (calls.load(Ordering::SeqCst) != 0).then_some(()) },
+            )
+            .await;
+            let observation = &harness.observation;
+            let queue_ids_ref = &queue_ids;
+            let processing = try_wait_until(std::time::Duration::from_secs(5), || async move {
+                let count = observation
+                    .owned_count(queue_ids_ref, Some(vec![bgworker::JobStatus::Processing]))
+                    .await;
+                (count == 3).then_some(count)
             })
             .await;
-            let processing = match processing {
-                Ok(count) => count,
-                Err(error) => panic!(
-                    "expected all 3 owned jobs processing: {error}; jobs={:?}, provider calls={}, active={}, max_active={}",
+            let Some(processing) = processing else {
+                panic!(
+                    "expected all 3 owned jobs processing: timed out; jobs={:?}, provider calls={}, active={}, max_active={}",
                     harness.observation.owned_statuses(&queue_ids).await,
                     provider.calls.load(Ordering::SeqCst),
                     provider.active.load(Ordering::SeqCst),
                     provider.max_active.load(Ordering::SeqCst),
-                ),
+                );
             };
             assert_eq!(processing, 3);
             assert_eq!(provider.active.load(Ordering::SeqCst), 1);
@@ -763,27 +759,27 @@ mod conflict {
             assert_eq!(in_status(LifecycleStatus::Failed), 0);
             assert_eq!(harness.observation.owned_count(&queue_ids, None).await, 3);
             provider.release.add_permits(3);
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                loop {
+            let lifecycle_ids_ref = &lifecycle_ids;
+            let db = &ctx.db;
+            wait_until(
+                "all queued jobs to complete",
+                std::time::Duration::from_secs(10),
+                || async move {
                     let done = Entity::find()
-                        .filter(yorishiro::models::queue_job_lifecycles::Column::Id.is_in(lifecycle_ids.clone()))
-                        .all(&ctx.db)
+                        .filter(yorishiro::models::queue_job_lifecycles::Column::Id.is_in(lifecycle_ids_ref.clone()))
+                        .all(db)
                         .await
                         .unwrap()
                         .into_iter()
                         .filter(|row| {
-                            lifecycle_ids.contains(&row.id)
+                            lifecycle_ids_ref.contains(&row.id)
                                 && row.status == LifecycleStatus::Completed.as_db_str()
                         })
                         .count();
-                    if done == 3 {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                }
-            })
-            .await
-            .expect("all queued jobs complete");
+                    (done == 3).then_some(())
+                },
+            )
+            .await;
             assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
             assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
             assert_eq!(vector_rows(&ctx, first).await, 1);
@@ -806,7 +802,7 @@ mod conflict {
             let (provider, transport, _server) = MixedProvider::start().await;
             ctx.shared_store.insert(transport);
             let mut worker_ctx = ctx.clone();
-            let queue = crate::workers::query_embedding::harness::shared_target_queue(&mut worker_ctx).await;
+            let queue = crate::requests::jobs::shared_target_queue(&mut worker_ctx).await;
             yorishiro::workers::embedding_sync::enqueue_for_class(
                 &ctx,
                 EmbeddingSyncArgs {
@@ -819,23 +815,22 @@ mod conflict {
             .await
             .unwrap();
             let directory = tempfile::tempdir().unwrap();
+            let queue_ref = &queue;
+            let dir = directory.path();
             let outcome = std::panic::AssertUnwindSafe(async {
-                tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                    loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                wait_until(
+                    "production relay to publish the document",
+                    std::time::Duration::from_secs(10),
+                    || async move {
+                        let dump = queue_ref.dump(dir, None, None).await.unwrap();
                         let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                        if jobs
-                            .iter()
+                        jobs.iter()
                             .any(|job| job.data["entity_id"] == entity_id.to_string())
-                        {
-                            break;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
-                })
-                .await
-                .expect("production relay publishes document");
+                            .then_some(())
+                    },
+                )
+                .await;
             })
             .catch_unwind()
             .await;
@@ -848,13 +843,13 @@ mod conflict {
             let worker =
                 tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
             let outcome = std::panic::AssertUnwindSafe(async {
-                tokio::time::timeout(std::time::Duration::from_secs(1), async {
-                    while provider.active.load(Ordering::SeqCst) != 1 {
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
-                })
-                .await
-                .expect("document acquired first");
+                let active = &provider.active;
+                wait_until(
+                    "document to acquire the provider first",
+                    std::time::Duration::from_secs(1),
+                    || async move { (active.load(Ordering::SeqCst) == 1).then_some(()) },
+                )
+                .await;
                 let tenant_id = workspace_workspaces::Entity::find_by_id(workspace_id)
                     .one(&ctx.db)
                     .await
@@ -871,50 +866,58 @@ mod conflict {
                     )
                     .await
                 });
-                let request_id = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                    loop {
-                        assert!(!query.is_finished(), "query caller finished before its delivery was observed processing: {:?}", (&mut query).await);
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<bgworker::Job> =
-                            serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                        if let Some(job) = jobs.iter().find(|job| {
-                            job.data["workspace_id"] == workspace_id.to_string()
-                                && job.data.get("request_id").is_some()
-                                && job.status == JobStatus::Processing
-                        }) {
-                            break serde_json::from_value::<Uuid>(job.data["request_id"].clone())
-                                .unwrap();
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                // The poll closure cannot hold `&mut query`, so it reports a finished caller as `Some(None)`.
+                let query_ref = &query;
+                let request_id = try_wait_until(std::time::Duration::from_secs(10), || async move {
+                    if query_ref.is_finished() {
+                        return Some(None);
                     }
+                    let dump = queue_ref.dump(dir, None, None).await.unwrap();
+                    let jobs: Vec<bgworker::Job> =
+                        serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
+                    let job = jobs.iter().find(|job| {
+                        job.data["workspace_id"] == workspace_id.to_string()
+                            && job.data.get("request_id").is_some()
+                            && job.status == JobStatus::Processing
+                    })?;
+                    Some(Some(
+                        serde_json::from_value::<Uuid>(job.data["request_id"].clone()).unwrap(),
+                    ))
                 })
                 .await;
                 let request_id = match request_id {
-                    Ok(id) => id,
-                    Err(error) => {
+                    Some(Some(id)) => id,
+                    Some(None) => panic!(
+                        "query caller finished before its delivery was observed processing: {:?}",
+                        (&mut query).await
+                    ),
+                    None => {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        panic!("query delivery was not observed processing: {error}; caller_finished={}; queue={}", query.is_finished(), std::fs::read_to_string(dump).unwrap());
+                        panic!("query delivery was not observed processing: timed out; caller_finished={}; queue={}", query.is_finished(), std::fs::read_to_string(dump).unwrap());
                     }
                 };
                 assert_eq!(provider.active.load(Ordering::SeqCst), 1);
                 assert_eq!(provider.order.lock().unwrap().len(), 1);
                 assert!(provider.order.lock().unwrap()[0].contains("original"));
                 provider.release.add_permits(1);
-                tokio::time::timeout(std::time::Duration::from_secs(1), async {
-                    while provider.order.lock().unwrap().len() < 2 {
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
-                })
-                .await
-                .expect("query is admitted after document");
+                let order = &provider.order;
+                wait_until(
+                    "query to be admitted after the document",
+                    std::time::Duration::from_secs(1),
+                    || async move { (order.lock().unwrap().len() >= 2).then_some(()) },
+                )
+                .await;
                 let inputs = provider.order.lock().unwrap().clone();
                 assert_eq!(inputs.len(), 2);
                 assert!(inputs[0].contains("original"));
                 assert_eq!(inputs[1], "alpha");
                 provider.release.add_permits(1);
-                tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                    loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                let db = &ctx.db;
+                wait_until(
+                    "both actual queue deliveries to complete",
+                    std::time::Duration::from_secs(10),
+                    || async move {
+                        let dump = queue_ref.dump(dir, None, None).await.unwrap();
                         let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
                         let document = jobs.iter().find(|job| {
@@ -925,23 +928,20 @@ mod conflict {
                             job.data["request_id"] == request_id.to_string()
                                 && job.status == JobStatus::Completed
                         });
-                        if let Some(document) = document.filter(|_| query) {
-                            let lifecycle_id =
-                                Uuid::parse_str(document.data["lifecycle_id"].as_str().unwrap())
-                                    .unwrap();
-                            let lifecycle = Entity::find_by_id(lifecycle_id)
-                                .one(&ctx.db)
-                                .await
-                                .unwrap()
+                        let document = document.filter(|_| query)?;
+                        let lifecycle_id =
+                            Uuid::parse_str(document.data["lifecycle_id"].as_str().unwrap())
                                 .unwrap();
-                            assert_eq!(lifecycle.status, LifecycleStatus::Completed.as_db_str());
-                            break;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
-                })
-                .await
-                .expect("both actual queue deliveries complete");
+                        let lifecycle = Entity::find_by_id(lifecycle_id)
+                            .one(db)
+                            .await
+                            .unwrap()
+                            .unwrap();
+                        assert_eq!(lifecycle.status, LifecycleStatus::Completed.as_db_str());
+                        Some(())
+                    },
+                )
+                .await;
                 assert_eq!(query.await.unwrap().unwrap().len(), 768);
                 assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
             })
@@ -974,9 +974,7 @@ mod conflict {
                 let (provider, transport, _server) = ErrorThenSuccessProvider::start().await;
                 ctx.shared_store.insert(transport);
                 let mut worker_ctx = ctx.clone();
-                let queue =
-                    crate::workers::query_embedding::harness::shared_target_queue(&mut worker_ctx)
-                        .await;
+                let queue = crate::requests::jobs::shared_target_queue(&mut worker_ctx).await;
                 yorishiro::workers::embedding_sync::enqueue_for_class(
                     &ctx,
                     EmbeddingSyncArgs {
@@ -989,23 +987,20 @@ mod conflict {
                 .await
                 .unwrap();
                 let directory = tempfile::tempdir().unwrap();
-                let published = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                    loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<bgworker::Job> =
-                            serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                        if let Some(job) = jobs.iter().find(|job| {
-                            job.data["entity_id"] == entity_id.to_string()
-                                && job.data["workspace_id"] == workspace_id.to_string()
-                        }) {
-                            break serde_json::from_value::<Uuid>(job.data["lifecycle_id"].clone())
-                                .unwrap();
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
+                let queue_ref = &queue;
+                let dir = directory.path();
+                let published = try_wait_until(std::time::Duration::from_secs(10), || async move {
+                    let dump = queue_ref.dump(dir, None, None).await.unwrap();
+                    let jobs: Vec<bgworker::Job> =
+                        serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
+                    let job = jobs.iter().find(|job| {
+                        job.data["entity_id"] == entity_id.to_string()
+                            && job.data["workspace_id"] == workspace_id.to_string()
+                    })?;
+                    Some(serde_json::from_value::<Uuid>(job.data["lifecycle_id"].clone()).unwrap())
                 })
                 .await;
-                let Ok(failed_id) = published else {
+                let Some(failed_id) = published else {
                     App::on_shutdown(&worker_ctx).await;
                     queue.close().await.unwrap();
                     panic!("production relay did not publish the first delivery");
@@ -1018,13 +1013,13 @@ mod conflict {
                 let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
                     std::time::Duration::from_secs(10),
                     async {
-                        tokio::time::timeout(std::time::Duration::from_secs(1), async {
-                            while provider.active.load(Ordering::SeqCst) != 1 {
-                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                            }
-                        })
-                        .await
-                        .expect("first delivery acquired the embedding permit");
+                        let active = &provider.active;
+                        wait_until(
+                            "first delivery to acquire the embedding permit",
+                            std::time::Duration::from_secs(1),
+                            || async move { (active.load(Ordering::SeqCst) == 1).then_some(()) },
+                        )
+                        .await;
                         yorishiro::workers::embedding_sync::enqueue_for_class(
                             &ctx,
                             EmbeddingSyncArgs {
@@ -1036,78 +1031,97 @@ mod conflict {
                         )
                         .await
                         .unwrap();
-                        let waiting_id = loop {
-                            let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                            let jobs: Vec<bgworker::Job> =
-                                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
-                                    .unwrap();
-                            if let Some(job) = jobs.iter().find(|job| {
-                                job.data["entity_id"] == entity_id.to_string()
-                                    && job.data["workspace_id"] == workspace_id.to_string()
-                                    && job.data["lifecycle_id"] != failed_id.to_string()
-                            }) {
-                                break serde_json::from_value::<Uuid>(
-                                    job.data["lifecycle_id"].clone(),
+                        let waiting_id = wait_until(
+                            "the second delivery to be published",
+                            std::time::Duration::from_secs(10),
+                            || async move {
+                                let dump = queue_ref.dump(dir, None, None).await.unwrap();
+                                let jobs: Vec<bgworker::Job> =
+                                    serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                                        .unwrap();
+                                let job = jobs.iter().find(|job| {
+                                    job.data["entity_id"] == entity_id.to_string()
+                                        && job.data["workspace_id"] == workspace_id.to_string()
+                                        && job.data["lifecycle_id"] != failed_id.to_string()
+                                })?;
+                                Some(
+                                    serde_json::from_value::<Uuid>(
+                                        job.data["lifecycle_id"].clone(),
+                                    )
+                                    .unwrap(),
                                 )
-                                .unwrap();
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                        };
-                        loop {
-                            let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                            let jobs: Vec<bgworker::Job> =
-                                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
-                                    .unwrap();
-                            let processing = jobs
-                                .iter()
-                                .filter(|job| {
-                                    [failed_id.to_string(), waiting_id.to_string()].contains(
-                                        &job.data["lifecycle_id"]
-                                            .as_str()
-                                            .unwrap_or_default()
-                                            .to_owned(),
-                                    ) && job.status == JobStatus::Processing
-                                })
-                                .count();
-                            if processing == 2 && provider.active.load(Ordering::SeqCst) == 1 {
-                                break;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                        }
+                            },
+                        )
+                        .await;
+                        wait_until(
+                            "both deliveries to be processing behind one provider permit",
+                            std::time::Duration::from_secs(10),
+                            || async move {
+                                let dump = queue_ref.dump(dir, None, None).await.unwrap();
+                                let jobs: Vec<bgworker::Job> =
+                                    serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                                        .unwrap();
+                                let processing = jobs
+                                    .iter()
+                                    .filter(|job| {
+                                        [failed_id.to_string(), waiting_id.to_string()].contains(
+                                            &job.data["lifecycle_id"]
+                                                .as_str()
+                                                .unwrap_or_default()
+                                                .to_owned(),
+                                        ) && job.status == JobStatus::Processing
+                                    })
+                                    .count();
+                                (processing == 2 && active.load(Ordering::SeqCst) == 1)
+                                    .then_some(())
+                            },
+                        )
+                        .await;
                         assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
                         provider.release.add_permits(1);
-                        loop {
-                            let row = Entity::find_by_id(failed_id)
-                                .one(&ctx.db)
-                                .await
-                                .unwrap()
-                                .unwrap();
-                            if row.status == LifecycleStatus::Failed.as_db_str() {
-                                assert!(row.error.is_some_and(|error| error.contains("HTTP 503")
-                                    && !error.contains("private scripted provider failure")));
-                                break;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                        }
-                        provider.release.add_permits(1);
-                        loop {
-                            let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                            let jobs: Vec<bgworker::Job> =
-                                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                        let app = &ctx;
+                        wait_until(
+                            "the first delivery's lifecycle to fail",
+                            std::time::Duration::from_secs(10),
+                            || async move {
+                                let row = Entity::find_by_id(failed_id)
+                                    .one(&app.db)
+                                    .await
+                                    .unwrap()
                                     .unwrap();
-                            let failed = jobs.iter().any(|job| {
-                                job.data["lifecycle_id"] == failed_id.to_string()
-                                    && job.status == JobStatus::Failed
-                            });
-                            let completed = jobs.iter().any(|job| {
-                                job.data["lifecycle_id"] == waiting_id.to_string()
-                                    && job.status == JobStatus::Completed
-                            });
-                            if failed && completed {
-                                break;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                        }
+                                if row.status == LifecycleStatus::Failed.as_db_str() {
+                                    assert!(row.error.is_some_and(
+                                        |error| error.contains("HTTP 503")
+                                            && !error.contains("private scripted provider failure")
+                                    ));
+                                    Some(())
+                                } else {
+                                    None
+                                }
+                            },
+                        )
+                        .await;
+                        provider.release.add_permits(1);
+                        wait_until(
+                            "the failed and waiting deliveries to reach their final states",
+                            std::time::Duration::from_secs(10),
+                            || async move {
+                                let dump = queue_ref.dump(dir, None, None).await.unwrap();
+                                let jobs: Vec<bgworker::Job> =
+                                    serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                                        .unwrap();
+                                let failed = jobs.iter().any(|job| {
+                                    job.data["lifecycle_id"] == failed_id.to_string()
+                                        && job.status == JobStatus::Failed
+                                });
+                                let completed = jobs.iter().any(|job| {
+                                    job.data["lifecycle_id"] == waiting_id.to_string()
+                                        && job.status == JobStatus::Completed
+                                });
+                                (failed && completed).then_some(())
+                            },
+                        )
+                        .await;
                         let row = Entity::find_by_id(waiting_id)
                             .one(&ctx.db)
                             .await
@@ -1169,25 +1183,27 @@ mod conflict {
             ids.push(id);
             queue_ids.push(queue_id);
         }
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while provider.active.load(Ordering::SeqCst) != 1 {
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("external provider holds the first delivery");
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while harness
-                .observation
-                .owned_count(&queue_ids, Some(vec![bgworker::JobStatus::Processing]))
-                .await
-                < 2
-            {
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .unwrap();
+        let active = &provider.active;
+        wait_until(
+            "external provider to hold the first delivery",
+            std::time::Duration::from_secs(5),
+            || async move { (active.load(Ordering::SeqCst) == 1).then_some(()) },
+        )
+        .await;
+        let observation = &harness.observation;
+        let queue_ids_ref = &queue_ids;
+        wait_until(
+            "both owned deliveries to be processing",
+            std::time::Duration::from_secs(5),
+            || async move {
+                (observation
+                    .owned_count(queue_ids_ref, Some(vec![bgworker::JobStatus::Processing]))
+                    .await
+                    >= 2)
+                    .then_some(())
+            },
+        )
+        .await;
         let rows = Entity::find()
             .filter(yorishiro::models::queue_job_lifecycles::Column::Id.is_in(ids.clone()))
             .all(&harness.ctx.db)
@@ -1214,21 +1230,21 @@ mod conflict {
         assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
         assert_eq!(harness.observation.owned_count(&queue_ids, None).await, 2);
         provider.release.add_permits(2);
-        let completed = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            loop {
-                let rows = Entity::find()
-                    .filter(yorishiro::models::queue_job_lifecycles::Column::Id.is_in(ids.clone()))
-                    .all(&harness.ctx.db)
-                    .await
-                    .unwrap();
-                if ids.iter().all(|id| {
+        let ids_ref = &ids;
+        let db = &harness.ctx.db;
+        let completed = try_wait_until(std::time::Duration::from_secs(10), || async move {
+            let rows = Entity::find()
+                .filter(yorishiro::models::queue_job_lifecycles::Column::Id.is_in(ids_ref.clone()))
+                .all(db)
+                .await
+                .unwrap();
+            ids_ref
+                .iter()
+                .all(|id| {
                     rows.iter()
                         .any(|r| r.id == *id && r.status == LifecycleStatus::Completed.as_db_str())
-                }) {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
+                })
+                .then_some(())
         })
         .await;
         let final_rows = Entity::find()
@@ -1237,7 +1253,7 @@ mod conflict {
             .await
             .unwrap();
         assert!(
-            completed.is_ok(),
+            completed.is_some(),
             "owned lifecycles did not complete: {final_rows:?}; HTTP calls={}, active={}",
             provider.calls.load(Ordering::SeqCst),
             provider.active.load(Ordering::SeqCst),
@@ -1301,13 +1317,13 @@ mod conflict {
                 let result = std::panic::AssertUnwindSafe(async {
                     let (id_a, _) = harness_a.enqueue(workspace, entity).await;
                     // Deliberately observe arrival before waiting to cover early provider entry.
-                    tokio::time::timeout(std::time::Duration::from_secs(3), async {
-                        while entered.available_permits() == 0 {
-                            tokio::task::yield_now().await;
-                        }
-                    })
-                    .await
-                    .unwrap();
+                    let entered_ref = &entered;
+                    wait_until(
+                        "the provider to be entered",
+                        std::time::Duration::from_secs(3),
+                        || async move { (entered_ref.available_permits() != 0).then_some(()) },
+                    )
+                    .await;
                     tokio::time::timeout(std::time::Duration::from_secs(3), entered.acquire())
                         .await
                         .unwrap()
@@ -1331,30 +1347,32 @@ mod conflict {
                             let cleanup_release_b = release.clone();
                             let result_b = std::panic::AssertUnwindSafe(async {
                                 let (id_b, _) = harness_b.enqueue(workspace_b, entity_b).await;
-                                tokio::time::timeout(std::time::Duration::from_secs(3), async {
-                                    while aggregate.load(Ordering::SeqCst) < 2 {
-                                        tokio::time::sleep(std::time::Duration::from_millis(20))
-                                            .await;
-                                    }
-                                })
-                                .await
-                                .unwrap();
+                                let aggregate_ref = &aggregate;
+                                wait_until(
+                                    "both contexts to hold a provider call",
+                                    std::time::Duration::from_secs(3),
+                                    || async move {
+                                        (aggregate_ref.load(Ordering::SeqCst) >= 2).then_some(())
+                                    },
+                                )
+                                .await;
                                 release.add_permits(2);
-                                tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                                    while Entity::find_by_id(id_b)
-                                        .one(&harness_b.ctx.db)
-                                        .await
-                                        .unwrap()
-                                        .unwrap()
-                                        .status
-                                        != LifecycleStatus::Completed.as_db_str()
-                                    {
-                                        tokio::time::sleep(std::time::Duration::from_millis(20))
-                                            .await;
-                                    }
-                                })
-                                .await
-                                .unwrap();
+                                let db_b = &harness_b.ctx.db;
+                                wait_until(
+                                    "the second context's lifecycle to complete",
+                                    std::time::Duration::from_secs(5),
+                                    || async move {
+                                        (Entity::find_by_id(id_b)
+                                            .one(db_b)
+                                            .await
+                                            .unwrap()
+                                            .unwrap()
+                                            .status
+                                            == LifecycleStatus::Completed.as_db_str())
+                                        .then_some(())
+                                    },
+                                )
+                                .await;
                                 assert_eq!(provider_b.max_active.load(Ordering::SeqCst), 1);
                             })
                             .catch_unwind()
@@ -1367,20 +1385,22 @@ mod conflict {
                         },
                     )
                     .await;
-                    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                        while Entity::find_by_id(id_a)
-                            .one(&harness_a.ctx.db)
-                            .await
-                            .unwrap()
-                            .unwrap()
-                            .status
-                            != LifecycleStatus::Completed.as_db_str()
-                        {
-                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                        }
-                    })
-                    .await
-                    .unwrap();
+                    let db_a = &harness_a.ctx.db;
+                    wait_until(
+                        "the first context's lifecycle to complete",
+                        std::time::Duration::from_secs(5),
+                        || async move {
+                            (Entity::find_by_id(id_a)
+                                .one(db_a)
+                                .await
+                                .unwrap()
+                                .unwrap()
+                                .status
+                                == LifecycleStatus::Completed.as_db_str())
+                            .then_some(())
+                        },
+                    )
+                    .await;
                     assert_eq!(provider_a.max_active.load(Ordering::SeqCst), 1);
                     assert_eq!(aggregate_max.load(Ordering::SeqCst), 2);
                 })
@@ -1427,9 +1447,7 @@ mod conflict {
                     provider
                 });
                 let mut worker_ctx = ctx.clone();
-                let queue =
-                    crate::workers::query_embedding::harness::shared_target_queue(&mut worker_ctx)
-                        .await;
+                let queue = crate::requests::jobs::shared_target_queue(&mut worker_ctx).await;
                 yorishiro::workers::embedding_sync::enqueue_for_class(
                     &ctx,
                     EmbeddingSyncArgs {
@@ -1447,41 +1465,39 @@ mod conflict {
                         async move { running.run(vec![WorkerTarget::Shared.tag()]).await },
                     );
                 let directory = tempfile::tempdir().unwrap();
-                let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    async {
-                        loop {
-                            let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                let queue_ref = &queue;
+                let dir = directory.path();
+                let db = &ctx.db;
+                let outcome = std::panic::AssertUnwindSafe(async {
+                    wait_until(
+                        "configured queue to complete the no-op",
+                        std::time::Duration::from_secs(10),
+                        || async move {
+                            let dump = queue_ref.dump(dir, None, None).await.unwrap();
                             let jobs: Vec<bgworker::Job> =
                                 serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
                                     .unwrap();
-                            if let Some(job) = jobs.iter().find(|job| {
+                            let job = jobs.iter().find(|job| {
                                 job.data["entity_id"] == entity_id.to_string()
                                     && job.status == JobStatus::Completed
-                            }) {
-                                let id =
-                                    Uuid::parse_str(job.data["lifecycle_id"].as_str().unwrap())
-                                        .unwrap();
-                                let lifecycle =
-                                    Entity::find_by_id(id).one(&ctx.db).await.unwrap().unwrap();
-                                assert_eq!(
-                                    lifecycle.status,
-                                    LifecycleStatus::Completed.as_db_str()
-                                );
-                                assert_eq!(
-                                    lifecycle.error.as_deref(),
-                                    Some(if disabled {
-                                        "embedding provider explicitly disabled"
-                                    } else {
-                                        "entity has no x-embed content"
-                                    })
-                                );
-                                break;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                        }
-                    },
-                ))
+                            })?;
+                            let id = Uuid::parse_str(job.data["lifecycle_id"].as_str().unwrap())
+                                .unwrap();
+                            let lifecycle = Entity::find_by_id(id).one(db).await.unwrap().unwrap();
+                            assert_eq!(lifecycle.status, LifecycleStatus::Completed.as_db_str());
+                            assert_eq!(
+                                lifecycle.error.as_deref(),
+                                Some(if disabled {
+                                    "embedding provider explicitly disabled"
+                                } else {
+                                    "entity has no x-embed content"
+                                })
+                            );
+                            Some(())
+                        },
+                    )
+                    .await;
+                })
                 .catch_unwind()
                 .await;
                 App::on_shutdown(&worker_ctx).await;
@@ -1490,7 +1506,7 @@ mod conflict {
                     tokio::time::timeout(std::time::Duration::from_secs(10), worker).await;
                 queue.close().await.unwrap();
                 match outcome {
-                    Ok(result) => result.expect("configured queue completes the no-op"),
+                    Ok(()) => {}
                     Err(panic) => std::panic::resume_unwind(panic),
                 }
                 drained.unwrap().unwrap().unwrap();
@@ -1542,9 +1558,7 @@ mod conflict {
             .expect("create write key")
             .plaintext;
             let mut worker_ctx = ctx.clone();
-            let queue =
-                crate::workers::query_embedding::harness::shared_target_queue(&mut worker_ctx)
-                    .await;
+            let queue = crate::requests::jobs::shared_target_queue(&mut worker_ctx).await;
             yorishiro::workers::embedding_sync::enqueue_for_class(
                 &ctx,
                 EmbeddingSyncArgs {
@@ -1560,6 +1574,9 @@ mod conflict {
             let worker =
                 tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
             let directory = tempfile::tempdir().unwrap();
+            let queue_ref = &queue;
+            let dir = directory.path();
+            let app = &ctx;
             let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
                 std::time::Duration::from_secs(10),
                 async {
@@ -1577,28 +1594,32 @@ mod conflict {
                     .await
                     .unwrap();
                     release.add_permits(1);
-                    let stale_id = loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<bgworker::Job> =
-                            serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                        if let Some(job) = jobs.iter().find(|job| {
-                            job.data["entity_id"] == entity_id.to_string()
-                                && job.status == JobStatus::Completed
-                        }) {
+                    let stale_id = wait_until(
+                        "the stale delivery to be cancelled",
+                        std::time::Duration::from_secs(10),
+                        || async move {
+                            let dump = queue_ref.dump(dir, None, None).await.unwrap();
+                            let jobs: Vec<bgworker::Job> =
+                                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                                    .unwrap();
+                            let job = jobs.iter().find(|job| {
+                                job.data["entity_id"] == entity_id.to_string()
+                                    && job.status == JobStatus::Completed
+                            })?;
                             let id = Uuid::parse_str(job.data["lifecycle_id"].as_str().unwrap())
                                 .unwrap();
                             let lifecycle =
-                                Entity::find_by_id(id).one(&ctx.db).await.unwrap().unwrap();
+                                Entity::find_by_id(id).one(&app.db).await.unwrap().unwrap();
                             assert_eq!(lifecycle.status, LifecycleStatus::Cancelled.as_db_str());
                             assert_eq!(
-                                vector_rows(&ctx, entity_id).await,
+                                vector_rows(app, entity_id).await,
                                 0,
                                 "the stale vector must not be stored"
                             );
-                            break id;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                    };
+                            Some(id)
+                        },
+                    )
+                    .await;
                     let fresh_update = request
                         .put(&format!("/api/entities/{entity_id}"))
                         .add_header("Authorization", format!("Bearer {write_key}"))
@@ -1612,25 +1633,29 @@ mod conflict {
                     );
                     entered.notified().await;
                     release.add_permits(1);
-                    loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<bgworker::Job> =
-                            serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                        if let Some(job) = jobs.iter().find(|job| {
-                            job.data["entity_id"] == entity_id.to_string()
-                                && job.data["lifecycle_id"] != stale_id.to_string()
-                                && job.status == JobStatus::Completed
-                        }) {
+                    wait_until(
+                        "the REST update's delivery to complete",
+                        std::time::Duration::from_secs(10),
+                        || async move {
+                            let dump = queue_ref.dump(dir, None, None).await.unwrap();
+                            let jobs: Vec<bgworker::Job> =
+                                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                                    .unwrap();
+                            let job = jobs.iter().find(|job| {
+                                job.data["entity_id"] == entity_id.to_string()
+                                    && job.data["lifecycle_id"] != stale_id.to_string()
+                                    && job.status == JobStatus::Completed
+                            })?;
                             let id = Uuid::parse_str(job.data["lifecycle_id"].as_str().unwrap())
                                 .unwrap();
                             let lifecycle =
-                                Entity::find_by_id(id).one(&ctx.db).await.unwrap().unwrap();
+                                Entity::find_by_id(id).one(&app.db).await.unwrap().unwrap();
                             assert_eq!(lifecycle.status, LifecycleStatus::Completed.as_db_str());
-                            assert_eq!(vector_rows(&ctx, entity_id).await, 1);
-                            break;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                    }
+                            assert_eq!(vector_rows(app, entity_id).await, 1);
+                            Some(())
+                        },
+                    )
+                    .await;
                 },
             ))
             .catch_unwind()
@@ -1655,7 +1680,7 @@ mod conflict {
         use loco_rs::{app::Hooks, bgworker::JobStatus};
         boot_request::<App, _, _>(|_request, ctx| async move {
             let mut worker_ctx = ctx.clone();
-            let queue = crate::workers::query_embedding::harness::shared_target_queue(&mut worker_ctx).await;
+            let queue = crate::requests::jobs::shared_target_queue(&mut worker_ctx).await;
             let mut owned = Vec::new();
             let mut payloads = Vec::new();
             // Inject invalid persisted deliveries at the queue boundary, bypassing typed enqueue validation.
@@ -1678,16 +1703,22 @@ mod conflict {
                 running.run(vec![WorkerTarget::Shared.tag()]).await
             });
             let observation = BackendObservation(queue.clone());
-            let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
-                std::time::Duration::from_secs(10), async {
-                    loop {
-                        if observation.owned_count(&owned, Some(vec![JobStatus::Failed])).await == 3 {
-                            break;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                    }
-                },
-            )).catch_unwind().await;
+            let observation_ref = &observation;
+            let owned_ref = &owned;
+            let outcome = std::panic::AssertUnwindSafe(async {
+                wait_until(
+                    "malformed deliveries to fail in the configured provider",
+                    std::time::Duration::from_secs(10),
+                    || async move {
+                        (observation_ref
+                            .owned_count(owned_ref, Some(vec![JobStatus::Failed]))
+                            .await
+                            == 3)
+                            .then_some(())
+                    },
+                )
+                .await;
+            }).catch_unwind().await;
             App::on_shutdown(&worker_ctx).await;
             queue.shutdown().unwrap();
             let drained = tokio::time::timeout(std::time::Duration::from_secs(10), worker).await;
@@ -1698,7 +1729,7 @@ mod conflict {
                 serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
             queue.close().await.unwrap();
             match outcome {
-                Ok(result) => result.expect("malformed deliveries fail in the configured provider"),
+                Ok(()) => {}
                 Err(panic) => std::panic::resume_unwind(panic),
             }
             drained.unwrap().unwrap().unwrap();
@@ -1722,9 +1753,7 @@ mod conflict {
             ctx.shared_store.insert(provider);
 
             let mut worker_ctx = ctx.clone();
-            let queue =
-                crate::workers::query_embedding::harness::shared_target_queue(&mut worker_ctx)
-                    .await;
+            let queue = crate::requests::jobs::shared_target_queue(&mut worker_ctx).await;
             yorishiro::workers::embedding_sync::enqueue_for_class(
                 &ctx,
                 EmbeddingSyncArgs {
@@ -1740,35 +1769,38 @@ mod conflict {
             let worker =
                 tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
             let directory = tempfile::tempdir().unwrap();
+            let queue_ref = &queue;
+            let dir = directory.path();
+            let app = &ctx;
             let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
                 std::time::Duration::from_secs(10),
                 async {
                     tokio::join!(
-                        async {
-                            loop {
-                                let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                        wait_until(
+                            "the deleted entity's delivery to complete",
+                            std::time::Duration::from_secs(10),
+                            || async move {
+                                let dump = queue_ref.dump(dir, None, None).await.unwrap();
                                 let jobs: Vec<bgworker::Job> =
                                     serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
                                         .unwrap();
-                                if let Some(job) = jobs.iter().find(|job| {
+                                let job = jobs.iter().find(|job| {
                                     job.data["entity_id"] == entity_id.to_string()
                                         && job.status == JobStatus::Completed
-                                }) {
-                                    let id =
-                                        Uuid::parse_str(job.data["lifecycle_id"].as_str().unwrap())
-                                            .unwrap();
-                                    let lifecycle =
-                                        Entity::find_by_id(id).one(&ctx.db).await.unwrap().unwrap();
-                                    assert_eq!(
-                                        lifecycle.status,
-                                        LifecycleStatus::Completed.as_db_str()
-                                    );
-                                    assert_eq!(vector_rows(&ctx, entity_id).await, 0);
-                                    break;
-                                }
-                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                            }
-                        },
+                                })?;
+                                let id =
+                                    Uuid::parse_str(job.data["lifecycle_id"].as_str().unwrap())
+                                        .unwrap();
+                                let lifecycle =
+                                    Entity::find_by_id(id).one(&app.db).await.unwrap().unwrap();
+                                assert_eq!(
+                                    lifecycle.status,
+                                    LifecycleStatus::Completed.as_db_str()
+                                );
+                                assert_eq!(vector_rows(app, entity_id).await, 0);
+                                Some(())
+                            },
+                        ),
                         async {
                             entered.notified().await;
                             entity_entities::delete(&ctx.db, workspace_id, entity_id)
@@ -1819,9 +1851,7 @@ mod conflict {
             ctx.shared_store.insert(original_provider.clone());
 
             let mut worker_ctx = ctx.clone();
-            let queue =
-                crate::workers::query_embedding::harness::shared_target_queue(&mut worker_ctx)
-                    .await;
+            let queue = crate::requests::jobs::shared_target_queue(&mut worker_ctx).await;
             assert!(
                 !crate::has_active_job(&ctx.db, "startup_reindex", workspace_id)
                     .await
@@ -1844,29 +1874,33 @@ mod conflict {
             let worker =
                 tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
             let directory = tempfile::tempdir().unwrap();
-            let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                async {
-                    loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
+            let queue_ref = &queue;
+            let dir = directory.path();
+            let db = &ctx.db;
+            let outcome = std::panic::AssertUnwindSafe(async {
+                let lifecycle = wait_until(
+                    "configured queue to record the dimension failure",
+                    std::time::Duration::from_secs(10),
+                    || async move {
+                        let dump = queue_ref.dump(dir, None, None).await.unwrap();
                         let jobs: Vec<bgworker::Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                        if let Some(job) = jobs.iter().find(|job| {
+                        let job = jobs.iter().find(|job| {
                             job.data["entity_id"] == entity_id.to_string()
                                 && job.status == JobStatus::Failed
-                        }) {
-                            let id = Uuid::parse_str(job.data["lifecycle_id"].as_str().unwrap())
-                                .unwrap();
-                            let lifecycle =
-                                Entity::find_by_id(id).one(&ctx.db).await.unwrap().unwrap();
-                            assert_eq!(lifecycle.status, LifecycleStatus::Failed.as_db_str());
-                            assert!(lifecycle.error.is_some());
-                            break;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
-                },
-            ))
+                        })?;
+                        let id =
+                            Uuid::parse_str(job.data["lifecycle_id"].as_str().unwrap()).unwrap();
+                        let lifecycle = Entity::find_by_id(id).one(db).await.unwrap().unwrap();
+                        (lifecycle.status == LifecycleStatus::Failed.as_db_str()
+                            && lifecycle.error.is_some())
+                        .then_some(lifecycle)
+                    },
+                )
+                .await;
+                assert_eq!(lifecycle.status, LifecycleStatus::Failed.as_db_str());
+                assert!(lifecycle.error.is_some());
+            })
             .catch_unwind()
             .await;
             App::on_shutdown(&worker_ctx).await;
@@ -1874,7 +1908,7 @@ mod conflict {
             let drained = tokio::time::timeout(std::time::Duration::from_secs(10), worker).await;
             queue.close().await.unwrap();
             match outcome {
-                Ok(result) => result.expect("configured queue records dimension failure"),
+                Ok(()) => {}
                 Err(panic) => std::panic::resume_unwind(panic),
             }
             drained.unwrap().unwrap().unwrap();

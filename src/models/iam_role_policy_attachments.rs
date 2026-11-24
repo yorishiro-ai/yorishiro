@@ -94,20 +94,7 @@ impl Model {
                 message: "system-managed roles cannot be changed".into(),
             });
         }
-        Self::add(&txn, actor.tenant_id, role_id, policy_id)
-            .await
-            .map_err(|error| match error {
-                YorishiroError::Internal(ref source)
-                    if source.downcast_ref::<DbErr>().is_some_and(|e| {
-                        matches!(e.sql_err(), Some(SqlErr::UniqueConstraintViolation(_)))
-                    }) =>
-                {
-                    YorishiroError::Conflict {
-                        message: "role association already exists".into(),
-                    }
-                }
-                other => other,
-            })?;
+        Self::add(&txn, actor.tenant_id, role_id, policy_id).await?;
         crate::models::iam_audit_events::record(
             &txn,
             actor,
@@ -199,7 +186,9 @@ impl Model {
         }
         .insert(txn)
         .await
-        .internal()
+        .map_err(|error| {
+            YorishiroError::conflict_on_unique(error, "role association already exists")
+        })
     }
 
     pub(crate) async fn remove(

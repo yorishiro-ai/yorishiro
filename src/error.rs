@@ -538,6 +538,22 @@ pub struct ValidationDetail {
     pub actual: Option<String>,
 }
 
+impl YorishiroError {
+    /// A unique-constraint violation becomes a conflict with `message`; any other database error is internal.
+    pub(crate) fn conflict_on_unique(error: sea_orm::DbErr, message: impl Into<String>) -> Self {
+        if matches!(
+            error.sql_err(),
+            Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+        ) {
+            Self::Conflict {
+                message: message.into(),
+            }
+        } else {
+            Self::Internal(error.into())
+        }
+    }
+}
+
 pub trait ResultExt<T> {
     ///
     /// # Errors

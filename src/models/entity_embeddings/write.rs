@@ -13,6 +13,7 @@ use crate::models::schema_schemas::metaschema::EntityTypeDef;
 use crate::services::embedding::{EmbedKind, EmbeddingProvider};
 
 use super::persistence::{VectorWriteInput, embed_and_write};
+use crate::error::ResultExt;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EmbeddingWriteOutcome {
@@ -54,9 +55,7 @@ async fn sync_embedding(
     let revision =
         crate::models::workspace_workspaces::embedding_revision(conn, workspace_id).await?;
     let vector = provider.embed_as(EmbedKind::Document, &text).await?;
-    let txn = crate::db::begin_write(conn)
-        .await
-        .map_err(|error| YorishiroError::Internal(error.into()))?;
+    let txn = crate::db::begin_write(conn).await.internal()?;
     crate::models::workspace_workspaces::fence_embedding(&txn, workspace_id, revision).await?;
     crate::models::workspace_workspaces::check_embedding_assignment(&txn, workspace_id, provider)
         .await?;
@@ -72,7 +71,7 @@ async fn sync_embedding(
         .into_tuple::<(Option<String>, String)>()
         .one(&txn)
         .await
-        .map_err(|error| YorishiroError::Internal(error.into()))?;
+        .internal()?;
     if stamp.is_some_and(|(model, prefix)| model.is_some() && prefix != provider.document_prefix())
     {
         return Err(YorishiroError::Conflict {
@@ -133,9 +132,7 @@ async fn sync_embedding(
         .await?;
     }
 
-    txn.commit()
-        .await
-        .map_err(|error| YorishiroError::Internal(error.into()))?;
+    txn.commit().await.internal()?;
     Ok(if written {
         EmbeddingWriteOutcome::Persisted
     } else {

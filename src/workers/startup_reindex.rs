@@ -113,7 +113,7 @@ pub async fn run_metadata_scan(ctx: &AppContext) -> loco_rs::Result<()> {
     let settings = crate::data::settings::configured(ctx)?;
     let workspaces = crate::models::workspace_workspaces::stamped_for_reindex(&ctx.db)
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(loco_rs::Error::wrap)?;
     let mut failures = Vec::new();
     for workspace in workspaces {
         let metadata = match crate::models::workspace_workspaces::effective_embedding_metadata(

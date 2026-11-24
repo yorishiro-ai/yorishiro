@@ -153,6 +153,7 @@ async fn accepted_enqueue_with_failed_provider_id_record_keeps_the_outbox_row() 
         return;
     }
     with_sqlite_queue(|ctx, pool, workspace_id| async move {
+        // Direct write (c): deterministic fault injection failing the provider ID write after the provider accepted the job.
         ctx.db
             .execute_unprepared(
                 "CREATE TRIGGER fail_provider_job_id BEFORE UPDATE OF provider_job_id ON queue_job_lifecycles \
@@ -267,17 +268,17 @@ async fn each_worker_class_is_sent_to_its_own_target() {
             vec![
                 (
                     "EmbeddingSyncWorker".to_string(),
-                    vec!["worker-target:official".to_string()],
+                    vec![yorishiro::workers::target::WorkerTarget::Official.tag()],
                     200,
                 ),
                 (
                     "EmbeddingSyncWorker".to_string(),
-                    vec!["worker-target:shared".to_string()],
+                    vec![yorishiro::workers::target::WorkerTarget::Shared.tag()],
                     100,
                 ),
                 (
                     "EmbeddingSyncWorker".to_string(),
-                    vec![format!("worker-target:tenant:{tenant_id}")],
+                    vec![yorishiro::workers::target::WorkerTarget::Tenant(tenant_id).tag()],
                     300,
                 ),
             ]
@@ -345,17 +346,17 @@ async fn each_reindex_worker_class_is_sent_to_its_own_target() {
             vec![
                 (
                     "ReindexWorker".to_string(),
-                    vec!["worker-target:official".to_string()],
+                    vec![yorishiro::workers::target::WorkerTarget::Official.tag()],
                     200,
                 ),
                 (
                     "ReindexWorker".to_string(),
-                    vec!["worker-target:shared".to_string()],
+                    vec![yorishiro::workers::target::WorkerTarget::Shared.tag()],
                     100,
                 ),
                 (
                     "ReindexWorker".to_string(),
-                    vec![format!("worker-target:tenant:{tenant_id}")],
+                    vec![yorishiro::workers::target::WorkerTarget::Tenant(tenant_id).tag()],
                     300,
                 ),
             ]
@@ -415,9 +416,7 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
             ctx.shared_store.insert(provider);
             let mut worker_ctx = ctx.clone();
             // Ordering is observable with one consumer, as with a single-worker deployment.
-            let queue =
-                crate::workers::query_embedding::harness::shared_target_queue(&mut worker_ctx)
-                    .await;
+            let queue = crate::requests::jobs::shared_target_queue(&mut worker_ctx).await;
             let mut ids = Vec::new();
             // Fault-inject competing provider deliveries with explicit priorities; request creation and execution use production models and workers.
             for (text, priority) in [("low", 100), ("high", 300)] {
@@ -455,18 +454,24 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
                     assert_eq!(arrivals.recv().await.as_deref(), Some("high"));
                     assert_eq!(arrivals.recv().await.as_deref(), Some("low"));
                     let directory = tempfile::tempdir().unwrap();
-                    loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
-                            serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                        if ids.iter().all(|id| {
-                            jobs.iter()
-                                .any(|job| job.id == *id && job.status == JobStatus::Completed)
-                        }) {
-                            break;
-                        }
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
+                    crate::requests::jobs::wait_until(
+                        "priority deliveries to complete",
+                        Duration::from_secs(5),
+                        || async {
+                            let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                            let jobs: Vec<loco_rs::bgworker::Job> =
+                                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                                    .unwrap();
+                            ids.iter()
+                                .all(|id| {
+                                    jobs.iter().any(|job| {
+                                        job.id == *id && job.status == JobStatus::Completed
+                                    })
+                                })
+                                .then_some(())
+                        },
+                    )
+                    .await;
                 }))
                 .catch_unwind()
                 .await;

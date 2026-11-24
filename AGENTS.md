@@ -19,7 +19,6 @@ CE therefore follows Loco's generator layout exactly; a directory Loco does not 
 | `src/workers/` | Background jobs, and the runtime (targets, dispatch, queue policy) that routes them; `workers/mod.rs` separates the two | Jobs |
 | `src/initializers/` | Process-lifetime wiring | Service providers |
 | `src/data/` | Typed settings and static data | Config |
-| `src/fixtures/` | Seed data | Seeders |
 | `src/services/` | **External clients only** (embedding providers). Loco has no equivalent, and nothing else may live here | Services |
 | `src/app.rs` | The community wiring, one function per `Hooks` method, plus the edition-neutral inputs an overlay extends it with (`RouteMounts`, `WorkerRegistry`, `McpToolSet`) | Application bootstrap |
 | `src/lib.rs` | Crate-root assembly and the only `Hooks` implementation, delegating to base and overlay wiring | Service container |

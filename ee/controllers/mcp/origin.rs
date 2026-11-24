@@ -49,7 +49,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts, "list_upstream_changes");
-        let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
+        let page = crate::models::pagination::ListParams::from(&args);
         let changes = try_tool!(
             crate::edition::ee::models::schema_schemas::list_for_actor(
                 self.app_context(),
@@ -101,3 +101,5 @@ impl YorishiroMcpServer {
         )
     }
 }
+
+crate::dtos::common::list_params_from!(ListUpstreamChangesArgs);

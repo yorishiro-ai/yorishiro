@@ -1,0 +1,612 @@
+use crate::http_stub::{keyword_provider, unavailable_provider};
+use crate::requests::boot_request;
+use crate::requests::boot_request_with;
+use crate::requests::fixtures::{TenantArgs, TestTenant};
+use crate::workers::query_embedding::harness::{
+    boot_with_query_worker, boot_with_query_worker_and_drain,
+};
+use axum::http::StatusCode;
+use std::sync::Arc;
+use std::time::Duration;
+use yorishiro::App;
+use yorishiro::models::api_keys::ApiKeyScope;
+use yorishiro::models::query_embedding_requests;
+use yorishiro::models::{entity_embeddings, entity_entities, schema_schemas};
+use yorishiro::services::embedding::EmbeddingProvider;
+
+/// Creates the `note` schema and one embedded entity per title, embedding each with `provider` directly.
+/// Document embedding through the queue is covered by the embedding worker's own tests, so these tests fix the document side and exercise only the query side.
+async fn embedded_notes(
+    ctx: &loco_rs::app::AppContext,
+    setup: &TestTenant,
+    provider: &dyn EmbeddingProvider,
+    titles: &[&str],
+) {
+    let definition = serde_json::from_value(serde_json::json!({
+        "name": "note",
+        "entity_types": { "note": { "fields": {
+            "title": { "type": "string", "required": true, "x-embed": true }
+        } } }
+    }))
+    .expect("parse definition");
+    schema_schemas::create_schema(
+        &ctx.db,
+        setup.tenant_id,
+        setup.workspace_id,
+        definition,
+        None,
+        None,
+    )
+    .await
+    .expect("create schema");
+    for title in titles {
+        let record = entity_entities::create(
+            &ctx.db,
+            setup.workspace_id,
+            entity_entities::CreateEntityInput {
+                schema_name: "note".into(),
+                entity_type: "note".into(),
+                data: serde_json::json!({ "title": title }),
+            },
+            None,
+        )
+        .await
+        .expect("create entity");
+        entity_embeddings::sync_embedding_for_record(
+            &ctx.db,
+            setup.workspace_id,
+            &record,
+            provider,
+        )
+        .await
+        .expect("embed entity");
+    }
+}
+
+async fn rows_left(ctx: &loco_rs::app::AppContext, workspace_id: uuid::Uuid) -> u64 {
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+    query_embedding_requests::Entity::find()
+        .filter(query_embedding_requests::Column::WorkspaceId.eq(workspace_id))
+        .count(&ctx.db)
+        .await
+        .expect("count requests")
+}
+
+fn titles(hits: &serde_json::Value) -> Vec<String> {
+    hits.as_array()
+        .expect("search hits")
+        .iter()
+        .map(|hit| hit["entity"]["data"]["title"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn unselected_search_combines_workspaces_and_explicit_selection_narrows_results() {
+    let (provider, _server, _) = keyword_provider(768).await;
+    boot_with_query_worker(provider.clone(), |request, ctx| async move {
+        let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let administrator =
+            crate::requests::fixtures::create_iam_administrator(&ctx, first.tenant_id).await;
+        let key =
+            crate::requests::fixtures::issue_tenant_key(&ctx, first.tenant_id, administrator).await;
+        let response = request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"name":"second-search"}))
+            .await;
+        response.assert_status(StatusCode::CREATED);
+        let second = TestTenant {
+            tenant_id: first.tenant_id,
+            owner_id: first.owner_id,
+            api_key: key.clone(),
+            workspace_id: response.json::<serde_json::Value>()["id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap(),
+        };
+        embedded_notes(&ctx, &first, provider.as_ref(), &["alpha first"]).await;
+        embedded_notes(&ctx, &second, provider.as_ref(), &["alpha second"]).await;
+        let response = request
+            .get("/api/search?query_text=alpha&limit=2")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .await;
+        response.assert_status_ok();
+        let mut actual = titles(&response.json());
+        actual.sort();
+        assert_eq!(actual, ["alpha first", "alpha second"]);
+        let response = request
+            .get("/api/search?query_text=alpha&limit=2")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("x-workspace-id", second.workspace_id.to_string())
+            .await;
+        response.assert_status_ok();
+        assert_eq!(titles(&response.json()), ["alpha second"]);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn unavailable_workspace_does_not_spend_the_search_budget_of_another() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+
+    let overrides = [("settings.rate_limit.search_tokens_per_minute", 1.into())];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
+        let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let root =
+            crate::requests::fixtures::issue_tenant_key(&ctx, first.tenant_id, first.owner_id)
+                .await;
+        let response = request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .json(&serde_json::json!({"name":"unavailable-search"}))
+            .await;
+        response.assert_status(StatusCode::CREATED);
+        let unavailable: uuid::Uuid =
+            serde_json::from_value(response.json::<serde_json::Value>()["id"].clone()).unwrap();
+        // Direct write (c): holds the workspace in the reindexing state, which a real reindex leaves as soon as it finishes.
+        yorishiro::models::workspace_workspaces::ActiveModel {
+            id: Set(unavailable),
+            embedding_reindexing: Set(true),
+            ..Default::default()
+        }
+        .update(&ctx.db)
+        .await
+        .unwrap();
+        let response = request
+            .get("/api/search?query_text=abc")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .await;
+        response.assert_status(StatusCode::SERVICE_UNAVAILABLE);
+        assert!(response.text().contains("reindexed"));
+        let response = request
+            .get("/api/search?query_text=abc")
+            .add_header("Authorization", format!("Bearer {root}"))
+            .add_header("x-workspace-id", first.workspace_id.to_string())
+            .await;
+        assert_ne!(response.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+    })
+    .await;
+}
+
+/// Opt-in live-provider smoke test using only configured credentials and synthetic documents.
+#[tokio::test]
+#[ignore = "requires an explicitly configured live OpenAI-compatible embedding endpoint"]
+async fn configured_live_provider_embeds_stores_and_searches() {
+    use loco_rs::{app::Hooks, environment::Environment};
+    use serde::Deserialize;
+    use yorishiro::services::embedding::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
+
+    #[derive(Deserialize)]
+    struct LiveSettings {
+        embedding: LiveEmbedding,
+    }
+    #[derive(Deserialize)]
+    struct LiveEmbedding {
+        provider: String,
+        dimensions: usize,
+        base_url: String,
+        api_key: String,
+        model: String,
+        send_dimensions_param: bool,
+        #[serde(default)]
+        query_instruction: String,
+        #[serde(default)]
+        document_prefix: String,
+    }
+
+    let config = App::load_config(&Environment::Test).await.unwrap();
+    let settings = config.settings::<LiveSettings>().unwrap().embedding;
+    assert_eq!(
+        settings.provider, "openai",
+        "explicit live provider required"
+    );
+    assert!(
+        !settings.api_key.is_empty(),
+        "configured credential required"
+    );
+    let dimensions = settings.dimensions;
+    let provider: Arc<dyn EmbeddingProvider> =
+        Arc::new(OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+            base_url: settings.base_url,
+            api_key: settings.api_key,
+            model: settings.model,
+            dimensions,
+            send_dimensions_param: settings.send_dimensions_param,
+            query_instruction: settings.query_instruction,
+            document_prefix: settings.document_prefix,
+        }));
+    let vectors = provider
+        .embed_batch(&[
+            "A cat sleeps on a warm sofa.",
+            "PostgreSQL database backup and recovery.",
+        ])
+        .await
+        .unwrap();
+    assert_eq!(vectors.len(), 2);
+    for vector in &vectors {
+        assert_eq!(vector.len(), dimensions);
+        assert!(vector.iter().all(|value| value.is_finite()));
+        assert!(vector.iter().any(|value| *value != 0.0));
+    }
+    boot_with_query_worker(provider.clone(), |request, ctx| async move {
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let documents = [
+            "A cat sleeps on a warm sofa.",
+            "PostgreSQL database backup and recovery.",
+            "Fresh bread is baked in the kitchen.",
+        ];
+        embedded_notes(&ctx, &setup, provider.as_ref(), &documents).await;
+        #[cfg(feature = "enterprise")]
+        let session = crate::ee::controllers::mcp::initialize(&request).await;
+        for (query, expected) in [
+            ("A cat sleeps on a warm sofa.", documents[0]),
+            ("How do I back up and restore a PostgreSQL database?", documents[1]),
+        ] {
+            let response = request.get("/api/search")
+                .add_query_param("query_text", query)
+                .add_query_param("limit", "3")
+                .add_header("Authorization", format!("Bearer {}", setup.api_key)).await;
+            response.assert_status(StatusCode::OK);
+            let hits = response.json::<serde_json::Value>();
+            assert_eq!(titles(&hits).len(), 3);
+            assert_eq!(titles(&hits)[0], expected, "live semantic ranking");
+            assert!(hits.as_array().unwrap().iter().all(|hit| hit["distance"].as_f64().unwrap().is_finite()));
+            #[cfg(feature = "enterprise")]
+            {
+                let response = crate::ee::controllers::mcp::mcp_call(&request, &session, &setup.api_key,
+                    20, "tools/call", serde_json::json!({
+                        "name":"search_entities", "arguments":{"query_text":query,"limit":3}
+                    })).await;
+                assert_eq!(response["result"]["isError"], false, "live MCP search failed");
+                let mcp_hits = crate::ee::controllers::mcp::tool_result_json(&response);
+                assert_eq!(titles(&mcp_hits)[0], expected, "live MCP semantic ranking");
+                let ids = |value: &serde_json::Value| value.as_array().unwrap().iter()
+                    .map(|hit| hit["entity"]["id"].clone()).collect::<Vec<_>>();
+                assert_eq!(ids(&mcp_hits), ids(&hits), "live transport result IDs");
+                assert!(mcp_hits.as_array().unwrap().iter().all(|hit| hit["distance"].as_f64().unwrap().is_finite()));
+            }
+        }
+        assert_eq!(rows_left(&ctx, setup.workspace_id).await, 0);
+        println!("Live embedding smoke passed: dimensions={dimensions}, stored_documents=3, REST queries=2, MCP enabled={}", cfg!(feature = "enterprise"));
+    }).await;
+}
+
+/// The whole semantic path with the model only in the worker: the server enqueues the query, a worker embeds it as `Query`, and the vector ranks the entities.
+/// Two searches run at once, and each must get the vector for its own text.
+#[tokio::test]
+async fn search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result() {
+    let (provider, _server, inputs) = keyword_provider(768).await;
+    boot_with_query_worker(provider.clone(), |request, ctx| async move {
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Read,
+                ..Default::default()
+            },
+        )
+        .await;
+        embedded_notes(
+            &ctx,
+            &setup,
+            provider.as_ref(),
+            &["alpha plan", "beta plan", "gamma plan"],
+        )
+        .await;
+        let documents = inputs.lock().unwrap().len();
+        assert_eq!(documents, 3, "setup embedded three documents");
+
+        let search = |query: &'static str| {
+            let request = &request;
+            let key = setup.api_key.clone();
+            async move {
+                request
+                    .get(&format!("/api/search?query_text={query}&limit=3"))
+                    .add_header("Authorization", format!("Bearer {key}"))
+                    .await
+            }
+        };
+        let (beta, alpha) = tokio::join!(search("beta"), search("alpha"));
+        for (response, expected) in [(beta, "beta plan"), (alpha, "alpha plan")] {
+            assert_eq!(
+                response.status_code(),
+                StatusCode::OK,
+                "{}",
+                response.text()
+            );
+            let hits: serde_json::Value = response.json();
+            assert_eq!(titles(&hits)[0], expected, "nearest entity first: {hits}");
+            assert!(
+                hits[0]["distance"].as_f64().unwrap() < 1.0e-6,
+                "a shared keyword is at distance zero: {hits}"
+            );
+        }
+        let mut queries = inputs.lock().unwrap()[documents..].to_vec();
+        queries.sort();
+        assert_eq!(
+            queries,
+            ["alpha", "beta"],
+            "each query reaches the HTTP provider once"
+        );
+        assert_eq!(
+            rows_left(&ctx, setup.workspace_id).await,
+            0,
+            "consumed results are deleted"
+        );
+    })
+    .await;
+}
+
+/// With no worker running the search must fail, loudly and boundedly: a lexical fallback would return results the caller did not ask for.
+#[tokio::test]
+async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fallback() {
+    let overrides = [
+        ("settings.query_embedding.timeout_ms", 300.into()),
+        ("settings.query_embedding.poll_interval_ms", 50.into()),
+    ];
+    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Read,
+                ..Default::default()
+            },
+        )
+        .await;
+        // An entity whose text matches the query literally, so a lexical fallback would find it.
+        let (provider, _server, _) = keyword_provider(768).await;
+        embedded_notes(&ctx, &setup, provider.as_ref(), &["alpha plan"]).await;
+
+        let started = std::time::Instant::now();
+        let response = request
+            .get("/api/search?query_text=alpha")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        let waited = started.elapsed();
+
+        assert_eq!(
+            response.status_code(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{}",
+            response.text()
+        );
+        let body: serde_json::Value = response.json();
+        assert_eq!(body["error"]["code"], "provider_busy", "{body}");
+        assert!(body["error"]["retry_after_seconds"].as_u64().is_some());
+        assert!(
+            waited >= Duration::from_millis(300) && waited < Duration::from_secs(10),
+            "the wait is bounded by the configured timeout: {waited:?}"
+        );
+        assert_eq!(
+            rows_left(&ctx, setup.workspace_id).await,
+            0,
+            "the expired request is consumed"
+        );
+    })
+    .await;
+}
+
+/// A worker that answers after its request expired must not resurrect it or fail.
+/// Expire through the production model after the real worker reaches the HTTP provider.
+#[tokio::test]
+async fn a_result_for_an_expired_request_is_discarded() {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::models::query_embedding_requests::Entity as Requests;
+    use yorishiro::services::embedding::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
+
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let (started, gate) = (entered.clone(), release.clone());
+    let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
+        "/embeddings",
+        axum::routing::post(move || {
+            let (started, gate) = (started.clone(), gate.clone());
+            async move {
+                started.notify_one();
+                gate.acquire().await.unwrap().forget();
+                let mut vector = vec![0.0_f32; 768];
+                vector[0] = 1.0;
+                axum::Json(serde_json::json!({"data": [{"index": 0, "embedding": vector}]}))
+            }
+        }),
+    ))
+    .await;
+    let provider = OpenAiCompatibleProvider::new(OpenAiCompatibleConfig {
+        base_url: server.url.clone(),
+        api_key: "test-key".into(),
+        model: "late-query-test".into(),
+        dimensions: 768,
+        send_dimensions_param: false,
+        query_instruction: String::new(),
+        document_prefix: String::new(),
+    });
+    let (workspace_tx, workspace_rx) = tokio::sync::oneshot::channel();
+    boot_with_query_worker_and_drain(
+        Arc::new(provider),
+        |request, ctx| async move {
+            let setup = TestTenant::create(
+                &request,
+                &ctx,
+                TenantArgs {
+                    key_scope: ApiKeyScope::Read,
+                    ..Default::default()
+                },
+            )
+            .await;
+            let search = async {
+                request
+                    .get("/api/search?query_text=alpha")
+                    .add_header("Authorization", format!("Bearer {}", setup.api_key))
+                    .await
+            };
+            let expire = async {
+                tokio::time::timeout(Duration::from_secs(10), entered.notified())
+                    .await
+                    .expect("the real worker reaches the provider before expiry");
+                // Observe the HTTP-created request only to synchronize the expiry fault.
+                let pending = Requests::find()
+                    .filter(query_embedding_requests::Column::WorkspaceId.eq(setup.workspace_id))
+                    .one(&ctx.db)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    Requests::expire(&ctx.db, setup.workspace_id, pending.id)
+                        .await
+                        .unwrap()
+                );
+            };
+            let (response, ()) = tokio::join!(search, expire);
+            assert_eq!(response.status_code(), StatusCode::SERVICE_UNAVAILABLE);
+            release.add_permits(1);
+            workspace_tx.send(setup.workspace_id).unwrap();
+        },
+        |ctx| async move {
+            // Query deliveries intentionally have no lifecycle; inspect only after Loco drains the worker.
+            let workspace_id = workspace_rx.await.unwrap();
+            assert_eq!(
+                rows_left(&ctx, workspace_id).await,
+                0,
+                "the late result neither revives nor leaks the request"
+            );
+        },
+    )
+    .await;
+}
+
+/// A worker that cannot embed records why, and the search reports it as an unavailable service rather than a bad request.
+#[tokio::test]
+async fn a_worker_failure_reaches_the_caller_as_service_unavailable() {
+    let (provider, _server) = unavailable_provider().await;
+    boot_with_query_worker(provider, |request, ctx| async move {
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Read,
+                ..Default::default()
+            },
+        )
+        .await;
+        let response = request
+            .get("/api/search?query_text=alpha")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{}",
+            response.text()
+        );
+        let body: serde_json::Value = response.json();
+        assert_eq!(body["error"]["code"], "backend_unavailable", "{body}");
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("HTTP 503"),
+            "the worker's diagnostic is kept: {body}"
+        );
+        assert!(!body.to_string().contains("private upstream diagnostic"));
+        assert_eq!(rows_left(&ctx, setup.workspace_id).await, 0);
+    })
+    .await;
+}
+
+/// A model whose width the workspace's vectors do not have is refused by the worker, against the same registry the writes use.
+#[tokio::test]
+async fn a_width_the_workspace_does_not_hold_is_refused_by_the_worker() {
+    let (provider, _server, _) = keyword_provider(1024).await;
+    boot_with_query_worker(provider, |request, ctx| async move {
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Read,
+                ..Default::default()
+            },
+        )
+        .await;
+        // The workspace already holds 768-wide vectors.
+        let (provider, _server, _) = keyword_provider(768).await;
+        embedded_notes(&ctx, &setup, provider.as_ref(), &["alpha plan"]).await;
+
+        let response = request
+            .get("/api/search?query_text=alpha")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{}",
+            response.text()
+        );
+        let message = response.text();
+        assert!(
+            message.contains("768") && message.contains("1024"),
+            "the diagnostic names both widths: {message}"
+        );
+    })
+    .await;
+}
+
+/// `YORISHIRO_EMBEDDING_PROVIDER=none` on the worker is an accurate, immediate answer, not a timeout.
+#[tokio::test]
+async fn a_disabled_embedding_provider_is_reported_by_the_worker() {
+    let settings: yorishiro::data::settings::Settings = serde_json::from_value(serde_json::json!({
+        "max_tenants": 1,
+        "embedding": {
+            "provider": "none", "dimensions": 768, "base_url": null, "api_key": "",
+            "model": null, "send_dimensions_param": false,
+            "local_model": "multilingual-e5-base", "local_max_sequence_length": 512
+        },
+        "rate_limit": {
+            "auth_max_requests": 10, "auth_window_seconds": 60, "search_tokens_per_minute": 100_000
+        },
+        "db_load_guard": { "threshold": 0, "sustain_seconds": 30, "poll_seconds": 5 }
+    }))
+    .expect("settings");
+    let settings_provider = yorishiro::services::embedding::build_embedding_provider(&settings)
+        .await
+        .expect("provider");
+    boot_with_query_worker(settings_provider, |request, ctx| async move {
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Read,
+                ..Default::default()
+            },
+        )
+        .await;
+        let response = request
+            .get("/api/search?query_text=alpha")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{}",
+            response.text()
+        );
+        assert!(
+            response
+                .text()
+                .contains("no embedding provider is configured")
+        );
+    })
+    .await;
+}
+
+/// The auth check (`Verified`) runs before the query is queued: no key at all must be rejected with 401, not 503.
+/// `Read` is the lowest scope, so there's no "too-low scope" case to test against a read-gated endpoint beyond this.
+#[tokio::test]
+async fn search_requires_authentication() {
+    boot_request::<App, _, _>(|request, _ctx| async move {
+        let response = request.get("/api/search?query_text=hello").await;
+        assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
+    })
+    .await;
+}

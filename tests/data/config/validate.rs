@@ -1,9 +1,7 @@
-use loco_rs::{app::Hooks, boot::StartMode, environment::Environment};
-
 use super::minimal_config;
 
-#[tokio::test]
-async fn boot_rejects_a_shared_sqlite_database_and_queue_file() {
+#[test]
+fn validation_rejects_a_shared_sqlite_database_and_queue_file() {
     let config = serde_yaml::from_str::<loco_rs::config::Config>(
         &minimal_config("sqlite://app.sqlite3?mode=rwc").replace(
             "sqlite://queue.sqlite3?mode=rwc",
@@ -12,11 +10,7 @@ async fn boot_rejects_a_shared_sqlite_database_and_queue_file() {
     )
     .unwrap();
 
-    let error = match yorishiro::App::boot(StartMode::ServerOnly, &Environment::Test, config).await
-    {
-        Ok(_) => panic!("shared SQLite file should be rejected at App::boot"),
-        Err(error) => error.to_string(),
-    };
+    let error = yorishiro::data::config::validate(&config).unwrap_err();
 
-    assert!(error.contains("same file"), "{error}");
+    assert!(error.to_string().contains("same file"), "{error}");
 }

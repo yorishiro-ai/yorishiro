@@ -1,12 +1,5 @@
-# Enable with `systemctl enable --now yorishiro-worker` alongside yorishiro.service.
-#
-# This unit serves the shared target, which is what a deployment without dedicated workers runs.
-# A worker serves the targets named after `--worker=`, separated by commas:
-#   worker-target:shared
-#   worker-target:official
-#   worker-target:tenant:<tenant-id>
-# To serve others, or to add a process for one tenant, override ExecStart in a drop-in (`systemctl edit yorishiro-worker`)
-# or copy this unit under another name.
+# Override ExecStart in a systemd drop-in to serve official or tenant-specific worker targets.
+# Use --worker=worker-target:official or --worker=worker-target:tenant:<tenant-id>.
 [Unit]
 Description=Yorishiro background worker
 After=network.target yorishiro.service

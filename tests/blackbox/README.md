@@ -6,11 +6,9 @@ Reports attribute successful and rejected MCP calls to their executing scenario 
 The report verifier writes `tool-coverage.json`, listing each tool's observed outcomes and every missing successful call.
 An observed successful call is not proof of complete behavior coverage, and each edition reports its missing successful calls explicitly.
 
-`rest.builtin-template-relations` creates every builtin template's entity and relation types through public HTTP using Write credentials after schema creation.
-The graph scenario also covers Read-scoped MCP entity filtering, invalid relation-list status and missing-entity diagnostics.
-
-Requires Python 3.10+ and an already-built SQLite-capable application binary.
-No Python dependencies, database access library, network embedding provider, model download, licence, or running external service is needed.
+Requires Python 3.10+ and an already-built application binary for the selected edition.
+SQLite suites need no Python dependencies, external service, model download or licence.
+The `tenant-postgres` suite additionally requires an owned PostgreSQL database and a valid enterprise licence.
 The runner reads the repository's `config/test.yaml` and copies it into its owned temporary working directory.
 Run the Make targets from the repository root, or use `make -C`.
 
@@ -24,7 +22,7 @@ make test-contract BINARY=/absolute/path/to/yorishiro-ee SUITE=mcp EDITION=ee
 Common contracts run on CE/SQLite; enterprise-only composition and behavior belong in explicit EE checks, not a duplicate common matrix.
 The edition argument labels evidence; it does not infer or verify the binary's compile-time features.
 The EE MCP delta suite checks edition discovery and entity-column and worker-class setting, scope denial, nonmutation and reset through both transports, without replaying CE business scenarios.
-Both editions run with the enterprise licence explicitly unset; licensed capabilities need separate ownership.
+The SQLite suites run with the enterprise licence explicitly unset; `tenant-postgres` requires a valid licence.
 The EE provider scenario configures and resets both LLM and embedding overrides, checks secret-free REST/MCP metadata parity and preserves settings after invalid or under-scoped writes.
 It uses reserved invalid provider URLs without starting workers, so it proves configuration and enqueue admission, not external inference or reindex completion.
 The separate EE search scenario owns a loopback OpenAI-compatible HTTP stub and a real embedding worker, waits for reindex completion, and checks REST/MCP query results and cross-workspace isolation.
@@ -33,30 +31,26 @@ The EE composition scenario adopts a library template, changes its upstream defi
 It then creates a second-workspace fork, checks scoped visibility and stale-head rejection, updates and deletes the fork without changing source history.
 
 Each SQLite invocation migrates separate owned application and queue databases and bootstraps an account through the setup API.
-The management suite proves migration and normal tasks succeed.
-It starts one server and reuses it for the whole suite.
+Each invocation starts one server and reuses it for the selected suite.
 The server starts separately from job workers.
 The MCP suite additionally starts a separate `--environment test start --worker=job-target:shared --no-banner` process only after import submission and queued/empty-destination assertions.
 The worker uses the server's exact environment, application database and separate queue database.
 Children receive an allowlisted environment, an owned home directory, and embedding provider `none`.
 The owned config disables auto-migration after explicit migration, and the auth rate limit is raised for these isolated checks.
-The server has a 45-second authenticated readiness deadline, individual commands have a 30-second deadline, HTTP operations have timeouts and body limits, and the suite has a 240-second budget checked between operations.
+The runner bounds readiness, commands, HTTP bodies and total suite duration; timeout values live in `run.py`.
 JSON and SSE bodies are read in bounded available-byte chunks with a decreasing socket timeout, so trickled partial lines cannot extend the response deadline.
-Import completion has a strict 60-second budget within the suite deadline, checks server/worker liveness, and rejects unsuccessful job states.
+Import completion checks server/worker liveness and rejects unsuccessful job states within the suite deadline.
 Worker cleanup runs on success, timeout and failure, with suite teardown as a fallback.
 Cleanup terminates the process group, escalates to kill after five seconds, waits, and deletes owned state.
 
 ## Implemented coverage
 
-These scenarios cover selected workflows, not the entire advertised MCP surface.
-Successful tool calls are not exhaustive behavioral coverage; cross-tenant acceptance and remaining fault and concurrency cases retain explicit owners outside these SQLite scenarios.
 The separate `tenant-postgres` EE suite requires an explicitly owned PostgreSQL URL and signed licence, and checks that authenticated cross-tenant invite acceptance is rejected without consuming the token, adding a membership or changing the original credential selection.
 The required census assigns CE tools to CE suites except `search_entities` and `accept_invite`, which belong to the owned provider and licensed PostgreSQL EE suites.
 EE owns all enterprise additions; each edition fails verification if an owned tool lacks a successful attributed call, except `accept_invite`, which requires a rejected call because a valid attributed credential already requires tenant membership.
 This partitions all registered tools without replaying the full CE suite under EE, and does not claim exhaustive behavior coverage.
 Its required GHA job owns a non-superuser PostgreSQL service and its own database; ordinary SQLite suites never inherit that database or licence.
 The MCP migration lifecycle checks drift and a read-only dry-run, queues fill-defaults before starting a real worker, compares completed status through REST, and restores the original snapshot through queued undo.
-Scenario counts alone are not a public-tool completeness guarantee.
 
 Every suite bootstraps its own credentials; the MCP suite alone checks revocation and immediate rejection through both surfaces using the existing server and MCP session.
 
@@ -66,25 +60,8 @@ Every suite bootstraps its own credentials; the MCP suite alone checks revocatio
 | `mcp` | Same CRUD through MCP, cross-checked through REST; initialize/session header/initialized notification, tool discovery, authentication protocol errors, scope tool errors, invalid UUID argument-deserialization tool error, missing schema arguments |
 | `management` | CLI bootstrap/key tasks, argument and exit contracts, human key management, MCP profile/settings/template/workspace/audit/membership lifecycles |
 
-`management.human-key-management` checks human-attributed key issuance, identity and lifecycle through the public interfaces.
-REST and MCP identity readback must name that human.
-An expiring delegated Read key cannot raise scope, add audit, omit its expiry ceiling or extend it through either transport; an unattributed service key cannot delegate management credentials.
-MCP rotation must preserve grant metadata, invalidate the predecessor through both transports and retain its successor link in secret-free REST/MCP history.
-REST revocation invalidates the successor through both transports and retains terminal history; a second rotation of the predecessor returns HTTP 409.
-These sequential contracts supplement, not replace, the internal issuance/revocation race and deterministic expiry tests.
-
-Schemas are versioned rather than updated in place.
-Both CRUD scenarios reject active-schema deletion, create an evolved version, check its incremented version and active selection, and retain the historical definition.
-Both reject stale entity updates through REST and MCP and verify unchanged data.
-The human management scenario also creates, renames, caps, grants/revokes membership and deletes a workspace, checking list/get visibility and preservation of the other workspace's credential.
-The shared fixture is an inline schema with one required string field.
-The `api.relation-export-import-worker` scenario runs once in the MCP suite with thin REST/MCP transport adapters.
-It creates a dedicated source workspace, a `graph` schema with `person.name` and `knows`, and Alice/Bob entities through REST.
-Relation create/read/list/delete and active/deprecated/archived status changes are read back through both surfaces, including omitted properties defaulting to `{}`, read-scope rejection, missing authentication, invalid status and missing endpoints.
-Export while deprecated must return exactly one schema, two entities and one relation in kind order, preserving IDs/data/properties/status, with identical raw REST NDJSON and MCP text.
-A new destination workspace and schema service key submit the raw document through MCP and an empty import through REST before one real worker starts.
-Both surfaces must report queued with an empty destination, then completed with job name `import` and counts 1/2/1.
-Restored records must have new IDs, remapped schema/endpoints, destination ownership and matching data/properties, while the source export stays unchanged.
+Scenario definitions and assertions live in `run.py`.
+The relation/export/import workflow submits through both transports before starting a worker, then checks completion and destination ownership without modifying the source.
 Imported relations are active even when exported as deprecated; this is not lossless history restoration.
 No database files are inspected or written directly by the tests.
 

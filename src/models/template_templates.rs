@@ -226,13 +226,10 @@ pub(crate) async fn create_template(
     };
 
     let row = active.insert(conn).await.map_err(|err| {
-        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-            YorishiroError::Conflict {
-                message: format!("a template named '{name}' already exists for this tenant"),
-            }
-        } else {
-            YorishiroError::Internal(err.into())
-        }
+        YorishiroError::conflict_on_unique(
+            err,
+            format!("a template named '{name}' already exists for this tenant"),
+        )
     })?;
 
     row.try_into()
@@ -489,13 +486,10 @@ pub(crate) async fn fork_template(
     };
 
     let row = active.insert(conn).await.map_err(|err| {
-        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-            YorishiroError::Conflict {
-                message: format!("a template named '{name}' already exists for this tenant"),
-            }
-        } else {
-            YorishiroError::Internal(err.into())
-        }
+        YorishiroError::conflict_on_unique(
+            err,
+            format!("a template named '{name}' already exists for this tenant"),
+        )
     })?;
 
     row.try_into()

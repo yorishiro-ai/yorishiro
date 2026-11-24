@@ -1,4 +1,12 @@
-mod mcp;
+mod dashboard;
+mod embedding;
+mod entity_columns;
+pub(crate) mod inference;
+mod marketplace;
+pub(crate) mod mcp;
 mod middleware;
 mod oauth;
+mod origin;
+mod schema_forks;
 mod stripe;
+mod worker_class;

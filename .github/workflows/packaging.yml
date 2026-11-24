@@ -21,6 +21,7 @@ on:
       - Dockerfile
       - docker-compose.yaml
       - docker-compose.test.yaml
+      - docker-compose.dev.yaml
       - init-extensions.sql
       - scripts/init-test-postgres.sql
       - .dockerignore

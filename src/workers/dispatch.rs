@@ -18,8 +18,7 @@ pub(crate) async fn dispatch_embedding(
         job_name: EmbeddingSyncArgs::JOB_NAME,
         workspace_id: args.workspace_id,
         class: args.worker_class,
-        dispatch_payload: serde_json::to_value(&args)
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
+        dispatch_payload: serde_json::to_value(&args).map_err(loco_rs::Error::wrap)?,
         worker_name: EmbeddingSyncWorker::class_name(),
         use_queue_concurrency: false,
     };
@@ -35,8 +34,7 @@ pub(crate) async fn dispatch_reindex(
         job_name: args.job_name(),
         workspace_id: args.workspace_id,
         class: args.worker_class,
-        dispatch_payload: serde_json::to_value(&args)
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
+        dispatch_payload: serde_json::to_value(&args).map_err(loco_rs::Error::wrap)?,
         worker_name: ReindexWorker::class_name(),
         use_queue_concurrency: true,
     };
@@ -172,7 +170,7 @@ async fn enqueue_pending(
         )
         .await
         .map(|id| id.unwrap_or_else(|| Uuid::now_v7().to_string()))
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))
+        .map_err(loco_rs::Error::wrap)
 }
 
 /// What identifies one job to the queue policy, independent of its argument type.
@@ -251,11 +249,11 @@ pub(crate) async fn dispatch_job(
         let tenant =
             crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, spec.workspace_id)
                 .await
-                .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+                .map_err(loco_rs::Error::wrap)?;
         Some(
             crate::db::begin_workspace(ctx, tenant, spec.workspace_id)
                 .await
-                .map_err(|e| loco_rs::Error::Message(e.to_string()))?,
+                .map_err(loco_rs::Error::wrap)?,
         )
     } else {
         None
@@ -263,11 +261,7 @@ pub(crate) async fn dispatch_job(
     let txn = caller_txn.or(owned_txn.as_ref()).ok_or_else(|| {
         loco_rs::Error::Message("dispatch requires a recording transaction".into())
     })?;
-    let tag = if super::registry::is_embedding_worker(&spec.worker_name) {
-        target.tag()
-    } else {
-        target.job_tag()
-    };
+    let tag = super::registry::routing_tag(&spec.worker_name, target);
     crate::models::queue_job_dispatch_outbox::record_in_transaction(
         txn,
         Enqueue {
@@ -285,12 +279,9 @@ pub(crate) async fn dispatch_job(
         Some(vec![tag]),
     )
     .await
-    .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    .map_err(loco_rs::Error::wrap)?;
     if let Some(owned_txn) = owned_txn {
-        owned_txn
-            .commit()
-            .await
-            .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+        owned_txn.commit().await.map_err(loco_rs::Error::wrap)?;
     }
     Ok(lifecycle_id.to_string())
 }

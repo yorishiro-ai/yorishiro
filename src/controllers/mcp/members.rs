@@ -87,7 +87,7 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts, "list_members");
         let db = &self.app_context().db;
-        let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
+        let page = crate::models::pagination::ListParams::from(&args);
         render(tenant_memberships::list_members_as(db, &auth, page).await)
     }
 
@@ -124,3 +124,5 @@ impl YorishiroMcpServer {
         }
     }
 }
+
+crate::dtos::common::list_params_from!(ListMembersArgs);

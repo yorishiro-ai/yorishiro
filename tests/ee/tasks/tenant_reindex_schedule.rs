@@ -5,7 +5,7 @@ use sea_orm::{
     QuerySelect, QueryTrait, TransactionTrait,
 };
 use std::sync::Arc;
-use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 use yorishiro::services::embedding::{
     EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
 };
@@ -34,12 +34,7 @@ async fn licensed_task_ticks_but_unlicensed_task_scans_without_provider() {
             .scheduled_for
             .unwrap();
 
-        let licensed = Arc::new(LicenceState::licensed(LicenceClaims {
-            sub: "test".into(),
-            plan: "pro".into(),
-            exp: chrono::Utc::now().timestamp() + 3600,
-        }));
-        ctx.shared_store.insert(licensed);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
         let due = before.to_utc();
         yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler
             .run_at(&ctx, &loco_rs::task::Vars::default(), due)

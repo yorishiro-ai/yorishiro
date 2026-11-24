@@ -63,10 +63,11 @@ async fn production_dispatch_records_each_resolved_target() {
             .unwrap()
             .expect("production dispatch records the delivery");
             let expected = match class {
-                WorkerClass::Shared => "worker-target:shared".to_owned(),
-                WorkerClass::Official => "worker-target:official".to_owned(),
-                WorkerClass::TenantPrivate => format!("worker-target:tenant:{}", fixture.tenant_id),
-            };
+                WorkerClass::Shared => WorkerTarget::Shared,
+                WorkerClass::Official => WorkerTarget::Official,
+                WorkerClass::TenantPrivate => WorkerTarget::Tenant(fixture.tenant_id),
+            }
+            .tag();
             assert_eq!(row.queue_name.as_deref(), Some(expected.as_str()));
             assert_eq!(row.tags, Some(serde_json::json!([expected])));
             assert_eq!(
@@ -84,8 +85,8 @@ async fn injected_deliveries_are_consumed_only_by_their_target() {
         let targets = [
             WorkerTarget::Shared,
             WorkerTarget::Official,
-            WorkerTarget::parse_tag(&format!("worker-target:tenant:{}", Uuid::now_v7())).unwrap(),
-            WorkerTarget::parse_tag(&format!("worker-target:tenant:{}", Uuid::now_v7())).unwrap(),
+            WorkerTarget::Tenant(Uuid::now_v7()),
+            WorkerTarget::Tenant(Uuid::now_v7()),
         ];
         let producer = ctx.queue_provider.as_ref().unwrap();
         let mut ids = Vec::new();
@@ -130,15 +131,13 @@ async fn injected_deliveries_are_consumed_only_by_their_target() {
         let directory = tempfile::tempdir().unwrap();
         for (index, target) in targets.into_iter().enumerate() {
             let mut worker_ctx = ctx.clone();
-            let queue =
-                crate::workers::query_embedding::harness::target_queue(&mut worker_ctx, target)
-                    .await;
+            let queue = crate::requests::jobs::target_queue(&mut worker_ctx, target).await;
             let running = Arc::clone(&queue);
             let worker = tokio::spawn(async move { running.run(vec![target.tag()]).await });
-            let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
-                Duration::from_secs(10),
-                async {
-                    loop {
+            let outcome =
+                std::panic::AssertUnwindSafe(crate::requests::jobs::try_wait_until(
+                    Duration::from_secs(10),
+                    || async {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
                         let jobs: Vec<Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
@@ -151,14 +150,13 @@ async fn injected_deliveries_are_consumed_only_by_their_target() {
                                     job.id == *id && job.status == JobStatus::Queued
                                 }));
                             }
-                            break;
+                            return Some(());
                         }
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
-                },
-            ))
-            .catch_unwind()
-            .await;
+                        None
+                    },
+                ))
+                .catch_unwind()
+                .await;
             App::on_shutdown(&worker_ctx).await;
             queue.shutdown().unwrap();
             let drained = tokio::time::timeout(Duration::from_secs(10), worker).await;

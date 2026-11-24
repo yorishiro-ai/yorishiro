@@ -1,6 +1,5 @@
 use super::helpers;
 use sea_orm_migration::prelude::*;
-use sea_orm_migration::sea_orm::DbBackend;
 
 #[derive(DeriveMigrationName)]
 pub(crate) struct Migration;
@@ -93,11 +92,11 @@ async fn up_queue_job_lifecycles(manager: &SchemaManager<'_>) -> Result<(), DbEr
                 .to_owned(),
         )
         .await?;
-    if manager.get_database_backend() != DbBackend::Sqlite {
-        manager.get_connection().execute_unprepared(
-                "ALTER TABLE queue_job_lifecycles ENABLE ROW LEVEL SECURITY; GRANT SELECT, INSERT, UPDATE ON queue_job_lifecycles TO yorishiro_app; CREATE POLICY workspace_lifecycle_select ON queue_job_lifecycles AS PERMISSIVE FOR SELECT USING (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid); CREATE POLICY workspace_lifecycle_insert ON queue_job_lifecycles AS PERMISSIVE FOR INSERT WITH CHECK (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid); CREATE POLICY workspace_lifecycle_update ON queue_job_lifecycles AS PERMISSIVE FOR UPDATE USING (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid) WITH CHECK (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid);",
-            ).await?;
-    }
+    helpers::pg_only(
+        manager,
+        "ALTER TABLE queue_job_lifecycles ENABLE ROW LEVEL SECURITY; GRANT SELECT, INSERT, UPDATE ON queue_job_lifecycles TO yorishiro_app; CREATE POLICY workspace_lifecycle_select ON queue_job_lifecycles AS PERMISSIVE FOR SELECT USING (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid); CREATE POLICY workspace_lifecycle_insert ON queue_job_lifecycles AS PERMISSIVE FOR INSERT WITH CHECK (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid); CREATE POLICY workspace_lifecycle_update ON queue_job_lifecycles AS PERMISSIVE FOR UPDATE USING (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid) WITH CHECK (workspace_id IS NOT NULL AND workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid);",
+    )
+    .await?;
 
     Ok(())
 }

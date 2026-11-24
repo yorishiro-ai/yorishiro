@@ -40,11 +40,7 @@ impl BackgroundWorker<UndoArgs> for UndoWorker {
             args.worker_class,
             args.workspace_id,
             &args,
-            || async {
-                self.restore(&args)
-                    .await
-                    .map_err(|error| loco_rs::Error::Message(error.to_string()))
-            },
+            || async { self.restore(&args).await.map_err(loco_rs::Error::wrap) },
         )
         .await
     }

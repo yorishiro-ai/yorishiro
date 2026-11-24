@@ -1,23 +1,9 @@
+pub(crate) mod jobs;
 mod sqlite;
 #[cfg(feature = "enterprise")]
 pub(crate) use sqlite::close_app_pools_sqlite;
 use sqlite::{boot_sqlite, remove_sqlite_files, sqlite_queue_path};
-mod api_keys;
-mod audit_log;
-mod auth;
-mod entities;
-mod export;
-pub(crate) mod fill_defaults;
 pub(crate) mod fixtures;
-mod iam;
-mod import;
-pub(crate) mod mcp;
-mod members;
-mod schemas;
-mod search;
-mod setup;
-mod template_library;
-mod workspaces;
 
 #[cfg(feature = "enterprise")]
 fn licence_active(ctx: &loco_rs::app::AppContext) -> bool {
@@ -66,7 +52,7 @@ pub(crate) fn uses_sqlite_queue(ctx: &loco_rs::app::AppContext) -> bool {
 pub(crate) type Override = (&'static str, serde_json::Value);
 
 /// Caps the tenants a booted app accepts.
-pub(crate) fn max_tenants(limit: u64) -> Override {
+pub(crate) fn max_tenants(limit: i32) -> Override {
     ("settings.max_tenants", limit.into())
 }
 
@@ -98,7 +84,9 @@ fn apply_config_overrides(
         }
         *node = value.clone();
     }
-    serde_json::from_value(document).expect("overridden config stays valid")
+    let config = serde_json::from_value(document).expect("overridden config stays valid");
+    yorishiro::data::config::validate(&config).expect("overridden config passes validation");
+    config
 }
 
 use futures::FutureExt;
@@ -261,5 +249,3 @@ pub(crate) async fn workspace_txn(
         .await
         .expect("begin workspace transaction")
 }
-
-pub(crate) mod tenants;

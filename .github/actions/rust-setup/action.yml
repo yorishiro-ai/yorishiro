@@ -56,7 +56,7 @@ runs:
         sudo apt-get -o Acquire::Retries=5 install --yes mold
         mold --version
 
-    # Prebuilt binary: building it from source took about four minutes in every job.
+    # Prebuilt binary, so no job compiles sccache from source.
     - name: Install sccache
       uses: Mozilla-Actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       with:

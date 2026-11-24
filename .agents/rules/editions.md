@@ -62,7 +62,8 @@ Per request rather than at boot is deliberate: `LicenceState::is_active` compare
 
 Booting with no `YORISHIRO_LICENSE_KEY` logs "no licence key configured: enterprise features are disabled" and serves every community route unchanged; booting with a valid key logs "licence key accepted: enterprise features are enabled".
 
-**One binary carries both editions**, so a deployment cannot be identified by which artifact it installed and there is no on-disk separation to assert against. What a deployment serves is decided at runtime.
+CE artifacts exclude the enterprise overlay; EE artifacts compile it in and apply runtime licence gates to the routes listed below.
+Artifact selection determines available code, while configuration and licence state determine which compiled capabilities are active.
 
 ## Gated routes
 
@@ -86,7 +87,8 @@ Ungated (serve regardless):
 
 ## Licence tests
 
-Tests live in `tests/requests/licence_gate.rs`, covering verification, expiry-boundary exclusivity (`exp > now`, not `>=`), and config-file key parsing. The suite generates its own throwaway RSA keypair per test via `openssl genrsa`/`openssl rsa -pubout` into a `tempfile::TempDir`, never a checked-in `.pem`: a committed private key reads as a leaked secret to a scanner regardless of what it actually signs, so nothing under `tests/` is a key file.
+Tests live in `tests/ee/controllers/middleware/edition/`, covering verification, expiry-boundary exclusivity (`exp > now`, not `>=`), and config-file key parsing.
+The suite generates its own throwaway RSA keypair per test via `openssl genrsa`/`openssl rsa -pubout` into a `tempfile::TempDir`, never a checked-in `.pem`: a committed private key reads as a leaked secret to a scanner regardless of what it actually signs, so nothing under `tests/` is a key file.
 
 ## Config file
 

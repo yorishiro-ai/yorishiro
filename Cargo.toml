@@ -83,6 +83,10 @@ path = "tests/mod.rs"
 name = "sqlite_ann"
 harness = false
 
+[[bench]]
+name = "postgres_search"
+harness = false
+
 [features]
 default = ["enterprise"]
 # The community edition: build it with `--no-default-features --features community`.

@@ -69,12 +69,13 @@ impl TryFrom<ListRelationsArgs> for entity_relations::ListRelationsQuery {
     type Error = YorishiroError;
 
     fn try_from(args: ListRelationsArgs) -> Result<Self, Self::Error> {
+        let page = crate::models::pagination::ListParams::from(&args);
         Ok(Self {
             source_id: args.source_id,
             target_id: args.target_id,
             relation_type: args.relation_type,
             status: args.status.as_deref().map(parse_status).transpose()?,
-            page: crate::models::pagination::ListParams::new(args.limit, args.offset),
+            page,
         })
     }
 }
@@ -162,3 +163,5 @@ impl YorishiroMcpServer {
         )
     }
 }
+
+crate::dtos::common::list_params_from!(ListRelationsArgs);

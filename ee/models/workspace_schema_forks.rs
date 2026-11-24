@@ -457,13 +457,10 @@ pub async fn create<C: ConnectionTrait>(
         ..Default::default()
     };
     let row = row.insert(conn).await.map_err(|err| {
-        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-            YorishiroError::Conflict {
-                message: "this workspace already has a fork for that source schema".into(),
-            }
-        } else {
-            YorishiroError::Internal(err.into())
-        }
+        YorishiroError::conflict_on_unique(
+            err,
+            "this workspace already has a fork for that source schema",
+        )
     })?;
     fork_heads::ActiveModel {
         id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),

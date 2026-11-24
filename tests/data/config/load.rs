@@ -291,14 +291,26 @@ async fn config_folder_preserves_non_utf8_paths() {
     let root = tempfile::tempdir().unwrap();
     let folder = root.path().join(OsStr::from_bytes(b"config-\xff"));
     std::fs::create_dir(&folder).unwrap();
-    std::fs::copy(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/config/production.yaml"),
+    let production = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/config/production.yaml"
+    ))
+    .unwrap();
+    let default = r#"get_env(name="YORISHIRO_MAX_TENANTS", default="1")"#;
+    assert!(production.contains(default));
+    // A value that differs from `./config`, so a fallback to that folder is detected.
+    std::fs::write(
         folder.join("production.yaml"),
+        production.replace(
+            default,
+            r#"get_env(name="YORISHIRO_MAX_TENANTS", default="7")"#,
+        ),
     )
     .unwrap();
 
     let guard = EnvGuard::capture(&[
         "LOCO_CONFIG_FOLDER",
+        "YORISHIRO_MAX_TENANTS",
         "DATABASE_URL",
         "QUEUE_URL",
         "YORISHIRO_QUEUE_KIND",
@@ -311,10 +323,16 @@ async fn config_folder_preserves_non_utf8_paths() {
         "sqlite:///tmp/non-utf8-config-queue.sqlite3?mode=rwc",
     );
     guard.set("YORISHIRO_QUEUE_KIND", "Sqlite");
+    guard.remove("YORISHIRO_MAX_TENANTS");
     guard.set("YORISHIRO_EMBEDDING_PROVIDER", "none");
 
     let config = load(&Environment::Production).unwrap();
     assert_eq!(config.database.uri, "sqlite::memory:");
+    assert_eq!(
+        config.settings.as_ref().unwrap()["max_tenants"],
+        7,
+        "the non-UTF-8 folder was not read"
+    );
 }
 
 #[tokio::test]

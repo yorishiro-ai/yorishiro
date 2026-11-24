@@ -123,7 +123,7 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts, "list_template_library");
 
-        let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
+        let page = crate::models::pagination::ListParams::from(&args);
         let templates =
             try_tool!(template_templates::list_as(&self.app_context().db, &auth, page).await);
         ok_json(templates)
@@ -146,3 +146,5 @@ impl YorishiroMcpServer {
         ok_json(template)
     }
 }
+
+crate::dtos::common::list_params_from!(ListTemplateLibraryArgs);

@@ -29,27 +29,32 @@ pub(crate) async fn list_audit_log(
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<AuditLogRecord>>, ApiError> {
     let records = authorized.records(page.try_into()?).await?;
-    Ok(Json(render_records(records, authorized.timezone())))
+    Ok(Json(render_records(records, authorized.timezone())?))
 }
 
 pub(crate) fn render_records(
     records: Vec<crate::models::_entities::api_key_audit_log::Model>,
     timezone: chrono_tz::Tz,
-) -> Vec<AuditLogRecord> {
+) -> Result<Vec<AuditLogRecord>, crate::YorishiroError> {
     records
         .into_iter()
-        .map(|record| AuditLogRecord {
-            id: record.id,
-            workspace_id: record.workspace_id,
-            tenant_id: record.tenant_id,
-            api_key_id: record.api_key_id,
-            user_id: record.user_id,
-            action: record
-                .action
-                .parse()
-                .expect("audit action matches the DB constraint"),
-            detail: record.detail,
-            created_at: crate::data::time::in_timezone(&record.created_at, timezone).to_rfc3339(),
+        .map(|record| {
+            let action = record.action.parse().map_err(|_| {
+                crate::YorishiroError::Internal(
+                    format!("unknown audit action '{}' in audit log", record.action).into(),
+                )
+            })?;
+            Ok(AuditLogRecord {
+                id: record.id,
+                workspace_id: record.workspace_id,
+                tenant_id: record.tenant_id,
+                api_key_id: record.api_key_id,
+                user_id: record.user_id,
+                action,
+                detail: record.detail,
+                created_at: crate::data::time::in_timezone(&record.created_at, timezone)
+                    .to_rfc3339(),
+            })
         })
         .collect()
 }

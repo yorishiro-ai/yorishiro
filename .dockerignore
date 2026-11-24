@@ -5,6 +5,7 @@
 !rust-toolchain.toml
 !.cargo/config.toml
 !benches/sqlite_ann.rs
+!benches/postgres_search.rs
 !src/**/*.rs
 !src/templates/*.json
 !ee/**/*.rs

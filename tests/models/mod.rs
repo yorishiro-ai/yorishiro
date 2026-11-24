@@ -24,4 +24,5 @@ mod workspace_memberships;
 mod entity_entities;
 mod schema_schemas;
 mod tenant_retirement_events;
+mod tenant_tenants;
 mod workspace_llm_keys;

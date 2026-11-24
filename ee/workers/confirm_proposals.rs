@@ -42,11 +42,7 @@ impl BackgroundWorker<ConfirmProposalsArgs> for ConfirmProposalsWorker {
             args.worker_class,
             args.workspace_id,
             &args,
-            || async {
-                self.confirm(&args)
-                    .await
-                    .map_err(|error| loco_rs::Error::Message(error.to_string()))
-            },
+            || async { self.confirm(&args).await.map_err(loco_rs::Error::wrap) },
         )
         .await
     }

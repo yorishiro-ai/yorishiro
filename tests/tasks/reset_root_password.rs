@@ -148,7 +148,7 @@ async fn postgres_root_reset_fences_login_waiting_with_verified_old_password() {
         );
         let login_after_reset_locks = async {
             // Reset owns the membership fence but cannot update the password until we release the row.
-            wait_for_membership_lock(&ctx.db, &fence, true).await;
+            crate::requests::fixtures::wait_for_membership_lock(&ctx.db, &fence, true).await;
             let login = yorishiro::models::tenancy::issue_login_key(
                 &ctx.db,
                 tenant.owner_id,
@@ -156,7 +156,7 @@ async fn postgres_root_reset_fences_login_waiting_with_verified_old_password() {
                 None,
             );
             let release_reset = async {
-                wait_for_membership_lock(&ctx.db, &fence, false).await;
+                crate::requests::fixtures::wait_for_membership_lock(&ctx.db, &fence, false).await;
                 row_lock.rollback().await.unwrap();
             };
             let (login, ()) = tokio::join!(login, release_reset);
@@ -178,30 +178,6 @@ async fn postgres_root_reset_fences_login_waiting_with_verified_old_password() {
         ));
     })
     .await;
-}
-
-async fn wait_for_membership_lock(db: &sea_orm::DatabaseConnection, fence: &str, granted: bool) {
-    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
-
-    tokio::time::timeout(std::time::Duration::from_secs(20), async {
-        loop {
-            let row = db
-                .query_one_raw(Statement::from_sql_and_values(
-                    DatabaseBackend::Postgres,
-                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted = $2 AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS observed",
-                    [fence.into(), granted.into()],
-                ))
-                .await
-                .unwrap()
-                .unwrap();
-            if row.try_get::<bool>("", "observed").unwrap() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("expected membership fence holder or waiter was not observed");
 }
 
 #[tokio::test]

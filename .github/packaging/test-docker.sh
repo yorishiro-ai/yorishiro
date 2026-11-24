@@ -3,7 +3,10 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-grep -q 'COPY config/production.yaml /app/config/production.yaml' "$repo/Dockerfile"
+if grep -q 'COPY config/production.yaml /app/config/' "$repo/Dockerfile"; then
+  echo 'Runtime defaults must come from the application, not a second configuration copy' >&2
+  exit 1
+fi
 grep -q '^logger:' "$repo/config/production.yaml"
 grep -q '^server:' "$repo/config/production.yaml"
 grep -q '^database:' "$repo/config/production.yaml"
@@ -24,14 +27,32 @@ for role in {"app", "worker", "jobs", "scheduler"}:
     assert "build" not in services[role]
     assert services[role]["environment"]["BINDING"] == "0.0.0.0"
 '
-  docker compose -f "$repo/docker-compose.test.yaml" --profile test config --format json |
+  docker compose -f "$repo/docker-compose.test.yaml" config --format json |
     python3 -c '
 import json
 import sys
 
 config = json.load(sys.stdin)
-assert config["services"]["app"]["build"]["context"]
+assert set(config["services"]) == {"testdb", "redis"}
+assert all("build" not in service for service in config["services"].values())
 assert any(mount["source"] == "test_pgdata" for mount in config["services"]["testdb"]["volumes"])
+'
+  docker compose -f "$repo/docker-compose.dev.yaml" config --format json |
+    python3 -c '
+import json
+import sys
+
+services = json.load(sys.stdin)["services"]
+assert set(services) == {"app", "worker", "jobs", "scheduler", "db", "redis"}
+for role in {"app", "worker", "jobs", "scheduler"}:
+    assert services[role]["build"]["context"]
+assert set(services["app"]["depends_on"]) == {"db", "redis"}
+for role in {"worker", "jobs"}:
+    assert services[role]["healthcheck"]["disable"]
+    assert set(services[role]["depends_on"]) == {"app", "redis"}
+    assert all(dependency["condition"] == "service_healthy" for dependency in services[role]["depends_on"].values())
+assert set(services["scheduler"]["depends_on"]) == {"app"}
+assert any(mount["source"] == "pgdata" for mount in services["db"]["volumes"])
 '
 fi
 
@@ -45,12 +66,10 @@ if [[ $# -gt 0 ]]; then
   }
   trap cleanup EXIT
   docker run --rm \
-    -v "$repo/config/production.yaml:/canonical-example.yaml:ro" \
     --entrypoint sh "$image" -ec '
-      test -f /app/config/production.yaml
-      cmp /app/config/production.yaml /canonical-example.yaml
+      test ! -e /app/config/production.yaml
       test ! -e /app/config/production.local.yaml
-      test "$(find /app -type f)" = /app/config/production.yaml
+      test -z "$(find /app -type f)"
       test "$(find /usr/local/bin -type f)" = /usr/local/bin/yorishiro
     '
 
@@ -79,7 +98,7 @@ if [[ $# -gt 0 ]]; then
       -v "$tmp/config:/app/config" \
       -v "$tmp/state:/var/lib/yorishiro" \
       -p 0:5150 \
-      --entrypoint yorishiro "$image" start >/dev/null 2>&1 >/dev/null
+      --entrypoint yorishiro "$image" start >/dev/null 2>&1
     host_port=""
     if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" = true ]]; then
       host_port=$(docker port "$container" 5150/tcp 2>/dev/null | sed 's/.*://' | head -1 || true)

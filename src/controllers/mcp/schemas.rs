@@ -130,7 +130,7 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts, "list_schemas");
-        let page = crate::models::pagination::ListParams::new(args.limit, args.offset);
+        let page = crate::models::pagination::ListParams::from(&args);
         let summaries =
             try_tool!(schema_schemas::list_for_actor(self.app_context(), &actor, page).await);
         ok_json(summaries)
@@ -228,3 +228,5 @@ impl YorishiroMcpServer {
         )
     }
 }
+
+crate::dtos::common::list_params_from!(ListSchemasArgs);

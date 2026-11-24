@@ -140,7 +140,7 @@ async fn perform_embedding_with_lifecycle(
     let _permit = concurrency
         .acquire_owned()
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(loco_rs::Error::wrap)?;
     let Some(id) = args.lifecycle_id else {
         return perform_embedding_sync(ctx, args)
             .await
@@ -149,7 +149,7 @@ async fn perform_embedding_with_lifecycle(
     };
     let attempt = match crate::models::queue_job_lifecycles::Entity::start(&ctx.db, id)
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+        .map_err(loco_rs::Error::wrap)?
     {
         crate::models::queue_job_lifecycles::Admission::Started { attempt }
         | crate::models::queue_job_lifecycles::Admission::Recovered { attempt } => attempt,
@@ -196,7 +196,7 @@ async fn perform_embedding_with_lifecycle(
         diagnostic,
     )
     .await
-    .map_err(|finish_error| loco_rs::Error::Message(finish_error.to_string()))?;
+    .map_err(loco_rs::Error::wrap)?;
     if superseded {
         return Ok(());
     }

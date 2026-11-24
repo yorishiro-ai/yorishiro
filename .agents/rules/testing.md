@@ -2,21 +2,21 @@
 
 ## Test commands
 
-All commands run from the repository root. `make -C . <target>` works from any directory (the Makefile sets CWD so Loco tasks find `config/`).
+Run commands from the repository root, or use `make -C /path/to/repo <target>`.
 
 | Command | What it does | Backend |
 |---|---|---|
 | `make test-sqlite` | The whole suite on SQLite (`cargo test`); `EDITION=ce` selects community, the default is `ee` | SQLite |
 | `make test-valkey` | Only the Valkey queue provider tests, with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` (default: the compose `redis` service) | SQLite + Valkey |
 | `make test-postgres` | The whole suite on PostgreSQL; every test creates and drops its own database | PostgreSQL |
-| `make check-ce` | `cargo check --locked --no-default-features --workspace` | CE |
+| `make check-ce` | `cargo check --locked --no-default-features --features community --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
 | `make clippy-ce` | Strict Clippy for every CE target, including tests | CE |
 | `make clippy-ee` | Strict Clippy for every EE target, including tests | EE |
-| `make fmt-check` | `cargo fmt --all -- --check` | — |
+| `make fmt-check` | `cargo fmt --all -- --check` | Both |
 | `make check-all` | Formatting, Python/boundary checks, CE check, and CE Clippy | CE |
 | `make check-all-ee` | Formatting, Python/boundary checks, EE check, and EE Clippy | EE |
-| `make build-ce` | `cargo build --locked --no-default-features --workspace` | CE |
+| `make build-ce` | Community debug build; see `Makefile` for feature flags | CE |
 | `make build-ee` | `cargo build --locked --features enterprise --workspace` | EE |
 | `make entities` | Spin up pgvector container, migrate, generate entities, tear down | PostgreSQL |
 
@@ -58,12 +58,11 @@ A test that creates more than one tenant in one boot therefore only passes on a 
 
 ```rust
 boot_request::<App, _, _>(|request, ctx| async move {
-    if super::skip_unlicensed(&ctx) {
+    if crate::requests::skip_unlicensed(&ctx) {
         return;
     }
 ```
 
-Outside `tests/requests/`, call it as `crate::requests::skip_unlicensed(&ctx)`.
 A test that must observe the unlicensed cap boots with `crate::requests::unlicensed()`, so the gate never sees a key.
 A test changes the booted app's configuration by passing overrides to `boot_request_with(&[crate::requests::max_tenants(1)], ...)`; each override is a dotted path into `Config` such as `queue.num_workers`, applied to that one boot; the process environment is touched only by tests of configuration loading itself, which take `serial(process_environment)`.
 
@@ -71,24 +70,24 @@ A test changes the booted app's configuration by passing overrides to `boot_requ
 
 CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus a licensed EE PostgreSQL job.
 Each job runs every test; nothing is assigned or inventoried per test, so a new test needs no registration.
-The real-binary REST/MCP/CLI contracts live in `tests/blackbox/` and use owned SQLite processes.
+The real-binary REST/MCP/CLI contracts live in `tests/blackbox/`; common suites own SQLite processes and the licensed tenant suite owns a PostgreSQL database.
 Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
-The package and Docker installability checks (about 90 minutes) are their own workflow, `packaging.yml`: a pull request runs it only when packaging inputs change, and `develop` always runs it.
+The package and Docker installability checks run in `packaging.yml`, selected by its path filters on pull requests and on pushes to `develop`.
 
 The integration tests are one binary rooted at `tests/mod.rs`.
 A test file sits at the same path as the source file it covers; not every source file has tests.
 
-- `tests/controllers/` — MCP tool routing, middleware, route inventory, OpenAPI assembly
-- `tests/data/` — configuration loading and validation (`config/`), typed settings, time, built-in templates
-- `tests/db.rs`, `tests/db/` — connection primitives and migrations
-- `tests/initializers/` — process-lifetime initializers
-- `tests/models/` — one file per table module, with sub-modules for backend-specific or sub-module coverage (`entity_entities/sqlite.rs`, `schema_schemas/metaschema/`)
-- `tests/requests/` — one file per REST feature, driven through `boot_request`
-- `tests/services/` — embedding providers
-- `tests/tasks/` — task commands, named after the task they run
-- `tests/workers/` — embedding sync, reindex, queue, dispatch, lifecycle, targets
-- `tests/integration/` — real child processes
-- `tests/ee/` — mirrors `ee/`, including `ee/requests/` (REST) and `ee/requests/mcp/` (one file per MCP tool group); compiled only with the `enterprise` feature
+- `tests/controllers/`: REST handlers, MCP tools, middleware, route inventory, OpenAPI assembly
+- `tests/data/`: configuration loading and validation (`config/`), typed settings, time, built-in templates
+- `tests/db.rs`, `tests/db/`: connection primitives and migrations
+- `tests/initializers/`: process-lifetime initializers
+- `tests/models/`: one file per table module, with sub-modules for backend-specific or sub-module coverage (`entity_entities/sqlite.rs`, `schema_schemas/metaschema/`)
+- `tests/requests/`: shared `boot_request` harness, queue/job harness (`jobs.rs`), and public-path fixtures
+- `tests/services/`: embedding providers
+- `tests/tasks/`: task commands, named after the task they run
+- `tests/workers/`: embedding sync, reindex, queue, dispatch, lifecycle, targets
+- `tests/integration/`: real child processes
+- `tests/ee/`: mirrors `ee/`, including REST and MCP tests under `ee/controllers/`; compiled only with the `enterprise` feature
 
 There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
 
@@ -125,9 +124,9 @@ if !require_sqlite_backend() { return; }
 ```
 
 Files that need a specific backend guard with it:
-- `tests/models/content_entities_sqlite.rs` — entity CRUD seeded via raw SQL
-- `tests/models/tenancy_sqlite.rs` — the SQLite tenancy cap
-- `tests/models/search.rs` — PostgreSQL-only query shapes, guarded the other way
+- `tests/models/content_entities_sqlite.rs`: entity CRUD seeded via raw SQL
+- `tests/models/tenancy_sqlite.rs`: the SQLite tenancy cap
+- `tests/models/search.rs`: PostgreSQL-only query shapes, guarded the other way
 
 
 ## `close_app_pools` (required)
@@ -158,7 +157,7 @@ A non-superuser role is required. A superuser bypasses RLS regardless of `FORCE`
 Provider routing tests use the request harness's owned throwaway database rather than clearing the database named by `DATABASE_URL` or `QUEUE_URL`.
 Process-local serial locks do not isolate separate CE and EE test processes.
 
-Queue tests (`tests/requests/queue.rs`) use separate temporary SQLite application and queue files for provider-specific inspection.
+Queue tests (`tests/workers/queue/`) use separate temporary SQLite application and queue files for provider-specific inspection.
 Teardown drains workers and closes queue and application pools before removing those files.
 
 ## Gate testing

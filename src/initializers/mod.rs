@@ -1,4 +1,4 @@
-//! Process-lifetime wiring that Loco runs at boot: logging, database, authentication, queue, embedding and rate limiting.
+//! Process-lifetime wiring: database pools, authentication, queue relay, embedding provider, rate limiting and the connection-load guard.
 
 pub(crate) mod auth;
 pub(crate) mod database;

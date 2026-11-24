@@ -159,13 +159,7 @@ impl Model {
         .insert(txn)
         .await
         .map_err(|error| {
-            if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-                YorishiroError::Conflict {
-                    message: "policy is already attached to this user".into(),
-                }
-            } else {
-                YorishiroError::Internal(error.into())
-            }
+            YorishiroError::conflict_on_unique(error, "policy is already attached to this user")
         })
     }
 

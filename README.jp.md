@@ -22,7 +22,7 @@ MCPを通してスキーマを作り、データを書き込み、必要な情�
 
 ## 始め方
 
-サーバー、ワーカー、スケジューラーをDocker Composeで起動します。
+サーバー、埋め込みワーカー、アプリケーションジョブ用ワーカー、スケジューラーをDocker Composeで起動します。
 [Docker Composeガイド](https://yorishiro-ai.github.io/wiki/ja/installation/docker-compose/)の構成を `compose.yml` に保存し、イメージの `<VERSION>` を使うリリースタグに置き換えてください。
 そのファイルのあるディレクトリで実行します。
 
@@ -39,7 +39,6 @@ Docker以外では、[パッケージのインストール](https://yorishiro-ai
 ## ドキュメント
 
 使い方、設定、運用手順は[Wiki](https://yorishiro-ai.github.io/wiki/ja/)にまとめています。
-READMEでは概要と始め方を案内し、詳しい説明はWikiで管理します。
 
 [インストール](https://yorishiro-ai.github.io/wiki/ja/installation/) · [設定](https://yorishiro-ai.github.io/wiki/ja/configuration/) · [埋め込み](https://yorishiro-ai.github.io/wiki/ja/configuration/embedding/) · [ワーカーとキュー](https://yorishiro-ai.github.io/wiki/ja/configuration/workers-and-queues/) · [MCPツール](https://yorishiro-ai.github.io/wiki/ja/reference/mcp-tools/)
 

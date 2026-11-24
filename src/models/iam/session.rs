@@ -2,6 +2,7 @@
 
 use sea_orm::{DatabaseConnection, DatabaseTransaction};
 
+use crate::error::ResultExt;
 use crate::error::YorishiroError;
 use crate::models::api_keys::{ApiKeyScope, AuthContext};
 use crate::models::iam::access::{
@@ -145,15 +146,9 @@ impl WorkspaceSession {
     /// # Errors
     /// Returns an internal error if either commit fails.
     pub async fn commit(self) -> Result<(), YorishiroError> {
-        self.txn
-            .commit()
-            .await
-            .map_err(|error| YorishiroError::Internal(error.into()))?;
+        self.txn.commit().await.internal()?;
         if let Some(authorization) = self.authorization {
-            authorization
-                .commit()
-                .await
-                .map_err(|error| YorishiroError::Internal(error.into()))?;
+            authorization.commit().await.internal()?;
         }
         Ok(())
     }
