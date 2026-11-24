@@ -231,6 +231,28 @@ pub(crate) async fn mcp_call(
     rpc_body(&response.text())
 }
 
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
+pub(crate) async fn call_tool(
+    request: &TestServer,
+    session: &str,
+    key: &str,
+    tool: &str,
+    arguments: Value,
+) -> Value {
+    mcp_call(
+        request,
+        session,
+        key,
+        2,
+        "tools/call",
+        json!({"name": tool, "arguments": arguments}),
+    )
+    .await
+}
+
 pub(crate) fn tool_inventory(response: &Value) -> &[Value] {
     response["result"]["tools"]
         .as_array()

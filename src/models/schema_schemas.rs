@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveValue, QueryOrder, QuerySelect, SqlErr, Statement};
+use sea_orm::{ActiveValue, QueryOrder, QuerySelect, Statement};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -613,15 +613,10 @@ pub async fn create_schema(
         ..Default::default()
     };
     let row = active.insert(conn).await.map_err(|err| {
-        if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-            YorishiroError::Conflict {
-                message: format!(
-                    "schema '{name}' version {next_version} already exists (concurrent create?)"
-                ),
-            }
-        } else {
-            YorishiroError::Internal(err.into())
-        }
+        YorishiroError::conflict_on_unique(
+            err,
+            format!("schema '{name}' version {next_version} already exists (concurrent create?)"),
+        )
     })?;
 
     // Inside the transaction: a workspace must not be left active by a schema insert that then rolls back.

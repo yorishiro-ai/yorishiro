@@ -56,7 +56,7 @@ pub async fn open_workspace_scope(
             .ok_or_else(|| Error::Message(format!("workspace {workspace_id} not found")))?;
     db::begin_workspace(ctx, workspace.tenant_id, workspace_id)
         .await
-        .map_err(|error| Error::Message(error.to_string()))
+        .map_err(Error::wrap)
 }
 
 async fn open_workspace_write_scope(
@@ -69,7 +69,7 @@ async fn open_workspace_write_scope(
             .internal()?;
     db::begin_workspace_write(ctx, tenant_id, workspace_id)
         .await
-        .map_err(|error| Error::Message(error.to_string()))
+        .map_err(Error::wrap)
 }
 
 async fn inference_snapshot(
@@ -86,7 +86,7 @@ async fn inference_snapshot(
     // remains the admission fence on both PostgreSQL and SQLite.
     db::lock_for_update(&schema_txn, &format!("infer-fill:{}", args.workspace_id))
         .await
-        .map_err(|e| Error::Message(e.to_string()))?;
+        .map_err(Error::wrap)?;
 
     let active =
         schema_schemas::get_active_schema(&schema_txn, args.workspace_id, &args.schema_name)
@@ -113,9 +113,7 @@ async fn perform_infer_fill(
     job_id: Uuid,
     attempt: i32,
 ) -> Result<(i64, i64)> {
-    check_actor(ctx, args)
-        .await
-        .map_err(|error| Error::Message(error.to_string()))?;
+    check_actor(ctx, args).await.map_err(Error::wrap)?;
     let config = workspace_llm_keys::get(&ctx.db, args.workspace_id)
         .await
         .internal()?
@@ -124,7 +122,7 @@ async fn perform_infer_fill(
     let (active, rows) = inference_snapshot(ctx, args).await?;
 
     let timeouts = crate::data::settings::configured(ctx)
-        .map_err(|error| Error::Message(error.to_string()))?
+        .map_err(Error::wrap)?
         .http_timeouts;
     let client = InferenceClient::with_timeouts(config, timeouts);
 
@@ -149,9 +147,7 @@ async fn perform_infer_fill(
             continue;
         }
 
-        check_actor(ctx, args)
-            .await
-            .map_err(|error| Error::Message(error.to_string()))?;
+        check_actor(ctx, args).await.map_err(Error::wrap)?;
         let answers = client
             .propose_fields(&row.data, &missing)
             .await
@@ -175,7 +171,7 @@ async fn perform_infer_fill(
             crate::models::iam::policy::Action::InferenceCreate,
         )
         .await
-        .map_err(|error| Error::Message(error.to_string()))?;
+        .map_err(Error::wrap)?;
         schema_schemas::lock_version(&proposal_txn, args.workspace_id, &args.schema_name)
             .await
             .internal()?;
@@ -200,7 +196,7 @@ async fn perform_infer_fill(
                     .map(|(field, value)| (entity_id, field, value)),
             )
             .await
-            .map_err(|e| Error::Message(e.to_string()))?;
+            .map_err(Error::wrap)?;
 
             if written == 0 {
                 skipped += 1;
@@ -442,10 +438,10 @@ async fn defer_and_enqueue(
     let tenant_id =
         crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, args.workspace_id)
             .await
-            .map_err(|error| Error::Message(error.to_string()))?;
+            .map_err(Error::wrap)?;
     let txn = db::begin_workspace(ctx, tenant_id, args.workspace_id)
         .await
-        .map_err(|error| Error::Message(error.to_string()))?;
+        .map_err(Error::wrap)?;
     if let Some(attempt) = attempt {
         if retry_inference_job {
             inference_jobs::retry(&txn, args.job_id, error, attempt)
@@ -459,11 +455,11 @@ async fn defer_and_enqueue(
             error,
         )
         .await
-        .map_err(|error| Error::Message(error.to_string()))?;
+        .map_err(Error::wrap)?;
     } else {
         crate::models::queue_job_lifecycles::Entity::defer(&txn, lifecycle_id, None, error)
             .await
-            .map_err(|error| Error::Message(error.to_string()))?;
+            .map_err(Error::wrap)?;
     }
     let target = crate::workers::target::WorkerTarget::for_job(
         &ctx.db,
@@ -471,9 +467,8 @@ async fn defer_and_enqueue(
         args.workspace_id,
     )
     .await
-    .map_err(|error| Error::Message(error.to_string()))?;
-    let mut payload =
-        serde_json::to_value(args).map_err(|error| Error::Message(error.to_string()))?;
+    .map_err(Error::wrap)?;
+    let mut payload = serde_json::to_value(args).map_err(Error::wrap)?;
     if let serde_json::Value::Object(fields) = &mut payload {
         fields.insert(
             "lifecycle_id".into(),
@@ -489,10 +484,8 @@ async fn defer_and_enqueue(
         Some(vec![target.job_tag()]),
     )
     .await
-    .map_err(|error| Error::Message(error.to_string()))?;
-    txn.commit()
-        .await
-        .map_err(|error| Error::Message(error.to_string()))
+    .map_err(Error::wrap)?;
+    txn.commit().await.map_err(Error::wrap)
 }
 
 /// Enqueue an infer-fill job for the given workspace and schema name.

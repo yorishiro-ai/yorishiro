@@ -159,7 +159,7 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
             request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);
             let id: Uuid = if explicit_deny {
-                let queued = crate::controllers::iam::iam_mcp_call(&request, &session, &key.plaintext,
+                let queued = crate::controllers::mcp::call_tool(&request, &session, &key.plaintext,
                     "import_jsonl", json!({"jsonl":jsonl})).await;
                 assert_ne!(queued["result"]["isError"], true, "{queued}");
                 let queued: serde_json::Value = serde_json::from_str(queued["result"]["content"][0]["text"].as_str().unwrap()).unwrap();

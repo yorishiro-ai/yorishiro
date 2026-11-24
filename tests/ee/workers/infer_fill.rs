@@ -342,7 +342,7 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
             crate::requests::fixtures::TenantArgs::default(),
         )
         .await;
-        let _entity_id = crate::ee::controllers::inference::create_entity(&request, &setup).await;
+        let _entity_id = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let first_update = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
@@ -529,7 +529,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
                 crate::requests::fixtures::TenantArgs::default(),
             )
             .await;
-            crate::ee::controllers::inference::create_entity(&request, &setup).await;
+            crate::requests::fixtures::rest_create_entity(&request, &setup).await;
             // A second version leaves the entity on an outdated schema, which is what infer-fill walks.
             let next = request
                 .post("/api/schemas")
@@ -778,7 +778,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
     let (llm, entered, release) = gated_llm().await;
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let setup = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
-        let entity_id = crate::ee::controllers::inference::create_entity(&request, &setup).await;
+        let entity_id = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let response = request.post("/api/schemas")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({"name":"note", "entity_types":{"note":{"fields":{

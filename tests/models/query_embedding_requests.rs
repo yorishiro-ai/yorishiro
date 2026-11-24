@@ -43,7 +43,7 @@ async fn a_disabled_tenant_cannot_publish_a_query_embedding() {
         )
         .await
         .unwrap();
-        // Fault injection: a real disable also fails pending requests, so only the bare flag keeps this one pending.
+        // Direct write (c): a real disable also fails pending requests, so only the bare flag keeps this one pending.
         {
             use sea_orm::{ActiveModelTrait, ActiveValue::Set};
             yorishiro::models::tenant_tenants::ActiveModel {

@@ -15,6 +15,7 @@ async fn mcp_authentication_database_failure_is_redacted() {
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let session = initialize(&request).await;
+        // Direct write (c): fault injection breaking the authentication lookup in this isolated test database.
         ctx.db
             .execute_unprepared("ALTER TABLE api_keys RENAME TO private_auth_diagnostic")
             .await

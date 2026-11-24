@@ -144,6 +144,7 @@ async fn unavailable_workspace_does_not_spend_the_search_budget_of_another() {
         response.assert_status(StatusCode::CREATED);
         let unavailable: uuid::Uuid =
             serde_json::from_value(response.json::<serde_json::Value>()["id"].clone()).unwrap();
+        // Direct write (c): holds the workspace in the reindexing state, which a real reindex leaves as soon as it finishes.
         yorishiro::models::workspace_workspaces::ActiveModel {
             id: Set(unavailable),
             embedding_reindexing: Set(true),

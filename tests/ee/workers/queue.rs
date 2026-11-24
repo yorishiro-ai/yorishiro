@@ -153,6 +153,7 @@ async fn accepted_enqueue_with_failed_provider_id_record_keeps_the_outbox_row() 
         return;
     }
     with_sqlite_queue(|ctx, pool, workspace_id| async move {
+        // Direct write (c): deterministic fault injection failing the provider ID write after the provider accepted the job.
         ctx.db
             .execute_unprepared(
                 "CREATE TRIGGER fail_provider_job_id BEFORE UPDATE OF provider_job_id ON queue_job_lifecycles \

@@ -161,18 +161,6 @@ pub fn is_workspace_busy(error: &YorishiroError) -> bool {
     matches!(error, YorishiroError::Conflict { message } if message == WORKSPACE_BUSY)
 }
 
-fn busy_or_internal(error: sea_orm::DbErr) -> YorishiroError {
-    if matches!(
-        error.sql_err(),
-        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-    ) {
-        return YorishiroError::Conflict {
-            message: WORKSPACE_BUSY.into(),
-        };
-    }
-    YorishiroError::Internal(error.into())
-}
-
 /// Claims a queued job exactly once.
 /// A running job is never reclaimed because its worker may still be executing an inference.
 ///
@@ -199,7 +187,10 @@ pub(crate) async fn claim_attempt(
     if let Some(attempt) = expected_attempt {
         update = update.filter(Column::Attempt.eq(attempt));
     }
-    let result = update.exec(conn).await.map_err(busy_or_internal)?;
+    let result = update
+        .exec(conn)
+        .await
+        .map_err(|error| YorishiroError::conflict_on_unique(error, WORKSPACE_BUSY))?;
     if result.rows_affected == 1 {
         return Ok(true);
     }
@@ -250,7 +241,7 @@ pub async fn reconcile_attempt(
             .filter(Column::Attempt.eq(target_attempt))
             .exec(&txn)
             .await
-            .map_err(busy_or_internal)?;
+            .map_err(|error| YorishiroError::conflict_on_unique(error, WORKSPACE_BUSY))?;
         txn.commit().await.internal()?;
         return Ok(result.rows_affected == 1);
     }
@@ -275,7 +266,7 @@ pub async fn reconcile_attempt(
         ]))
         .exec(&txn)
         .await
-        .map_err(busy_or_internal)?;
+        .map_err(|error| YorishiroError::conflict_on_unique(error, WORKSPACE_BUSY))?;
     txn.commit().await.internal()?;
     Ok(result.rows_affected == 1)
 }

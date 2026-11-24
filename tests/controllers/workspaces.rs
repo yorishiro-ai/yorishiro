@@ -77,20 +77,13 @@ async fn plan_workspace_quota_expires_without_erasing_manual_caps() {
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn disabled_plan_policy_ignores_free_quota_but_keeps_manual_cap() {
-    use std::sync::Arc;
-    use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
     let overrides = [("initializers.plan_policy_enabled", "false".into())];
     crate::requests::boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
                 .await;
-        ctx.shared_store
-            .insert(Arc::new(LicenceState::licensed(LicenceClaims {
-                sub: "quota-disabled".into(),
-                plan: "free".into(),
-                exp: chrono::Utc::now().timestamp() + 3600,
-            })));
+        crate::requests::fixtures::install_licence(&ctx, "free");
         request
             .post("/api/workspaces")
             .add_header("Authorization", format!("Bearer {tenant_key}"))

@@ -40,7 +40,7 @@ pub(crate) fn app_version() -> String {
 pub(crate) fn load_config(env: &Environment) -> Result<Config> {
     let mut config = crate::data::config::load(env)?;
     let start = crate::workers::start::worker_start_from_args(std::env::args_os())
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(loco_rs::Error::wrap)?;
     crate::workers::start::configure_start(&mut config, start);
     Ok(config)
 }

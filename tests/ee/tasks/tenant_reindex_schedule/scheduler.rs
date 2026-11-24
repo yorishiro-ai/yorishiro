@@ -149,23 +149,12 @@ fn at(offset: i64) -> chrono::DateTime<Utc> {
     Utc.timestamp_opt(TICK + offset, 0).single().unwrap()
 }
 
-fn install_active_licence(ctx: &loco_rs::app::AppContext) {
-    use std::sync::Arc;
-    use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-    ctx.shared_store
-        .insert(Arc::new(LicenceState::licensed(LicenceClaims {
-            sub: "scheduler-test".into(),
-            plan: "pro".into(),
-            exp: Utc::now().timestamp() + 3600,
-        })));
-}
-
 #[tokio::test]
 async fn disabled_tenant_retains_schedule_and_history_without_new_dispatches() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
-        install_active_licence(&ctx);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
         let tenant = crate::requests::fixtures::TestTenant::create(
             &request,
             &ctx,
@@ -228,7 +217,7 @@ async fn postgres_tick_waits_for_disable_and_rechecks_tenant_activity() {
         use sea_orm::{EntityTrait, QuerySelect, TransactionTrait};
         use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
-        install_active_licence(&ctx);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
         let tenant = crate::requests::fixtures::TestTenant::create(
             &request,
             &ctx,
@@ -385,7 +374,7 @@ async fn sqlite_task_rolls_back_schedule_when_dispatch_fails() {
     use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-    install_active_licence(&ctx);
+    crate::requests::fixtures::install_licence(&ctx, "pro");
     if !crate::require_sqlite_backend() { return; }
 
 
@@ -485,7 +474,7 @@ async fn intervals_that_cannot_be_scheduled_are_refused() {
 async fn a_schedule_advances_by_its_own_interval() {
     use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        install_active_licence(&ctx);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
 
         let crate::requests::fixtures::TestTenant { tenant_id, .. } =
             crate::requests::fixtures::TestTenant::create(
@@ -534,11 +523,11 @@ async fn a_schedule_advances_by_its_own_interval() {
 #[tokio::test]
 async fn licensed_task_ticks_schedule_while_unlicensed_task_only_scans_mismatches() {
     use std::sync::Arc;
-    use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+    use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
     use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
 
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        install_active_licence(&ctx);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
         let crate::requests::fixtures::TestTenant { tenant_id, .. } =
             crate::requests::fixtures::TestTenant::create(
                 &request,
@@ -554,12 +543,7 @@ async fn licensed_task_ticks_schedule_while_unlicensed_task_only_scans_mismatche
             .scheduled_for
             .unwrap();
 
-        ctx.shared_store
-            .insert(Arc::new(LicenceState::licensed(LicenceClaims {
-                sub: "scheduler-test".into(),
-                plan: "pro".into(),
-                exp: Utc::now().timestamp() + 3600,
-            })));
+        crate::requests::fixtures::install_licence(&ctx, "pro");
         TenantReindexScheduler
             .run_at(&ctx, &loco_rs::task::Vars::default(), Utc::now())
             .await
@@ -597,7 +581,7 @@ async fn invalid_stored_intervals_are_rejected_without_advancement() {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use yorishiro::edition::ee::models::tenant_reindex_schedules::{get, set};
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        install_active_licence(&ctx);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
 
         let crate::requests::fixtures::TestTenant { tenant_id, .. } =
             crate::requests::fixtures::TestTenant::create(

@@ -75,19 +75,11 @@ async fn unlicensed_policy_bypasses_plan_and_workspace_resolution() {
 #[cfg(feature = "enterprise")]
 #[tokio::test]
 async fn disabled_policy_bypasses_resolution_even_with_valid_licence() {
-    use std::sync::Arc;
-    use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
-
     let overrides = [("initializers.plan_policy_enabled", "false".into())];
     crate::requests::boot_request_with::<yorishiro::App, _, _>(
         &overrides,
         |_request, ctx| async move {
-            ctx.shared_store
-                .insert(Arc::new(LicenceState::licensed(LicenceClaims {
-                    sub: "queue-policy".into(),
-                    plan: "pro".into(),
-                    exp: chrono::Utc::now().timestamp() + 3600,
-                })));
+            crate::requests::fixtures::install_licence(&ctx, "pro");
             let policy = concurrency_for(&ctx, uuid::Uuid::new_v4(), WorkerClass::Official)
                 .await
                 .unwrap();
@@ -115,12 +107,7 @@ async fn enabled_policy_rechecks_licence_before_each_admission() {
             )
             .await;
             let now = chrono::Utc::now().timestamp();
-            ctx.shared_store
-                .insert(Arc::new(LicenceState::licensed(LicenceClaims {
-                    sub: "queue-policy".into(),
-                    plan: "pro".into(),
-                    exp: now + 3600,
-                })));
+            crate::requests::fixtures::install_licence(&ctx, "pro");
             let active = concurrency_for(&ctx, fixture.workspace_id, WorkerClass::Official)
                 .await
                 .unwrap();

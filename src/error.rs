@@ -540,7 +540,7 @@ pub struct ValidationDetail {
 
 impl YorishiroError {
     /// A unique-constraint violation becomes a conflict with `message`; any other database error is internal.
-    pub(crate) fn conflict_on_unique(error: sea_orm::DbErr, message: &str) -> Self {
+    pub(crate) fn conflict_on_unique(error: sea_orm::DbErr, message: impl Into<String>) -> Self {
         if matches!(
             error.sql_err(),
             Some(sea_orm::SqlErr::UniqueConstraintViolation(_))

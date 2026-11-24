@@ -81,20 +81,7 @@ impl Model {
         if !crate::models::tenant_memberships::is_member(&txn, actor.tenant_id, user_id).await? {
             return Err(YorishiroError::not_found("tenant user was not found"));
         }
-        Self::add(&txn, actor.tenant_id, group_id, user_id)
-            .await
-            .map_err(|error| match error {
-                YorishiroError::Internal(ref source)
-                    if source.downcast_ref::<DbErr>().is_some_and(|e| {
-                        matches!(e.sql_err(), Some(SqlErr::UniqueConstraintViolation(_)))
-                    }) =>
-                {
-                    YorishiroError::Conflict {
-                        message: "group association already exists".into(),
-                    }
-                }
-                other => other,
-            })?;
+        Self::add(&txn, actor.tenant_id, group_id, user_id).await?;
         crate::models::iam_audit_events::record(
             &txn,
             actor,
@@ -169,7 +156,9 @@ impl Model {
         }
         .insert(txn)
         .await
-        .internal()
+        .map_err(|error| {
+            YorishiroError::conflict_on_unique(error, "group association already exists")
+        })
     }
 
     pub(crate) async fn remove(

@@ -200,58 +200,6 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
     .await;
 }
 
-/// Creates one schema and one entity for the infer-fill request tests.
-#[expect(
-    clippy::future_not_send,
-    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
-)]
-pub(crate) async fn create_entity(request: &loco_rs::TestServer, setup: &TestTenant) -> Uuid {
-    let create_schema = request
-        .post("/api/schemas")
-        .add_header("Authorization", format!("Bearer {}", setup.api_key))
-        .json(&serde_json::json!({
-            "name": "note",
-            "entity_types": {
-                "note": {
-                    "fields": {
-                        "title": { "type": "string", "required": true },
-                        "summary": { "type": "string" }
-                    }
-                }
-            }
-        }))
-        .await;
-    assert_eq!(
-        create_schema.status_code(),
-        201,
-        "response: {:?}",
-        create_schema.text()
-    );
-
-    let create_entity = request
-        .post("/api/entities")
-        .add_header("Authorization", format!("Bearer {}", setup.api_key))
-        .json(&serde_json::json!({
-            "schema_name": "note",
-            "entity_type": "note",
-            "data": { "title": "original" }
-        }))
-        .await;
-    assert_eq!(
-        create_entity.status_code(),
-        201,
-        "response: {:?}",
-        create_entity.text()
-    );
-    let entity_id: Uuid = create_entity.json::<serde_json::Value>()["id"]
-        .as_str()
-        .unwrap()
-        .parse()
-        .unwrap();
-
-    entity_id
-}
-
 /// A proposal remains separate from the entity until an explicit confirmation.
 #[tokio::test]
 #[expect(
@@ -264,7 +212,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             return;
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let entity = create_entity(&request, &setup).await;
+        let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
 
         let job_id = Uuid::new_v4();
         inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
@@ -465,7 +413,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
 async fn invalid_proposals_do_not_leave_a_snapshot() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let entity = create_entity(&request, &setup).await;
+        let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
 
         let job_id = Uuid::new_v4();
         inference_jobs::create(&ctx.db, job_id, setup.workspace_id, "note")
@@ -565,7 +513,7 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
         }
         let session = crate::controllers::mcp::initialize(&request).await;
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let entity = create_entity(&request, &setup).await;
+        let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let rejected_job = Uuid::new_v4();
         let discarded_job = Uuid::new_v4();
         create_completed_proposal(
@@ -705,7 +653,7 @@ async fn proposals_cannot_be_listed_by_another_tenant() {
             return;
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let entity = create_entity(&request, &setup).await;
+        let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let rejected_job = Uuid::new_v4();
         create_completed_proposal(
             &ctx,
@@ -746,7 +694,7 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
     }
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let entity = create_entity(&request, &setup).await;
+        let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let db = ctx.shared_store.get::<DbHandle>().unwrap().clone();
 
         for terminal_action in ["reject", "discard"] {
@@ -856,7 +804,7 @@ async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
             return;
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let entity = create_entity(&request, &setup).await;
+        let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let queued_job = Uuid::new_v4();
         create_pending_proposal(&ctx, &setup, entity, queued_job).await;
         let queued = request
@@ -1073,7 +1021,7 @@ async fn infer_fill_dispatch_failure_rolls_back_job() {
             .await;
         assert_eq!(put_key.status_code(), StatusCode::NO_CONTENT);
 
-        // Database fault injection is isolated from other tests and uses real enqueue.
+        // Direct write (c): deterministic fault injection refusing every dispatch, isolated from other tests and using real enqueue.
         let fault = match ctx.db.get_database_backend() {
             DbBackend::Postgres => "ALTER TABLE queue_job_dispatch_outbox ADD CONSTRAINT refuse_test_dispatch CHECK (false)",
             DbBackend::Sqlite => "CREATE TRIGGER refuse_test_dispatch BEFORE INSERT ON queue_job_dispatch_outbox BEGIN SELECT RAISE(ABORT, 'refuse_test_dispatch'); END",
@@ -1178,7 +1126,7 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
         }
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert_ne!(setup.tenant_id, setup.workspace_id);
-        create_entity(&request, &setup).await;
+        crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let key = request
             .put("/api/workspace/llm-key")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))

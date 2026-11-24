@@ -3,53 +3,13 @@ use axum::http::StatusCode;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait, TransactionTrait};
 use yorishiro::App;
 
-#[expect(
-    clippy::future_not_send,
-    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
-)]
-pub(crate) async fn iam_mcp_call(
-    request: &loco_rs::TestServer,
-    session: &str,
-    key: &str,
-    tool: &str,
-    arguments: serde_json::Value,
-) -> serde_json::Value {
-    crate::controllers::mcp::mcp_call(
-        request,
-        session,
-        key,
-        2,
-        "tools/call",
-        serde_json::json!({"name": tool, "arguments": arguments}),
-    )
-    .await
-}
-
-#[expect(
-    clippy::future_not_send,
-    reason = "the request harness uses thread-local HTTP futures"
-)]
-async fn create_workspace(request: &loco_rs::TestServer, api_key: &str) -> uuid::Uuid {
-    let response = request
-        .post("/api/workspaces")
-        .add_header("Authorization", format!("Bearer {api_key}"))
-        .json(&serde_json::json!({"name": "default"}))
-        .await;
-    response.assert_status(StatusCode::CREATED);
-    response.json::<serde_json::Value>()["id"]
-        .as_str()
-        .unwrap()
-        .parse()
-        .unwrap()
-}
-
 #[tokio::test]
 async fn unselected_lists_do_not_expose_workspaces_without_iam_grants() {
     use crate::requests::fixtures;
     boot_request_with::<App, _, _>(&[], |request, ctx| async move {
         let tenant = fixtures::TestTenant::create(&request, &ctx, fixtures::TenantArgs::default()).await;
         let root = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let other_workspace = create_workspace(&request, &root).await;
+        let other_workspace = fixtures::rest_create_workspace(&request, &root).await;
         for workspace in [tenant.workspace_id, other_workspace] {
             request.post("/api/schemas")
                 .add_header("Authorization", format!("Bearer {root}"))
@@ -141,7 +101,7 @@ async fn entity_creation_selects_the_only_authorized_workspace() {
             .json(&input).await;
         created.assert_status(StatusCode::CREATED);
         assert_eq!(created.json::<serde_json::Value>()["workspace_id"], tenant.workspace_id.to_string());
-        create_workspace(&request, &key).await;
+        crate::requests::fixtures::rest_create_workspace(&request, &key).await;
         request.post("/api/entities")
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&input).await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
@@ -164,7 +124,7 @@ async fn relation_operations_resolve_the_source_and_relation_workspaces() {
             response.assert_status(StatusCode::CREATED);
             ids.push(response.json::<serde_json::Value>()["id"].clone());
         }
-        create_workspace(&request, &key).await;
+        fixtures::rest_create_workspace(&request, &key).await;
         let relation = request.post("/api/relations").add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({"source_id":ids[0],"target_id":ids[1],"relation_type":"references","properties":{}})).await;
         relation.assert_status(StatusCode::CREATED);
@@ -213,7 +173,7 @@ async fn schema_ids_resolve_the_workspace_and_creation_refuses_ambiguity() {
             .add_header("Authorization", format!("Bearer {denied}"))
             .await
             .assert_status(StatusCode::NOT_FOUND);
-        let other = create_workspace(&request, &key).await;
+        let other = fixtures::rest_create_workspace(&request, &key).await;
         request
             .get(&format!("/api/schemas/{id}"))
             .add_header("Authorization", format!("Bearer {key}"))
@@ -324,7 +284,7 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
             .await
             .assert_status_ok();
         let session = crate::controllers::mcp::initialize(&request).await;
-        let result = iam_mcp_call(
+        let result = crate::controllers::mcp::call_tool(
             &request,
             &session,
             &root,
@@ -334,7 +294,7 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
         .await;
         assert_ne!(result["result"]["isError"], true, "{result}");
         assert!(result.get("error").is_none(), "{result}");
-        let result = iam_mcp_call(
+        let result = crate::controllers::mcp::call_tool(
             &request,
             &session,
             &root,
@@ -349,7 +309,7 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
         let delegated =
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator)
                 .await;
-        let result = iam_mcp_call(
+        let result = crate::controllers::mcp::call_tool(
             &request,
             &session,
             &delegated,
@@ -411,7 +371,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert_eq!(response.status_code(), 201, "{}", response.text());
             let body: serde_json::Value = response.json();
             let api_key = body["api_key"].as_str().unwrap().to_string();
-            let workspace_id = create_workspace(&request, &api_key).await;
+            let workspace_id = crate::requests::fixtures::rest_create_workspace(&request, &api_key).await;
 
             let group = request
                 .post("/api/iam/groups")
@@ -482,7 +442,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             );
 
             let session = crate::controllers::mcp::initialize(&request).await;
-            let audit_mcp = iam_mcp_call(
+            let audit_mcp = crate::controllers::mcp::call_tool(
                 &request,
                 &session,
                 &audit_key.plaintext,
@@ -505,7 +465,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 "resources":[{"type":"all_workspaces","tenant_id":body["tenant_id"]}]
             }]}});
             let created =
-                iam_mcp_call(&request, &session, &api_key, "create_iam_policy", policy).await;
+                crate::controllers::mcp::call_tool(&request, &session, &api_key, "create_iam_policy", policy).await;
             assert_ne!(created["result"]["isError"], true, "{created}");
             let policy_result: serde_json::Value =
                 serde_json::from_str(created["result"]["content"][0]["text"].as_str().unwrap())
@@ -529,7 +489,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .add_header("Authorization", format!("Bearer {api_key}"))
                 .json(&serde_json::json!({"name":"rest-rollback"}))
                 .await;
-            let failed_mcp = iam_mcp_call(
+            let failed_mcp = crate::controllers::mcp::call_tool(
                 &request,
                 &session,
                 &api_key,
@@ -618,7 +578,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             )
             .await
             .unwrap();
-            let denied = iam_mcp_call(
+            let denied = crate::controllers::mcp::call_tool(
                 &request,
                 &session,
                 &scoped_key.plaintext,
@@ -669,7 +629,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .json(&serde_json::json!({"name":"renamed"}))
                 .await
                 .assert_status_ok();
-            let deleted = iam_mcp_call(
+            let deleted = crate::controllers::mcp::call_tool(
                 &request,
                 &session,
                 &api_key,
@@ -734,7 +694,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             request.get("/api/iam/groups")
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .await.assert_status(StatusCode::FORBIDDEN);
-            let denied = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let denied = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "list_iam_policies", serde_json::json!({})).await;
             assert_eq!(denied["result"]["isError"], true, "{denied}");
             let attachment = format!("/api/iam/users/{}/policies/{policy_id}", user.id);
@@ -743,7 +703,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .add_header("Authorization", format!("Bearer {api_key}"))
                 .await
                 .assert_status(StatusCode::NO_CONTENT);
-            let allowed = iam_mcp_call(
+            let allowed = crate::controllers::mcp::call_tool(
                 &request,
                 &session,
                 &user_key.plaintext,
@@ -759,11 +719,11 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let inventory = inventory.json::<serde_json::Value>();
             assert_eq!(inventory.as_array().unwrap().len(), 1);
             assert_eq!(inventory[0]["id"], workspace_id.to_string());
-            let mcp_inventory = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let mcp_inventory = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "list_workspaces", serde_json::json!({})).await;
             let mcp_inventory: serde_json::Value = serde_json::from_str(mcp_inventory["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
             assert_eq!(inventory, mcp_inventory);
-            let discovered = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let discovered = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "discover_workspaces", serde_json::json!({})).await;
             let discovered: serde_json::Value = serde_json::from_str(discovered["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
             assert_eq!(discovered.as_array().unwrap().len(), 1);
@@ -771,26 +731,26 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             request.get("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))
                 .await.assert_status(StatusCode::FORBIDDEN);
-            let bound_list = iam_mcp_call(&request, &session, &scoped_key.plaintext,
+            let bound_list = crate::controllers::mcp::call_tool(&request, &session, &scoped_key.plaintext,
                 "list_workspaces", serde_json::json!({})).await;
             assert_eq!(bound_list["result"]["isError"], true, "{bound_list}");
             let detail = request.get(&workspace_path)
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext)).await;
             detail.assert_status_ok();
-            let mcp_detail = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let mcp_detail = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "get_workspace", serde_json::json!({"workspace_id":workspace_id})).await;
             let mcp_detail: serde_json::Value = serde_json::from_str(mcp_detail["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
             assert_eq!(detail.json::<serde_json::Value>(), mcp_detail);
             request.get(&format!("/api/workspaces/{second_id}"))
                 .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))
                 .await.assert_status(StatusCode::FORBIDDEN);
-            let bound_detail = iam_mcp_call(&request, &session, &scoped_key.plaintext,
+            let bound_detail = crate::controllers::mcp::call_tool(&request, &session, &scoped_key.plaintext,
                 "get_workspace", serde_json::json!({"workspace_id":second_id})).await;
             assert_eq!(bound_detail["result"]["isError"], true, "{bound_detail}");
             request.put(&workspace_path)
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"name":"IAM workspace"})).await.assert_status_ok();
-            let updated_workspace = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let updated_workspace = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "update_workspace", serde_json::json!({"workspace_id":workspace_id,"name":"MCP IAM workspace"})).await;
             assert_ne!(updated_workspace["result"]["isError"], true, "{updated_workspace}");
             request.put(&workspace_path)
@@ -800,7 +760,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             request.put(&format!("/api/workspaces/{second_id}"))
                 .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))
                 .json(&serde_json::json!({"name":"binding-denied"})).await.assert_status(StatusCode::FORBIDDEN);
-            let bound = iam_mcp_call(&request, &session, &scoped_key.plaintext,
+            let bound = crate::controllers::mcp::call_tool(&request, &session, &scoped_key.plaintext,
                 "update_workspace", serde_json::json!({"workspace_id":second_id,"name":"binding-denied"})).await;
             assert_eq!(bound["result"]["isError"], true, "{bound}");
             request.post("/api/template-library")
@@ -808,7 +768,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .json(&template).await.assert_status(StatusCode::CREATED);
             let mut mcp_template = template.clone();
             mcp_template["name"] = serde_json::json!("iam-mcp-template");
-            let created_template = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let created_template = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "create_template_library_item", mcp_template.clone()).await;
             assert_ne!(created_template["result"]["isError"], true, "{created_template}");
             let created_template: serde_json::Value = serde_json::from_str(
@@ -817,7 +777,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             request.put(&format!("/api/template-library/{template_id}"))
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"description":"IAM update"})).await.assert_status_ok();
-            let updated = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let updated = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "update_template_library_item", serde_json::json!({"id":template_id,"description":"MCP IAM update"})).await;
             assert_ne!(updated["result"]["isError"], true, "{updated}");
             let forked = request.post(&format!("/api/template-library/{template_id}/fork"))
@@ -828,20 +788,20 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             request.delete(&format!("/api/template-library/{fork_id}"))
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .await.assert_status(StatusCode::NO_CONTENT);
-            let forked = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let forked = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "fork_template_library_item", serde_json::json!({"id":template_id,"name":"iam-mcp-fork"})).await;
             assert_ne!(forked["result"]["isError"], true, "{forked}");
             let forked: serde_json::Value = serde_json::from_str(forked["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-            let deleted = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let deleted = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "delete_template_library_item", serde_json::json!({"id":forked["id"]})).await;
             assert_ne!(deleted["result"]["isError"], true, "{deleted}");
             request.post("/api/template-library")
                 .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))
                 .json(&template).await.assert_status(StatusCode::FORBIDDEN);
-            let bound = iam_mcp_call(&request, &session, &scoped_key.plaintext,
+            let bound = crate::controllers::mcp::call_tool(&request, &session, &scoped_key.plaintext,
                 "create_template_library_item", mcp_template.clone()).await;
             assert_eq!(bound["result"]["isError"], true, "{bound}");
-            let detached = iam_mcp_call(
+            let detached = crate::controllers::mcp::call_tool(
                 &request,
                 &session,
                 &api_key,
@@ -861,7 +821,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let member_path = format!("/api/iam/groups/{group_id}/members/{}", user.id);
             request.put(&member_path).add_header("Authorization", format!("Bearer {api_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);
-            let attached = iam_mcp_call(&request, &session, &api_key, "attach_group_policy",
+            let attached = crate::controllers::mcp::call_tool(&request, &session, &api_key, "attach_group_policy",
                 serde_json::json!({"group_id":group_id,"policy_id":policy_id})).await;
             assert_ne!(attached["result"]["isError"], true, "{attached}");
             for (path, tool, args) in [
@@ -876,7 +836,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 let rest = request.get(&path)
                     .add_header("Authorization", format!("Bearer {}", user_key.plaintext)).await;
                 rest.assert_status_ok();
-                let mcp = iam_mcp_call(&request, &session, &user_key.plaintext, tool, args).await;
+                let mcp = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext, tool, args).await;
                 assert_ne!(mcp["result"]["isError"], true, "{mcp}");
                 let mcp: serde_json::Value = serde_json::from_str(mcp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
                 assert_eq!(rest.json::<serde_json::Value>(), mcp, "{tool}");
@@ -902,7 +862,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             request.get(&format!("/api/workspaces/{}", foreign_workspace.id))
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .await.assert_status(StatusCode::NOT_FOUND);
-            let foreign_detail = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let foreign_detail = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "get_workspace", serde_json::json!({"workspace_id":foreign_workspace.id})).await;
             assert_eq!(foreign_detail["result"]["isError"], true, "{foreign_detail}");
             let inventory = request.get("/api/workspaces")
@@ -912,7 +872,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             request.get(&format!("/api/iam/groups/{}", foreign_group.id))
                 .add_header("Authorization", format!("Bearer {api_key}"))
                 .await.assert_status(StatusCode::NOT_FOUND);
-            let foreign = iam_mcp_call(&request, &session, &api_key, "list_iam_group_members",
+            let foreign = crate::controllers::mcp::call_tool(&request, &session, &api_key, "list_iam_group_members",
                 serde_json::json!({"group_id":foreign_group.id})).await;
             assert_eq!(foreign["result"]["isError"], true, "{foreign}");
             let groups = request.get("/api/iam/groups")
@@ -922,7 +882,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             request.post("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"name":"IAM created"})).await.assert_status(StatusCode::CREATED);
-            let created_workspace = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let created_workspace = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "create_workspace", serde_json::json!({"name":"MCP IAM created"})).await;
             assert_ne!(created_workspace["result"]["isError"], true, "{created_workspace}");
             let created_workspace: serde_json::Value = serde_json::from_str(created_workspace["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -930,13 +890,13 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             request.delete(&format!("/api/workspaces/{delete_id}"))
                 .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))
                 .await.assert_status(StatusCode::FORBIDDEN);
-            let bound_delete = iam_mcp_call(&request, &session, &scoped_key.plaintext,
+            let bound_delete = crate::controllers::mcp::call_tool(&request, &session, &scoped_key.plaintext,
                 "delete_workspace", serde_json::json!({"workspace_id":delete_id})).await;
             assert_eq!(bound_delete["result"]["isError"], true, "{bound_delete}");
             request.post("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {}", scoped_key.plaintext))
                 .json(&serde_json::json!({"name":"bound-denied"})).await.assert_status(StatusCode::FORBIDDEN);
-            let bound = iam_mcp_call(&request, &session, &scoped_key.plaintext,
+            let bound = crate::controllers::mcp::call_tool(&request, &session, &scoped_key.plaintext,
                 "create_workspace", serde_json::json!({"name":"bound-denied"})).await;
             assert_eq!(bound["result"]["isError"], true, "{bound}");
             request.post("/api/iam/groups").add_header("Authorization", format!("Bearer {}", user_key.plaintext))
@@ -962,45 +922,45 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let deny_path = format!("/api/iam/users/{}/policies/{deny_id}", user.id);
             request.put(&deny_path).add_header("Authorization", format!("Bearer {api_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);
-            let denied = iam_mcp_call(&request, &session, &user_key.plaintext, "create_iam_group",
+            let denied = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext, "create_iam_group",
                 serde_json::json!({"name":"explicit-denied"})).await;
             assert_eq!(denied["result"]["isError"], true, "{denied}");
             request.put(&workspace_path)
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"name":"explicit-denied"})).await.assert_status(StatusCode::FORBIDDEN);
-            let denied_workspace = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let denied_workspace = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "update_workspace", serde_json::json!({"workspace_id":workspace_id,"name":"explicit-denied"})).await;
             assert_eq!(denied_workspace["result"]["isError"], true, "{denied_workspace}");
             request.get(&workspace_path)
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .await.assert_status(StatusCode::NOT_FOUND);
-            let denied_detail = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let denied_detail = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "get_workspace", serde_json::json!({"workspace_id":workspace_id})).await;
             assert_eq!(denied_detail["result"]["isError"], true, "{denied_detail}");
             let inventory = request.get("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext)).await;
             inventory.assert_status_ok();
             assert_eq!(inventory.json::<Vec<serde_json::Value>>(), [] as [serde_json::Value; 0]);
-            let denied_list = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let denied_list = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "list_workspaces", serde_json::json!({})).await;
             let denied_list: serde_json::Value = serde_json::from_str(denied_list["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
             assert_eq!(denied_list, serde_json::json!([]));
             request.post("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"name":"explicit-denied"})).await.assert_status(StatusCode::FORBIDDEN);
-            let denied_create = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let denied_create = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "create_workspace", serde_json::json!({"name":"explicit-denied"})).await;
             assert_eq!(denied_create["result"]["isError"], true, "{denied_create}");
             request.delete(&format!("/api/workspaces/{delete_id}"))
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .await.assert_status(StatusCode::FORBIDDEN);
-            let denied_delete = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let denied_delete = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "delete_workspace", serde_json::json!({"workspace_id":delete_id})).await;
             assert_eq!(denied_delete["result"]["isError"], true, "{denied_delete}");
             request.post("/api/template-library")
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&template).await.assert_status(StatusCode::FORBIDDEN);
-            let denied_template = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let denied_template = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "create_template_library_item", mcp_template).await;
             assert_eq!(denied_template["result"]["isError"], true, "{denied_template}");
             for key in [&user_key.plaintext, &scoped_key.plaintext] {
@@ -1018,7 +978,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                     ("fork_template_library_item", serde_json::json!({"id":template_id,"name":"must-not-fork"})),
                     ("delete_template_library_item", serde_json::json!({"id":template_id})),
                 ] {
-                    let denied = iam_mcp_call(&request, &session, key, tool, args).await;
+                    let denied = crate::controllers::mcp::call_tool(&request, &session, key, tool, args).await;
                     assert_eq!(denied["result"]["isError"], true, "{denied}");
                 }
             }
@@ -1027,7 +987,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             request.delete(&format!("/api/workspaces/{delete_id}"))
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .await.assert_status(StatusCode::NO_CONTENT);
-            let deleted_workspace = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let deleted_workspace = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "delete_workspace", serde_json::json!({"workspace_id":second_id})).await;
             assert_ne!(deleted_workspace["result"]["isError"], true, "{deleted_workspace}");
             let workspaces = request.get("/api/workspaces")
@@ -1043,7 +1003,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             request.delete(&format!("/api/workspaces/{workspace_id}"))
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .await.assert_status(StatusCode::CONFLICT);
-            let last = iam_mcp_call(&request, &session, &user_key.plaintext,
+            let last = crate::controllers::mcp::call_tool(&request, &session, &user_key.plaintext,
                 "delete_workspace", serde_json::json!({"workspace_id":workspace_id})).await;
             assert_eq!(last["result"]["isError"], true, "{last}");
             request.delete(&member_path).add_header("Authorization", format!("Bearer {api_key}"))
@@ -1060,12 +1020,12 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 .await.assert_status_ok();
             request.post("/api/iam/groups").add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"name":"updated-denied"})).await.assert_status(StatusCode::FORBIDDEN);
-            let restored = iam_mcp_call(&request, &session, &api_key, "update_iam_policy",
+            let restored = crate::controllers::mcp::call_tool(&request, &session, &api_key, "update_iam_policy",
                 serde_json::json!({"policy_id":policy_id,"name":"operators","document":policy_result["document"]})).await;
             assert_ne!(restored["result"]["isError"], true, "{restored}");
             request.post("/api/iam/groups").add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"name":"updated-allowed"})).await.assert_status(StatusCode::CREATED);
-            let deleted = iam_mcp_call(&request, &session, &api_key, "delete_iam_policy",
+            let deleted = crate::controllers::mcp::call_tool(&request, &session, &api_key, "delete_iam_policy",
                 serde_json::json!({"policy_id":policy_id})).await;
             assert_ne!(deleted["result"]["isError"], true, "{deleted}");
             request.post("/api/iam/groups").add_header("Authorization", format!("Bearer {}", user_key.plaintext))
@@ -1099,7 +1059,7 @@ async fn assigned_roles_change_user_permissions_without_changing_identity() {
         let roles = roles.json::<Vec<Value>>();
         assert_eq!(roles.len(), 3);
         let session = crate::controllers::mcp::initialize(&request).await;
-        let listed = iam_mcp_call(&request, &session, &root, "list_iam_roles", json!({})).await;
+        let listed = crate::controllers::mcp::call_tool(&request, &session, &root, "list_iam_roles", json!({})).await;
         assert_ne!(listed["result"]["isError"], true, "{listed}");
         let listed: Value = serde_json::from_str(listed["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(listed, json!(roles));
@@ -1131,6 +1091,7 @@ async fn assigned_roles_change_user_permissions_without_changing_identity() {
         request.put(&format!("/api/iam/roles/{}/policies/{}", role["id"].as_str().unwrap(), reader["id"].as_str().unwrap()))
             .add_header("Authorization", &auth).await.assert_status(StatusCode::CONFLICT);
         request.delete(&attachment).add_header("Authorization", &auth).await.assert_status(StatusCode::NO_CONTENT);
+        // Direct write (a): `create_tenant` enforces the one-tenant cap, and the IAM role operations are crate-private.
         let txn = ctx.db.begin().await.unwrap();
         let foreign = yorishiro::models::tenant_tenants::ActiveModel {
             name: Set("foreign-role-tenant".into()), ..Default::default()

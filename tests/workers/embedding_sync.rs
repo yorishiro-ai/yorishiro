@@ -582,6 +582,7 @@ mod conflict {
                 tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
                     .await
                     .expect("embedding reached provider");
+                // Direct write (c): the bare `disabled_at` flag, deliberately not the full disable operation, which would also cancel the work this test needs in flight.
                 let result = yorishiro::models::tenant_tenants::ActiveModel {
                     id: Set(workspace.tenant_id),
                     disabled_at: Set(Some(chrono::Utc::now().fixed_offset())),
@@ -1877,7 +1878,7 @@ mod conflict {
             let dir = directory.path();
             let db = &ctx.db;
             let outcome = std::panic::AssertUnwindSafe(async {
-                wait_until(
+                let lifecycle = wait_until(
                     "configured queue to record the dimension failure",
                     std::time::Duration::from_secs(10),
                     || async move {
@@ -1891,12 +1892,14 @@ mod conflict {
                         let id =
                             Uuid::parse_str(job.data["lifecycle_id"].as_str().unwrap()).unwrap();
                         let lifecycle = Entity::find_by_id(id).one(db).await.unwrap().unwrap();
-                        assert_eq!(lifecycle.status, LifecycleStatus::Failed.as_db_str());
-                        assert!(lifecycle.error.is_some());
-                        Some(())
+                        (lifecycle.status == LifecycleStatus::Failed.as_db_str()
+                            && lifecycle.error.is_some())
+                        .then_some(lifecycle)
                     },
                 )
                 .await;
+                assert_eq!(lifecycle.status, LifecycleStatus::Failed.as_db_str());
+                assert!(lifecycle.error.is_some());
             })
             .catch_unwind()
             .await;

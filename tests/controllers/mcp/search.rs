@@ -92,6 +92,7 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
                 ))),
             });
         }
+        // Direct write (a): no operation stores a chosen vector, and the decoy corpus must hold exact vectors in bulk.
         vectors::Entity::insert_many(embeddings)
             .exec(&ctx.db)
             .await
@@ -103,6 +104,7 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
         for (phase, background) in [(0, 0.001_f32), (1, -0.001_f32)] {
             let mut vector = vec![background; 4000];
             vector[1] = 1.0;
+            // Direct write (a): no operation stores a chosen vector, and each phase needs the nearest neighbour's exact coordinates.
             vectors::Entity::update_many()
                 .col_expr(
                     vectors::Column::Embedding,

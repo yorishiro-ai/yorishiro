@@ -79,6 +79,7 @@ async fn expired_keys_are_rejected_over_rest_and_an_existing_mcp_session() {
             .unwrap()
             .parse()
             .unwrap();
+        // Direct write (c): issuance rejects a past expiry, so time passing is injected by moving the stored expiry.
         yorishiro::models::api_keys::ActiveModel {
             id: Set(id),
             expires_at: Set(Some(

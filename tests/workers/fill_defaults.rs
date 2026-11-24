@@ -175,7 +175,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
             request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);
             let undo_id: Uuid = if explicit_deny {
-                let queued = crate::controllers::iam::iam_mcp_call(&request, &session, &attributed.plaintext,
+                let queued = crate::controllers::mcp::call_tool(&request, &session, &attributed.plaintext,
                     "undo_migration_job", json!({"job_id":filled_id})).await;
                 assert_ne!(queued["result"]["isError"], true, "{queued}");
                 let queued: serde_json::Value = serde_json::from_str(queued["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -207,7 +207,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
                 .add_header("Authorization", format!("Bearer {iam_key}"))
                 .json(&json!({"name":"queued-fill","document":document})).await.assert_status_ok();
             let id: Uuid = if explicit_deny {
-                let queued = crate::controllers::iam::iam_mcp_call(&request, &session, &attributed.plaintext,
+                let queued = crate::controllers::mcp::call_tool(&request, &session, &attributed.plaintext,
                     "reindex_workspace", json!({})).await;
                 assert_ne!(queued["result"]["isError"], true, "{queued}");
                 let queued: serde_json::Value = serde_json::from_str(queued["result"]["content"][0]["text"].as_str().unwrap()).unwrap();

@@ -42,6 +42,7 @@ async fn export_jsonl_tool_matches_the_rest_export() {
         let rest = request.get("/api/export.jsonl").add_header("Authorization", format!("Bearer {}", tenant.api_key)).await;
         rest.assert_status(StatusCode::OK);
         assert_eq!(text, rest.text());
+        // Direct write (a): the entity API rejects a payload this large, so the 8 MiB JSON is stored directly.
         Entity::update_many()
             .col_expr(Column::Data, sea_orm::sea_query::Expr::value(json!({"title":"x".repeat(8 * 1024 * 1024)})))
             .filter(Column::Id.eq(entity_id.parse::<Uuid>().unwrap())).exec(&ctx.db).await.unwrap();

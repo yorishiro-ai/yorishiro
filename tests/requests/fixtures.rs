@@ -2,6 +2,7 @@
 //!
 //! Uses signup for new tenants.
 
+use axum::http::StatusCode;
 use loco_rs::app::AppContext;
 use sea_orm::TransactionTrait;
 use uuid::Uuid;
@@ -78,7 +79,7 @@ impl TestTenant {
                 "display_name": args.tenant_name,
             }))
             .await;
-        response.assert_status(axum::http::StatusCode::CREATED);
+        response.assert_status(StatusCode::CREATED);
         let account = response.json::<serde_json::Value>();
         let tenant_id =
             serde_json::from_value(account["tenant_id"].clone()).expect("signup tenant ID");
@@ -98,7 +99,7 @@ impl TestTenant {
             .add_header("Authorization", &bearer)
             .json(&serde_json::json!({"name": args.workspace_name}))
             .await;
-        workspace.assert_status(axum::http::StatusCode::CREATED);
+        workspace.assert_status(StatusCode::CREATED);
         let workspace_id: Uuid =
             serde_json::from_value(workspace.json::<serde_json::Value>()["id"].clone())
                 .expect("workspace ID");
@@ -112,7 +113,7 @@ impl TestTenant {
                 "audit": args.key_audit,
             }))
             .await;
-        key.assert_status(axum::http::StatusCode::CREATED);
+        key.assert_status(StatusCode::CREATED);
         let api_key = key.json::<serde_json::Value>()["full_key"]
             .as_str()
             .expect("workspace API key")
@@ -244,6 +245,19 @@ pub(crate) async fn issue_tenant_key(ctx: &AppContext, tenant_id: Uuid, user_id:
     .plaintext
 }
 
+/// Installs a licence for `plan` that stays valid for an hour.
+#[cfg(feature = "enterprise")]
+pub(crate) fn install_licence(ctx: &AppContext, plan: &str) {
+    use std::sync::Arc;
+    use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
+    ctx.shared_store
+        .insert(Arc::new(LicenceState::licensed(LicenceClaims {
+            sub: "test".into(),
+            plan: plan.into(),
+            exp: chrono::Utc::now().timestamp() + 3600,
+        })));
+}
+
 /// An email address no other test in the same database uses.
 pub(crate) fn unique_email(prefix: &str) -> String {
     format!("{prefix}-{}@example.com", Uuid::new_v4().simple())
@@ -302,4 +316,76 @@ pub(crate) async fn create_workspace(
         .expect("create workspace");
     txn.commit().await.expect("commit workspace creation");
     workspace
+}
+
+/// Creates a workspace named `default` through the REST API and returns its ID.
+#[expect(
+    clippy::future_not_send,
+    reason = "the request harness uses thread-local HTTP futures"
+)]
+pub(crate) async fn rest_create_workspace(request: &loco_rs::TestServer, api_key: &str) -> Uuid {
+    let response = request
+        .post("/api/workspaces")
+        .add_header("Authorization", format!("Bearer {api_key}"))
+        .json(&serde_json::json!({"name": "default"}))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    response.json::<serde_json::Value>()["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
+/// Creates a `note` schema and one entity through the REST API and returns the entity ID.
+#[cfg(feature = "enterprise")]
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
+pub(crate) async fn rest_create_entity(request: &loco_rs::TestServer, setup: &TestTenant) -> Uuid {
+    let create_schema = request
+        .post("/api/schemas")
+        .add_header("Authorization", format!("Bearer {}", setup.api_key))
+        .json(&serde_json::json!({
+            "name": "note",
+            "entity_types": {
+                "note": {
+                    "fields": {
+                        "title": { "type": "string", "required": true },
+                        "summary": { "type": "string" }
+                    }
+                }
+            }
+        }))
+        .await;
+    assert_eq!(
+        create_schema.status_code(),
+        201,
+        "response: {:?}",
+        create_schema.text()
+    );
+
+    let create_entity = request
+        .post("/api/entities")
+        .add_header("Authorization", format!("Bearer {}", setup.api_key))
+        .json(&serde_json::json!({
+            "schema_name": "note",
+            "entity_type": "note",
+            "data": { "title": "original" }
+        }))
+        .await;
+    assert_eq!(
+        create_entity.status_code(),
+        201,
+        "response: {:?}",
+        create_entity.text()
+    );
+    let entity_id: Uuid = create_entity.json::<serde_json::Value>()["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    entity_id
 }

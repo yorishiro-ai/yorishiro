@@ -15,8 +15,7 @@ pub(crate) async fn dispatch_infer_fill(
         job_name: InferFillArgs::JOB_NAME,
         workspace_id: args.workspace_id,
         class: WorkerClass::Shared,
-        dispatch_payload: serde_json::to_value(&args)
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?,
+        dispatch_payload: serde_json::to_value(&args).map_err(loco_rs::Error::wrap)?,
         worker_name: InferFillWorker::class_name(),
         use_queue_concurrency: true,
     };

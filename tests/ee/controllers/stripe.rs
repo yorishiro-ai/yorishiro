@@ -1,30 +1,17 @@
 mod inbound;
 
-use std::sync::Arc;
-
 use crate::requests::boot_request;
 use crate::requests::boot_request_with;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::{HeaderValue, StatusCode};
 use chrono::Utc;
-use loco_rs::app::AppContext;
 use serde_json::json;
 use serial_test::serial;
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::edition::ee::models::tenant_billing;
 
 const WEBHOOK_SECRET: &str = "whsec_test";
-
-fn enable_stripe(ctx: &AppContext) {
-    ctx.shared_store
-        .insert(Arc::new(LicenceState::licensed(LicenceClaims {
-            sub: "stripe-test".into(),
-            plan: "pro".into(),
-            exp: Utc::now().timestamp() + 3600,
-        })));
-}
 
 /// Stripe as the apps boot with it.
 fn stripe_overrides() -> [crate::requests::Override; 3] {
@@ -128,7 +115,7 @@ async fn a_duplicate_event_id_is_not_reapplied() {
         "YORISHIRO_STRIPE_PRICE_TEAM",
     ]);
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        enable_stripe(&ctx);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
         changed.set(
             "YORISHIRO_STRIPE_WEBHOOK_SECRET",
             "changed-after-config-load",
@@ -206,7 +193,7 @@ async fn a_cancellation_returns_the_tenant_to_free() {
     boot_request_with::<App, _, _>(
         &[&stripe_overrides()[..], &overrides[..]].concat(),
         |request, ctx| async move {
-            enable_stripe(&ctx);
+            crate::requests::fixtures::install_licence(&ctx, "pro");
             let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
                 .await
                 .tenant_id;
@@ -271,7 +258,7 @@ async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
     boot_request_with::<App, _, _>(
         &[&stripe_overrides()[..], &overrides[..]].concat(),
         |request, ctx| async move {
-            enable_stripe(&ctx);
+            crate::requests::fixtures::install_licence(&ctx, "pro");
             let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
                 .await
                 .tenant_id;
@@ -322,7 +309,7 @@ async fn disabled_policy_grandfathers_workspace_cap_on_stripe_changes() {
 #[tokio::test]
 async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        enable_stripe(&ctx);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
         let body = subscription_updated_body("evt_x", 1_000, "cus_x");
         let response = request
             .post("/api/stripe/webhook")
@@ -343,7 +330,7 @@ async fn an_unconfigured_webhook_refuses_rather_than_accepting() {
 #[tokio::test]
 async fn malformed_signature_headers_have_exact_plain_text_rejections() {
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        enable_stripe(&ctx);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
         let body = subscription_updated_body("evt_header", 1_000, "cus_header");
         let now = Utc::now().timestamp();
         let signature = sign(WEBHOOK_SECRET, now, &body);
@@ -394,7 +381,7 @@ async fn malformed_signature_headers_have_exact_plain_text_rejections() {
 #[tokio::test]
 async fn malformed_json_is_rejected_after_signature_verification() {
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        enable_stripe(&ctx);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
         let body = b"not json".to_vec();
         let now = Utc::now().timestamp();
         let valid_signature = sign(WEBHOOK_SECRET, now, &body);
@@ -422,7 +409,7 @@ async fn malformed_json_is_rejected_after_signature_verification() {
 #[tokio::test]
 async fn a_stale_subscription_event_is_not_reapplied() {
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        enable_stripe(&ctx);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
         let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
             .await
             .tenant_id;
@@ -468,7 +455,7 @@ async fn a_stale_subscription_event_is_not_reapplied() {
 #[tokio::test]
 async fn checkout_completion_links_the_stripe_customer() {
     boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
-        enable_stripe(&ctx);
+        crate::requests::fixtures::install_licence(&ctx, "pro");
         let tenant_id = TestTenant::create(&request, &ctx, TenantArgs::default())
             .await
             .tenant_id;

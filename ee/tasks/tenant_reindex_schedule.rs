@@ -24,7 +24,7 @@ impl Task for TenantReindexSchedule {
             .map_err(|_| Error::Message("tenant_id is not a valid UUID".into()))?;
         crate::models::tenant_tenants::Model::find_by_id(&ctx.db, tenant_id)
             .await
-            .map_err(|error| Error::Message(error.to_string()))?;
+            .map_err(Error::wrap)?;
         match vars.cli_arg("action")? {
             "get" => {}
             "set" => tenant_reindex_schedules::set(
@@ -34,15 +34,15 @@ impl Task for TenantReindexSchedule {
                 vars.cli_arg("timezone").ok(),
             )
             .await
-            .map_err(|error| Error::Message(error.to_string()))?,
+            .map_err(Error::wrap)?,
             "disable" => tenant_reindex_schedules::clear(&ctx.db, tenant_id)
                 .await
-                .map_err(|error| Error::Message(error.to_string()))?,
+                .map_err(Error::wrap)?,
             _ => return Err(Error::Message("action must be get, set or disable".into())),
         }
         let schedule = tenant_reindex_schedules::get(&ctx.db, tenant_id)
             .await
-            .map_err(|error| Error::Message(error.to_string()))?;
+            .map_err(Error::wrap)?;
         println!(
             "{}",
             serde_json::json!({
