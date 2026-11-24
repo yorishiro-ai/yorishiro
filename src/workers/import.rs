@@ -43,11 +43,7 @@ impl BackgroundWorker<ImportArgs> for ImportWorker {
             args.worker_class,
             args.workspace_id,
             &args,
-            || async {
-                self.import(&args)
-                    .await
-                    .map_err(|error| loco_rs::Error::Message(error.to_string()))
-            },
+            || async { self.import(&args).await.map_err(loco_rs::Error::wrap) },
         )
         .await
     }

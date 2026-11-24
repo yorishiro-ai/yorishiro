@@ -51,9 +51,7 @@ impl BackgroundWorker<QueryEmbeddingArgs> for QueryEmbeddingWorker {
 
     async fn perform(&self, args: QueryEmbeddingArgs) -> loco_rs::Result<()> {
         // The message, not the HTTP-shaped conversion: Loco stores this text as the failed job's diagnostic, so an operator reads the cause in the queue.
-        answer(&self.ctx, &args)
-            .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))
+        answer(&self.ctx, &args).await.map_err(loco_rs::Error::wrap)
     }
 }
 

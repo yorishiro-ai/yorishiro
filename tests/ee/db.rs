@@ -327,22 +327,18 @@ async fn postgres_scheduler_lock_drop_releases_after_task_cancellation() {
     });
     task.abort();
     let _ = task.await;
-    let mut final_ownership = None;
-    for _ in 0..20 {
-        if let Some(ownership) =
+    crate::requests::jobs::wait_until(
+        "cancellation to release scheduler ownership",
+        Duration::from_secs(1),
+        || async {
             yorishiro::edition::ee::db::acquire_postgres_scheduler_lock(pool.clone(), &key)
                 .await
                 .unwrap()
-        {
-            final_ownership = Some(ownership);
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    final_ownership
-        .expect("cancellation must release scheduler ownership")
-        .release()
-        .await
-        .unwrap();
+        },
+    )
+    .await
+    .release()
+    .await
+    .unwrap();
     pool.close().await;
 }

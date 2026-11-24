@@ -1,4 +1,6 @@
 //! Background work: the jobs themselves, and the machinery that routes, runs and recovers them.
+//!
+//! No worker sets Loco's `max_retries`: a failed job stays `failed` on its lifecycle row and is re-run explicitly, for example by `resync_embeddings`.
 
 // Jobs: one file per kind of background work.
 pub mod embedding_sync;

@@ -185,10 +185,7 @@ fn a_redis_worker_polls_the_queue_of_each_target_it_serves() {
     };
     assert_eq!(
         redis.queues,
-        Some(vec![
-            "worker-target:shared".to_owned(),
-            format!("worker-target:tenant:{TENANT_A}"),
-        ])
+        Some(vec![WorkerTarget::Shared.tag(), tenant(TENANT_A).tag(),])
     );
 }
 

@@ -54,10 +54,10 @@ impl FillDefaultsWorker {
         let authorization = crate::db::begin_authorization(&self.ctx.db).await?;
         let txn = crate::db::begin_workspace_write(&self.ctx, args.tenant_id, args.workspace_id)
             .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+            .map_err(loco_rs::Error::wrap)?;
         crate::db::lock_for_update(&txn, &format!("fill-defaults:{job_id}"))
             .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+            .map_err(loco_rs::Error::wrap)?;
         if api_key_audit_log::job_completed(
             &txn,
             args.workspace_id,
@@ -65,7 +65,7 @@ impl FillDefaultsWorker {
             api_key_audit_log::AuditAction::FillDefaults,
         )
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+        .map_err(loco_rs::Error::wrap)?
         {
             txn.commit().await?;
             return Ok(());
@@ -88,7 +88,7 @@ impl FillDefaultsWorker {
             },
         )
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(loco_rs::Error::wrap)?;
         let report = entity_entities::fill_defaults(
             &txn,
             args.workspace_id,
@@ -97,7 +97,7 @@ impl FillDefaultsWorker {
             args.user_id,
         )
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(loco_rs::Error::wrap)?;
         api_key_audit_log::record(
             &txn,
             api_key_audit_log::AuditActor {
@@ -107,7 +107,7 @@ impl FillDefaultsWorker {
             api_key_audit_log::AuditAction::FillDefaults,
             serde_json::json!({"schema_name": args.schema_name, "job_id": job_id,
                 "entities_updated": report.entities_updated, "fields_filled": report.fields_filled}),
-        ).await.map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        ).await.map_err(loco_rs::Error::wrap)?;
         txn.commit().await?;
         if let Some(authorization) = authorization {
             authorization.commit().await?;

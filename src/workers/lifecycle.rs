@@ -100,9 +100,8 @@ where
 {
     let target = WorkerTarget::for_job(&ctx.db, class, workspace_id)
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
-    let mut payload =
-        serde_json::to_value(args).map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(loco_rs::Error::wrap)?;
+    let mut payload = serde_json::to_value(args).map_err(loco_rs::Error::wrap)?;
     if let serde_json::Value::Object(fields) = &mut payload {
         fields.insert(
             "lifecycle_id".into(),
@@ -116,10 +115,10 @@ where
     let tenant_id =
         crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id)
             .await
-            .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+            .map_err(loco_rs::Error::wrap)?;
     let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id)
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(loco_rs::Error::wrap)?;
     let tag = super::registry::routing_tag(&W::class_name(), target);
     crate::models::queue_job_dispatch_outbox::record_lifecycle_payload(
         &txn,
@@ -131,9 +130,7 @@ where
     )
     .await
     .map_err(|error| message(&error))?;
-    txn.commit()
-        .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+    txn.commit().await.map_err(loco_rs::Error::wrap)?;
     Ok(())
 }
 

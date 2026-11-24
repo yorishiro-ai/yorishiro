@@ -88,14 +88,14 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
             },
         )
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(loco_rs::Error::wrap)?;
         txn.commit().await?;
     }
     // Resolve in the worker so workspace-specific overrides are honored without putting
     // credentials in the queue payload.
     let provider = crate::models::workspace_workspaces::embedding_provider(ctx, args.workspace_id)
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?
+        .map_err(loco_rs::Error::wrap)?
         .ok_or_else(|| loco_rs::Error::Message("embedding provider absent".into()))?;
     if provider.availability() == EmbeddingProviderAvailability::Disabled {
         return Err(loco_rs::Error::Message(
@@ -109,7 +109,7 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
     let _permit = concurrency
         .acquire_owned()
         .await
-        .map_err(|error| loco_rs::Error::Message(error.to_string()))?;
+        .map_err(loco_rs::Error::wrap)?;
     let outcome = crate::models::entity_embeddings::reindex_workspace_with_actor(
         ctx,
         args.workspace_id,
@@ -118,7 +118,7 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         args.startup,
     )
     .await
-    .map_err(|e| loco_rs::Error::Message(e.to_string()))?;
+    .map_err(loco_rs::Error::wrap)?;
 
     if !outcome.failures.is_empty() {
         return Err(loco_rs::Error::Message(format!(

@@ -85,8 +85,8 @@ async fn injected_deliveries_are_consumed_only_by_their_target() {
         let targets = [
             WorkerTarget::Shared,
             WorkerTarget::Official,
-            WorkerTarget::parse_tag(&format!("worker-target:tenant:{}", Uuid::now_v7())).unwrap(),
-            WorkerTarget::parse_tag(&format!("worker-target:tenant:{}", Uuid::now_v7())).unwrap(),
+            WorkerTarget::Tenant(Uuid::now_v7()),
+            WorkerTarget::Tenant(Uuid::now_v7()),
         ];
         let producer = ctx.queue_provider.as_ref().unwrap();
         let mut ids = Vec::new();

@@ -52,7 +52,7 @@ pub(crate) fn uses_sqlite_queue(ctx: &loco_rs::app::AppContext) -> bool {
 pub(crate) type Override = (&'static str, serde_json::Value);
 
 /// Caps the tenants a booted app accepts.
-pub(crate) fn max_tenants(limit: u64) -> Override {
+pub(crate) fn max_tenants(limit: i32) -> Override {
     ("settings.max_tenants", limit.into())
 }
 
@@ -84,7 +84,9 @@ fn apply_config_overrides(
         }
         *node = value.clone();
     }
-    serde_json::from_value(document).expect("overridden config stays valid")
+    let config = serde_json::from_value(document).expect("overridden config stays valid");
+    yorishiro::data::config::validate(&config).expect("overridden config passes validation");
+    config
 }
 
 use futures::FutureExt;
