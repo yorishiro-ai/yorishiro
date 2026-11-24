@@ -29,6 +29,9 @@ pub fn load(environment: &Environment) -> Result<Config> {
         && !path.join("production.local.yaml").try_exists()?
     {
         load_production_defaults(environment)?
+    } else if let Some(folder) = folder.as_deref() {
+        // `Environment::load` reads the variable as UTF-8 and would fall back to `./config` for any other path.
+        environment.load_from_folder(folder)?
     } else {
         environment.load()?
     };
