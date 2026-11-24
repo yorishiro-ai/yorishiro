@@ -560,7 +560,7 @@ pub(crate) async fn insert_next_version(
             Column::CreatedBy,
         ])
         .select_from(select)
-        .map_err(|error| YorishiroError::Internal(error.into()))?
+        .internal()?
         .returning(Query::returning().columns([
             Column::Id,
             Column::TemplateId,

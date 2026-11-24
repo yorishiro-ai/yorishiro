@@ -34,17 +34,14 @@ async fn tenant_key_issuance_rechecks_authority_after_waiting_for_policy_detachm
         };
         let demote = async {
             // Observe the real fence wait rather than guessing how long the HTTP request needs.
-            tokio::time::timeout(std::time::Duration::from_secs(20), async {
-                loop {
-                    let row = ctx.db.query_one_raw(sea_orm::Statement::from_sql_and_values(
-                        sea_orm::DatabaseBackend::Postgres,
-                        "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295)) AS waiting",
-                        [fence.clone().into()],
-                    )).await.unwrap().unwrap();
-                    if row.try_get::<bool>("", "waiting").unwrap() { break; }
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
-            }).await.expect("issuance must wait on the membership fence");
+            crate::requests::jobs::wait_until("issuance to wait on the membership fence", std::time::Duration::from_secs(20), || async {
+                let row = ctx.db.query_one_raw(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Postgres,
+                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295)) AS waiting",
+                    [fence.clone().into()],
+                )).await.unwrap().unwrap();
+                row.try_get::<bool>("", "waiting").unwrap().then_some(())
+            }).await;
             // Direct write (c): the demotion runs inside the transaction holding the fence, which a handler cannot be paused on.
             yorishiro::models::_entities::iam_user_policy_attachments::Entity::delete_many()
                 .filter(yorishiro::models::_entities::iam_user_policy_attachments::Column::UserId.eq(admin.id))

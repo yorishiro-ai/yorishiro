@@ -16,7 +16,6 @@ use uuid::Uuid;
 
 use crate::edition::ee::models::marketplace;
 use crate::models::api_keys::ApiKeyScope;
-use crate::models::pagination::ListParams;
 
 pub(super) const TOOL_NAMES: &[&str] = &[
     "list_marketplace",
@@ -88,7 +87,7 @@ impl YorishiroMcpServer {
             marketplace::list_as(
                 &self.app_context().db,
                 &actor,
-                ListParams::new(input.limit, input.offset),
+                crate::models::pagination::ListParams::from(&input),
             )
             .await,
         )
@@ -106,7 +105,7 @@ impl YorishiroMcpServer {
                 &self.app_context().db,
                 &actor,
                 input.template_id,
-                ListParams::new(input.limit, input.offset),
+                crate::models::pagination::ListParams::from(&input),
             )
             .await,
         )
@@ -149,7 +148,7 @@ impl YorishiroMcpServer {
                 &self.app_context().db,
                 &actor,
                 input.template_id,
-                ListParams::new(input.limit, input.offset),
+                crate::models::pagination::ListParams::from(&input),
             )
             .await,
         )
@@ -214,3 +213,5 @@ impl YorishiroMcpServer {
         }
     }
 }
+
+crate::dtos::common::list_params_from!(MarketplacePage, TemplatePage);

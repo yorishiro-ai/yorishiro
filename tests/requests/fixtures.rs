@@ -271,8 +271,10 @@ pub(crate) async fn wait_for_membership_lock(
 ) {
     use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-    tokio::time::timeout(std::time::Duration::from_secs(20), async {
-        loop {
+    super::jobs::wait_until(
+        "the membership fence holder or waiter",
+        std::time::Duration::from_secs(20),
+        || async {
             let row = db
                 .query_one_raw(Statement::from_sql_and_values(
                     DatabaseBackend::Postgres,
@@ -282,14 +284,10 @@ pub(crate) async fn wait_for_membership_lock(
                 .await
                 .unwrap()
                 .unwrap();
-            if row.try_get::<bool>("", "observed").unwrap() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("expected membership fence holder or waiter was not observed");
+            row.try_get::<bool>("", "observed").unwrap().then_some(())
+        },
+    )
+    .await;
 }
 
 /// Creates a workspace under `tenant_id` and commits it.

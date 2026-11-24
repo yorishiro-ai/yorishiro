@@ -46,7 +46,7 @@ impl YorishiroMcpServer {
             entity_column_preferences::list_for_actor(
                 self.app_context(),
                 &actor,
-                crate::models::pagination::ListParams::new(args.limit, args.offset),
+                crate::models::pagination::ListParams::from(&args),
             )
             .await,
         )
@@ -88,3 +88,5 @@ impl YorishiroMcpServer {
         ok_json(serde_json::json!({"reset": true}))
     }
 }
+
+crate::dtos::common::list_params_from!(ListColumnsArgs);

@@ -15,6 +15,7 @@ use sea_orm::{ConnectionTrait, QueryFilter, QuerySelect, QueryTrait};
 
 pub use crate::models::_entities::query_embedding_requests::{ActiveModel, Column, Entity, Model};
 
+use crate::error::ResultExt;
 use crate::error::YorishiroError;
 use crate::models::db_enum::db_enum;
 
@@ -223,7 +224,7 @@ impl Entity {
             .filter(Column::Status.ne(QueryEmbeddingStatus::Pending.as_db_str()))
             .exec_with_returning(db)
             .await
-            .map_err(|error| YorishiroError::Internal(error.into()))?;
+            .internal()?;
         if let Some(row) = finished.into_iter().next() {
             return Ok(Some(outcome(row)?));
         }
@@ -231,7 +232,7 @@ impl Entity {
             .filter(Column::WorkspaceId.eq(workspace_id))
             .one(db)
             .await
-            .map_err(|error| YorishiroError::Internal(error.into()))?;
+            .internal()?;
         Ok(waiting.map(|_| QueryOutcome::Pending))
     }
 

@@ -52,42 +52,36 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
             .unwrap();
         let job_id = Uuid::parse_str(&job_id).unwrap();
         let directory = tempfile::tempdir().unwrap();
-        let relayed = tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
+        let relayed = crate::requests::jobs::wait_until(
+            "production relay publishes this lifecycle",
+            Duration::from_secs(10),
+            || async {
                 let dump = queue.dump(directory.path(), None, None).await.unwrap();
                 let queued: Vec<loco_rs::bgworker::Job> =
                     serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                if let Some(job) = queued
+                queued
                     .into_iter()
                     .find(|job| job.data["job_id"] == job_id.to_string())
-                {
-                    break job;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("production relay publishes this lifecycle");
+            },
+        )
+        .await;
         assert_eq!(relayed.name, InferFillWorker::class_name());
         assert_eq!(relayed.status, JobStatus::Queued);
         assert_eq!(relayed.tags, Some(vec![target.job_tag()]));
         let provider = queue.clone();
         let runner = tokio::spawn(async move { provider.run(vec![target.job_tag()]).await });
-        let result =
-            std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(10), async {
-                loop {
-                    let job = yorishiro::edition::ee::models::inference_jobs::get(&db, job_id)
-                        .await
-                        .unwrap()
-                        .expect("inference job remains until consumed");
-                    if job.attempt > 0 {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-            }))
-            .catch_unwind()
-            .await;
+        let result = std::panic::AssertUnwindSafe(crate::requests::jobs::try_wait_until(
+            Duration::from_secs(10),
+            || async {
+                let job = yorishiro::edition::ee::models::inference_jobs::get(&db, job_id)
+                    .await
+                    .unwrap()
+                    .expect("inference job remains until consumed");
+                (job.attempt > 0).then_some(())
+            },
+        ))
+        .catch_unwind()
+        .await;
         yorishiro::App::on_shutdown(&ctx).await;
         queue.shutdown().unwrap();
         tokio::time::timeout(Duration::from_secs(10), runner)
@@ -96,7 +90,7 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
             .unwrap()
             .unwrap();
         match result {
-            Ok(Ok(())) => {
+            Ok(Some(())) => {
                 let dump = queue.dump(directory.path(), None, None).await.unwrap();
                 let jobs: Vec<loco_rs::bgworker::Job> =
                     serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
@@ -107,9 +101,9 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
                     .expect("relay job remains after consumption");
                 assert_eq!(job.status, JobStatus::Completed);
             }
-            Ok(Err(error)) => {
+            Ok(None) => {
                 queue.close().await.unwrap();
-                panic!("registered InferFillWorker consumed the relay job: {error}");
+                panic!("registered InferFillWorker did not consume the relay job in time");
             }
             Err(panic) => {
                 queue.close().await.unwrap();
@@ -163,8 +157,10 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
         });
         let mut producer_job = None;
         let result = std::panic::AssertUnwindSafe(async {
-            tokio::time::timeout(Duration::from_secs(2), async {
-                loop {
+            crate::requests::jobs::wait_until(
+                "relay claims the dispatch while the real queue is locked",
+                Duration::from_secs(2),
+                || async {
                     let row = Outbox::find_by_id(stalled_id)
                         .one(&ctx.db)
                         .await
@@ -172,13 +168,12 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
                         .unwrap();
                     if row.claim_token.is_some() {
                         assert!(row.published_at.is_none());
-                        break;
+                        return Some(());
                     }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-            })
-            .await
-            .expect("relay claims the dispatch while the real queue is locked");
+                    None
+                },
+            )
+            .await;
 
             producer_job = Some(
                 tokio::time::timeout(
@@ -239,23 +234,22 @@ async fn deliver_lifecycle(ctx: &AppContext, lifecycle_id: Uuid) {
     let running = queue.clone();
     let worker = tokio::spawn(async move { running.run(vec![target.job_tag()]).await });
     let directory = tempfile::tempdir().unwrap();
-    let outcome =
-        std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                let jobs: Vec<loco_rs::bgworker::Job> =
-                    serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                if jobs.iter().any(|job| {
+    let outcome = std::panic::AssertUnwindSafe(crate::requests::jobs::try_wait_until(
+        Duration::from_secs(10),
+        || async {
+            let dump = queue.dump(directory.path(), None, None).await.unwrap();
+            let jobs: Vec<loco_rs::bgworker::Job> =
+                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
+            jobs.iter()
+                .any(|job| {
                     job.data["lifecycle_id"] == lifecycle_id.to_string()
                         && job.status == JobStatus::Completed
-                }) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        }))
-        .catch_unwind()
-        .await;
+                })
+                .then_some(())
+        },
+    ))
+    .catch_unwind()
+    .await;
     yorishiro::App::on_shutdown(&worker_ctx).await;
     queue.shutdown().unwrap();
     let drained = tokio::time::timeout(Duration::from_secs(10), worker).await;
@@ -587,42 +581,50 @@ async fn two_jobs_for_one_workspace_never_run_together() {
                 Duration::from_secs(10),
                 async {
                     entered.notified().await;
-                    loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let queued: Vec<loco_rs::bgworker::Job> =
-                            serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                        if queued.iter().any(|job| {
-                            jobs.iter().any(|id| job.data["job_id"] == id.to_string())
-                                && job.status == JobStatus::Completed
-                        }) {
-                            break;
-                        }
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
+                    crate::requests::jobs::wait_until(
+                        "a competing delivery to complete",
+                        Duration::from_secs(10),
+                        || async {
+                            let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                            let queued: Vec<loco_rs::bgworker::Job> =
+                                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                                    .unwrap();
+                            queued
+                                .iter()
+                                .any(|job| {
+                                    jobs.iter().any(|id| job.data["job_id"] == id.to_string())
+                                        && job.status == JobStatus::Completed
+                                })
+                                .then_some(())
+                        },
+                    )
+                    .await;
                     assert_eq!(
                         in_flight.load(Ordering::SeqCst),
                         1,
                         "the first LLM call is still held"
                     );
                     release.add_permits(2);
-                    loop {
-                        let mut completed = 0;
-                        for id in jobs {
-                            if inference_jobs::get(&ctx.db, id)
-                                .await
-                                .unwrap()
-                                .unwrap()
-                                .status
-                                == InferenceJobStatus::Completed
-                            {
-                                completed += 1;
+                    crate::requests::jobs::wait_until(
+                        "every inference job to complete",
+                        Duration::from_secs(10),
+                        || async {
+                            let mut completed = 0;
+                            for id in jobs {
+                                if inference_jobs::get(&ctx.db, id)
+                                    .await
+                                    .unwrap()
+                                    .unwrap()
+                                    .status
+                                    == InferenceJobStatus::Completed
+                                {
+                                    completed += 1;
+                                }
                             }
-                        }
-                        if completed == jobs.len() {
-                            break;
-                        }
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
+                            (completed == jobs.len()).then_some(())
+                        },
+                    )
+                    .await;
                 },
             ))
             .catch_unwind()

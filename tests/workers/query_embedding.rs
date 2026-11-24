@@ -95,23 +95,19 @@ async fn deliver_stale_request(ctx: &AppContext, workspace_id: Uuid, request_id:
     let running = queue.clone();
     let worker = tokio::spawn(async move { running.run(vec![WorkerTarget::Shared.tag()]).await });
     let directory = tempfile::tempdir().unwrap();
-    let outcome =
-        std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                let jobs: Vec<loco_rs::bgworker::Job> =
-                    serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                if jobs
-                    .iter()
-                    .any(|job| job.id == provider_id && job.status == JobStatus::Completed)
-                {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        }))
-        .catch_unwind()
-        .await;
+    let outcome = std::panic::AssertUnwindSafe(crate::requests::jobs::try_wait_until(
+        Duration::from_secs(10),
+        || async {
+            let dump = queue.dump(directory.path(), None, None).await.unwrap();
+            let jobs: Vec<loco_rs::bgworker::Job> =
+                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
+            jobs.iter()
+                .any(|job| job.id == provider_id && job.status == JobStatus::Completed)
+                .then_some(())
+        },
+    ))
+    .catch_unwind()
+    .await;
     App::on_shutdown(&worker_ctx).await;
     queue.shutdown().unwrap();
     let drained = tokio::time::timeout(Duration::from_secs(10), worker).await;
@@ -274,8 +270,10 @@ async fn a_failure_is_recorded_on_the_request_and_returned_to_loco() {
             "provider response bodies must stay private"
         );
         let directory = tempfile::tempdir().unwrap();
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
+        crate::requests::jobs::wait_until(
+            "Loco records the query delivery failure",
+            Duration::from_secs(10),
+            || async {
                 let dump = ctx
                     .queue_provider
                     .as_ref()
@@ -285,21 +283,18 @@ async fn a_failure_is_recorded_on_the_request_and_returned_to_loco() {
                     .unwrap();
                 let jobs: Vec<loco_rs::bgworker::Job> =
                     serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                if let Some(job) = jobs.iter().find(|job| {
+                let job = jobs.iter().find(|job| {
                     job.data["workspace_id"] == ws.to_string()
                         && job.name == QueryEmbeddingWorker::class_name()
                         && job.status == JobStatus::Failed
-                }) {
-                    let diagnostic = job.data.to_string();
-                    assert!(diagnostic.contains("HTTP 503"));
-                    assert!(!diagnostic.contains("model is warming up"));
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("Loco records the query delivery failure");
+                })?;
+                let diagnostic = job.data.to_string();
+                assert!(diagnostic.contains("HTTP 503"));
+                assert!(!diagnostic.contains("model is warming up"));
+                Some(())
+            },
+        )
+        .await;
     })
     .await;
 }

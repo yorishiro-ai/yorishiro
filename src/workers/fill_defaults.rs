@@ -178,14 +178,13 @@ pub(crate) async fn enqueue(
             workspace_id: auth.require_workspace()?,
             class: worker_class,
             worker_name: FillDefaultsWorker::class_name(),
-            dispatch_payload: serde_json::to_value(args)
-                .map_err(|error| crate::YorishiroError::Internal(error.into()))?,
+            dispatch_payload: serde_json::to_value(args).internal()?,
             use_queue_concurrency: true,
         },
         Some(txn),
     )
     .await
-    .map_err(|error| crate::YorishiroError::Internal(error.into()))?;
+    .internal()?;
     if let Some(authorization) = authorization {
         authorization.commit().await.internal()?;
     }

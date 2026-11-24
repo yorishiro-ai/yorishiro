@@ -453,18 +453,24 @@ async fn configured_queue_orders_competing_jobs_by_priority() {
                     assert_eq!(arrivals.recv().await.as_deref(), Some("high"));
                     assert_eq!(arrivals.recv().await.as_deref(), Some("low"));
                     let directory = tempfile::tempdir().unwrap();
-                    loop {
-                        let dump = queue.dump(directory.path(), None, None).await.unwrap();
-                        let jobs: Vec<loco_rs::bgworker::Job> =
-                            serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
-                        if ids.iter().all(|id| {
-                            jobs.iter()
-                                .any(|job| job.id == *id && job.status == JobStatus::Completed)
-                        }) {
-                            break;
-                        }
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
+                    crate::requests::jobs::wait_until(
+                        "priority deliveries to complete",
+                        Duration::from_secs(5),
+                        || async {
+                            let dump = queue.dump(directory.path(), None, None).await.unwrap();
+                            let jobs: Vec<loco_rs::bgworker::Job> =
+                                serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap())
+                                    .unwrap();
+                            ids.iter()
+                                .all(|id| {
+                                    jobs.iter().any(|job| {
+                                        job.id == *id && job.status == JobStatus::Completed
+                                    })
+                                })
+                                .then_some(())
+                        },
+                    )
+                    .await;
                 }))
                 .catch_unwind()
                 .await;

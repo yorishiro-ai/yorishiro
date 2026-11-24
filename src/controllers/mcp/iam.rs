@@ -32,7 +32,7 @@ impl YorishiroMcpServer {
         match crate::models::iam_groups::Model::list_as(
             &self.app_context().db,
             &auth,
-            crate::models::pagination::ListParams::new(input.limit, input.offset),
+            crate::models::pagination::ListParams::from(&input),
         )
         .await
         {
@@ -51,7 +51,7 @@ impl YorishiroMcpServer {
         match crate::models::iam_policies::Model::list_as(
             &self.app_context().db,
             &auth,
-            crate::models::pagination::ListParams::new(input.limit, input.offset),
+            crate::models::pagination::ListParams::from(&input),
         )
         .await
         {
@@ -71,7 +71,7 @@ impl YorishiroMcpServer {
             &self.app_context().db,
             &auth,
             input.group_id,
-            crate::models::pagination::ListParams::new(input.limit, input.offset),
+            crate::models::pagination::ListParams::from(&input),
         )
         .await
         {
@@ -95,7 +95,7 @@ impl YorishiroMcpServer {
             &self.app_context().db,
             &auth,
             input.user_id,
-            crate::models::pagination::ListParams::new(input.limit, input.offset),
+            crate::models::pagination::ListParams::from(&input),
         )
         .await
         {
@@ -119,7 +119,7 @@ impl YorishiroMcpServer {
             &self.app_context().db,
             &auth,
             input.group_id,
-            crate::models::pagination::ListParams::new(input.limit, input.offset),
+            crate::models::pagination::ListParams::from(&input),
         )
         .await
         {
@@ -379,7 +379,7 @@ impl YorishiroMcpServer {
         match crate::models::iam_audit_events::Model::list_as(
             &self.app_context().db,
             &auth,
-            crate::models::pagination::ListParams::new(input.limit, input.offset),
+            crate::models::pagination::ListParams::from(&input),
         )
         .await
         {
@@ -437,7 +437,7 @@ impl YorishiroMcpServer {
         match crate::models::iam_roles::Model::list_as(
             &self.app_context().db,
             &auth,
-            crate::models::pagination::ListParams::new(input.limit, input.offset),
+            crate::models::pagination::ListParams::from(&input),
         )
         .await
         {
@@ -457,7 +457,7 @@ impl YorishiroMcpServer {
             &self.app_context().db,
             &auth,
             input.role_id,
-            crate::models::pagination::ListParams::new(input.limit, input.offset),
+            crate::models::pagination::ListParams::from(&input),
         )
         .await
         {
@@ -481,7 +481,7 @@ impl YorishiroMcpServer {
             &self.app_context().db,
             &auth,
             input.role_id,
-            crate::models::pagination::ListParams::new(input.limit, input.offset),
+            crate::models::pagination::ListParams::from(&input),
         )
         .await
         {

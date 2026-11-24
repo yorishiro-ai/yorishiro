@@ -1,10 +1,41 @@
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use futures::FutureExt;
 use loco_rs::app::{AppContext, Hooks};
 use sea_orm::{ConnectionTrait, EntityTrait};
 use uuid::Uuid;
 use yorishiro::{App, workers::target::WorkerTarget};
+
+const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+/// Polls `poll` every 20 ms and returns its first `Some`, or `None` once `timeout` has passed.
+pub(crate) async fn try_wait_until<T, F, Fut>(timeout: Duration, mut poll: F) -> Option<T>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Option<T>>,
+{
+    tokio::time::timeout(timeout, async {
+        loop {
+            if let Some(value) = poll().await {
+                return value;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .ok()
+}
+
+/// [`try_wait_until`] that fails the test with `what` on timeout.
+pub(crate) async fn wait_until<T, F, Fut>(what: &str, timeout: Duration, poll: F) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Option<T>>,
+{
+    try_wait_until(timeout, poll)
+        .await
+        .unwrap_or_else(|| panic!("timed out waiting for {what}"))
+}
 
 #[expect(
     clippy::future_not_send,
@@ -69,50 +100,45 @@ pub(crate) async fn finish_job(
     let queue = queue_for_tag(&mut worker_ctx, tag.clone()).await;
     let running = queue.clone();
     let worker = tokio::spawn(async move { running.run(vec![tag]).await });
-    let result =
-        std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(20), async {
-            loop {
-                let status = if let Some((request, key, path)) = status_api {
-                    let response = request
-                        .get(path)
-                        .add_header("Authorization", format!("Bearer {key}"))
-                        .await;
-                    response.assert_status(axum::http::StatusCode::OK);
-                    response.json::<serde_json::Value>()["status"]
-                        .as_str()
-                        .expect("job status")
-                        .to_owned()
-                } else {
-                    yorishiro::models::queue_job_lifecycles::Entity::find_by_id(id)
-                        .one(&ctx.db)
-                        .await
-                        .unwrap()
-                        .unwrap()
-                        .status
-                };
-                if matches!(status.as_str(), "completed" | "failed") {
-                    assert_eq!(status, expected, "worker outcome");
-                    let directory = tempfile::tempdir().expect("queue result directory");
-                    let path = queue.dump(directory.path(), None, None).await.unwrap();
-                    let jobs: Vec<loco_rs::bgworker::Job> =
-                        serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-                    let expected_status = if expected == "failed" {
-                        loco_rs::bgworker::JobStatus::Failed
-                    } else {
-                        loco_rs::bgworker::JobStatus::Completed
-                    };
-                    if jobs.iter().any(|job| {
-                        job.data["lifecycle_id"] == id.to_string() && job.status == expected_status
-                    }) {
-                        break;
-                    }
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        }))
-        .catch_unwind()
-        .await;
-    if matches!(&result, Ok(Err(_))) {
+    let result = std::panic::AssertUnwindSafe(try_wait_until(Duration::from_secs(20), || async {
+        let status = if let Some((request, key, path)) = status_api {
+            let response = request
+                .get(path)
+                .add_header("Authorization", format!("Bearer {key}"))
+                .await;
+            response.assert_status(axum::http::StatusCode::OK);
+            response.json::<serde_json::Value>()["status"]
+                .as_str()
+                .expect("job status")
+                .to_owned()
+        } else {
+            yorishiro::models::queue_job_lifecycles::Entity::find_by_id(id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .status
+        };
+        if !matches!(status.as_str(), "completed" | "failed") {
+            return None;
+        }
+        assert_eq!(status, expected, "worker outcome");
+        let directory = tempfile::tempdir().expect("queue result directory");
+        let path = queue.dump(directory.path(), None, None).await.unwrap();
+        let jobs: Vec<loco_rs::bgworker::Job> =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let expected_status = if expected == "failed" {
+            loco_rs::bgworker::JobStatus::Failed
+        } else {
+            loco_rs::bgworker::JobStatus::Completed
+        };
+        jobs.iter()
+            .any(|job| job.data["lifecycle_id"] == id.to_string() && job.status == expected_status)
+            .then_some(())
+    }))
+    .catch_unwind()
+    .await;
+    if matches!(&result, Ok(None)) {
         log_worker_timeout(ctx, id, &queue).await;
     }
     App::on_shutdown(&worker_ctx).await;
@@ -120,7 +146,9 @@ pub(crate) async fn finish_job(
     let joined = tokio::time::timeout(Duration::from_secs(10), worker).await;
     let closed = queue.close().await;
     match result {
-        Ok(outcome) => outcome.expect("the job must complete on the configured queue provider"),
+        Ok(outcome) => {
+            outcome.expect("the job must complete on the configured queue provider");
+        }
         Err(panic) => std::panic::resume_unwind(panic),
     }
     shutdown.expect("shutdown worker queue");

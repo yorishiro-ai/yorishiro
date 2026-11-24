@@ -134,10 +134,10 @@ async fn injected_deliveries_are_consumed_only_by_their_target() {
             let queue = crate::requests::jobs::target_queue(&mut worker_ctx, target).await;
             let running = Arc::clone(&queue);
             let worker = tokio::spawn(async move { running.run(vec![target.tag()]).await });
-            let outcome = std::panic::AssertUnwindSafe(tokio::time::timeout(
-                Duration::from_secs(10),
-                async {
-                    loop {
+            let outcome =
+                std::panic::AssertUnwindSafe(crate::requests::jobs::try_wait_until(
+                    Duration::from_secs(10),
+                    || async {
                         let dump = queue.dump(directory.path(), None, None).await.unwrap();
                         let jobs: Vec<Job> =
                             serde_yaml::from_str(&std::fs::read_to_string(dump).unwrap()).unwrap();
@@ -150,14 +150,13 @@ async fn injected_deliveries_are_consumed_only_by_their_target() {
                                     job.id == *id && job.status == JobStatus::Queued
                                 }));
                             }
-                            break;
+                            return Some(());
                         }
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
-                },
-            ))
-            .catch_unwind()
-            .await;
+                        None
+                    },
+                ))
+                .catch_unwind()
+                .await;
             App::on_shutdown(&worker_ctx).await;
             queue.shutdown().unwrap();
             let drained = tokio::time::timeout(Duration::from_secs(10), worker).await;

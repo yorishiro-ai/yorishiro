@@ -448,26 +448,20 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         blocker.execute_unprepared(&format!("LOCK TABLE {partition} IN SHARE MODE")).await.unwrap();
         let maintenance_db = ctx.db.clone();
         let maintenance = tokio::spawn(async move { entity_embeddings::maintain_workspace_indexes(&maintenance_db).await });
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            loop {
-                let waiting = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
-                    "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE $1) AS waiting",
-                    [format!("CREATE INDEX CONCURRENTLY \"{index}\"%").into()])).await.unwrap().unwrap().try_get::<bool>("", "waiting").unwrap();
-                if waiting { break; }
-                tokio::task::yield_now().await;
-            }
-        }).await.expect("maintenance must reach the actual concurrent build lock");
+        crate::requests::jobs::wait_until("maintenance to reach the actual concurrent build lock", std::time::Duration::from_secs(15), || async {
+            let waiting = ctx.db.query_one_raw(Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres,
+                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE $1) AS waiting",
+                [format!("CREATE INDEX CONCURRENTLY \"{index}\"%").into()])).await.unwrap().unwrap().try_get::<bool>("", "waiting").unwrap();
+            waiting.then_some(())
+        }).await;
         let (provider, _server) = fixed_width_provider(7).await;
         let reindex_db = ctx.db.clone();
         let workspace_id = fixture.workspace_id;
         let publication = tokio::spawn(async move { entity_embeddings::reindex_workspace(&reindex_db, workspace_id, &provider).await });
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            loop {
-                let workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id).one(&ctx.db).await.unwrap().unwrap();
-                if workspace.embedding_reindexing { break; }
-                tokio::task::yield_now().await;
-            }
-        }).await.expect("real reindex must fence publication while index build is blocked");
+        crate::requests::jobs::wait_until("real reindex to fence publication while index build is blocked", std::time::Duration::from_secs(15), || async {
+            let workspace = workspace_workspaces::Entity::find_by_id(fixture.workspace_id).one(&ctx.db).await.unwrap().unwrap();
+            workspace.embedding_reindexing.then_some(())
+        }).await;
         blocker.rollback().await.unwrap();
         maintenance.await.unwrap().unwrap();
         let published = publication.await.unwrap().unwrap();
@@ -1204,20 +1198,15 @@ async fn concurrent_reindex_runs_serialize_and_consistent_after_lock() {
         });
 
         // Inspect the actual lock wait, not elapsed time; this is a database-lock regression.
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            loop {
-                #[derive(sea_orm::FromQueryResult)]
-                struct LockWait { waiting: bool }
-                let waiting = LockWait::find_by_statement(Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Postgres,
-                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS waiting",
-                    [entity_embeddings::workspace_reindex_lock_key(workspace_id).into()],
-                )).one(&ctx.db).await.expect("observe workspace advisory lock")
-                    .expect("lock observation row").waiting;
-                if waiting { break; }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        }).await.expect("second reindex waits for this workspace's advisory lock");
+        crate::requests::jobs::wait_until("second reindex to wait for this workspace's advisory lock", std::time::Duration::from_secs(10), || async {
+            let waiting = LockWait::find_by_statement(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS waiting",
+                [entity_embeddings::workspace_reindex_lock_key(workspace_id).into()],
+            )).one(&ctx.db).await.expect("observe workspace advisory lock")
+                .expect("lock observation row").waiting;
+            waiting.then_some(())
+        }).await;
         release.add_permits(1);
 
         let outcome1 = h1.await.expect("handler 1 finished");
@@ -1900,4 +1889,9 @@ async fn stored_postgres_vector(
         .await
         .expect("query embedding")
         .and_then(|row| row.embedding)
+}
+
+#[derive(sea_orm::FromQueryResult)]
+struct LockWait {
+    waiting: bool,
 }

@@ -62,11 +62,12 @@ impl TryFrom<ListEntitiesArgs> for entity_entities::ListEntitiesQuery {
     type Error = crate::YorishiroError;
 
     fn try_from(args: ListEntitiesArgs) -> Result<Self, Self::Error> {
+        let page = crate::models::pagination::ListParams::from(&args);
         Ok(Self {
             entity_type: args.entity_type,
             filter: args.filter,
             schema_version: args.schema_version,
-            page: crate::models::pagination::ListParams::new(args.limit, args.offset),
+            page,
         })
     }
 }
@@ -269,3 +270,5 @@ impl YorishiroMcpServer {
         })
     }
 }
+
+crate::dtos::common::list_params_from!(ListEntitiesArgs);

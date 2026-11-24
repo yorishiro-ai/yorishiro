@@ -15,9 +15,12 @@ use sea_orm::sqlx::sqlite::SqliteConnectOptions;
 
 use crate::error::YorishiroError;
 
+/// Loads `environment`'s configuration through Loco and validates it.
+///
+/// A production start with neither `production.yaml` nor `production.local.yaml` in the configuration folder uses the defaults embedded in the binary.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error when the files cannot be read or parsed, or when a setting is invalid.
 pub fn load(environment: &Environment) -> Result<Config> {
     let folder = crate::data::env::config_folder().map(PathBuf::from);
     let path = folder.as_deref().unwrap_or_else(|| Path::new("config"));
@@ -27,10 +30,7 @@ pub fn load(environment: &Environment) -> Result<Config> {
     {
         load_production_defaults(environment)?
     } else {
-        match folder.as_deref() {
-            Some(folder) => Config::from_folder(environment, folder)?,
-            None => Config::new(environment)?,
-        }
+        environment.load()?
     };
     validate(&config)?;
     Ok(config)

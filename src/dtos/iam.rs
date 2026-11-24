@@ -301,3 +301,11 @@ impl From<crate::models::iam_role_policy_attachments::Model> for RolePolicyRecor
         }
     }
 }
+
+crate::dtos::common::list_params_from!(
+    ListAudit,
+    ListIam,
+    ListGroupAssociations,
+    ListUserPolicies,
+    ListRoleAssociations,
+);

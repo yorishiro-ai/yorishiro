@@ -45,7 +45,7 @@ impl YorishiroMcpServer {
             model::list_for_actor(
                 self.app_context(),
                 &actor,
-                crate::models::pagination::ListParams::new(page.limit, page.offset),
+                crate::models::pagination::ListParams::from(&page),
             )
             .await,
         )

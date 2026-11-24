@@ -19,6 +19,7 @@ use tokio::time::Instant;
 use uuid::Uuid;
 
 use crate::data::settings::QueryEmbedding;
+use crate::error::ResultExt;
 use crate::error::YorishiroError;
 use crate::models::query_embedding_requests::{Entity as Requests, QueryOutcome};
 use crate::models::search;
@@ -64,7 +65,7 @@ async fn answer(ctx: &AppContext, args: &QueryEmbeddingArgs) -> Result<(), Yoris
     }
     let Some(request) = Requests::find_pending(&ctx.db, workspace_id, args.request_id)
         .await
-        .map_err(|error| YorishiroError::Internal(error.into()))?
+        .internal()?
     else {
         tracing::debug!(request_id = %args.request_id, "query embedding: request is gone or no longer pending");
         return Ok(());
@@ -74,7 +75,7 @@ async fn answer(ctx: &AppContext, args: &QueryEmbeddingArgs) -> Result<(), Yoris
         Ok((vector, model)) => {
             let stored = Requests::complete(&ctx.db, workspace_id, request.id, &vector, &model)
                 .await
-                .map_err(|error| YorishiroError::Internal(error.into()))?;
+                .internal()?;
             if !stored {
                 tracing::info!(request_id = %request.id, "query embedding: the search stopped waiting, result discarded");
             }
@@ -106,10 +107,7 @@ async fn embed(
         .shared_store
         .get::<std::sync::Arc<tokio::sync::Semaphore>>()
         .ok_or_else(|| YorishiroError::Internal("embedding concurrency missing".into()))?;
-    let _permit = concurrency
-        .acquire_owned()
-        .await
-        .map_err(|error| YorishiroError::Internal(error.into()))?;
+    let _permit = concurrency.acquire_owned().await.internal()?;
     if deadline_at <= crate::data::time::now().fixed_offset() {
         return Err(YorishiroError::ProviderBusy {
             message: "query embedding caller deadline elapsed before provider start".into(),
@@ -141,7 +139,7 @@ pub async fn embed_query(
     query_text: &str,
 ) -> Result<Vec<f32>, YorishiroError> {
     let settings = crate::data::settings::configured(ctx)
-        .map_err(|error| YorishiroError::Internal(error.into()))?
+        .internal()?
         .query_embedding;
     let scope = Scope {
         ctx,
@@ -246,14 +244,13 @@ impl Scope<'_> {
             deadline_at,
         )
         .await
-        .map_err(|error| YorishiroError::Internal(error.into()))?;
+        .internal()?;
         let dispatch_id = Uuid::now_v7();
         let args = QueryEmbeddingArgs {
             request_id: id,
             workspace_id: self.workspace_id,
         };
-        let mut payload =
-            serde_json::to_value(&args).map_err(|error| YorishiroError::Internal(error.into()))?;
+        let mut payload = serde_json::to_value(&args).internal()?;
         if let serde_json::Value::Object(fields) = &mut payload {
             fields.insert(
                 "workspace_id".into(),
@@ -271,19 +268,15 @@ impl Scope<'_> {
             Some(vec![target.tag()]),
         )
         .await
-        .map_err(|error| YorishiroError::Internal(error.into()))?;
-        txn.commit()
-            .await
-            .map_err(|error| YorishiroError::Internal(error.into()))?;
+        .internal()?;
+        txn.commit().await.internal()?;
         Ok(id)
     }
 
     async fn read(&self, request_id: Uuid) -> Result<Option<QueryOutcome>, YorishiroError> {
         let txn = self.begin().await?;
         let outcome = Requests::take(&txn, self.workspace_id, request_id).await?;
-        txn.commit()
-            .await
-            .map_err(|error| YorishiroError::Internal(error.into()))?;
+        txn.commit().await.internal()?;
         Ok(outcome)
     }
 
@@ -291,10 +284,8 @@ impl Scope<'_> {
         let txn = self.begin().await?;
         let expired = Requests::expire(&txn, self.workspace_id, request_id)
             .await
-            .map_err(|error| YorishiroError::Internal(error.into()))?;
-        txn.commit()
-            .await
-            .map_err(|error| YorishiroError::Internal(error.into()))?;
+            .internal()?;
+        txn.commit().await.internal()?;
         Ok(expired)
     }
 }

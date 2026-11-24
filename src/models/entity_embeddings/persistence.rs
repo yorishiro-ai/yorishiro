@@ -72,7 +72,7 @@ pub(super) async fn embed_and_write(
         .into_table(table.clone())
         .columns([workspace.clone(), id.clone(), tenant, embedding.clone()])
         .select_from(source)
-        .map_err(|error| YorishiroError::Internal(error.into()))?
+        .internal()?
         .on_conflict(
             OnConflict::columns([workspace, id.clone()])
                 .value(embedding, Expr::val(vector))

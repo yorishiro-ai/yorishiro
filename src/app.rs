@@ -45,18 +45,18 @@ pub(crate) fn load_config(env: &Environment) -> Result<Config> {
     Ok(config)
 }
 
-/// Validates the queue policy and the worker targets, then boots through Loco as `H`.
+/// Validates the worker targets, then boots through Loco as `H`.
 ///
-/// The command line does not call this (see [`load_config`]); a caller that boots with a [`StartMode`], such as the test harness, does, and gets the same checks.
+/// The configuration was validated when it was loaded (see [`load_config`]).
+/// The command line does not call this; a caller that boots with a [`StartMode`], such as the test harness, does, and gets the same worker-target checks.
 ///
 /// # Errors
-/// Returns an error when the queue policy is invalid or the mode starts workers without a valid worker target.
+/// Returns an error when the mode starts workers without a valid worker target.
 pub(crate) async fn boot<H: Hooks>(
     mode: StartMode,
     environment: &Environment,
     mut config: Config,
 ) -> Result<BootResult> {
-    crate::data::config::validate(&config)?;
     crate::workers::start::configure(&mut config, &mode)?;
     // Register sqlite-vec for the test harness path (the test binary never runs main.rs).
     // The call site in main.rs already covers all CLI subcommands.

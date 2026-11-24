@@ -411,18 +411,19 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
                 use sea_orm::{FromQueryResult, Statement};
                 #[derive(FromQueryResult)]
                 struct LockWait { waiting: bool }
-                tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                    loop {
+                crate::requests::jobs::wait_until(
+                    "request waits on the target advisory lock",
+                    std::time::Duration::from_secs(10),
+                    || async {
                         let waiting = LockWait::find_by_statement(Statement::from_sql_and_values(
                             sea_orm::DatabaseBackend::Postgres,
                             "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295) AND objid::bigint = (hashtextextended($1, 0) & 4294967295) AND objsubid = 1) AS waiting",
                             [key.clone().into()],
                         )).one(&db).await.expect("observe revision lock wait")
                             .expect("lock observation").waiting;
-                        if waiting { break; }
-                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                    }
-                }).await.expect("request waits on the target advisory lock");
+                        waiting.then_some(())
+                    },
+                ).await;
             }
         };
         let publish_after_merge_waits = async {

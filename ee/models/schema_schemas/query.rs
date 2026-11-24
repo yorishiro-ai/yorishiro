@@ -97,18 +97,14 @@ pub(crate) async fn list_for_actor(
         .filter_map(|row| schemas.remove(&row.schema_id).map(|schema| (row, schema)))
         .filter(|(row, schema)| schema.origin_template_id == Some(row.template_id))
         .map(|(row, schema)| {
-            let schema_definition: MetaSchemaDefinition = serde_json::from_value(schema.definition)
-                .map_err(|err| YorishiroError::Internal(err.into()))?;
+            let schema_definition: MetaSchemaDefinition =
+                serde_json::from_value(schema.definition).internal()?;
             let base: MetaSchemaDefinition = schema
                 .origin_snapshot
                 .ok_or_else(|| YorishiroError::Internal("linked schema has no merge base".into()))
-                .and_then(|value| {
-                    serde_json::from_value(value)
-                        .map_err(|err| YorishiroError::Internal(err.into()))
-                })?;
+                .and_then(|value| serde_json::from_value(value).internal())?;
             let template_definition: MetaSchemaDefinition =
-                serde_json::from_value(row.template_definition)
-                    .map_err(|err| YorishiroError::Internal(err.into()))?;
+                serde_json::from_value(row.template_definition).internal()?;
             let summary = merge::three_way(&base, &template_definition, &schema_definition).summary;
             Ok(UpstreamChange {
                 workspace_id: row.workspace_id,

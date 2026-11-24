@@ -24,6 +24,18 @@ impl TryFrom<PageParams> for crate::models::pagination::ListParams {
     }
 }
 
+/// Implements `From<&T> for ListParams` for request types with `limit` and `offset` fields.
+macro_rules! list_params_from {
+    ($($request:ty),+ $(,)?) => {$(
+        impl From<&$request> for $crate::models::pagination::ListParams {
+            fn from(request: &$request) -> Self {
+                Self::new(request.limit, request.offset)
+            }
+        }
+    )+};
+}
+pub(crate) use list_params_from;
+
 /// Parses a query-string `filter` parameter (a JSON object, e.g. `{"status":"active"}`) used as a JSONB containment filter.
 /// `None`/empty means no filter.
 pub(crate) fn parse_filter_param(
