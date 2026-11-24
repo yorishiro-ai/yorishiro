@@ -267,3 +267,89 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
     })
     .await;
 }
+
+/// `list_upstream_changes` maps `limit`/`offset` onto the page of changed schemas.
+#[tokio::test]
+async fn list_upstream_changes_pages_by_limit_and_offset() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        crate::requests::fixtures::install_licence(&ctx, "pro");
+        let TestTenant {
+            tenant_id,
+            workspace_id,
+            owner_id,
+            api_key: schema_key,
+        } = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
+        let administrator =
+            crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await;
+        let read_key =
+            issue_api_key(&ctx, workspace_id, administrator, ApiKeyScope::Read, false).await;
+        let library_key =
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant_id, owner_id).await;
+        for index in 0..3 {
+            let name = format!("origin-page-{index}");
+            let template = request
+                .post("/api/template-library")
+                .add_header("Authorization", format!("Bearer {library_key}"))
+                .json(&json!({
+                    "name": name,
+                    "definition": crate::requests::fixtures::note_schema(&name, false),
+                }))
+                .await;
+            template.assert_status(StatusCode::CREATED);
+            let template_id = template.json::<Value>()["id"].as_str().unwrap().to_owned();
+            request
+                .post("/api/schemas")
+                .add_header("Authorization", format!("Bearer {schema_key}"))
+                .json(&json!({ "template_id": template_id }))
+                .await
+                .assert_status(StatusCode::CREATED);
+            let mut changed = crate::requests::fixtures::note_schema(&name, false);
+            changed["entity_types"]["note"]["fields"]["category"] = json!({"type": "string"});
+            request
+                .put(&format!("/api/template-library/{template_id}"))
+                .add_header("Authorization", format!("Bearer {library_key}"))
+                .json(&json!({ "definition": changed }))
+                .await
+                .assert_status_ok();
+        }
+        let session = initialize(&request).await;
+        let all = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            2,
+            "tools/call",
+            json!({"name":"list_upstream_changes","arguments":{}}),
+        )
+        .await;
+        let all = tool_result_json(&all);
+        let all = all.as_array().unwrap();
+        assert_eq!(all.len(), 3);
+        for (arguments, expected) in [
+            (json!({"limit":1,"offset":1}), &all[1..2]),
+            (json!({"limit":2,"offset":2}), &all[2..3]),
+            (json!({"limit":2}), &all[0..2]),
+        ] {
+            let page = mcp_call(
+                &request,
+                &session,
+                &read_key,
+                3,
+                "tools/call",
+                json!({"name":"list_upstream_changes","arguments":arguments}),
+            )
+            .await;
+            assert_ne!(page["result"]["isError"], true, "{page}");
+            assert_eq!(tool_result_json(&page), json!(expected), "{arguments}");
+        }
+    })
+    .await;
+}

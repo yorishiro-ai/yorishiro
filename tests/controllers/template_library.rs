@@ -80,3 +80,68 @@ async fn member_role_cannot_manage_the_template_library() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn creating_or_forking_onto_a_taken_template_name_conflicts() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let auth = format!("Bearer {key}");
+        let name = format!("taken-{}", uuid::Uuid::new_v4());
+        let create = || async {
+            request
+                .post("/api/template-library")
+                .add_header("Authorization", &auth)
+                .json(&serde_json::json!({"name":name,"definition":note_definition()}))
+                .await
+        };
+        let created = create().await;
+        created.assert_status(StatusCode::CREATED);
+        let id = created.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let message = format!("a template named '{name}' already exists for this tenant");
+
+        let duplicate = create().await;
+        duplicate.assert_status(StatusCode::CONFLICT);
+        assert!(duplicate.text().contains(&message), "{}", duplicate.text());
+
+        let fork = request
+            .post(&format!("/api/template-library/{id}/fork"))
+            .add_header("Authorization", &auth)
+            .json(&serde_json::json!({"name":name}))
+            .await;
+        fork.assert_status(StatusCode::CONFLICT);
+        assert!(fork.text().contains(&message), "{}", fork.text());
+    })
+    .await;
+}
+
+/// Only a unique violation is a conflict: any other failed insert stays an internal error.
+#[tokio::test]
+async fn a_non_unique_insert_failure_is_internal_not_a_conflict() {
+    use sea_orm::{ConnectionTrait, DbBackend};
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        // Direct write (c): the insert has to fail for a reason other than a unique violation, which no valid request can cause, so the target table is dropped.
+        let drop = match ctx.db.get_database_backend() {
+            DbBackend::Postgres => "DROP TABLE template_templates CASCADE",
+            _ => "DROP TABLE template_templates",
+        };
+        ctx.db.execute_unprepared(drop).await.unwrap();
+        let response = request
+            .post("/api/template-library")
+            .add_header("Authorization", format!("Bearer {key}"))
+            .json(&serde_json::json!({"name":"orphan","definition":note_definition()}))
+            .await;
+        response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            !response.text().contains("already exists"),
+            "{}",
+            response.text()
+        );
+    })
+    .await;
+}

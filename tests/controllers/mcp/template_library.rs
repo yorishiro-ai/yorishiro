@@ -41,3 +41,33 @@ async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
         rest.assert_status_ok();
     }).await;
 }
+
+#[tokio::test]
+async fn list_template_library_pages_by_limit_and_offset() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let session = initialize(&request).await;
+        for index in 0..3 {
+            let created = request.post("/api/template-library")
+                .add_header("Authorization", format!("Bearer {key}"))
+                .json(&json!({"name":format!("paged-{index}-{}",Uuid::now_v7()),
+                    "definition":{"name":"note","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}}}))
+                .await;
+            created.assert_status(StatusCode::CREATED);
+        }
+        let all = call_tool(&request, &session, &key, "list_template_library", json!({})).await;
+        let all = tool_result_json(&all);
+        let all = all.as_array().unwrap();
+        assert_eq!(all.len(), 3);
+        for (arguments, expected) in [
+            (json!({"limit":1,"offset":1}), &all[1..2]),
+            (json!({"limit":2,"offset":2}), &all[2..3]),
+            (json!({"limit":2}), &all[0..2]),
+        ] {
+            let page = call_tool(&request, &session, &key, "list_template_library", arguments.clone()).await;
+            assert_ne!(page["result"]["isError"], true, "{page}");
+            assert_eq!(tool_result_json(&page), json!(expected), "{arguments}");
+        }
+    }).await;
+}
