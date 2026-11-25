@@ -3,7 +3,7 @@ use axum::extract::{Query, State};
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{ReadScope, Verified, search_token_limiter};
+use crate::controllers::extractors::{Verified, search_token_limiter};
 use crate::controllers::openapi::Routes;
 use crate::dtos::search::SearchEntitiesParams;
 use crate::models::search::{self, SearchHit};
@@ -11,7 +11,7 @@ use crate::models::search::{self, SearchHit};
 pub(crate) async fn search_entities(
     State(ctx): State<AppContext>,
     // `Verified`, not `Authorized`: no connection is acquired here until after the slow embedding call below.
-    verified: Verified<ReadScope>,
+    verified: Verified,
     Query(params): Query<SearchEntitiesParams>,
 ) -> Result<Json<Vec<SearchHit>>, ApiError> {
     let default = search::SearchQuery::default();

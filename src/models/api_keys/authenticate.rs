@@ -1,17 +1,17 @@
-//! Resolving a presented key to its workspace, tenant and scope, and recording its use.
+//! Resolving a presented key to its workspace and tenant, and recording its use.
 
 use super::{
     AuthContext, ColumnTrait, ConnectionTrait, DbHandle, Entity, EntityTrait, Expr,
     FromQueryResult, Model, QueryFilter, ResultExt, Uuid, WORKSPACE_HEADER, YorishiroError,
-    hash_key, stored_scope,
+    hash_key,
 };
 
 impl Entity {
-    /// Verifies a presented raw API key and resolves the workspace, tenant, and scope it belongs to.
+    /// Verifies a presented raw API key and resolves the workspace and tenant it belongs to.
     ///
     /// At this point neither the workspace nor the tenant is known yet, so RLS's `app.current_workspace`/`app.current_tenant` can't be set, which is why this takes the whole [`DbHandle`] rather than a scoped connection.
     ///
-    /// `SeaQuery` calls the `authenticate_api_key` SECURITY DEFINER function to read through RLS and projects only `id/workspace_id/tenant_id/scope/user_id/audit`, never `key_hash` itself.
+    /// `SeaQuery` calls the `authenticate_api_key` SECURITY DEFINER function to read through RLS and projects only `id/workspace_id/tenant_id/user_id/audit`, never `key_hash` itself.
     ///
     /// Non-root workspace-scoped keys resolve to their recorded workspace.
     /// A tenant-scoped key resolves `requested_workspace` when present, otherwise it has no workspace.
@@ -29,22 +29,11 @@ impl Entity {
             id: Uuid,
             workspace_id: Option<Uuid>,
             tenant_id: Uuid,
-            scope: String,
             user_id: Option<Uuid>,
             audit: bool,
         }
         let query = Query::select()
-            .columns(
-                [
-                    "id",
-                    "workspace_id",
-                    "tenant_id",
-                    "scope",
-                    "user_id",
-                    "audit",
-                ]
-                .map(Alias::new),
-            )
+            .columns(["id", "workspace_id", "tenant_id", "user_id", "audit"].map(Alias::new))
             .from_function(
                 Func::cust(Alias::new("authenticate_api_key"))
                     .arg(Expr::val(hash_key(presented_key))),
@@ -70,7 +59,6 @@ impl Entity {
             api_key_id: row.id,
             workspace_id,
             tenant_id: row.tenant_id,
-            scope: stored_scope(&row.scope)?,
             user_id: row.user_id,
             audit: row.audit,
         }
@@ -146,7 +134,6 @@ impl Entity {
             api_key_id: key.id,
             workspace_id,
             tenant_id: key.tenant_id,
-            scope: stored_scope(&key.scope)?,
             user_id: key.user_id,
             audit: key.audit,
         }

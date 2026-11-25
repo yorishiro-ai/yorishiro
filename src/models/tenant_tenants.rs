@@ -20,7 +20,6 @@ pub(crate) async fn detail_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::TenantGet,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -46,7 +45,6 @@ pub(crate) async fn update_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::TenantUpdate,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,

@@ -2,21 +2,12 @@ use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 /// A workspace that never chose reads as absent (an empty list, not a 404, since `list` is "every stored preference" and there being none is not an error); setting, then resetting, round-trips through the exact stored order and back to absence.
 #[tokio::test]
 async fn set_get_and_reset_round_trip_in_display_order() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Write,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let before = request
             .get("/api/workspace/entity-columns")
@@ -114,15 +105,7 @@ async fn set_get_and_reset_round_trip_in_display_order() {
 #[tokio::test]
 async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Write,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let duplicate = request
             .put("/api/workspace/entity-columns/task")
@@ -168,15 +151,7 @@ async fn a_duplicate_or_over_limit_selection_is_refused_and_leaves_no_row() {
 #[tokio::test]
 async fn an_empty_selection_is_stored_as_a_choice() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Write,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let put = request
             .put("/api/workspace/entity-columns/task")

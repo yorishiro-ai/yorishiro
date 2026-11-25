@@ -11,7 +11,6 @@ use yorishiro::models::_entities::{
     entity_entities, schema_schemas, template_templates, workspace_schema_fork_heads,
     workspace_schema_forks,
 };
-use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::{
     tenant_memberships, tenant_tenants::retirement, user_users, workspace_workspaces,
 };
@@ -28,8 +27,8 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
 
     boot_request::<App, _, _>(|request, ctx| async move {
         crate::requests::require_licence(&ctx);
-        let target = TestTenant::create(&request, &ctx, TenantArgs { key_scope: ApiKeyScope::Schema, ..Default::default() }).await;
-        let other = TestTenant::create(&request, &ctx, TenantArgs { key_scope: ApiKeyScope::Schema, ..Default::default() }).await;
+        let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;
         let created = request.post("/api/template-library")
             .add_header("Authorization", format!("Bearer {tenant_key}"))
@@ -49,7 +48,7 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
             .json(&json!({"name":format!("retirement-fork-{}", uuid::Uuid::new_v4())})).await;
         assert_eq!(workspace.status_code(), StatusCode::CREATED);
         let workspace_id = workspace.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
-        let fork_key = crate::requests::fixtures::issue_api_key(&ctx, workspace_id, target.owner_id, ApiKeyScope::Schema, false).await;
+        let fork_key = crate::requests::fixtures::issue_api_key(&ctx, workspace_id, target.owner_id, false).await;
         let fork = request.post("/api/schema-forks").add_header("Authorization", format!("Bearer {fork_key}"))
             .json(&json!({"source_workspace_id":target.workspace_id,"source_schema_id":schemas[0]})).await;
         assert_eq!(fork.status_code(), StatusCode::CREATED, "{}", fork.text());
@@ -295,19 +294,13 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
         let target = TestTenant::create(
             &request,
             &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
+            TenantArgs::default(),
         )
         .await;
         let other = TestTenant::create(
             &request,
             &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
+            TenantArgs::default(),
         )
         .await;
         let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;

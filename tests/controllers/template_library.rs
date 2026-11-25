@@ -1,7 +1,6 @@
 use crate::requests::boot_request;
 use axum::http::StatusCode;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::fixtures::{self, TenantArgs, TestTenant, issue_api_key};
 
@@ -22,9 +21,9 @@ async fn template_update_rejects_a_revoked_previously_authenticated_actor() {
         created.assert_status(StatusCode::CREATED);
         let id = created.json::<serde_json::Value>()["id"].as_str().unwrap().parse().unwrap();
         let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
-        let key = api_keys::Entity::create_tenant_api_key(&ctx.db, tenant.tenant_id, ApiKeyScope::Read, Some(administrator), false, "template-admin").await.unwrap();
+        let key = api_keys::Entity::create_tenant_api_key(&ctx.db, tenant.tenant_id, Some(administrator), false, "template-admin").await.unwrap();
         let actor = api_keys::AuthContext { api_key_id:key.id, workspace_id:None,
-            tenant_id:tenant.tenant_id, user_id:Some(administrator), scope:ApiKeyScope::Read, audit:false };
+            tenant_id:tenant.tenant_id, user_id:Some(administrator), audit:false };
         template_templates::update_as(&ctx.db, &actor, id, UpdateTemplateInput {
             name: None, description: Some("before-revocation".into()), definition: None, tags: None, locale: None,
         }).await.unwrap();
@@ -52,14 +51,7 @@ async fn member_role_cannot_manage_the_template_library() {
         yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant.tenant_id, member.id)
             .await
             .expect("add member");
-        let member_key = issue_api_key(
-            &ctx,
-            tenant.workspace_id,
-            member.id,
-            ApiKeyScope::Write,
-            false,
-        )
-        .await;
+        let member_key = issue_api_key(&ctx, tenant.workspace_id, member.id, false).await;
 
         let response = request
             .post("/api/template-library")

@@ -240,6 +240,7 @@ class ArgumentTests(unittest.TestCase):
     def test_rest_extractor_rejection_is_text_not_json(self):
         app = Mock(key="credential", workspace="workspace")
         app.issue.return_value = ("id", "read-key")
+        app.reader.return_value = (None, "read-key")
         for status, text, passes in ((422, "missing field `schema_name`", True),
                                      (200, "missing field `schema_name`", False),
                                      (422, "unrelated rejection", False)):
@@ -280,10 +281,10 @@ class ArgumentTests(unittest.TestCase):
             app.tenant_key = "ysr_bootstrap"
             value = "00000000-0000-0000-0000-000000000001"
             with patch.object(app, "rest", return_value={"id": value, "full_key": "ysr_delegated"}) as rest:
-                self.assertEqual(app.issue(value, "read", issuer="ysr_member", audit=True),
+                self.assertEqual(app.issue(value, issuer="ysr_member", audit=True),
                                  (value, "ysr_delegated"))
                 rest.assert_called_once_with("POST", "/api/api-keys", {
-                    "name": "contract-delegated", "scope": "read", "audit": True,
+                    "name": "contract-delegated", "audit": True,
                     "expires_at": rest.call_args.args[2]["expires_at"],
                 }, status=201, key="ysr_member", headers={"X-Workspace-Id": value})
                 self.assertGreater(datetime.fromisoformat(rest.call_args.args[2]["expires_at"]),

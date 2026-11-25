@@ -21,9 +21,9 @@ make test-contract BINARY=/absolute/path/to/yorishiro-ee SUITE=mcp EDITION=ee
 
 Common contracts run on CE/SQLite; enterprise-only composition and behavior belong in explicit EE checks, not a duplicate common matrix.
 The edition argument labels evidence; it does not infer or verify the binary's compile-time features.
-The EE MCP delta suite checks edition discovery and entity-column and worker-class setting, scope denial, nonmutation and reset through both transports, without replaying CE business scenarios.
+The EE MCP delta suite checks edition discovery and entity-column and worker-class setting, IAM denial, nonmutation and reset through both transports, without replaying CE business scenarios.
 The SQLite suites run with the enterprise licence explicitly unset; `tenant-postgres` requires a valid licence.
-The EE provider scenario configures and resets both LLM and embedding overrides, checks secret-free REST/MCP metadata parity and preserves settings after invalid or under-scoped writes.
+The EE provider scenario configures and resets both LLM and embedding overrides, checks secret-free REST/MCP metadata parity and preserves settings after invalid or unauthorized writes.
 It uses reserved invalid provider URLs without starting workers, so it proves configuration and enqueue admission, not external inference or reindex completion.
 The separate EE search scenario owns a loopback OpenAI-compatible HTTP stub and a real embedding worker, waits for reindex completion, and checks REST/MCP query results and cross-workspace isolation.
 Its deterministic vectors test transport and worker integration, not semantic model quality or a live provider.
@@ -56,8 +56,8 @@ Every suite bootstraps its own credentials; the MCP suite alone checks revocatio
 
 | Suite | Additional checks |
 | --- | --- |
-| `rest` | Schema create/read/archive/delete and entity create/list/read/update/delete through REST, cross-checked through MCP; unauthenticated/invalid credentials, insufficient scope, malformed entity input |
-| `mcp` | Same CRUD through MCP, cross-checked through REST; initialize/session header/initialized notification, tool discovery, authentication protocol errors, scope tool errors, invalid UUID argument-deserialization tool error, missing schema arguments |
+| `rest` | Schema create/read/archive/delete and entity create/list/read/update/delete through REST, cross-checked through MCP; unauthenticated/invalid credentials, IAM denial, malformed entity input |
+| `mcp` | Same CRUD through MCP, cross-checked through REST; initialize/session header/initialized notification, tool discovery, authentication protocol errors, IAM denial tool errors, invalid UUID argument-deserialization tool error, missing schema arguments |
 | `management` | CLI bootstrap/key tasks, argument and exit contracts, human key management, MCP profile/settings/template/workspace/audit/membership lifecycles |
 
 Scenario definitions and assertions live in `run.py`.

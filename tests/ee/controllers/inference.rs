@@ -268,8 +268,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         let member = yorishiro::models::tenancy::register_member(&txn, setup.tenant_id,
             &crate::requests::fixtures::unique_email("confirm-iam"), "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
-        let key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, setup.workspace_id,
-            yorishiro::models::api_keys::ApiKeyScope::Schema, Some(member.id), false).await.unwrap();
+        let key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, setup.workspace_id, Some(member.id), false).await.unwrap();
         let document = serde_json::json!({"statements":[{"effect":"allow","actions":["inference_confirm"],
             "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
         for deny in [false, true] {
@@ -305,7 +304,6 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         let revoked = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             setup.workspace_id,
-            yorishiro::models::api_keys::ApiKeyScope::Schema,
             Some(setup.owner_id),
             false,
         )
@@ -535,7 +533,7 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
             "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
         let key = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, setup.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema,
+            &ctx.db, setup.workspace_id,
             Some(member.id), false,
         ).await.unwrap();
         let document = serde_json::json!({"statements":[{"effect":"allow",

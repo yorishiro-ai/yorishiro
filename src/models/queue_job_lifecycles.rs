@@ -39,7 +39,6 @@ pub(crate) async fn migration_job_status_for_actor(
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Migration,
         crate::models::iam::access::WorkspaceTarget::Job(id),
         crate::models::iam::policy::Action::MigrationJobGet,
         async |session| migration_job_status(session.txn(), session.workspace_id()?, id).await,
@@ -576,7 +575,7 @@ pub struct Enqueue<'a> {
     pub concurrency_limit: Option<i32>,
 }
 
-/// Opens the caller's schema-scope session and reads an import job's status.
+/// Opens the caller's read session and reads an import job's status.
 ///
 /// # Errors
 /// Returns the session, authorization or lookup error.
@@ -588,7 +587,6 @@ pub(crate) async fn import_job_status_for_actor(
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::access::WorkspaceTarget::Job(id),
         crate::models::iam::policy::Action::ImportJobGet,
         async |session| {

@@ -19,6 +19,7 @@ mod m20261118_000015_iam;
 mod m20261121_000016_workspace_list_rls;
 mod m20261125_000017_drop_workspace_memberships;
 mod m20261125_000018_roles_to_groups;
+mod m20261125_000019_drop_api_key_scope;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -80,6 +81,7 @@ impl MigratorTrait for Migrations {
             Box::new(m20261121_000016_workspace_list_rls::Migration),
             Box::new(m20261125_000017_drop_workspace_memberships::Migration),
             Box::new(m20261125_000018_roles_to_groups::Migration),
+            Box::new(m20261125_000019_drop_api_key_scope::Migration),
             // inject-above (do not remove this comment)
         ]
     }

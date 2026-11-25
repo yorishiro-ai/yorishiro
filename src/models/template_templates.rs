@@ -244,7 +244,6 @@ pub(crate) async fn list_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::TemplateLibraryList,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -263,7 +262,6 @@ pub(crate) async fn get_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::TemplateLibraryGet,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -282,7 +280,6 @@ pub(crate) async fn create_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::TemplateLibraryCreate,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -306,7 +303,6 @@ pub async fn update_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::TemplateLibraryUpdate,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -327,7 +323,6 @@ pub(crate) async fn delete_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::TemplateLibraryDelete,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -348,7 +343,6 @@ pub(crate) async fn fork_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::TemplateLibraryFork,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,

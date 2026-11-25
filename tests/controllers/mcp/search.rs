@@ -1,6 +1,5 @@
 use axum::http::StatusCode;
 use serde_json::{Value, json};
-use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::{entity_entities, schema_schemas};
 
 use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
@@ -165,7 +164,7 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             owner_id,
             ..
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let read_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, false).await;
+        let read_key = issue_api_key(&ctx, workspace_id, owner_id, false).await;
         let definition = serde_json::from_value(json!({
             "name": "note",
             "entity_types": { "note": { "fields": {

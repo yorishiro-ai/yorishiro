@@ -16,7 +16,7 @@ use crate::controllers::api_keys::render_grant;
 use crate::dtos::api_keys::{
     ApiKeyRecord, CreateApiKeyRequest, CreateApiKeyResponse, ListApiKeysResponse,
 };
-use crate::models::api_keys::{ApiKeyScope, IdentityApiKeys};
+use crate::models::api_keys::IdentityApiKeys;
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -27,15 +27,14 @@ pub(crate) struct ApiKeyArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_api_keys)]
 impl YorishiroMcpServer {
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Issue an API key and return its secret once. Select a workspace to bind the key, or set tenant_scoped without a workspace selector for an unbound key. Requires a tenant-scoped issuer with read scope and credential_create permission. The new key cannot exceed the issuer's effective scope or audit grant. An expiring issuer must supply expires_at no later than its own expiration, except for a root sign-in session."
+        description = "Issue an API key and return its secret once. Select a workspace to bind the key, or set tenant_scoped without a workspace selector for an unbound key. Requires a tenant-scoped issuer with credential_create permission. The new key cannot exceed the issuer's effective scope or audit grant. An expiring issuer must supply expires_at no later than its own expiration, except for a root sign-in session."
     )]
     pub(crate) async fn create_api_key(
         &self,
         Parameters(args): Parameters<CreateApiKeyRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(self, parts, "create_api_key");
+        let auth = verified!(self, parts);
         try_tool!(
             args.validate_workspace_selection(
                 parts
@@ -47,7 +46,6 @@ impl YorishiroMcpServer {
             IdentityApiKeys::create_delegated_tenant_api_key(
                 &self.app_context().db,
                 &auth,
-                args.scope.unwrap_or(ApiKeyScope::Read),
                 args.audit,
                 &args.name,
                 args.expires_at,
@@ -57,7 +55,6 @@ impl YorishiroMcpServer {
             IdentityApiKeys::create_delegated_api_key(
                 &self.app_context().db,
                 &auth,
-                args.scope.unwrap_or(ApiKeyScope::Read),
                 args.audit,
                 &args.name,
                 args.expires_at,
@@ -78,14 +75,13 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "List current-tenant API key history including revoked and expired grants without secrets (requires read scope and credential_list IAM permission with a tenant-scoped credential)"
+        description = "List current-tenant API key history including revoked and expired grants without secrets (requires credential_list IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn list_api_keys(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(self, parts, "list_api_keys");
+        let auth = verified!(self, parts);
         let ctx = self.app_context();
         let result = async {
             let mut records = Vec::new();
@@ -108,15 +104,14 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Revoke a current-tenant API key while retaining secret-free history (requires read scope and credential_revoke IAM permission with a tenant-scoped credential)"
+        description = "Revoke a current-tenant API key while retaining secret-free history (requires credential_revoke IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn revoke_api_key(
         &self,
         Parameters(args): Parameters<ApiKeyArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(self, parts, "revoke_api_key");
+        let auth = verified!(self, parts);
         match IdentityApiKeys::revoke_for_tenant(&self.app_context().db, &auth, args.key_id).await {
             Ok(()) => ok_json(serde_json::json!({"revoked":true})),
             Err(error) => Ok(err_to_tool_result(error)),
@@ -124,15 +119,14 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Atomically rotate a current-tenant API key, revoke its predecessor and return the successor secret once (requires read scope and credential_rotate IAM permission with a tenant-scoped credential; issuer ceilings apply)"
+        description = "Atomically rotate a current-tenant API key, revoke its predecessor and return the successor secret once (requires credential_rotate IAM permission with a tenant-scoped credential; issuer ceilings apply)"
     )]
     pub(crate) async fn rotate_api_key(
         &self,
         Parameters(args): Parameters<ApiKeyArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(self, parts, "rotate_api_key");
+        let auth = verified!(self, parts);
         match IdentityApiKeys::rotate(&self.app_context().db, &auth, args.key_id).await {
             Ok(created) => ok_json(CreateApiKeyResponse {
                 id: created.id,

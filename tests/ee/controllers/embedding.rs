@@ -4,7 +4,6 @@ use axum::http::StatusCode;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, SelectExt};
 use yorishiro::App;
 use yorishiro::models::_entities::queue_job_lifecycles::{Column, Entity};
-use yorishiro::models::api_keys::ApiKeyScope;
 
 #[tokio::test]
 async fn document_prefix_invalidates_vectors_but_query_instruction_does_not() {
@@ -27,15 +26,7 @@ async fn document_prefix_revision_contract() {
     use sea_orm::EntityTrait;
     use yorishiro::models::workspace_workspaces;
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let read = || workspace_workspaces::Entity::find_by_id(setup.workspace_id).one(&ctx.db);
         let initial = read().await.unwrap().unwrap();
         let mut config = serde_json::json!({
@@ -98,15 +89,7 @@ async fn document_prefix_revision_contract() {
 #[tokio::test]
 async fn embedding_key_set_get_and_clear_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let missing = request
             .get("/api/workspace/embedding-key")
@@ -182,15 +165,7 @@ async fn embedding_key_set_get_and_clear_round_trip() {
 #[tokio::test]
 async fn a_non_http_base_url_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         for bad_url in [
             "file:///etc/passwd",
@@ -222,15 +197,7 @@ async fn a_non_http_base_url_is_refused() {
 #[tokio::test]
 async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_reindex() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let definition = serde_json::from_value(serde_json::json!({
             "name": "note",
@@ -323,15 +290,7 @@ async fn set_accepts_arbitrary_positive_widths_without_creating_tables() {
     use sea_orm::sea_query::{Alias, Asterisk, Expr, ExprTrait, Func, Query};
 
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let refused = request
             .put("/api/workspace/embedding-key")

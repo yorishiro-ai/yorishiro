@@ -53,7 +53,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         // create_tenant_api_key reads tenant_tenants and tenant_memberships, neither granted to yorishiro_app (see tenant_tenants's migration doc comment), so it runs on the identity pool (the migration/admin role), not the RLS-scoped tenant pool.
         let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let identity = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.identity.clone());
-        let tenant_key = create_tenant_api_key(&identity, tenant_id, "read", Some(user_id))
+        let tenant_key = create_tenant_api_key(&identity, tenant_id, Some(user_id))
             .await
             .expect("issuing a tenant-scoped key");
 
@@ -66,7 +66,6 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         let replacement = rotated.json::<serde_json::Value>();
         assert!(replacement["workspace_id"].is_null());
         assert_eq!(replacement["tenant_id"], tenant_id.to_string());
-        assert_eq!(replacement["scope"], "read");
         request
             .get("/api/whoami")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
@@ -167,8 +166,6 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         assert_eq!(identity["user_id"], user_id.to_string());
         assert_eq!(identity["identity_kind"], "user");
         assert!(identity["bound_workspace_id"].is_null());
-        assert_eq!(identity["stored_scope"], "read");
-        assert_eq!(identity["scope"], "read");
         assert_ne!(identity["workspace_name"].as_str().unwrap(), "");
         assert_ne!(identity["tenant_name"].as_str().unwrap(), "");
         assert!(!response.text().contains(&tenant_key.plaintext));
@@ -248,7 +245,7 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
         let member = tenancy::register_member(&txn, tenant.tenant_id,
             &crate::requests::fixtures::unique_email("tenant-target"), "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
-        let key = create_tenant_api_key(&ctx.db, tenant.tenant_id, "read", Some(member.id)).await.unwrap();
+        let key = create_tenant_api_key(&ctx.db, tenant.tenant_id, Some(member.id)).await.unwrap();
         let root_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let created = request.post("/api/iam/policies")
             .add_header("Authorization", format!("Bearer {root_key}"))
@@ -313,10 +310,9 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
 
         let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let identity = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.identity.clone());
-        let tenant_key =
-            create_tenant_api_key(&identity, caller.tenant_id, "read", Some(caller.owner_id))
-                .await
-                .expect("issuing a tenant-scoped key");
+        let tenant_key = create_tenant_api_key(&identity, caller.tenant_id, Some(caller.owner_id))
+            .await
+            .expect("issuing a tenant-scoped key");
 
         // The key works in its own tenant's workspace.
         let own = request
@@ -341,7 +337,7 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
 
         // The same header is valid for a key of the foreign tenant, proving the refusal is about the pairing, not the workspace.
         let foreign_key =
-            create_tenant_api_key(&identity, foreign.tenant_id, "read", Some(foreign.owner_id))
+            create_tenant_api_key(&identity, foreign.tenant_id, Some(foreign.owner_id))
                 .await
                 .expect("issuing a second tenant-scoped key");
         let valid = request

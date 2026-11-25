@@ -8,17 +8,16 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{AuthContext, ReadScope, SchemaScope, Verified};
+use crate::controllers::extractors::{AuthContext, Verified};
 use crate::controllers::openapi::Routes;
 use crate::data::templates::{self, TemplateSummary};
 use crate::dtos::schemas::{CreateSchemaRequest, CreateSchemaResponse};
-use crate::models::api_keys::ApiKeyScope;
 use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 use crate::models::schema_schemas::{self, SchemaRecord, SchemaSummary};
 
 pub(crate) async fn archive_schema(
     State(ctx): State<AppContext>,
-    verified: Verified<SchemaScope>,
+    verified: Verified,
     Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
         crate::dtos::common::SchemaIdPath<Uuid>,
     >,
@@ -30,7 +29,7 @@ pub(crate) async fn archive_schema(
 
 pub(crate) async fn delete_schema(
     State(ctx): State<AppContext>,
-    verified: Verified<SchemaScope>,
+    verified: Verified,
     Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
         crate::dtos::common::SchemaIdPath<Uuid>,
     >,
@@ -44,7 +43,6 @@ pub(crate) async fn list_schemas(
     AuthContext(actor): AuthContext,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<SchemaSummary>>, ApiError> {
-    crate::controllers::middleware::auth::require_scope(&actor, ApiKeyScope::Read)?;
     let summaries = schema_schemas::list_for_actor(&ctx, &actor, page.try_into()?).await?;
     Ok(Json(summaries))
 }
@@ -54,7 +52,7 @@ pub(crate) async fn list_schemas(
 /// Returns an error if the operation cannot be completed.
 async fn create_schema(
     State(ctx): State<AppContext>,
-    verified: Verified<SchemaScope>,
+    verified: Verified,
     Json(body): Json<CreateSchemaRequest>,
 ) -> Result<Created<CreateSchemaResponse>, ApiError> {
     Ok(Created(
@@ -67,7 +65,7 @@ async fn create_schema(
 /// Returns an error if the operation cannot be completed.
 async fn get_active_schema(
     State(ctx): State<AppContext>,
-    verified: Verified<ReadScope>,
+    verified: Verified,
     Path(crate::dtos::common::NamePath { name }): Path<crate::dtos::common::NamePath<String>>,
 ) -> Result<Json<SchemaRecord>, ApiError> {
     Ok(Json(
@@ -77,7 +75,7 @@ async fn get_active_schema(
 
 pub(crate) async fn get_schema_by_id(
     State(ctx): State<AppContext>,
-    verified: Verified<ReadScope>,
+    verified: Verified,
     Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
         crate::dtos::common::SchemaIdPath<Uuid>,
     >,
@@ -88,7 +86,7 @@ pub(crate) async fn get_schema_by_id(
 }
 
 pub(crate) async fn list_templates(
-    _verified: Verified<ReadScope>,
+    _verified: Verified,
 ) -> Result<Json<Vec<TemplateSummary>>, ApiError> {
     Ok(Json(templates::list_templates()))
 }
@@ -97,7 +95,7 @@ pub(crate) async fn list_templates(
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn get_template(
-    _verified: Verified<ReadScope>,
+    _verified: Verified,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<String>>,
 ) -> Result<Json<MetaSchemaDefinition>, ApiError> {
     let definition = templates::get_template(&id)?;
@@ -106,7 +104,7 @@ async fn get_template(
 
 pub(crate) async fn get_entity_type_json_schema(
     State(ctx): State<AppContext>,
-    verified: Verified<ReadScope>,
+    verified: Verified,
     Path(crate::dtos::common::NameEntityTypePath { name, entity_type }): Path<
         crate::dtos::common::NameEntityTypePath<String, String>,
     >,

@@ -2,7 +2,6 @@ use axum::http::StatusCode;
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
@@ -28,7 +27,7 @@ async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
             json!({"name":"fork_template_library_item","arguments":{"id":id,"name":format!("fork-{}",Uuid::now_v7())}})).await;
         let fork = tool_result_json(&fork);
         assert_ne!(fork["id"], created["id"]);
-        let service = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Migration, None, false).await.unwrap();
+        let service = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, None, false).await.unwrap();
         let denied = mcp_call(&request, &session, &service.plaintext, 5, "tools/call",
             json!({"name":"delete_template_library_item","arguments":{"id":id}})).await;
         assert_eq!(denied["result"]["isError"], true);

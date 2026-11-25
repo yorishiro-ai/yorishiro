@@ -112,6 +112,15 @@ def parse_args(argv=None):
     return args
 
 
+class WorkspaceKey(str):
+    """A login key that acts on one workspace, which every request sends as `X-Workspace-Id`."""
+
+    def __new__(cls, key, workspace):
+        value = super().__new__(cls, key)
+        value.workspace = workspace
+        return value
+
+
 class App:
     def __init__(self, args, directory):
         self.args = args
@@ -203,7 +212,29 @@ class App:
     def task(self, task_name, **params):
         return self.cli("task", task_name, *(f"{key}:{value}" for key, value in params.items()))[0]
 
-    def issue(self, workspace, scope, *, issuer=None, audit=False, expires_at=None):
+    def reader(self, workspace):
+        """A key for a user whose only IAM grant is the built-in `Tenant Reader` policy.
+
+        The key is a login key, so it acts on `workspace` through the default `X-Workspace-Id` header set here.
+        """
+        if not hasattr(self, "reader_key"):
+            password = "contract-reader-password"
+            self.secrets.append(password)
+            member = self.rest("POST", "/api/members/users", {
+                "user_name": "contract-reader", "password": password,
+            }, status=201, key=self.tenant_key)
+            policies = self.rest("GET", "/api/iam/policies", key=self.tenant_key)
+            policy = next(row for row in policies if row["name"] == "Tenant Reader")
+            self.rest("PUT", f"/api/iam/users/{member['user_id']}/policies/{policy['id']}",
+                      status=204, key=self.tenant_key)
+            login = self.rest("POST", "/auth/tenant/login", {
+                "tenant_id": self.tenant, "user_name": "contract-reader", "password": password,
+            }, key="")
+            self.reader_key = login["api_key"]
+            self.secrets.append(self.reader_key)
+        return None, WorkspaceKey(self.reader_key, workspace)
+
+    def issue(self, workspace, *, issuer=None, audit=False, expires_at=None):
         if issuer is None:
             if not hasattr(self, "administrator_key"):
                 password = "contract-administrator-password"
@@ -225,7 +256,7 @@ class App:
         if expires_at is None:
             from datetime import UTC, datetime, timedelta
             expires_at = (datetime.now(UTC) + timedelta(minutes=30)).isoformat()
-        body = {"name": "contract-delegated", "scope": scope, "audit": audit}
+        body = {"name": "contract-delegated", "audit": audit}
         if expires_at is not None:
             body["expires_at"] = expires_at
         created = self.rest("POST", "/api/api-keys", body, status=201, key=issuer,
@@ -284,7 +315,7 @@ class App:
         self.workspace = self.create_workspace("contract")
         self.account = account
         self.tenant = account["tenant_id"]
-        self.key_id, self.key = self.issue(self.workspace, "schema")
+        self.key_id, self.key = self.issue(self.workspace)
 
     def http(self, method, path, body=None, key=None, headers=None, rpc_id=None, timeout=10,
              raw_body=None):
@@ -298,6 +329,8 @@ class App:
         if body is not None:
             request_headers["Content-Type"] = "application/json"
         request_headers.update(headers or {})
+        if getattr(key, "workspace", None) and "X-Workspace-Id" not in request_headers:
+            request_headers["X-Workspace-Id"] = key.workspace
         raw = b""
         status = None
         until = time.monotonic() + self.remaining(timeout)
@@ -480,7 +513,7 @@ def vertical_slice(app):
     document = client.call("list_schemas", error=True)
     require("error" in document and document["error"]["code"] == -32600,
             "revoked MCP credential must produce an authentication protocol error")
-    app.key_id, app.key = app.issue(app.workspace, "schema")
+    app.key_id, app.key = app.issue(app.workspace)
 
 
 def crud(app, surface):
@@ -595,7 +628,7 @@ class GraphAPI:
 def relation_export_import_worker(app):
     def workspace(name):
         value = app.create_workspace(name)
-        _, key = app.issue(value, "schema")
+        _, key = app.issue(value)
         return value, key
 
     source_id, source_key = workspace("graph-source")
@@ -605,13 +638,13 @@ def relation_export_import_worker(app):
         "name": {"type": "string", "required": True}}}},
         "relation_types": {"knows": {"source": "person", "target": "person"}}}
     schema_id = source.call("create_schema", {"definition": definition})["schema"]["id"]
-    _, write_key = app.issue(source_id, "write")
+    _, write_key = app.issue(source_id)
     source = GraphAPI(app, "rest", write_key)
     peer = GraphAPI(app, peer.surface, write_key)
     people = [source.call("create_entity", {"schema_name": "graph", "entity_type": "person",
                                          "data": {"name": name}}) for name in ("Alice", "Bob")]
     payload = {"source_id": people[0]["id"], "target_id": people[1]["id"], "relation_type": "knows"}
-    _, read_key = app.issue(source_id, "read")
+    _, read_key = app.reader(source_id)
     readers = (GraphAPI(app, "rest", read_key), GraphAPI(app, "mcp", read_key))
     require(len(readers[1].client.call("list_entities", {"entity_type": "person"})) == 2,
             "filtered MCP entity list changed")
@@ -647,12 +680,12 @@ def relation_export_import_worker(app):
     require(shallow["entity"] == people[0] and shallow["relations"][0]["neighbor"]["data"] == {},
             "default recall exposed non-embedding neighbor fields")
     readers[1].client.call("recall_context", {"entity_id": str(uuid.uuid4())}, error=True)
-    _, isolated_key = app.issue(app.workspace, "read")
+    _, isolated_key = app.reader(app.workspace)
     MCP(app, isolated_key).call("recall_context", {"entity_id": people[0]["id"]}, error=True)
     app.rest("POST", "/api/relations", payload, status=403, key=read_key)
     denied = MCP(app, read_key).call("create_relation", payload, error=True)
     require(denied.get("result", {}).get("isError") is True
-            and "scope_insufficient" in json.dumps(denied), "wrong relation scope tool error")
+            and "scope_insufficient" in json.dumps(denied), "wrong relation denial tool error")
     status, _, _ = app.http("POST", "/api/relations", payload)
     require(status == 401, "relation creation accepted missing auth")
     status, _, _ = app.http("GET", "/api/relations")
@@ -795,8 +828,8 @@ def template_required_data(fields):
 
 def builtin_relations(app):
     workspace = app.create_workspace("builtin-relations")
-    _, schema_key = app.issue(workspace, "schema")
-    _, write_key = app.issue(workspace, "write")
+    _, schema_key = app.issue(workspace)
+    _, write_key = app.issue(workspace)
     templates = app.rest("GET", "/api/templates", key=schema_key)
     client = MCP(app, schema_key)
     require(client.call("list_templates") == templates, "builtin inventory differs across transports")
@@ -829,7 +862,7 @@ def builtin_relations(app):
 
 
 def rest_suite(app):
-    _, read_key = app.issue(app.workspace, "read")
+    _, read_key = app.reader(app.workspace)
     app.rest("POST", "/api/schemas", SCHEMA, status=403, key=read_key)
     status, _, _ = app.http("GET", "/api/schemas")
     require(status == 401, "REST missing auth accepted")
@@ -881,10 +914,10 @@ def mcp_suite(app):
     for key in ("", "invalid"):
         document = client.call("list_schemas", error=True, key=key)
         require(document.get("error", {}).get("code") == -32600, "wrong MCP auth error")
-    _, read_key = app.issue(app.workspace, "read")
+    _, read_key = app.reader(app.workspace)
     reader = MCP(app, read_key)
     denied = reader.call("create_schema", {"definition": SCHEMA}, error=True)
-    require(denied.get("result", {}).get("isError") is True, "scope denial must be a tool error")
+    require(denied.get("result", {}).get("isError") is True, "IAM denial must be a tool error")
     malformed = client.call("get_entity", {"id": "not-a-uuid"}, error=True)
     require(malformed.get("result", {}).get("isError") is True
             and "failed to deserialize parameters" in json.dumps(malformed),
@@ -948,7 +981,7 @@ def root_recovery(app):
 
 
 def human_owner(app):
-    _, owner = app.issue(app.workspace, "schema", issuer=app.tenant_key)
+    _, owner = app.issue(app.workspace, issuer=app.tenant_key)
     client = MCP(app, owner)
     for identity in (app.rest("GET", "/api/whoami", key=owner), client.call("whoami")):
         require(identity["user_id"] == app.account["user_id"] and identity["identity_kind"] == "user",
@@ -1007,10 +1040,9 @@ def iam_lifecycle(app):
             "IAM member was reported as tenant root")
     require("workspace_access" not in member_identity and "tenant_admin" not in member_capabilities
             and "workspace_access" not in member_capabilities, "discovery exposes unauthorized capabilities")
-    require(member_capabilities["credential_scope"] == member_identity["stored_scope"]
-            and member_capabilities["constraints"]["authorization_model"] == "tenant_iam"
+    require(member_capabilities["constraints"]["authorization_model"] == "tenant_iam"
             and not member_capabilities["constraints"]["discovery_authorizes_requests"],
-            "discovery confused credential ceiling with IAM authorization")
+            "discovery confused the credential with IAM authorization")
     # Root's independent audit grant is not inherited by an ordinary subject.
     no_audit = MCP(app, member_key)
     no_audit.call("list_audit_log", error=True)
@@ -1018,7 +1050,7 @@ def iam_lifecycle(app):
     document["statements"].append({"effect": "allow", "actions": ["credential_create"],
                                    "resources": [{"type": "tenant", "tenant_id": app.tenant}]})
     client.call("update_iam_policy", {"policy_id": policy_id, "name": "workspace-reader", "document": document})
-    _, bound_key = app.issue(app.workspace, "schema", issuer=member_key)
+    _, bound_key = app.issue(app.workspace, issuer=member_key)
     document["statements"].pop()
     client.call("update_iam_policy", {"policy_id": policy_id, "name": "workspace-reader", "document": document})
     ordinary = MCP(app, bound_key)
@@ -1127,7 +1159,7 @@ def iam_lifecycle(app):
     require([{k: v for k, v in row.items() if k != "last_used_at"} for row in mcp_keys] ==
             [{k: v for k, v in row.items() if k != "last_used_at"} for row in rest_keys],
             "delegated credential listing differs across transports")
-    delegated_id, delegated_key = app.issue(app.workspace, "read", issuer=member_key)
+    delegated_id, delegated_key = app.issue(app.workspace, issuer=member_key)
     replacement = tenant_client.call("rotate_api_key", {"key_id": delegated_id})
     app.secrets.append(replacement["full_key"])
     app.rest("GET", "/api/whoami", status=401, key=delegated_key)
@@ -1163,16 +1195,14 @@ def human_key_management(app):
     from datetime import UTC, datetime, timedelta
     expiry = (datetime.now(UTC) + timedelta(minutes=15)).isoformat()
     original = app.rest("POST", "/api/api-keys", {
-        "name": "bounded-read", "scope": "read", "expires_at": expiry, "tenant_scoped": True,
+        "name": "bounded-read", "expires_at": expiry, "tenant_scoped": True,
     }, status=201, key=owner)
     app.secrets.append(original["full_key"])
     reader = MCP(app, original["full_key"])
     require(reader.call("whoami")["user_id"] == account["user_id"], "delegated key lost attribution")
-    listed = next(row for row in client.call("list_api_keys")["keys"] if row["id"] == original["id"])
-    require(listed["effective_scope"] == reader.call("whoami")["scope"],
-            "credential history disagrees with authenticated scope")
-    for body in ({"name": "scope-escalation", "scope": "write", "expires_at": expiry},
-                 {"name": "audit-escalation", "audit": True, "expires_at": expiry},
+    require(any(row["id"] == original["id"] for row in client.call("list_api_keys")["keys"]),
+            "issued credential missing from its history")
+    for body in ({"name": "audit-escalation", "audit": True, "expires_at": expiry},
                  {"name": "unlimited"},
                  {"name": "longer", "expires_at": "2090-01-02T00:00:00Z"}):
         app.rest("POST", "/api/api-keys", {**body, "tenant_scoped": True}, status=403, key=original["full_key"])
@@ -1181,12 +1211,12 @@ def human_key_management(app):
     app.secrets.append(successor["full_key"])
     require(successor["id"] != original["id"] and successor["full_key"] != original["full_key"],
             "rotation did not replace the credential")
-    for field in ("scope", "audit", "workspace_id", "tenant_id", "user_id", "expires_at"):
+    for field in ("audit", "workspace_id", "tenant_id", "user_id", "expires_at"):
         require(original[field] == successor[field], f"rotation changed {field}")
     app.rest("GET", "/api/whoami", key=original["full_key"], status=401)
     reader.call("whoami", error=True)
     successor_client = MCP(app, successor["full_key"])
-    require(successor_client.call("whoami")["scope"] == "read", "successor is unusable")
+    require(successor_client.call("whoami")["user_id"] == account["user_id"], "successor is unusable")
     app.rest("POST", f"/api/api-keys/{original['id']}/rotate", status=409, key=owner)
     app.rest("DELETE", f"/api/api-keys/{successor['id']}", status=204, key=owner)
     app.rest("GET", "/api/whoami", key=successor["full_key"], status=401)
@@ -1196,7 +1226,7 @@ def human_key_management(app):
         require(records[original["id"]]["replaced_by_id"] == successor["id"], "rotation history missing")
         for key in (original, successor):
             record = records[key["id"]]
-            require(record["state"] == "revoked" and record["effective_scope"] is None,
+            require(record["state"] == "revoked",
                     "revoked key history is not terminal")
         serialized = json.dumps(history)
         require("full_key" not in serialized and "key_hash" not in serialized
@@ -1263,22 +1293,22 @@ def user_profile_lifecycle(app):
 
 def audit_history_lifecycle(app):
     from datetime import UTC, datetime, timedelta
-    _, owner = app.issue(app.workspace, "schema")
+    _, owner = app.issue(app.workspace)
     client = MCP(app, owner)
     client.call("list_audit_log", error=True)
     app.rest("GET", "/api/audit-log", key=owner, status=403)
     app.rest("POST", "/api/api-keys", {
-        "name": "audit-escalation", "scope": "read", "audit": True,
+        "name": "audit-escalation", "audit": True,
         "expires_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
     }, status=403, key=owner, headers={"X-Workspace-Id": app.workspace})
-    key_id, key = app.issue(app.workspace, "read", audit=True, issuer=app.tenant_key)
+    key_id, key = app.issue(app.workspace, audit=True, issuer=app.tenant_key)
     auditor = MCP(app, key)
     capabilities = auditor.call("capabilities")
-    require(capabilities["audit"] and not capabilities["tenant_root"] and capabilities["scopes"] == ["read"],
+    require(capabilities["audit"] and not capabilities["tenant_root"],
             "issued audit credential does not match its grant")
-    _, read_key = app.issue(app.workspace, "read")
+    _, read_key = app.reader(app.workspace)
     MCP(app, read_key).call("create_schema", {"definition": {**SCHEMA, "name": "audit-denied"}}, error=True)
-    _, migration_key = app.issue(app.workspace, "migration")
+    _, migration_key = app.issue(app.workspace)
     migration = MCP(app, migration_key)
     migration.call("reindex_workspace")
     records = auditor.call("list_audit_log", {"page": 1, "page_size": 50})
@@ -1313,11 +1343,11 @@ def workspace_key_lifecycle(app):
     capabilities = tenant_client.call("capabilities")
     require(capabilities["tenant_root"] and not capabilities["constraints"]["discovery_authorizes_requests"],
             "capabilities confused discovery with authorization")
-    client.call("create_api_key", {"name": "denied", "scope": "read"}, error=True)
-    bound = tenant_client.call("create_api_key", {"name": "bound-root", "scope": "read",
+    client.call("create_api_key", {"name": "denied"}, error=True)
+    bound = tenant_client.call("create_api_key", {"name": "bound-root",
                                                   "workspace_id": app.workspace})
     app.secrets.append(bound["full_key"])
-    bound_rest = app.rest("POST", "/api/api-keys", {"name": "bound-root-rest", "scope": "read"},
+    bound_rest = app.rest("POST", "/api/api-keys", {"name": "bound-root-rest"},
                           status=201, key=tenant_key, headers={"X-Workspace-Id": app.workspace})
     app.secrets.append(bound_rest["full_key"])
     from datetime import UTC, datetime, timedelta
@@ -1339,7 +1369,7 @@ def workspace_key_lifecycle(app):
             == "validation_failed", "MCP header did not reject incompatible key selectors")
     require(all(row["name"] != conflicting["name"] for row in tenant_client.call("list_api_keys")["keys"]),
             "contradictory key request issued a credential")
-    created = tenant_client.call("create_api_key", {"name": "mcp-issued", "scope": "read", "tenant_scoped": True,
+    created = tenant_client.call("create_api_key", {"name": "mcp-issued", "tenant_scoped": True,
                                                     "expires_at": expiry})
     app.secrets.append(created["full_key"])
     delegated = MCP(app, created["full_key"])
@@ -1356,7 +1386,7 @@ def workspace_key_lifecycle(app):
     require(any(row["workspace_id"] == workspace_id and row["tenant_id"] == app.tenant
                 for row in tenant_client.call("discover_workspaces")),
             "human discovery omitted tenant workspace")
-    _, selected_key = app.issue(workspace_id, "schema", issuer=tenant_key, expires_at=expiry)
+    _, selected_key = app.issue(workspace_id, issuer=tenant_key, expires_at=expiry)
     selected = MCP(app, selected_key)
     selected.call("update_workspace", {"workspace_id": workspace_id, "replace_max_entities": True,
                                        "max_entities": 5}, error=True)
@@ -1463,7 +1493,7 @@ def membership_retirement_lifecycle(app):
 
 
 def tenant_settings_lifecycle(app):
-    _, bound = app.issue(app.workspace, "schema")
+    _, bound = app.issue(app.workspace)
     bound_client = MCP(app, bound)
     bound_client.call("get_tenant", error=True)
     bound_client.call("update_tenant", {"name": "Bound key"}, error=True)
@@ -1498,7 +1528,7 @@ def tenant_settings_lifecycle(app):
 
 
 def migration_lifecycle(app):
-    _, key = app.issue(app.workspace, "migration")
+    _, key = app.issue(app.workspace)
     client = MCP(app, key)
     name = "migration-contract"
     definition = {**SCHEMA, "name": name}
@@ -1520,7 +1550,8 @@ def migration_lifecycle(app):
             "dry-run did not count the old entity")
     require(client.call("get_entity", {"id": entity["id"]})["data"] == entity["data"],
             "dry-run changed entity data")
-    reader = MCP(app, app.key)
+    _, read_key = app.reader(app.workspace)
+    reader = MCP(app, read_key)
     reader.call("fill_defaults", {"schema_name": name}, error=True)
     job_id = client.call("fill_defaults", {"schema_name": name})["job_id"]
     require(client.call("migration_job_status", {"job_id": job_id})["status"] == "queued",
@@ -1571,7 +1602,7 @@ def migration_lifecycle(app):
 
 def enterprise_settings(app):
     client = MCP(app, app.key)
-    _, read_key = app.issue(app.workspace, "read")
+    _, read_key = app.reader(app.workspace)
     reader = MCP(app, read_key)
     path = "/api/workspace/entity-columns"
     saved = client.call("set_entity_columns", {"entity_type": "note", "columns": ["title", "body"]})
@@ -1612,7 +1643,7 @@ def enterprise_settings(app):
 
 def enterprise_providers(app):
     client = MCP(app, app.key)
-    _, read_key = app.issue(app.workspace, "read")
+    _, read_key = app.reader(app.workspace)
     reader = MCP(app, read_key)
     for kind in ("llm", "embedding"):
         path = f"/api/workspace/{kind}-key"
@@ -1662,7 +1693,7 @@ def enterprise_providers(app):
         {"effect": "allow", "actions": ["credential_create"],
          "resources": [{"type": "tenant", "tenant_id": app.tenant}]}]}})
     root.call("attach_user_policy", {"user_id": member["user_id"], "policy_id": issuance["id"]})
-    _, key = app.issue(app.workspace, "schema", issuer=login["api_key"])
+    _, key = app.issue(app.workspace, issuer=login["api_key"])
     root.call("delete_iam_policy", {"policy_id": issuance["id"]})
     ordinary = MCP(app, key)
     path = "/api/workspace/llm-key"
@@ -1779,7 +1810,7 @@ def enterprise_schema_composition(app):
             "tenant overview differs across transports")
     MCP(app, app.key).call("get_tenant_overview", error=True)
     app.rest("GET", "/api/tenant/overview", status=403, key=app.key)
-    _, read_key = app.issue(app.workspace, "read")
+    _, read_key = app.reader(app.workspace)
     reader = MCP(app, read_key)
     definition = json.loads(json.dumps(SCHEMA))
     definition["name"] = "upstream-note"
@@ -1808,8 +1839,8 @@ def enterprise_schema_composition(app):
     require(client.call("get_schema_by_id", {"schema_id": source["id"]}) == archived, "merge changed immutable history")
 
     target = app.create_workspace("fork-target")
-    _, key = app.issue(target, "schema")
-    _, target_read = app.issue(target, "read")
+    _, key = app.issue(target)
+    _, target_read = app.reader(target)
     owner, viewer = MCP(app, key), MCP(app, target_read)
     input_ = {"source_workspace_id": app.workspace, "source_schema_id": merged["id"]}
     viewer.call("create_schema_fork", input_, error=True)
@@ -1903,8 +1934,8 @@ def embedding_endpoint():
 
 def enterprise_search(app):
     workspace = app.create_workspace("search-target")
-    _, key = app.issue(workspace, "migration")
-    _, schema_key = app.issue(workspace, "schema")
+    _, key = app.issue(workspace)
+    _, schema_key = app.issue(workspace)
     client, writer = MCP(app, key), MCP(app, schema_key)
     definition = json.loads(json.dumps(SCHEMA))
     definition["name"] = "search-notes"
@@ -1951,7 +1982,7 @@ def cross_tenant_rejection(app):
     target = target_owner["tenant_id"]
     target_login = app.login("target@example.invalid", password)
     workspace = app.create_workspace("inviting-workspace", issuer=target_login)
-    _, target_key = app.issue(workspace, "schema", issuer=target_login)
+    _, target_key = app.issue(workspace, issuer=target_login)
     member = MCP(app, target_key)
     administrator = MCP(app, target_login)
     member.call("list_members", error=True)

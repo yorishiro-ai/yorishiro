@@ -2,7 +2,6 @@ use crate::requests::boot_request;
 use axum::http::StatusCode;
 use yorishiro::App;
 use yorishiro::data::templates::TEMPLATES;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 
@@ -42,15 +41,7 @@ async fn schema_deletion_refuses_active_versions_and_references() {
             workspace_id,
             tenant_id,
             ..
-        } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = serde_json::json!({
             "name": "delete-history",
             "entity_types": {
@@ -71,8 +62,7 @@ async fn schema_deletion_refuses_active_versions_and_references() {
         let read_key = crate::requests::fixtures::issue_api_key(
             &ctx,
             workspace_id,
-            crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await,
-            ApiKeyScope::Read,
+            crate::requests::fixtures::create_iam_reader(&ctx, tenant_id).await,
             false,
         )
         .await;
@@ -171,15 +161,8 @@ async fn schema_deletion_refuses_active_versions_and_references() {
 #[tokio::test]
 async fn create_schema_from_every_builtin_template() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant { api_key: key, .. } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let TestTenant { api_key: key, .. } =
+            TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         for template in TEMPLATES {
             let response = request
                 .post("/api/schemas")
@@ -206,15 +189,8 @@ async fn create_schema_from_every_builtin_template() {
 #[tokio::test]
 async fn create_schema_rejects_an_unknown_template_id() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant { api_key: key, .. } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let TestTenant { api_key: key, .. } =
+            TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let response = request
             .post("/api/schemas")
@@ -234,15 +210,8 @@ async fn create_schema_rejects_an_unknown_template_id() {
 #[tokio::test]
 async fn list_templates_and_get_template_over_rest() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant { api_key: key, .. } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let TestTenant { api_key: key, .. } =
+            TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let response = request
             .get("/api/templates")
@@ -298,15 +267,7 @@ async fn list_templates_and_get_template_over_rest() {
 async fn create_schema_from_a_library_template_links_the_origin() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let name = format!("library-note-{}", uuid::Uuid::new_v4().simple());
-        let tenant = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let key = tenant.api_key;
         let library_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
@@ -359,15 +320,7 @@ async fn create_schema_from_a_library_template_links_the_origin() {
 async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let name = format!("library-note-{}", uuid::Uuid::new_v4().simple());
-        let tenant = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let key = tenant.api_key;
         let library_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)

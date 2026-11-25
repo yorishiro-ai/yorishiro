@@ -78,7 +78,6 @@ async fn authorize_reindex(
         crate::models::iam::access::require_iam_action(
             txn,
             actor,
-            crate::models::api_keys::ApiKeyScope::Migration,
             crate::models::iam::policy::Action::WorkspaceReindex,
             crate::models::iam::policy::Resource::Workspace {
                 tenant_id: actor.tenant_id,

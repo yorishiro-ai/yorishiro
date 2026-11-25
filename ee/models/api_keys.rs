@@ -3,7 +3,6 @@
 use uuid::Uuid;
 
 use crate::YorishiroError;
-use crate::models::api_keys::ApiKeyScope;
 
 /// A freshly issued tenant-scoped key.
 pub use crate::models::api_keys::CreatedTenantApiKey;
@@ -17,17 +16,10 @@ pub use crate::models::api_keys::CreatedTenantApiKey;
 pub async fn create_tenant_api_key(
     conn: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
-    scope: &str,
     user_id: Option<Uuid>,
 ) -> Result<CreatedTenantApiKey, YorishiroError> {
-    let scope =
-        ApiKeyScope::from_db_str(scope).ok_or_else(|| YorishiroError::ValidationFailed {
-            message: format!("unknown scope '{scope}'"),
-            details: Vec::new(),
-            hint: "use one of: read, write, schema, migration".into(),
-        })?;
     crate::models::api_keys::Entity::create_tenant_api_key(
-        conn, tenant_id, scope, user_id, false, "unnamed",
+        conn, tenant_id, user_id, false, "unnamed",
     )
     .await
 }

@@ -15,7 +15,6 @@ use uuid::Uuid;
 use super::{YorishiroMcpServer, ok_json};
 use crate::dtos::relations::CreateRelationRequest;
 use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
-use crate::models::api_keys::ApiKeyScope;
 use crate::models::entity_relations::{self, RelationStatus, SetRelationStatusInput};
 
 #[derive(Deserialize, JsonSchema)]
@@ -83,8 +82,7 @@ impl TryFrom<ListRelationsArgs> for entity_relations::ListRelationsQuery {
 #[tool_router(vis = "pub(crate)", router = tool_router_relations)]
 impl YorishiroMcpServer {
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),
-        description = "Create a relation between two entities (requires write scope and relation_create IAM permission). \
+        description = "Create a relation between two entities (requires relation_create IAM permission). \
                            Properties cannot be edited in place; to change them, delete the \
                            relation and recreate it. To retire a relation without losing the \
                            record that it existed, use set_relation_status instead of deleting."
@@ -94,41 +92,38 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<CreateRelationRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "create_relation");
+        let actor = verified!(self, parts);
         render(entity_relations::create_for_actor(self.app_context(), actor, args.into()).await)
     }
 
-    #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "Get a single relation by ID (requires read scope and relation_get IAM permission)")]
+    #[tool(description = "Get a single relation by ID (requires relation_get IAM permission)")]
     pub async fn get_relation(
         &self,
         Parameters(args): Parameters<GetRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "get_relation");
+        let actor = verified!(self, parts);
         render(entity_relations::get_for_actor(self.app_context(), actor, args.id).await)
     }
 
-    #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Delete a relation (requires write scope and relation_delete IAM permission)")]
+    #[tool(description = "Delete a relation (requires relation_delete IAM permission)")]
     pub(crate) async fn delete_relation(
         &self,
         Parameters(args): Parameters<DeleteRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "delete_relation");
+        let actor = verified!(self, parts);
         try_tool!(entity_relations::delete_for_actor(self.app_context(), actor, args.id).await);
         ok_json(serde_json::json!({ "deleted": true }))
     }
 
-    #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "List relations (requires read scope and relation_list IAM permission)")]
+    #[tool(description = "List relations (requires relation_list IAM permission)")]
     pub async fn list_relations(
         &self,
         Parameters(args): Parameters<ListRelationsArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "list_relations");
+        let actor = verified!(self, parts);
 
         let query = try_tool!(args.try_into());
 
@@ -138,9 +133,8 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),
         description = "Set a relation's status to active, deprecated or archived \
-                           (requires write scope and relation_update IAM permission). Retiring a relation this way keeps the record \
+                           (requires relation_update IAM permission). Retiring a relation this way keeps the record \
                            that it existed, which delete_relation does not; graph traversal \
                            follows active relations only."
     )]
@@ -149,7 +143,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<SetRelationStatusArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "set_relation_status");
+        let actor = verified!(self, parts);
         render(
             entity_relations::set_status_for_actor(
                 self.app_context(),

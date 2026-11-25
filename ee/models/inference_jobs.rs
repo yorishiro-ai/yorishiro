@@ -27,7 +27,6 @@ pub(crate) async fn get_as(
     let txn = super::iam::access::workspace_transaction(
         db,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::InferenceJobGet,
     )
     .await?;
@@ -59,7 +58,6 @@ pub(crate) async fn confirmation_status_as(
     let txn = super::iam::access::workspace_transaction(
         db,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::policy::Action::InferenceConfirmationGet,
     )
     .await?;

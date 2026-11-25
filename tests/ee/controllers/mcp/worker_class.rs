@@ -1,7 +1,6 @@
 use axum::http::StatusCode;
 use serde_json::{Value, json};
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
@@ -42,7 +41,6 @@ async fn worker_class_tools_match_rest_and_enforce_schema_scope() {
         let read_key = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             tenant.workspace_id,
-            ApiKeyScope::Read,
             None,
             false,
         )

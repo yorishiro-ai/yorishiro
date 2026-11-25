@@ -332,7 +332,6 @@ pub(crate) async fn drift_for_actor(
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         target,
         crate::models::iam::policy::Action::EntityDriftGet,
         async |session| drift(session.txn(), session.workspace_id()?, id).await,
@@ -352,7 +351,6 @@ pub(crate) async fn migration_dry_run_for_actor(
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::MigrationDryRun,
         ),

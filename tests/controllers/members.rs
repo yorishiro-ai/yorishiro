@@ -2,7 +2,6 @@ use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn competing_tenant_memberships_allow_only_one() {
@@ -106,10 +105,6 @@ async fn root_removal_conflicts_and_preserves_the_root() {
     clippy::future_not_send,
     reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
 )]
-#[expect(
-    clippy::too_many_lines,
-    reason = "the gated issuance-removal race shares setup and verifies both durable revocation and HTTP rejection after membership is restored"
-)]
 async fn issuance_and_removal_are_serialized(tenant_key: bool) {
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
     use yorishiro::models::_entities::api_keys::Column;
@@ -132,7 +127,6 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
             let created = api_keys::Entity::create_tenant_api_key(
                 &ctx.db,
                 tenant.tenant_id,
-                ApiKeyScope::Read,
                 Some(user.id),
                 false,
                 "membership-race-probe",
@@ -149,15 +143,10 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
             assert_eq!(stored.workspace_id, None);
             api_keys::Entity::revoke(&ctx.db, created.id).await.unwrap();
         }
-        let broad = api_keys::Entity::create_api_key(
-            &ctx.db,
-            tenant.workspace_id,
-            ApiKeyScope::Write,
-            Some(user.id),
-            false,
-        )
-        .await
-        .unwrap();
+        let broad =
+            api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, Some(user.id), false)
+                .await
+                .unwrap();
         api_keys::Entity::revoke(&ctx.db, broad.id).await.unwrap();
         let barrier = tokio::sync::Barrier::new(2);
         let issue = async {
@@ -166,7 +155,6 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
                 return api_keys::Entity::create_tenant_api_key(
                     &ctx.db,
                     tenant.tenant_id,
-                    ApiKeyScope::Read,
                     Some(user.id),
                     false,
                     "membership-race",
@@ -174,15 +162,9 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
                 .await
                 .map(|key| key.plaintext);
             }
-            api_keys::Entity::create_api_key(
-                &ctx.db,
-                tenant.workspace_id,
-                ApiKeyScope::Read,
-                Some(user.id),
-                false,
-            )
-            .await
-            .map(|key| key.plaintext)
+            api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, Some(user.id), false)
+                .await
+                .map(|key| key.plaintext)
         };
         let remove = async {
             barrier.wait().await;
@@ -202,15 +184,9 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
             "removal must revoke a racing issuance or prevent its insertion"
         );
         assert!(
-            api_keys::Entity::create_api_key(
-                &ctx.db,
-                tenant.workspace_id,
-                ApiKeyScope::Read,
-                Some(user.id),
-                false
-            )
-            .await
-            .is_err()
+            api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, Some(user.id), false)
+                .await
+                .is_err()
         );
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id)
             .await

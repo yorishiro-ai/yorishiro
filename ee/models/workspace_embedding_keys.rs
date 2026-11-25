@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_embedding_keys::{ActiveModel, Column, Entity};
-use crate::models::api_keys::{ApiKeyScope, AuthContext};
+use crate::models::api_keys::AuthContext;
 use crate::models::iam::policy::Action;
 use crate::services::embedding::{
     EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
@@ -24,13 +24,9 @@ pub(crate) async fn configure(
     request: crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest,
 ) -> Result<(), YorishiroError> {
     let workspace_id = actor.require_workspace()?;
-    let txn = super::iam::access::workspace_transaction(
-        &ctx.db,
-        actor,
-        ApiKeyScope::Schema,
-        Action::EmbeddingProviderUpdate,
-    )
-    .await?;
+    let txn =
+        super::iam::access::workspace_transaction(&ctx.db, actor, Action::EmbeddingProviderUpdate)
+            .await?;
     let previous = get(&txn, workspace_id).await?;
     let query_only = previous.as_ref().is_some_and(|old| {
         old.base_url == request.base_url.trim_end_matches('/')
@@ -208,13 +204,9 @@ pub(crate) async fn remove(
     actor: &AuthContext,
 ) -> Result<(), YorishiroError> {
     let workspace_id = actor.require_workspace()?;
-    let txn = super::iam::access::workspace_transaction(
-        &ctx.db,
-        actor,
-        ApiKeyScope::Schema,
-        Action::EmbeddingProviderDelete,
-    )
-    .await?;
+    let txn =
+        super::iam::access::workspace_transaction(&ctx.db, actor, Action::EmbeddingProviderDelete)
+            .await?;
     clear(&txn, workspace_id).await?;
     crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
         .await
@@ -229,13 +221,8 @@ pub(crate) async fn describe_as(
     db: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
 ) -> Result<Option<EmbeddingKeyDescription>, YorishiroError> {
-    let txn = super::iam::access::workspace_transaction(
-        db,
-        actor,
-        ApiKeyScope::Read,
-        Action::EmbeddingProviderGet,
-    )
-    .await?;
+    let txn =
+        super::iam::access::workspace_transaction(db, actor, Action::EmbeddingProviderGet).await?;
     describe(&txn, actor.require_workspace()?).await
 }
 

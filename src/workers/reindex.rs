@@ -72,7 +72,6 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
             api_key_id: actor.api_key_id,
             user_id: actor.user_id,
             workspace_id: Some(args.workspace_id),
-            scope: crate::models::api_keys::ApiKeyScope::Migration,
             audit: false,
         });
     if let Some(actor) = &actor {
@@ -80,7 +79,6 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::api_keys::ApiKeyScope::Migration,
             crate::models::iam::policy::Action::WorkspaceReindex,
             crate::models::iam::policy::Resource::Workspace {
                 tenant_id: actor.tenant_id,
@@ -211,7 +209,6 @@ pub(crate) async fn enqueue_requested_for_actor(
     WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Migration,
         crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::WorkspaceReindex,
         ),
@@ -238,7 +235,6 @@ pub(crate) async fn enqueue_requested(
     crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         actor,
-        crate::models::api_keys::ApiKeyScope::Migration,
         crate::models::iam::policy::Action::WorkspaceReindex,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,

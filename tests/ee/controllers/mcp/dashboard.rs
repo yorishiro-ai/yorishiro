@@ -1,7 +1,6 @@
 use axum::http::StatusCode;
 use serde_json::{Value, json};
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant, issue_tenant_key};
@@ -33,7 +32,6 @@ async fn tenant_overview_tool_matches_rest_and_rejects_service_credentials() {
         let service = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             tenant.workspace_id,
-            ApiKeyScope::Read,
             None,
             false,
         )

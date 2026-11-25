@@ -694,7 +694,7 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
         request.put(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
         let key = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, fixture.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema,
+            &ctx.db, fixture.workspace_id,
             Some(member.id), false).await.unwrap();
         define_schema(&request, &tenant_key, "note").await;
         let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
@@ -815,7 +815,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
         request.put(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
         let key = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, setup.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema, Some(user.id), false,
+            &ctx.db, setup.workspace_id, Some(user.id), false,
         ).await.unwrap();
         let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
             .await.unwrap().parse::<Uuid>().unwrap();

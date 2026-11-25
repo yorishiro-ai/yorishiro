@@ -11,7 +11,6 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::YorishiroMcpServer;
-use crate::models::api_keys::ApiKeyScope;
 use crate::models::recall::{self, DEFAULT_RECALL_DEPTH, DEFAULT_RECALL_LIMIT};
 
 #[derive(Deserialize, JsonSchema)]
@@ -28,15 +27,14 @@ pub(crate) struct RecallContextArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_recall)]
 impl YorishiroMcpServer {
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Fetch an entity's full body together with its relations and connected neighbors, up to `depth` hops away, in one call (requires read scope and recall IAM permission)"
+        description = "Fetch an entity's full body together with its relations and connected neighbors, up to `depth` hops away, in one call (requires recall IAM permission)"
     )]
     pub async fn recall_context(
         &self,
         Parameters(args): Parameters<RecallContextArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "recall_context");
+        let actor = verified!(self, parts);
         let query = recall::RecallQuery {
             limit: args.limit.unwrap_or(DEFAULT_RECALL_LIMIT),
             full: args.full.unwrap_or(false),

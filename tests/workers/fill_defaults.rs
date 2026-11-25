@@ -12,10 +12,10 @@ use crate::requests::jobs::{finish_job, finish_via_api};
 async fn rest_fill_defaults_waits_for_a_loco_worker() {
     use axum::http::StatusCode;
     use serde_json::json;
-    use yorishiro::models::{api_keys::ApiKeyScope, entity_entities, schema_schemas};
+    use yorishiro::models::{entity_entities, schema_schemas};
 
     boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let crate::requests::fixtures::TestTenant { tenant_id: tenant, workspace_id: workspace, api_key: key, owner_id,  } = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs { key_scope: ApiKeyScope::Migration, ..Default::default() },
+        let crate::requests::fixtures::TestTenant { tenant_id: tenant, workspace_id: workspace, api_key: key, owner_id,  } = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default(),
         ).await;
         let iam_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant, owner_id).await;
         let mut entity_id = None;
@@ -60,7 +60,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         assert_eq!(entity_entities::drift(&ctx.db, workspace, entity_id).await.unwrap().missing_fields[0].name, "rank");
 
         let revoked = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, workspace, ApiKeyScope::Migration, Some(owner_id), false,
+            &ctx.db, workspace, Some(owner_id), false,
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", revoked.plaintext))
@@ -88,7 +88,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
         let attributed = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, workspace, ApiKeyScope::Migration, Some(member.id), false,
+            &ctx.db, workspace, Some(member.id), false,
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", attributed.plaintext))
@@ -123,7 +123,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         assert_eq!(failed.json::<serde_json::Value>()["status"], "failed");
 
         let removed = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, workspace, ApiKeyScope::Migration, Some(member.id), false,
+            &ctx.db, workspace, Some(member.id), false,
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", removed.plaintext))
@@ -145,7 +145,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
             .await.assert_status(StatusCode::NO_CONTENT);
 
         let attributed = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, workspace, ApiKeyScope::Migration, Some(member.id), false,
+            &ctx.db, workspace, Some(member.id), false,
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", attributed.plaintext))
@@ -154,7 +154,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         let filled_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
         finish_via_api(&request, &ctx, filled_id, &key, &format!("/api/migration-jobs/{filled_id}")).await;
         let revoked = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, workspace, ApiKeyScope::Migration, Some(owner_id), false,
+            &ctx.db, workspace, Some(owner_id), false,
         ).await.unwrap();
         let response = request.post(&format!("/api/migration-jobs/{filled_id}/undo"))
             .add_header("Authorization", format!("Bearer {}", revoked.plaintext)).await;

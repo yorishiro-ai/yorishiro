@@ -7,12 +7,7 @@ use yorishiro::App;
 use yorishiro::models::tenant_memberships;
 use yorishiro::models::user_users;
 
-async fn member_key(
-    ctx: &loco_rs::app::AppContext,
-    tenant_id: Uuid,
-    workspace_id: Uuid,
-    key_scope: yorishiro::models::api_keys::ApiKeyScope,
-) -> String {
+async fn member_key(ctx: &loco_rs::app::AppContext, tenant_id: Uuid, workspace_id: Uuid) -> String {
     let email = format!("member-{}@example.com", Uuid::new_v4().simple());
     let member = user_users::create_user(&ctx.db, &email, "hunter2-hunter2", None)
         .await
@@ -20,7 +15,7 @@ async fn member_key(
     tenant_memberships::add_member(&ctx.db, tenant_id, member.id)
         .await
         .expect("add member");
-    issue_api_key(ctx, workspace_id, member.id, key_scope, false).await
+    issue_api_key(ctx, workspace_id, member.id, false).await
 }
 
 #[tokio::test]
@@ -155,14 +150,7 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             assert_eq!(created_at.offset().local_minus_utc(), expected_offset);
         }
 
-        let staging_key = issue_api_key(
-            &ctx,
-            staging_id.parse().unwrap(),
-            owner_id,
-            yorishiro::models::api_keys::ApiKeyScope::Read,
-            false,
-        )
-        .await;
+        let staging_key = issue_api_key(&ctx, staging_id.parse().unwrap(), owner_id, false).await;
         let response = request
             .get(&format!("/api/workspaces/{staging_id}"))
             .add_header("Authorization", format!("Bearer {staging_key}"))
@@ -196,10 +184,6 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
 }
 
 #[tokio::test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "a paused authenticator gates demotion and revocation races against the same administrator context and checks HTTP and model rejection"
-)]
 async fn workspace_mutations_recheck_stale_administrator_contexts() {
     use sea_orm::TransactionTrait;
     use std::sync::Arc;
@@ -243,7 +227,6 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
         let key = api_keys::Entity::create_tenant_api_key(
             &ctx.db,
             tenant.tenant_id,
-            api_keys::ApiKeyScope::Read,
             Some(admin.id),
             false,
             "stale-admin",
@@ -255,7 +238,6 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             workspace_id: None,
             tenant_id: tenant.tenant_id,
             user_id: Some(admin.id),
-            scope: api_keys::ApiKeyScope::Read,
             audit: false,
         };
         let resolved = Arc::new(tokio::sync::Notify::new());
@@ -334,13 +316,7 @@ async fn member_role_cannot_create_or_delete_workspaces() {
             workspace_id: main_id,
             ..
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let member_key = member_key(
-            &ctx,
-            tenant_id,
-            main_id,
-            yorishiro::models::api_keys::ApiKeyScope::Write,
-        )
-        .await;
+        let member_key = member_key(&ctx, tenant_id, main_id).await;
 
         let response = request
             .post("/api/workspaces")

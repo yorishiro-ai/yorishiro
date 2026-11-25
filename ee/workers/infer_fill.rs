@@ -167,7 +167,6 @@ async fn perform_infer_fill(
             &proposal_txn,
             &ctx.db,
             &args.actor,
-            crate::models::api_keys::ApiKeyScope::Schema,
             crate::models::iam::policy::Action::InferenceCreate,
         )
         .await
@@ -524,7 +523,6 @@ pub async fn enqueue_infer_fill(
             api_key_id: auth.api_key_id,
             user_id: auth.user_id,
         },
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::policy::Action::InferenceCreate,
     )
     .await?;
@@ -578,7 +576,6 @@ async fn check_actor(ctx: &AppContext, args: &InferFillArgs) -> Result<(), crate
         &txn,
         &ctx.db,
         &args.actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::policy::Action::InferenceCreate,
     )
     .await?;

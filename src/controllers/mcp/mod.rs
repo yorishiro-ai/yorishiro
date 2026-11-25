@@ -41,12 +41,12 @@ use rmcp::{ServerHandler, tool_handler};
 
 use crate::controllers::middleware::auth;
 use crate::error::YorishiroError;
-use crate::models::api_keys::{ApiKeyScope, AuthContext};
+use crate::models::api_keys::AuthContext;
 
 pub(crate) use authorize::{VerifyOutcome, verify};
 use authorize::{extract_bearer_key, header_error};
 pub use policy::{McpToolPolicy, McpToolSet};
-pub use server::{YorishiroMcpServer, scope_requirement};
+pub use server::YorishiroMcpServer;
 
 /// The complete community-edition tool set.
 #[must_use]
@@ -123,12 +123,12 @@ pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
     result
 }
 
-/// Unwraps a verified caller, or returns the scope denial as the tool result.
+/// Unwraps a verified caller, or returns the denial as the tool result.
 macro_rules! verified {
-    ($server:expr, $parts:expr, $tool:literal) => {
-        match $server.verify(&$parts, $tool).await? {
+    ($server:expr, $parts:expr) => {
+        match $server.verify(&$parts).await? {
             $crate::controllers::mcp::VerifyOutcome::Verified(actor) => actor,
-            $crate::controllers::mcp::VerifyOutcome::ScopeDenied(denied) => return Ok(denied),
+            $crate::controllers::mcp::VerifyOutcome::Denied(denied) => return Ok(denied),
         }
     };
 }

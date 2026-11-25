@@ -79,15 +79,9 @@ async fn operator_user_deletion_requires_confirmation_and_schedules_root_tenants
             user_users::create_user(&ctx.db, "detached@example.com", "long-test-password", None)
                 .await
                 .unwrap();
-        let key = api_keys::Entity::create_api_key(
-            &ctx.db,
-            tenant.workspace_id,
-            api_keys::ApiKeyScope::Read,
-            None,
-            false,
-        )
-        .await
-        .unwrap();
+        let key = api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, None, false)
+            .await
+            .unwrap();
         // Simulate retained attributed credentials after out-of-band membership cleanup.
         let mut attributed: api_keys::ActiveModel = api_keys::Entity::find_by_id(key.id)
             .one(&ctx.db)

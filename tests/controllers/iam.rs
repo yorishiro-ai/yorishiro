@@ -211,7 +211,7 @@ async fn schema_ids_resolve_the_workspace_and_creation_refuses_ambiguity() {
     reason = "one account history compares root sessions with restricted and delegated credentials over REST and MCP"
 )]
 async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
-    use yorishiro::models::api_keys::{ApiKeyScope, Entity};
+    use yorishiro::models::api_keys::Entity;
     boot_request_with::<App, _, _>(&[], |request, ctx| async move {
         let tenant = crate::requests::fixtures::TestTenant::create(
             &request,
@@ -222,7 +222,6 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
         let key = Entity::create_api_key(
             &ctx.db,
             tenant.workspace_id,
-            ApiKeyScope::Read,
             Some(tenant.owner_id),
             false,
         )
@@ -234,7 +233,7 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
                 .await;
         let named_login = request.post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {root}"))
-            .json(&serde_json::json!({"name":"login","tenant_scoped":true,"scope":"read"}))
+            .json(&serde_json::json!({"name":"login","tenant_scoped":true}))
             .await;
         named_login.assert_status(StatusCode::CREATED);
         let named_login = named_login.json::<serde_json::Value>();
@@ -262,12 +261,6 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
             .get("/api/schemas")
             .add_header("Authorization", format!("Bearer {key}"))
             .add_header("x-workspace-id", &workspace)
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-        request
-            .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({"template_id":"general-notes"}))
             .await
             .assert_status(StatusCode::FORBIDDEN);
         request
@@ -406,7 +399,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let audit_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
                 &ctx.db,
                 tenant_id,
-                yorishiro::models::api_keys::ApiKeyScope::Read,
                 Some(user_id),
                 true,
                 "iam-audit",
@@ -416,7 +408,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let no_audit_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
                 &ctx.db,
                 tenant_id,
-                yorishiro::models::api_keys::ApiKeyScope::Read,
                 Some(user_id),
                 false,
                 "without-audit",
@@ -565,7 +556,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let scoped_key = yorishiro::models::api_keys::Entity::create_api_key(
                 &ctx.db,
                 workspace_id,
-                yorishiro::models::api_keys::ApiKeyScope::Read,
                 Some(user_id),
                 false,
             )
@@ -655,7 +645,6 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let user_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
                 &ctx.db,
                 tenant_id,
-                yorishiro::models::api_keys::ApiKeyScope::Read,
                 Some(user.id),
                 false,
                 "iam-user",

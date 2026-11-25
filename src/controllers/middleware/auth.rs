@@ -11,7 +11,7 @@ use loco_rs::prelude::async_trait;
 
 use crate::db::{DbHandle, is_sqlite};
 use crate::error::YorishiroError;
-use crate::models::api_keys::{ApiKeyScope, AuthContext, Entity, WORKSPACE_HEADER};
+use crate::models::api_keys::{AuthContext, Entity, WORKSPACE_HEADER};
 use uuid::Uuid;
 
 /// Copies readable request headers into the authenticator input shape.
@@ -124,7 +124,7 @@ pub fn default_authenticator() -> Arc<dyn Authenticator> {
     Arc::new(DefaultAuthenticator)
 }
 
-pub use crate::models::iam::access::{require_audit, require_scope};
+pub use crate::models::iam::access::require_audit;
 
 /// Request authentication shared by transport adapters through the installed policy.
 pub(crate) struct RequestAuth<'a> {
@@ -174,11 +174,9 @@ impl<'a> RequestAuth<'a> {
     pub(crate) async fn verify(
         &self,
         key: &str,
-        required: ApiKeyScope,
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
         let ctx = self.resolve(key, headers).await?;
-        require_scope(&ctx, required)?;
         Entity::touch_authenticated(self.app, &ctx).await?;
         Ok(ctx)
     }

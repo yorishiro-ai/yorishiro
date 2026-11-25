@@ -1,8 +1,8 @@
-//! The MCP server type, its tool dispatch and the scope metadata it advertises.
+//! The MCP server type and its tool dispatch.
 
 use super::{
-    ApiKeyScope, AppContext, Arc, CallToolRequestParams, CallToolResponse, ErrorData,
-    ListToolsResult, McpToolPolicy, PaginatedRequestParams, RequestContext, ResultType, RoleServer,
+    AppContext, Arc, CallToolRequestParams, CallToolResponse, ErrorData, ListToolsResult,
+    McpToolPolicy, PaginatedRequestParams, RequestContext, ResultType, RoleServer,
     ServerCapabilities, ServerConfig, ServerHandler, ToolRouter, err_to_tool_result, tool_handler,
 };
 
@@ -56,28 +56,16 @@ impl YorishiroMcpServer {
         &self.ctx
     }
 
-    /// Authenticates the request and checks the scope the tool declares.
+    /// Authenticates the request; IAM authorizes each operation afterwards.
     pub(crate) async fn verify(
         &self,
         parts: &axum::http::request::Parts,
-        tool: &str,
     ) -> Result<super::VerifyOutcome, ErrorData> {
-        super::authorize::verify(self.app_context(), parts, self.required_scope(tool)?).await
-    }
-
-    pub(crate) fn required_scope(&self, name: &str) -> Result<ApiKeyScope, ErrorData> {
-        self.tool_router
-            .get(name)
-            .and_then(|tool| tool.meta.as_ref())
-            .and_then(|meta| meta.0.get("yorishiro/required_scope"))
-            .cloned()
-            .and_then(|value| serde_json::from_value(value).ok())
-            .ok_or_else(|| ErrorData::internal_error("tool scope requirement missing", None))
+        super::authorize::verify(self.app_context(), parts).await
     }
 
     pub(crate) fn tool_capabilities(
         &self,
-        scopes: &[ApiKeyScope],
         audit: bool,
     ) -> Result<Vec<serde_json::Value>, ErrorData> {
         self.tool_router
@@ -85,30 +73,18 @@ impl YorishiroMcpServer {
             .into_iter()
             .filter(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()))
             .map(|tool| {
-                let required = self.required_scope(tool.name.as_ref())?;
                 let grants = tool.meta.as_ref()
                     .and_then(|meta| meta.0.get("yorishiro/required_grants"))
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!([]));
                 Ok(serde_json::json!({
                     "name": tool.name,
-                    "required_scope": required,
-                    "scope_satisfied": scopes.contains(&required),
                     "required_grants": grants,
                     "grants_satisfied": grants.as_array().is_some_and(|grants| grants.iter().all(|grant| grant == "audit" && audit)),
                 }))
             })
             .collect()
     }
-}
-
-/// Declares the scope used by both tool authorization and capability discovery.
-#[must_use]
-pub fn scope_requirement(scope: ApiKeyScope) -> rmcp::model::MetaObject {
-    let mut meta = rmcp::model::MetaObject::new();
-    meta.0
-        .insert("yorishiro/required_scope".into(), serde_json::json!(scope));
-    meta
 }
 
 #[tool_handler(router = self.tool_router.clone())]
@@ -210,8 +186,7 @@ impl ServerHandler for YorishiroMcpServer {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Yorishiro is a multi-tenant knowledge store with user-defined schemas. \
              Every tool call requires authentication via an `Authorization: Bearer <api-key>` \
-             header, and the tools available depend on the API key's scope \
-             (read/write/schema, where higher scopes include the permissions of lower ones). \
+             header, and IAM policies decide which operations a key's user may perform. \
              Select a workspace with the `workspace_id` tool argument or `X-Workspace-Id` header. \
              Without selection, lists and search span permitted workspaces, resource IDs resolve their workspace, \
              and destination operations select a workspace only when exactly one is permitted. \

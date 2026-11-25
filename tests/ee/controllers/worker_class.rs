@@ -2,21 +2,12 @@ use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 use axum::http::StatusCode;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 /// Setting, reading and clearing a workspace's own worker-class assignment over REST, matching `embedding_key_set_get_and_clear_round_trip`.
 #[tokio::test]
 async fn worker_class_set_get_and_clear_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let missing = request
             .get("/api/workspace/worker-class")
@@ -78,15 +69,7 @@ async fn worker_class_set_get_and_clear_round_trip() {
 #[tokio::test]
 async fn an_unconfigured_target_preserves_the_old_assignment() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let first = request
             .put("/api/workspace/worker-class")

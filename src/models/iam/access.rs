@@ -5,21 +5,19 @@ use sea_orm::{ConnectionTrait, DatabaseTransaction, TransactionTrait};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::api_keys::{ApiKeyScope, AuthContext};
+use crate::models::api_keys::AuthContext;
 use crate::models::tenant_memberships;
 
 pub(crate) async fn authorize_workspace_action(
     txn: &DatabaseTransaction,
     identity: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
-    scope: ApiKeyScope,
     action: crate::models::iam::policy::Action,
 ) -> Result<Option<DatabaseTransaction>, YorishiroError> {
     let authorization = crate::db::begin_authorization(identity).await.internal()?;
     require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         actor,
-        scope,
         action,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
@@ -65,7 +63,6 @@ impl WorkspaceTarget {
         self,
         db: &sea_orm::DatabaseConnection,
         actor: &AuthContext,
-        scope: ApiKeyScope,
     ) -> Result<Uuid, YorishiroError> {
         if let Some(workspace_id) = actor.workspace_id {
             return Ok(workspace_id);
@@ -119,7 +116,7 @@ impl WorkspaceTarget {
             Self::Relation(id) => {
                 crate::models::entity_relations::workspace_for_actor(db, actor, id).await
             }
-            Self::Permission(action) => select_workspace(db, actor, scope, action).await,
+            Self::Permission(action) => select_workspace(db, actor, action).await,
         }
     }
 }
@@ -140,11 +137,10 @@ pub(crate) fn hide_inferred_resource(inferred: bool, error: YorishiroError) -> Y
 pub(crate) async fn require_iam_action(
     txn: &DatabaseTransaction,
     actor: &AuthContext,
-    required: ApiKeyScope,
     action: crate::models::iam::policy::Action,
     target: crate::models::iam::policy::Resource,
 ) -> Result<(), YorishiroError> {
-    IamEvaluation::load(txn, actor, required)
+    IamEvaluation::load(txn, actor)
         .await?
         .require(action, target)
         .await
@@ -153,14 +149,13 @@ pub(crate) async fn require_iam_action(
 pub(crate) async fn select_workspace(
     db: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
-    scope: ApiKeyScope,
     action: crate::models::iam::policy::Action,
 ) -> Result<Uuid, YorishiroError> {
     if let Some(workspace) = actor.workspace_id {
         return Ok(workspace);
     }
     let txn = db.begin().await.internal()?;
-    let evaluation = IamEvaluation::load(&txn, actor, scope).await?;
+    let evaluation = IamEvaluation::load(&txn, actor).await?;
     let workspaces = evaluation.workspace_ids(action).await?;
     txn.commit().await.internal()?;
     match workspaces.as_slice() {
@@ -176,7 +171,7 @@ pub(crate) async fn read_workspaces(
     action: crate::models::iam::policy::Action,
 ) -> Result<Vec<Uuid>, YorishiroError> {
     let txn = db.begin().await.internal()?;
-    let evaluation = IamEvaluation::load(&txn, actor, ApiKeyScope::Read).await?;
+    let evaluation = IamEvaluation::load(&txn, actor).await?;
     if action == crate::models::iam::policy::Action::AuditLogList {
         require_audit(&evaluation.current)?;
     }
@@ -249,7 +244,6 @@ impl<'a> IamEvaluation<'a> {
     pub(crate) async fn load(
         txn: &'a DatabaseTransaction,
         actor: &AuthContext,
-        required: ApiKeyScope,
     ) -> Result<Self, YorishiroError> {
         use crate::models::iam::policy::Policy;
         use sea_orm::EntityTrait;
@@ -262,7 +256,6 @@ impl<'a> IamEvaluation<'a> {
             .await
             .internal()?
             .ok_or(YorishiroError::Unauthenticated)?;
-        require_scope(&current, required)?;
         let user_id = current.user_id.ok_or(YorishiroError::Unauthenticated)?;
         let root = key.has_root_principal(txn).await?;
         let documents = if root {
@@ -353,15 +346,7 @@ impl<'a> IamEvaluation<'a> {
             }
             _ => return Err(YorishiroError::Unauthenticated),
         };
-        if self.root_session
-            || (self.root
-                && workspace.is_some()
-                && (!matches!(
-                    action,
-                    crate::models::iam::policy::Action::WorkspaceUpdate
-                        | crate::models::iam::policy::Action::WorkspaceDelete
-                ) || self.current.scope.satisfies(ApiKeyScope::Migration)))
-        {
+        if self.root_session || (self.root && workspace.is_some()) {
             return Ok(());
         }
         if Policy::allows(
@@ -386,7 +371,6 @@ pub struct AccessIdentity {
     pub current: AuthContext,
     pub workspace_name: Option<String>,
     pub tenant_name: String,
-    pub stored_scope: ApiKeyScope,
     pub bound_workspace_id: Option<Uuid>,
     pub tenant_root: bool,
 }
@@ -419,14 +403,11 @@ pub async fn identity(
         .await
         .internal()?
         .ok_or(YorishiroError::Unauthenticated)?;
-    let stored_scope = ApiKeyScope::from_db_str(&key.scope)
-        .ok_or_else(|| YorishiroError::Internal("unknown api key scope in database".into()))?;
     let tenant_root = key.is_login_session() && key.has_root_principal(conn).await?;
     Ok(AccessIdentity {
         current,
         workspace_name: workspace.map(|workspace| workspace.name),
         tenant_name: tenant.name,
-        stored_scope,
         bound_workspace_id: key.workspace_id,
         tenant_root,
     })
@@ -436,10 +417,8 @@ pub async fn identity(
 pub struct AccessCapabilities {
     pub database_backend: &'static str,
     pub row_level_security: bool,
-    pub scopes: Vec<ApiKeyScope>,
     pub audit: bool,
     pub tenant_root: bool,
-    pub credential_scope: ApiKeyScope,
 }
 
 /// # Errors
@@ -450,15 +429,6 @@ pub async fn capabilities(
 ) -> Result<AccessCapabilities, YorishiroError> {
     let identity = identity(conn, actor).await?;
     let current = identity.current;
-    let scopes = [
-        ApiKeyScope::Read,
-        ApiKeyScope::Write,
-        ApiKeyScope::Schema,
-        ApiKeyScope::Migration,
-    ]
-    .into_iter()
-    .filter(|scope| require_scope(&current, *scope).is_ok())
-    .collect();
     Ok(AccessCapabilities {
         database_backend: match conn.get_database_backend() {
             sea_orm::DatabaseBackend::Postgres => "postgres",
@@ -467,10 +437,8 @@ pub async fn capabilities(
             _ => "unknown",
         },
         row_level_security: crate::db::is_postgres(conn),
-        scopes,
         audit: require_audit(&current).is_ok(),
         tenant_root: identity.tenant_root,
-        credential_scope: identity.stored_scope,
     })
 }
 
@@ -493,40 +461,20 @@ pub(crate) async fn require_key_attribution(
 }
 
 /// # Errors
-/// Rejects inactive tenants and grants the issuer does not hold.
+/// Rejects inactive tenants and an audit grant the issuer does not hold.
 pub async fn require_key_grant(
     conn: &impl ConnectionTrait,
     issuer: &AuthContext,
-    scope: ApiKeyScope,
     audit: bool,
 ) -> Result<(), YorishiroError> {
     crate::models::tenant_tenants::Model::require_active(conn, issuer.tenant_id).await?;
-    require_scope(issuer, scope)?;
     if audit {
         require_audit(issuer)?;
     }
     Ok(())
 }
 
-/// Enforces the effective content grant.
-///
-/// # Errors
-/// Returns scope insufficient when the grant cannot perform the operation.
-pub fn require_scope(ctx: &AuthContext, required: ApiKeyScope) -> Result<(), YorishiroError> {
-    if ctx.scope.satisfies(required) {
-        Ok(())
-    } else {
-        Err(YorishiroError::ScopeInsufficient {
-            message: format!(
-                "this operation requires {required:?} scope but the API key has {:?} scope",
-                ctx.scope
-            ),
-            hint: "Reissue an API key with sufficient scope".into(),
-        })
-    }
-}
-
-/// Audit is an independent operator grant, not an ordered content scope.
+/// Audit is an operator grant a key holds.
 ///
 /// # Errors
 /// Returns scope insufficient when the explicit audit grant is absent.

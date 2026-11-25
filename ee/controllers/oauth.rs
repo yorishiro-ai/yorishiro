@@ -129,7 +129,7 @@ async fn callback(
     .await?;
     txn.commit().await.internal()?;
 
-    let (created, _, _) =
+    let (created, _) =
         crate::models::tenancy::issue_login_key(&ctx.db, user_id, None, None).await?;
     Ok(login_success_redirect(&created.plaintext, clear_cookie))
 }

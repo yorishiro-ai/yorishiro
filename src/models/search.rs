@@ -122,7 +122,6 @@ async fn search_text(
         &txn,
         &ctx.db,
         actor,
-        super::api_keys::ApiKeyScope::Read,
         super::iam::policy::Action::Search,
     )
     .await?;

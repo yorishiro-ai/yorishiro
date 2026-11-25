@@ -579,7 +579,6 @@ pub(crate) async fn create_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Write,
         target,
         Some(crate::models::iam::policy::Action::RelationCreate),
         async |session| create(session.txn(), session.workspace_id()?, input).await,
@@ -599,7 +598,6 @@ pub(crate) async fn get_for_actor(
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::access::WorkspaceTarget::Relation(id),
         crate::models::iam::policy::Action::RelationGet,
         async |session| get(session.txn(), session.workspace_id()?, id).await,
@@ -619,7 +617,6 @@ pub(crate) async fn delete_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Write,
         crate::models::iam::access::WorkspaceTarget::Relation(id),
         Some(crate::models::iam::policy::Action::RelationDelete),
         async |session| delete(session.txn(), session.workspace_id()?, id).await,
@@ -640,7 +637,6 @@ pub(crate) async fn set_status_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Write,
         crate::models::iam::access::WorkspaceTarget::Relation(id),
         Some(crate::models::iam::policy::Action::RelationUpdate),
         async |session| set_status(session.txn(), session.workspace_id()?, input).await,

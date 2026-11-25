@@ -5,11 +5,9 @@
 
 use crate::controllers::Accepted;
 use crate::controllers::ApiError;
-use crate::controllers::middleware::auth::require_scope;
 use crate::controllers::openapi::Routes;
 use crate::edition::ee::controllers::middleware::auth::WorkspaceAuthenticated;
 use crate::error::YorishiroError;
-use crate::models::api_keys::ApiKeyScope;
 use axum::Json;
 use axum::extract::{Path, State};
 use loco_rs::app::AppContext;
@@ -25,7 +23,7 @@ use crate::edition::ee::models::workspace_llm_keys;
 /// `POST /api/schemas/active/{name}/infer-fill`
 ///
 /// Enqueues an async infer-fill job whose answers are stored as reviewable proposals.
-/// Requires `inference_create` on the selected workspace in addition to schema scope.
+/// Requires `inference_create` on the selected workspace.
 /// The worker rechecks the credential and IAM policy before inference and proposal storage.
 ///
 /// Poll for completion via `GET /api/inference-jobs/{job_id}`.
@@ -35,7 +33,6 @@ async fn infer_fill(
     Path(crate::dtos::common::NamePath { name }): Path<crate::dtos::common::NamePath<String>>,
 ) -> Result<Json<InferFillResponse>, ApiError> {
     // Gate before authentication so unlicensed requests all receive the same 404.
-    require_scope(&auth_ctx, ApiKeyScope::Schema)?;
     let job_id =
         crate::edition::ee::workers::infer_fill::enqueue_infer_fill(&ctx, &auth_ctx, name).await?;
 
@@ -49,14 +46,13 @@ async fn infer_fill(
 ///
 /// Poll for the durable result of an infer-fill job.
 ///
-/// Requires authentication and read scope, and only returns a job belonging to the
+/// Requires authentication, and only returns a job belonging to the
 /// authenticated workspace.
 async fn infer_job_status(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
     Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<String>>,
 ) -> Result<Json<InferJobStatusResponse>, ApiError> {
-    require_scope(&auth_ctx, ApiKeyScope::Read)?;
     let parsed_job_id = uuid::Uuid::parse_str(&job_id)
         .map_err(|_| YorishiroError::not_found("infer-fill job not found"))?;
     let result = inference_jobs::get_as(&ctx.db, &auth_ctx, parsed_job_id).await?;
@@ -202,7 +198,6 @@ async fn confirmation_status(
         crate::dtos::common::JobIdPath<uuid::Uuid>,
     >,
 ) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
-    require_scope(&auth, ApiKeyScope::Schema)?;
     Ok(Json(
         inference_jobs::confirmation_status_as(&ctx.db, &auth, job_id).await?,
     ))
@@ -243,7 +238,7 @@ async fn discard_proposals(
     ))
 }
 
-/// Enqueues confirmation with `inference_confirm` on the selected workspace and schema scope.
+/// Enqueues confirmation with `inference_confirm` on the selected workspace.
 /// The worker rechecks the credential and IAM policy before applying proposals.
 async fn confirm_proposals(
     State(ctx): State<AppContext>,
@@ -262,7 +257,6 @@ async fn set_llm_key(
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
     Json(body): Json<SetLlmKeyRequest>,
 ) -> Result<axum::response::NoContent, ApiError> {
-    require_scope(&auth_ctx, ApiKeyScope::Schema)?;
     workspace_llm_keys::set_as(
         &ctx.db,
         &auth_ctx,
@@ -279,7 +273,6 @@ async fn get_llm_key(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
 ) -> Result<Json<workspace_llm_keys::LlmKeyDescription>, ApiError> {
-    require_scope(&auth_ctx, ApiKeyScope::Read)?;
     let described = workspace_llm_keys::describe_as(&ctx.db, &auth_ctx)
         .await?
         .ok_or_else(|| YorishiroError::not_found("no LLM credentials configured"))?;
@@ -291,7 +284,6 @@ async fn delete_llm_key(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
 ) -> Result<axum::response::NoContent, ApiError> {
-    require_scope(&auth_ctx, ApiKeyScope::Schema)?;
     workspace_llm_keys::clear_as(&ctx.db, &auth_ctx).await?;
     Ok(axum::response::NoContent)
 }

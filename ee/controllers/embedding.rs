@@ -4,11 +4,9 @@
 //! A workspace with none configured keeps using the deployment default, so an existing deployment is unaffected until an operator sets one.
 
 use crate::controllers::ApiError;
-use crate::controllers::middleware::auth::require_scope;
 use crate::controllers::openapi::Routes;
 use crate::edition::ee::controllers::middleware::auth::WorkspaceAuthenticated;
 use crate::error::YorishiroError;
-use crate::models::api_keys::ApiKeyScope;
 use axum::Json;
 use axum::extract::State;
 use loco_rs::app::AppContext;
@@ -22,8 +20,6 @@ async fn set_embedding_key(
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
     Json(body): Json<SetEmbeddingKeyRequest>,
 ) -> Result<axum::response::NoContent, ApiError> {
-    require_scope(&auth_ctx, ApiKeyScope::Schema)?;
-
     workspace_embedding_keys::configure(&ctx, &auth_ctx, body).await?;
     Ok(axum::response::NoContent)
 }
@@ -33,7 +29,6 @@ async fn get_embedding_key(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
 ) -> Result<Json<EmbeddingKeyDescription>, ApiError> {
-    require_scope(&auth_ctx, ApiKeyScope::Read)?;
     let described = workspace_embedding_keys::describe_as(&ctx.db, &auth_ctx)
         .await?
         .ok_or_else(|| {
@@ -47,7 +42,6 @@ async fn delete_embedding_key(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
 ) -> Result<axum::response::NoContent, ApiError> {
-    require_scope(&auth_ctx, ApiKeyScope::Schema)?;
     workspace_embedding_keys::remove(&ctx, &auth_ctx).await?;
     Ok(axum::response::NoContent)
 }

@@ -644,7 +644,6 @@ pub(crate) async fn archive_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
         Some(crate::models::iam::policy::Action::SchemaArchive),
         async |session| archive(session.txn(), session.workspace_id()?, schema_id).await,
@@ -664,7 +663,6 @@ pub(crate) async fn delete_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
         Some(crate::models::iam::policy::Action::SchemaDelete),
         async |session| delete(session.txn(), session.workspace_id()?, schema_id).await,
@@ -684,7 +682,6 @@ pub(crate) async fn create_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::SchemaCreate,
         ),
@@ -739,7 +736,6 @@ pub(crate) async fn get_active_for_actor(
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::SchemaGet,
         ),
@@ -761,7 +757,6 @@ pub(crate) async fn get_by_id_for_actor(
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
         crate::models::iam::policy::Action::SchemaGet,
         async |session| get_by_id(session.txn(), session.workspace_id()?, schema_id).await,

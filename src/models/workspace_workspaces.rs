@@ -357,12 +357,7 @@ pub(crate) async fn list_for_actor(
 ) -> Result<Vec<WorkspaceRecord>, YorishiroError> {
     use crate::models::iam::policy::{Action, Resource};
     let txn = crate::db::begin_write(conn).await.internal()?;
-    let evaluation = crate::models::iam::access::IamEvaluation::load(
-        &txn,
-        actor,
-        crate::models::api_keys::ApiKeyScope::Read,
-    )
-    .await?;
+    let evaluation = crate::models::iam::access::IamEvaluation::load(&txn, actor).await?;
     evaluation
         .require(
             Action::WorkspaceList,
@@ -411,7 +406,6 @@ pub(crate) async fn get_for_actor(
     crate::models::iam::access::require_iam_action(
         conn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::WorkspaceGet,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
@@ -436,7 +430,6 @@ pub(crate) async fn update_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::WorkspaceUpdate,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
@@ -470,7 +463,6 @@ pub(crate) async fn update_as(
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::api_keys::ApiKeyScope::Read,
             crate::models::iam::policy::Action::TenantUpdate,
             crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,

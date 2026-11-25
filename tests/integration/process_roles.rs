@@ -25,16 +25,12 @@ fn yorishiro(dir: &std::path::Path, args: &[&str]) -> Output {
 #[tokio::test]
 async fn a_job_consumer_does_not_build_the_embedding_provider() {
     use futures::FutureExt;
-    use yorishiro::models::api_keys::ApiKeyScope;
 
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture = crate::requests::fixtures::TestTenant::create(
             &request,
             &ctx,
-            crate::requests::fixtures::TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
+            crate::requests::fixtures::TenantArgs::default(),
         )
         .await;
         let accepted = request

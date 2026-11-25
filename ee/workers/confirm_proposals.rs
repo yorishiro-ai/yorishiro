@@ -76,7 +76,6 @@ impl ConfirmProposalsWorker {
                     api_key_id: args.api_key_id,
                     user_id: args.user_id,
                 },
-                crate::models::api_keys::ApiKeyScope::Schema,
                 crate::models::iam::policy::Action::InferenceConfirm,
             )
             .await?;
@@ -116,7 +115,6 @@ pub(crate) async fn enqueue(
             api_key_id: auth.api_key_id,
             user_id: auth.user_id,
         },
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::policy::Action::InferenceConfirm,
     )
     .await?;

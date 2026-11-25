@@ -15,7 +15,6 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::edition::ee::models::marketplace;
-use crate::models::api_keys::ApiKeyScope;
 
 pub(super) const TOOL_NAMES: &[&str] = &[
     "list_marketplace",
@@ -76,13 +75,15 @@ pub(crate) struct VisibilityArgs {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_marketplace)]
 impl YorishiroMcpServer {
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "List community-visible marketplace templates (requires an active licence, PostgreSQL, read scope and marketplace_list IAM permission with a tenant-scoped credential)")]
+    #[tool(
+        description = "List community-visible marketplace templates (requires an active licence, PostgreSQL, marketplace_list IAM permission with a tenant-scoped credential)"
+    )]
     pub(crate) async fn list_marketplace(
         &self,
         Parameters(input): Parameters<MarketplacePage>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "list_marketplace");
+        let actor = verified!(self, parts);
         render(
             marketplace::list_as(
                 &self.app_context().db,
@@ -93,13 +94,15 @@ impl YorishiroMcpServer {
         )
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "List published template versions and the current tenant's own drafts (requires an active licence, PostgreSQL, read scope and marketplace_version_list IAM permission with a tenant-scoped credential)")]
+    #[tool(
+        description = "List published template versions and the current tenant's own drafts (requires an active licence, PostgreSQL, marketplace_version_list IAM permission with a tenant-scoped credential)"
+    )]
     pub(crate) async fn list_marketplace_versions(
         &self,
         Parameters(input): Parameters<TemplatePage>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "list_marketplace_versions");
+        let actor = verified!(self, parts);
         render(
             marketplace::versions_as(
                 &self.app_context().db,
@@ -111,13 +114,15 @@ impl YorishiroMcpServer {
         )
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Publish a version of a current-tenant template (requires an active licence, read scope and marketplace_publish IAM permission with a tenant-scoped credential)")]
+    #[tool(
+        description = "Publish a version of a current-tenant template (requires an active licence, marketplace_publish IAM permission with a tenant-scoped credential)"
+    )]
     pub(crate) async fn publish_marketplace_version(
         &self,
         Parameters(input): Parameters<PublishArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "publish_marketplace_version");
+        let actor = verified!(self, parts);
         let status = try_tool!(marketplace::TemplateVersionStatus::parse_publish(
             input.status.as_deref().unwrap_or("draft"),
         ));
@@ -136,13 +141,15 @@ impl YorishiroMcpServer {
         )
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "List a marketplace template's reviews (requires an active licence, PostgreSQL, read scope and marketplace_review_list IAM permission with a tenant-scoped credential)")]
+    #[tool(
+        description = "List a marketplace template's reviews (requires an active licence, PostgreSQL, marketplace_review_list IAM permission with a tenant-scoped credential)"
+    )]
     pub(crate) async fn list_marketplace_reviews(
         &self,
         Parameters(input): Parameters<TemplatePage>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "list_marketplace_reviews");
+        let actor = verified!(self, parts);
         render(
             marketplace::reviews_as(
                 &self.app_context().db,
@@ -154,13 +161,15 @@ impl YorishiroMcpServer {
         )
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Create or replace the current tenant's template review (requires an active licence, read scope and marketplace_review_submit IAM permission with a tenant-scoped credential)")]
+    #[tool(
+        description = "Create or replace the current tenant's template review (requires an active licence, marketplace_review_submit IAM permission with a tenant-scoped credential)"
+    )]
     pub(crate) async fn submit_marketplace_review(
         &self,
         Parameters(input): Parameters<ReviewArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "submit_marketplace_review");
+        let actor = verified!(self, parts);
         render(
             marketplace::submit_review(
                 self.app_context(),
@@ -175,13 +184,15 @@ impl YorishiroMcpServer {
         )
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Fork a published marketplace version into the current tenant's library (requires an active licence, read scope and marketplace_fork IAM permission with a tenant-scoped credential)")]
+    #[tool(
+        description = "Fork a published marketplace version into the current tenant's library (requires an active licence, marketplace_fork IAM permission with a tenant-scoped credential)"
+    )]
     pub(crate) async fn fork_marketplace_template(
         &self,
         Parameters(input): Parameters<ForkArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "fork_marketplace_template");
+        let actor = verified!(self, parts);
         match marketplace::fork_template(
             self.app_context(),
             &actor,
@@ -195,13 +206,15 @@ impl YorishiroMcpServer {
         }
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Change a current-tenant template's marketplace visibility (requires an active licence, read scope and marketplace_visibility_update IAM permission with a tenant-scoped credential)")]
+    #[tool(
+        description = "Change a current-tenant template's marketplace visibility (requires an active licence, marketplace_visibility_update IAM permission with a tenant-scoped credential)"
+    )]
     pub(crate) async fn set_marketplace_visibility(
         &self,
         Parameters(input): Parameters<VisibilityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "set_marketplace_visibility");
+        let actor = verified!(self, parts);
         let visibility = try_tool!(
             crate::models::template_templates::TemplateVisibility::parse_input(&input.visibility,)
         );

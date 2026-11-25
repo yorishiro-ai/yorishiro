@@ -13,7 +13,6 @@ use crate::controllers::openapi::Routes;
 use crate::dtos::api_keys::{
     ApiKeyRecord, CreateApiKeyRequest, CreateApiKeyResponse, ListApiKeysResponse,
 };
-use crate::models::api_keys::ApiKeyScope;
 use crate::models::api_keys::IdentityApiKeys;
 
 pub(crate) fn render_grant(
@@ -38,13 +37,11 @@ pub(crate) async fn create(
     body.validate_workspace_selection(
         headers.contains_key(crate::models::api_keys::WORKSPACE_HEADER),
     )?;
-    let scope = body.scope.unwrap_or(ApiKeyScope::Read);
-    crate::models::iam::access::require_key_grant(&ctx.db, &auth, scope, body.audit).await?;
+    crate::models::iam::access::require_key_grant(&ctx.db, &auth, body.audit).await?;
     let created = if body.tenant_scoped {
         IdentityApiKeys::create_delegated_tenant_api_key(
             &ctx.db,
             &auth,
-            scope,
             body.audit,
             &body.name,
             body.expires_at,
@@ -54,7 +51,6 @@ pub(crate) async fn create(
         IdentityApiKeys::create_delegated_api_key(
             &ctx.db,
             &auth,
-            scope,
             body.audit,
             &body.name,
             body.expires_at,

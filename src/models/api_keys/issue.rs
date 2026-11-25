@@ -1,36 +1,25 @@
 //! Issuing direct keys, login keys and delegated keys.
 
 use super::{
-    ActiveModel, ActiveModelTrait, ActiveValue, ApiKeyScope, AuthContext, CreatedApiKey,
-    CreatedTenantApiKey, DatabaseConnection, Entity, EntityTrait, LOGIN_SESSION_HOURS, Model,
-    PaginatorTrait, ResultExt, Uuid, YorishiroError, generate_key, hash_key, validate_key_name,
+    ActiveModel, ActiveModelTrait, ActiveValue, AuthContext, CreatedApiKey, CreatedTenantApiKey,
+    DatabaseConnection, Entity, EntityTrait, LOGIN_SESSION_HOURS, Model, PaginatorTrait, ResultExt,
+    Uuid, YorishiroError, generate_key, hash_key, validate_key_name,
 };
 
 impl Entity {
     /// Issues a new API key of the form `ysr_<prefix>_<secret>`, with 48 random alphanumeric secret characters (over 285 bits of entropy).
     /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since API keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
-    /// `audit` is independent of `scope`: it does not raise or lower where the key sits on the read/write/schema/migration ladder, only whether it additionally holds the separate grant `AuthContext::audit`'s doc comment describes.
+    /// `audit` is whether the key additionally holds the separate grant `AuthContext::audit` describes.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
     pub async fn create_api_key(
         db: &DatabaseConnection,
         workspace_id: Uuid,
-        scope: ApiKeyScope,
         user_id: Option<Uuid>,
         audit: bool,
     ) -> Result<CreatedApiKey, YorishiroError> {
-        Self::create_named_api_key(
-            db,
-            workspace_id,
-            scope,
-            user_id,
-            audit,
-            "unnamed",
-            None,
-            None,
-        )
-        .await
+        Self::create_named_api_key(db, workspace_id, user_id, audit, "unnamed", None, None).await
     }
 
     /// Issues a key without a workspace, so it acts on the caller's tenant and names its workspace per request.
@@ -40,7 +29,6 @@ impl Entity {
     pub async fn create_tenant_api_key(
         db: &DatabaseConnection,
         tenant_id: Uuid,
-        scope: ApiKeyScope,
         user_id: Option<Uuid>,
         audit: bool,
         name: &str,
@@ -68,7 +56,6 @@ impl Entity {
             key_hash: ActiveValue::Set(hash_key(&plaintext)),
             key_prefix: ActiveValue::Set(prefix),
             name: ActiveValue::Set(name),
-            scope: ActiveValue::Set(scope.as_db_str().to_string()),
             audit: ActiveValue::Set(audit),
             ..Default::default()
         }
@@ -86,7 +73,6 @@ impl Entity {
         txn: &sea_orm::DatabaseTransaction,
         tenant_id: Uuid,
         user_id: Uuid,
-        scope: ApiKeyScope,
     ) -> Result<CreatedTenantApiKey, YorishiroError> {
         crate::models::iam::access::require_key_attribution(txn, tenant_id, Some(user_id)).await?;
         let (prefix, plaintext) = super::generate_key_with_prefix(super::LOGIN_KEY_PREFIX);
@@ -97,7 +83,6 @@ impl Entity {
             key_hash: ActiveValue::Set(hash_key(&plaintext)),
             key_prefix: ActiveValue::Set(prefix),
             name: ActiveValue::Set("login".to_string()),
-            scope: ActiveValue::Set(scope.as_db_str().to_string()),
             audit: ActiveValue::Set(false),
             expires_at: ActiveValue::Set(Some(
                 (crate::data::time::now() + chrono::Duration::hours(LOGIN_SESSION_HOURS)).into(),
@@ -116,7 +101,6 @@ impl Entity {
     pub(crate) async fn create_delegated_api_key(
         db: &DatabaseConnection,
         issuer: &AuthContext,
-        scope: ApiKeyScope,
         audit: bool,
         name: &str,
         expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,
@@ -124,7 +108,6 @@ impl Entity {
         Self::create_named_api_key(
             db,
             issuer.require_workspace()?,
-            scope,
             issuer.user_id,
             audit,
             name,
@@ -142,7 +125,6 @@ impl Entity {
     pub(crate) async fn create_delegated_tenant_api_key(
         db: &DatabaseConnection,
         issuer: &AuthContext,
-        scope: ApiKeyScope,
         audit: bool,
         name: &str,
         expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,
@@ -160,7 +142,6 @@ impl Entity {
         crate::models::iam::access::require_iam_action(
             &txn,
             issuer,
-            ApiKeyScope::Read,
             crate::models::iam::policy::Action::CredentialCreate,
             crate::models::iam::policy::Resource::Tenant {
                 tenant_id: issuer.tenant_id,
@@ -168,7 +149,7 @@ impl Entity {
         )
         .await?;
         let current = Model::current_context(&txn, issuer).await?;
-        crate::models::iam::access::require_key_grant(&txn, &current, scope, audit).await?;
+        crate::models::iam::access::require_key_grant(&txn, &current, audit).await?;
         let issuer_key = Self::find_by_id(issuer.api_key_id)
             .one(&txn)
             .await
@@ -203,7 +184,6 @@ impl Entity {
             key_hash: ActiveValue::Set(hash_key(&plaintext)),
             key_prefix: ActiveValue::Set(prefix),
             name: ActiveValue::Set(name),
-            scope: ActiveValue::Set(scope.as_db_str().to_string()),
             audit: ActiveValue::Set(audit),
             expires_at: ActiveValue::Set(expires_at),
             ..Default::default()
@@ -211,13 +191,12 @@ impl Entity {
         .insert(&txn)
         .await
         .internal()?;
-        let grant = inserted.grant_metadata(&txn).await?;
+        let grant = inserted.grant_metadata();
         txn.commit().await.internal()?;
 
         Ok(CreatedApiKey {
             id: inserted.id,
             workspace_id: None,
-            scope,
             grant,
             key_prefix: inserted.key_prefix,
             name: inserted.name,
@@ -227,14 +206,9 @@ impl Entity {
     }
 
     /// Issues a key and validates attribution while holding the membership fence.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "mirrors the table columns written in one statement"
-    )]
     async fn create_named_api_key(
         db: &DatabaseConnection,
         workspace_id: Uuid,
-        scope: ApiKeyScope,
         user_id: Option<Uuid>,
         audit: bool,
         name: &str,
@@ -266,7 +240,6 @@ impl Entity {
             crate::models::iam::access::require_iam_action(
                 &txn,
                 issuer,
-                ApiKeyScope::Read,
                 crate::models::iam::policy::Action::CredentialCreate,
                 crate::models::iam::policy::Resource::Tenant {
                     tenant_id: workspace.tenant_id,
@@ -274,7 +247,7 @@ impl Entity {
             )
             .await?;
             let current = Model::current_context(&txn, issuer).await?;
-            crate::models::iam::access::require_key_grant(&txn, &current, scope, audit).await?;
+            crate::models::iam::access::require_key_grant(&txn, &current, audit).await?;
             let issuer_key = Self::find_by_id(issuer.api_key_id)
                 .one(&txn)
                 .await
@@ -302,18 +275,16 @@ impl Entity {
             key_prefix: ActiveValue::Set(prefix),
             name: ActiveValue::Set(name.clone()),
             expires_at: ActiveValue::Set(expires_at),
-            scope: ActiveValue::Set(scope.as_db_str().to_string()),
             audit: ActiveValue::Set(audit),
             ..Default::default()
         };
         let inserted = active.insert(&txn).await.internal()?;
-        let grant = inserted.grant_metadata(&txn).await?;
+        let grant = inserted.grant_metadata();
         txn.commit().await.internal()?;
 
         Ok(CreatedApiKey {
             id: inserted.id,
             workspace_id: Some(workspace_id),
-            scope,
             grant,
             key_prefix: inserted.key_prefix,
             name: inserted.name,

@@ -33,10 +33,6 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
         assert!(document["paths"]["/api/stripe/webhook"]["post"]["responses"]["500"]["content"]
             .is_null());
         assert_eq!(
-            document["paths"]["/api/entities"]["post"]["x-yorishiro-required-scopes"],
-            serde_json::json!(["write"])
-        );
-        assert_eq!(
             document["paths"]["/api/audit-log"]["get"]["x-yorishiro-required-grants"],
             serde_json::json!(["audit"])
         );

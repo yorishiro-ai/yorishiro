@@ -20,12 +20,12 @@ async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let (key, _, scope) = yorishiro::models::tenancy::issue_login_key(
+        let (key, _) = yorishiro::models::tenancy::issue_login_key(
             &ctx.db, target.owner_id, None, Some(target.tenant_id),
         ).await.unwrap();
         let actor = api_keys::AuthContext {
             api_key_id: key.id, workspace_id: None, tenant_id: target.tenant_id,
-            user_id: Some(target.owner_id), scope, audit: false,
+            user_id: Some(target.owner_id), audit: false,
         };
         let job_id = uuid::Uuid::now_v7();
         jobs::Entity::record_enqueue(&ctx.db, jobs::Enqueue {
@@ -174,15 +174,9 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
         crate::requests::require_licence(&ctx);
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let service = api_keys::Entity::create_api_key(
-            &ctx.db,
-            target.workspace_id,
-            api_keys::ApiKeyScope::Read,
-            None,
-            false,
-        )
-        .await
-        .unwrap();
+        let service = api_keys::Entity::create_api_key(&ctx.db, target.workspace_id, None, false)
+            .await
+            .unwrap();
         // Set persisted state directly until a fully fenced disable operation is available.
         crate::requests::fixtures::disable_tenant(&ctx, target.tenant_id).await;
         for key in [&target.api_key, &service.plaintext] {
@@ -194,14 +188,8 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
         }
         for user_id in [None, Some(target.owner_id)] {
             assert!(matches!(
-                api_keys::Entity::create_api_key(
-                    &ctx.db,
-                    target.workspace_id,
-                    api_keys::ApiKeyScope::Read,
-                    user_id,
-                    false,
-                )
-                .await,
+                api_keys::Entity::create_api_key(&ctx.db, target.workspace_id, user_id, false,)
+                    .await,
                 Err(yorishiro::YorishiroError::Unauthenticated)
             ));
         }

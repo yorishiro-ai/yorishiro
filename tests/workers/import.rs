@@ -27,16 +27,12 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
         let tenant = crate::requests::fixtures::TestTenant::create(
             &request,
             &ctx,
-            crate::requests::fixtures::TenantArgs {
-                key_scope: api_keys::ApiKeyScope::Schema,
-                ..Default::default()
-            },
+            crate::requests::fixtures::TenantArgs::default(),
         )
         .await;
         let key = api_keys::Entity::create_api_key(
             &ctx.db,
             tenant.workspace_id,
-            api_keys::ApiKeyScope::Schema,
             Some(tenant.owner_id),
             false,
         )
@@ -125,7 +121,6 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
         let key = api_keys::Entity::create_api_key(
             &ctx.db,
             tenant.workspace_id,
-            api_keys::ApiKeyScope::Schema,
             Some(member.id),
             false,
         )

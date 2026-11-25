@@ -47,7 +47,6 @@ impl Model {
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::api_keys::ApiKeyScope::Read,
             Action::PolicyList,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
@@ -75,7 +74,6 @@ impl Model {
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::api_keys::ApiKeyScope::Read,
             Action::PolicyGet,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
@@ -101,7 +99,6 @@ impl Model {
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::api_keys::ApiKeyScope::Read,
             Action::PolicyUpdate,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
@@ -145,7 +142,6 @@ impl Model {
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::api_keys::ApiKeyScope::Read,
             Action::PolicyDelete,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
@@ -182,7 +178,6 @@ impl Model {
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::api_keys::ApiKeyScope::Read,
             crate::models::iam::policy::Action::PolicyCreate,
             crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,

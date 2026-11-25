@@ -50,7 +50,6 @@ pub async fn inventory_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::TenantGet,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -85,7 +84,6 @@ pub async fn disable_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::TenantUpdate,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,

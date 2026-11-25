@@ -7,7 +7,7 @@ use loco_rs::app::AppContext;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{AuthContext, MigrationScope, Verified, WriteScope};
+use crate::controllers::extractors::{AuthContext, Verified};
 use crate::controllers::openapi::Routes;
 use crate::dtos::entities::{
     CreateEntityRequest, FillDefaultsRequest, FillDefaultsResponse, ListEntitiesParams,
@@ -18,7 +18,7 @@ use crate::workers::reindex;
 
 pub(crate) async fn create_entity(
     State(ctx): State<AppContext>,
-    verified: Verified<WriteScope>,
+    verified: Verified,
     Json(body): Json<CreateEntityRequest>,
 ) -> Result<Created<EntityRecord>, ApiError> {
     let record = entity_entities::create_for_actor(&ctx, &verified.ctx, body.into()).await?;
@@ -39,7 +39,7 @@ async fn get_entity(
 
 pub(crate) async fn update_entity(
     State(ctx): State<AppContext>,
-    verified: Verified<WriteScope>,
+    verified: Verified,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<UpdateEntityRequest>,
 ) -> Result<Json<EntityRecord>, ApiError> {
@@ -60,7 +60,7 @@ pub(crate) async fn update_entity(
 
 pub(crate) async fn delete_entity(
     State(ctx): State<AppContext>,
-    verified: Verified<WriteScope>,
+    verified: Verified,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<axum::response::NoContent, ApiError> {
     entity_entities::delete_for_actor(&ctx, &verified.ctx, id).await?;
@@ -83,10 +83,10 @@ async fn list_entities(
 
 /// Puts every entity a job's snapshots cover back to what it held before the job overwrote it.
 ///
-/// `MigrationScope`, not `WriteScope`: undoing a batch is a migration operation (the same scope that would gate the job that produced the snapshots, e.g. confirming a proposal that writes entities), not an ordinary entity write.
+/// Undoing a batch is a migration operation, authorized by its own IAM action rather than an ordinary entity write.
 pub(crate) async fn undo_migration_job(
     State(ctx): State<AppContext>,
-    verified: Verified<MigrationScope>,
+    verified: Verified,
     Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<Uuid>>,
 ) -> Result<Accepted<UndoResponse>, ApiError> {
     let queued_id = crate::workers::undo::enqueue_for_actor(&ctx, verified.ctx, job_id).await?;
@@ -98,7 +98,7 @@ pub(crate) async fn undo_migration_job(
 
 pub(crate) async fn migration_job_status(
     State(ctx): State<AppContext>,
-    verified: Verified<MigrationScope>,
+    verified: Verified,
     Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<Uuid>>,
 ) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
     Ok(Json(
@@ -113,8 +113,7 @@ pub(crate) async fn migration_job_status(
 
 /// Enqueues a reindex job for this workspace.
 ///
-/// `MigrationScope`, not `WriteScope`: reindex is a migration operation (replacing vectors from
-/// an old model with a new one), and the same audit trail that gates `undo` applies here too.
+/// Reindex is a migration operation (replacing vectors from an old model with a new one), authorized by its own IAM action.
 ///
 /// `POST /api/migration-jobs/reindex` returns 202 immediately with the job ID; the actual
 /// reindex runs asynchronously in a background worker, serialised by an advisory lock.
@@ -127,7 +126,7 @@ pub(crate) async fn migration_job_status(
 /// a job ID while discarding the job, which is worse than no endpoint at all.
 pub(crate) async fn reindex_workspace(
     State(ctx): State<AppContext>,
-    verified: Verified<MigrationScope>,
+    verified: Verified,
 ) -> Result<Json<ReindexResponse>, ApiError> {
     let job_id = reindex::enqueue_requested_for_actor(&ctx, verified.ctx).await?;
     Ok(Json(ReindexResponse { job_id }))
@@ -139,7 +138,7 @@ pub(crate) async fn reindex_workspace(
 /// The worker records completed counts in the audit log and uses this ID for undo snapshots.
 pub(crate) async fn fill_defaults(
     State(ctx): State<AppContext>,
-    verified: Verified<MigrationScope>,
+    verified: Verified,
     Json(body): Json<FillDefaultsRequest>,
 ) -> Result<Accepted<FillDefaultsResponse>, ApiError> {
     let job_id = crate::workers::fill_defaults::enqueue_for_actor(

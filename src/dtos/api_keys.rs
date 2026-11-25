@@ -1,5 +1,4 @@
 use crate::data::time::Timezone;
-use crate::models::api_keys::ApiKeyScope;
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -8,7 +7,6 @@ use uuid::Uuid;
 #[serde(deny_unknown_fields)]
 pub(crate) struct CreateApiKeyRequest {
     pub(crate) name: String,
-    pub(crate) scope: Option<ApiKeyScope>,
     pub(crate) expires_at: Option<DateTime<chrono::FixedOffset>>,
     #[serde(default)]
     pub(crate) audit: bool,

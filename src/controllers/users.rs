@@ -3,14 +3,14 @@ use axum::extract::State;
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{ReadScope, Verified};
+use crate::controllers::extractors::Verified;
 use crate::controllers::openapi::Routes;
 use crate::dtos::users::{UpdateUserRequest, UserRecord};
 use crate::models::user_users;
 
 async fn get_current_user(
     State(ctx): State<AppContext>,
-    actor: Verified<ReadScope>,
+    actor: Verified,
 ) -> Result<Json<UserRecord>, ApiError> {
     Ok(Json(UserRecord::render(
         &ctx,
@@ -20,7 +20,7 @@ async fn get_current_user(
 
 async fn update_current_user(
     State(ctx): State<AppContext>,
-    actor: Verified<ReadScope>,
+    actor: Verified,
     Json(input): Json<UpdateUserRequest>,
 ) -> Result<Json<UserRecord>, ApiError> {
     Ok(Json(UserRecord::render(
