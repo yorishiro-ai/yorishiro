@@ -213,3 +213,288 @@ async fn postgres_iam_rls_grants_and_tenant_foreign_keys() {
         std::panic::resume_unwind(panic);
     }
 }
+
+fn uid(n: u128) -> uuid::Uuid {
+    uuid::Uuid::from_u128(n)
+}
+
+async fn insert<const N: usize>(
+    db: &sea_orm::DatabaseConnection,
+    table: &str,
+    columns: [&str; N],
+    values: [sea_orm::sea_query::SimpleExpr; N],
+) {
+    let insert = sea_orm::sea_query::Query::insert()
+        .into_table(sea_orm::sea_query::Alias::new(table))
+        .columns(columns.map(sea_orm::sea_query::Alias::new))
+        .values_panic(values)
+        .to_owned();
+    db.execute(&insert).await.unwrap();
+}
+
+/// Rows of `table` where every `column = value` holds.
+async fn count(
+    db: &sea_orm::DatabaseConnection,
+    table: &str,
+    filters: Vec<(&str, sea_orm::sea_query::SimpleExpr)>,
+) -> i64 {
+    use sea_orm::sea_query::{Alias, Asterisk, Expr, ExprTrait, Func, Query};
+    let mut select = Query::select();
+    select
+        .expr_as(Func::count(Expr::col(Asterisk)), Alias::new("n"))
+        .from(Alias::new(table));
+    for (column, value) in filters {
+        select.and_where(Expr::col(Alias::new(column)).eq(value));
+    }
+    db.query_one(&select)
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "n")
+        .unwrap()
+}
+
+async fn group_id(db: &sea_orm::DatabaseConnection, name: &str) -> uuid::Uuid {
+    use sea_orm::sea_query::ExprTrait;
+    let select = sea_orm::sea_query::Query::select()
+        .column(sea_orm::sea_query::Alias::new("id"))
+        .from(sea_orm::sea_query::Alias::new("iam_groups"))
+        .and_where(sea_orm::sea_query::Expr::col(sea_orm::sea_query::Alias::new("name")).eq(name))
+        .to_owned();
+    let row = db.query_one(&select).await.unwrap().unwrap();
+    row.try_get("", "id").unwrap()
+}
+
+/// Applies every migration before roles-to-groups and seeds one tenant that holds roles.
+async fn seed_roles(db: &sea_orm::DatabaseConnection) {
+    use sea_orm::sea_query::Expr;
+    let steps = Migrator::migrations().len() - 1;
+    Migrator::up(db, Some(u32::try_from(steps).unwrap()))
+        .await
+        .unwrap();
+    let writer = r#"{"statements":[{"effect":"deny","actions":["role_list","user_role_add","tenant_update"],"resources":["*"]}]}"#;
+    let roles_only = r#"{"statements":[{"effect":"allow","actions":["role_get","role_policy_attach"],"resources":["*"]}]}"#;
+    let plain =
+        r#"{"statements":[{"effect":"allow","actions":["entity_list"],"resources":["*"]}]}"#;
+    let json = |text: &str| Expr::value(serde_json::from_str::<serde_json::Value>(text).unwrap());
+    let (tenant, user) = (uid(1), uid(11));
+    insert(
+        db,
+        "tenant_tenants",
+        ["id", "name"],
+        [tenant.into(), "one".into()],
+    )
+    .await;
+    insert(
+        db,
+        "user_users",
+        ["id", "tenant_id", "user_name", "password_hash"],
+        [user.into(), tenant.into(), "user".into(), "hash".into()],
+    )
+    .await;
+    insert(
+        db,
+        "tenant_memberships",
+        ["id", "tenant_id", "user_id"],
+        [uid(61).into(), tenant.into(), user.into()],
+    )
+    .await;
+    // A user-made group already carries the built-in role's name and must not inherit the role's policies.
+    insert(
+        db,
+        "iam_groups",
+        ["id", "tenant_id", "name"],
+        [uid(21).into(), tenant.into(), "Tenant Writer".into()],
+    )
+    .await;
+    for (n, name, document) in [
+        (31, "writer", writer),
+        (32, "roles-only", roles_only),
+        (33, "plain", plain),
+    ] {
+        insert(
+            db,
+            "iam_policies",
+            ["id", "tenant_id", "name", "document"],
+            [uid(n).into(), tenant.into(), name.into(), json(document)],
+        )
+        .await;
+    }
+    for (n, name) in [(71, "Tenant Writer"), (72, "ops")] {
+        insert(
+            db,
+            "iam_roles",
+            ["id", "tenant_id", "name"],
+            [uid(n).into(), tenant.into(), name.into()],
+        )
+        .await;
+    }
+    for (n, role) in [(81, 71), (82, 72)] {
+        insert(
+            db,
+            "iam_user_role_attachments",
+            ["id", "tenant_id", "user_id", "role_id"],
+            [uid(n).into(), tenant.into(), user.into(), uid(role).into()],
+        )
+        .await;
+    }
+    for (n, role, policy) in [(91, 71, 31), (92, 72, 33), (93, 72, 32)] {
+        insert(
+            db,
+            "iam_role_policy_attachments",
+            ["id", "tenant_id", "role_id", "policy_id"],
+            [
+                uid(n).into(),
+                tenant.into(),
+                uid(role).into(),
+                uid(policy).into(),
+            ],
+        )
+        .await;
+    }
+}
+
+/// Applies the roles-to-groups migration on the seeded tenant and checks what the groups now hold.
+async fn assert_roles_become_groups(db: &sea_orm::DatabaseConnection) {
+    use sea_orm::sea_query::{Expr, ExprTrait};
+    seed_roles(db).await;
+    Migrator::up(db, None).await.unwrap();
+
+    let user_made = uid(21);
+    let writer = group_id(db, "Tenant Writer").await;
+    let ops = group_id(db, "ops").await;
+    assert_ne!(
+        writer, user_made,
+        "the role becomes a new group of its name"
+    );
+    let renamed = sea_orm::sea_query::Query::select()
+        .column(sea_orm::sea_query::Alias::new("name"))
+        .from(sea_orm::sea_query::Alias::new("iam_groups"))
+        .and_where(Expr::col(sea_orm::sea_query::Alias::new("id")).eq(user_made))
+        .to_owned();
+    let name: String = db
+        .query_one(&renamed)
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "name")
+        .unwrap();
+    assert!(
+        name.starts_with("Tenant Writer (user-defined "),
+        "renamed, not merged: {name}"
+    );
+    for table in ["iam_group_memberships", "iam_group_policy_attachments"] {
+        assert_eq!(
+            count(db, table, vec![("group_id", user_made.into())]).await,
+            0,
+            "{table}: the renamed group gains nothing from the role"
+        );
+    }
+    assert_eq!(
+        count(db, "iam_group_memberships", vec![]).await,
+        2,
+        "each role membership becomes a group membership"
+    );
+    assert_eq!(
+        count(
+            db,
+            "iam_group_policy_attachments",
+            vec![("group_id", writer.into()), ("policy_id", uid(31).into())]
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        count(
+            db,
+            "iam_group_policy_attachments",
+            vec![("group_id", ops.into()), ("policy_id", uid(33).into())]
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        count(db, "iam_policies", vec![("id", uid(32).into())]).await,
+        0,
+        "a policy that only held role actions is removed"
+    );
+    assert_eq!(
+        count(
+            db,
+            "iam_group_policy_attachments",
+            vec![("policy_id", uid(32).into())]
+        )
+        .await,
+        0
+    );
+    assert_documents_and_tables_migrated(db).await;
+}
+
+/// A stored policy document loses the removed role actions, and the role tables are gone.
+async fn assert_documents_and_tables_migrated(db: &sea_orm::DatabaseConnection) {
+    use sea_orm::sea_query::{Expr, ExprTrait};
+    let select = sea_orm::sea_query::Query::select()
+        .column(sea_orm::sea_query::Alias::new("document"))
+        .from(sea_orm::sea_query::Alias::new("iam_policies"))
+        .and_where(Expr::col(sea_orm::sea_query::Alias::new("id")).eq(uid(31)))
+        .to_owned();
+    let row = db.query_one(&select).await.unwrap().unwrap();
+    let document: serde_json::Value = if db.get_database_backend() == DatabaseBackend::Sqlite {
+        serde_json::from_str(&row.try_get::<String>("", "document").unwrap()).unwrap()
+    } else {
+        row.try_get("", "document").unwrap()
+    };
+    assert_eq!(
+        document["statements"][0]["actions"],
+        serde_json::json!(["tenant_update"])
+    );
+    for table in [
+        "iam_roles",
+        "iam_user_role_attachments",
+        "iam_role_policy_attachments",
+    ] {
+        let probe = sea_orm::sea_query::Query::select()
+            .expr(Expr::val(1))
+            .from(sea_orm::sea_query::Alias::new(table))
+            .to_owned();
+        assert!(db.query_all(&probe).await.is_err(), "{table} remains");
+    }
+}
+
+#[tokio::test]
+async fn sqlite_roles_migrate_into_groups_with_their_members_and_policies() {
+    if !crate::require_sqlite_backend() {
+        return;
+    }
+    yorishiro::db::register_sqlite_extensions();
+    let db = Database::connect("sqlite::memory:").await.unwrap();
+    db.execute_unprepared("PRAGMA foreign_keys = ON")
+        .await
+        .unwrap();
+    assert_roles_become_groups(&db).await;
+    db.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn postgres_roles_migrate_into_groups_with_their_members_and_policies() {
+    if !crate::require_postgres_backend() {
+        return;
+    }
+    let _environment = crate::EnvironmentRead::enter();
+    let config = App::load_config(&loco_rs::environment::Environment::Test)
+        .await
+        .unwrap();
+    let database = loco_rs::testing::db::init_test_db_creation(&config.database.uri).unwrap();
+    database.init_db().await;
+    let mut options = sea_orm::ConnectOptions::new(database.get_connection_str());
+    options.min_connections(1).max_connections(1);
+    let db = Database::connect(options).await.unwrap();
+    let outcome = std::panic::AssertUnwindSafe(assert_roles_become_groups(&db))
+        .catch_unwind()
+        .await;
+    db.close().await.unwrap();
+    database.cleanup_db();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}

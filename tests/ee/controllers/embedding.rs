@@ -319,10 +319,19 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
 /// Positive arbitrary widths are accepted without request-time schema changes.
 #[tokio::test]
 async fn set_accepts_arbitrary_positive_widths_without_creating_tables() {
-    use sea_orm::{ConnectionTrait, Statement};
+    use sea_orm::ConnectionTrait;
+    use sea_orm::sea_query::{Alias, Asterisk, Expr, ExprTrait, Func, Query};
 
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(&request, &ctx, TenantArgs { key_scope: ApiKeyScope::Schema, ..Default::default() }).await;
+        let setup = TestTenant::create(
+            &request,
+            &ctx,
+            TenantArgs {
+                key_scope: ApiKeyScope::Schema,
+                ..Default::default()
+            },
+        )
+        .await;
 
         let refused = request
             .put("/api/workspace/embedding-key")
@@ -334,13 +343,19 @@ async fn set_accepts_arbitrary_positive_widths_without_creating_tables() {
                 "dimensions": 0
             }))
             .await;
-        assert_eq!(refused.status_code(), StatusCode::UNPROCESSABLE_ENTITY, "{}", refused.text());
+        assert_eq!(
+            refused.status_code(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{}",
+            refused.text()
+        );
         assert!(
             request
                 .get("/api/workspace/embedding-key")
                 .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .await
-                .status_code() == StatusCode::NOT_FOUND,
+                .status_code()
+                == StatusCode::NOT_FOUND,
             "a refused assignment must store nothing"
         );
 
@@ -354,21 +369,38 @@ async fn set_accepts_arbitrary_positive_widths_without_creating_tables() {
                 "dimensions": 3072
             }))
             .await;
-        assert_eq!(stored.status_code(), StatusCode::NO_CONTENT, "{}", stored.text());
+        assert_eq!(
+            stored.status_code(),
+            StatusCode::NO_CONTENT,
+            "{}",
+            stored.text()
+        );
 
-        let backend = ctx.db.get_database_backend();
-        let stray_tables = if backend == sea_orm::DatabaseBackend::Sqlite {
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'content_entity_embeddings%'"
+        // The catalogue that lists tables differs per backend.
+        let (catalogue, name_column) =
+            if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+                (Alias::new("sqlite_master"), "name")
+            } else {
+                (Alias::new("tables"), "table_name")
+            };
+        let mut stray_tables = Query::select();
+        stray_tables
+            .expr_as(Func::count(Expr::col(Asterisk)), Alias::new("n"))
+            .and_where(Expr::col(Alias::new(name_column)).like("content_entity_embeddings%"));
+        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            stray_tables
+                .from(catalogue)
+                .and_where(Expr::col(Alias::new("type")).eq("table"));
         } else {
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'content_entity_embeddings%'"
-        };
+            stray_tables.from((Alias::new("information_schema"), catalogue));
+        }
         let stray: i64 = ctx
             .db
-            .query_one_raw(Statement::from_string(backend, stray_tables))
+            .query_one(&stray_tables)
             .await
             .expect("query tables")
             .expect("count row")
-            .try_get_by_index(0)
+            .try_get("", "n")
             .expect("count value");
         assert_eq!(stray, 0, "no table outside the community naming may exist");
     })

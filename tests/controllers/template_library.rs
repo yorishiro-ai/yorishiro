@@ -119,11 +119,12 @@ async fn a_non_unique_insert_failure_is_internal_not_a_conflict() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         // Direct write (c): the insert has to fail for a reason other than a unique violation, which no valid request can cause, so the target table is dropped.
-        let drop = match ctx.db.get_database_backend() {
-            DbBackend::Postgres => "DROP TABLE template_templates CASCADE",
-            _ => "DROP TABLE template_templates",
-        };
-        ctx.db.execute_unprepared(drop).await.unwrap();
+        let mut drop = sea_orm::sea_query::Table::drop();
+        drop.table(sea_orm::sea_query::Alias::new("template_templates"));
+        if ctx.db.get_database_backend() == DbBackend::Postgres {
+            drop.cascade();
+        }
+        ctx.db.execute(&drop).await.unwrap();
         let response = request
             .post("/api/template-library")
             .add_header("Authorization", format!("Bearer {key}"))

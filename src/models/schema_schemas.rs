@@ -2,8 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveValue, QueryOrder, QuerySelect, Statement};
+use sea_orm::sea_query::{Alias, Expr, Func, Query};
+use sea_orm::{ActiveValue, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -227,12 +227,15 @@ async fn deletion_blockers(
         .internal()?;
     let (forks, fork_heads) = if crate::db::is_postgres(conn) {
         // Incoming forks can live outside the selected workspace, so ordinary RLS-scoped counts miss them.
+        let counts = Query::select()
+            .columns([Alias::new("forks"), Alias::new("fork_heads")])
+            .from_function(
+                Func::cust(Alias::new("schema_fork_reference_counts")).arg(Expr::val(schema_id)),
+                Alias::new("counts"),
+            )
+            .to_owned();
         let row = conn
-            .query_one_raw(Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Postgres,
-                "SELECT forks, fork_heads FROM schema_fork_reference_counts($1)",
-                [schema_id.into()],
-            ))
+            .query_one_raw(conn.get_database_backend().build(&counts))
             .await
             .internal()?
             .ok_or_else(|| {

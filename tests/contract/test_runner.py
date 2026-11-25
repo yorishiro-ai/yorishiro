@@ -23,7 +23,7 @@ class ToolInventoryTests(unittest.TestCase):
         with run.inference_endpoint() as (url, requests):
             connection = run.http.client.HTTPConnection(url.removeprefix("http://"), timeout=5)
             try:
-                body = json.dumps({"model": "blackbox-inference", "messages": []})
+                body = json.dumps({"model": "contract-inference", "messages": []})
                 for credential, expected in (("wrong", 400), ("owned-llm-secret", 200)):
                     connection.request("POST", "/chat/completions", body,
                                        {"Authorization": f"Bearer {credential}", "Content-Type": "application/json"})
@@ -41,8 +41,8 @@ class ToolInventoryTests(unittest.TestCase):
         with run.embedding_endpoint() as (url, requests):
             connection = run.http.client.HTTPConnection(url.removeprefix("http://"), timeout=5)
             try:
-                connection.request("POST", "/embeddings", json.dumps({"model": "blackbox-owned", "input": ["a", "b"]}),
-                                   {"Authorization": "Bearer blackbox-provider-secret", "Content-Type": "application/json"})
+                connection.request("POST", "/embeddings", json.dumps({"model": "contract-owned", "input": ["a", "b"]}),
+                                   {"Authorization": "Bearer contract-provider-secret", "Content-Type": "application/json"})
                 response = connection.getresponse()
                 self.assertEqual(response.status, 200)
                 data = json.loads(response.read())["data"]
@@ -256,8 +256,8 @@ class ArgumentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             app = run.App(args, directory)
             with patch.object(app, "cli", return_value=("created", "")) as cli:
-                self.assertEqual(app.task("maintenance", name="blackbox"), "created")
-                cli.assert_called_once_with("task", "maintenance", "name:blackbox")
+                self.assertEqual(app.task("maintenance", name="contract"), "created")
+                cli.assert_called_once_with("task", "maintenance", "name:contract")
             app.close()
 
     def test_server_exit_fails_before_readiness_request(self):
@@ -283,7 +283,7 @@ class ArgumentTests(unittest.TestCase):
                 self.assertEqual(app.issue(value, "read", issuer="ysr_member", audit=True),
                                  (value, "ysr_delegated"))
                 rest.assert_called_once_with("POST", "/api/api-keys", {
-                    "name": "blackbox-delegated", "scope": "read", "audit": True,
+                    "name": "contract-delegated", "scope": "read", "audit": True,
                     "expires_at": rest.call_args.args[2]["expires_at"],
                 }, status=201, key="ysr_member", headers={"X-Workspace-Id": value})
                 self.assertGreater(datetime.fromisoformat(rest.call_args.args[2]["expires_at"]),
@@ -315,7 +315,7 @@ class ArgumentTests(unittest.TestCase):
                     task.assert_not_called()
                     self.assertEqual(rest.call_args.args[1],
                                      "/auth/signup" if suite == "tenant-postgres" else "/setup")
-                    create.assert_called_once_with("blackbox")
+                    create.assert_called_once_with("contract")
                     self.assertEqual(app.key, "ysr_selected")
                     self.assertEqual(app.tenant_key,
                                      "ysr_login" if suite == "tenant-postgres" else "ysr_bootstrap")

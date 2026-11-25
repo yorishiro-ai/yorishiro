@@ -1166,7 +1166,7 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
 
 #[tokio::test]
 async fn the_infer_fill_scope_carries_the_workspaces_tenant() {
-    use sea_orm::{ConnectionTrait, Statement};
+    use sea_orm::ConnectionTrait;
     use yorishiro::edition::ee::workers::infer_fill::open_workspace_scope;
 
     // The settings are PostgreSQL session settings that row-level security reads.
@@ -1180,11 +1180,20 @@ async fn the_infer_fill_scope_carries_the_workspaces_tenant() {
         let txn = open_workspace_scope(&ctx, setup.workspace_id)
             .await
             .expect("open the scope");
+        let settings = sea_orm::sea_query::Query::select()
+            .expr_as(
+                sea_orm::sea_query::Func::cust(sea_orm::sea_query::Alias::new("current_setting"))
+                    .arg("app.current_tenant"),
+                sea_orm::sea_query::Alias::new("tenant"),
+            )
+            .expr_as(
+                sea_orm::sea_query::Func::cust(sea_orm::sea_query::Alias::new("current_setting"))
+                    .arg("app.current_workspace"),
+                sea_orm::sea_query::Alias::new("workspace"),
+            )
+            .to_owned();
         let row = txn
-            .query_one_raw(Statement::from_string(
-                sea_orm::DatabaseBackend::Postgres,
-                "SELECT current_setting('app.current_tenant') AS tenant, current_setting('app.current_workspace') AS workspace",
-            ))
+            .query_one_raw(sea_orm::DatabaseBackend::Postgres.build(&settings))
             .await
             .expect("read the settings")
             .expect("one row");
@@ -1195,7 +1204,10 @@ async fn the_infer_fill_scope_carries_the_workspaces_tenant() {
         txn.rollback().await.expect("release the worker scope");
 
         let unknown = open_workspace_scope(&ctx, Uuid::new_v4()).await;
-        assert!(unknown.is_err(), "a workspace that does not exist has no scope");
+        assert!(
+            unknown.is_err(),
+            "a workspace that does not exist has no scope"
+        );
     })
     .await;
 }

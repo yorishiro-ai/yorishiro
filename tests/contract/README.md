@@ -1,4 +1,4 @@
-# External black-box checks
+# External contract checks
 
 `tools.json` records the reviewed CE tool inventory and EE additions.
 The real MCP discovery scenario requires the selected edition's inventory to match exactly; runner-only checks compare both inventories to the source handlers.
@@ -82,8 +82,8 @@ Use a distinct artifact root for each suite/edition invocation; repeated runs ov
 Discovery and definition checks never start a process and require no binary:
 
 ```sh
-python3 tests/blackbox/run.py --suite rest --edition ce --list
-python3 tests/blackbox/run.py --self-check
+python3 tests/contract/run.py --suite rest --edition ce --list
+python3 tests/contract/run.py --self-check
 ```
 
 `--list` prints a JSON array of the exact expected scenario IDs.

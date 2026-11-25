@@ -38,11 +38,8 @@ pub mod iam_group_memberships;
 pub mod iam_group_policy_attachments;
 pub mod iam_groups;
 pub mod iam_policies;
-pub mod iam_role_policy_attachments;
-pub mod iam_roles;
 pub mod iam_tenant_roots;
 pub mod iam_user_policy_attachments;
-pub mod iam_user_role_attachments;
 
 // Schemas, forks and the template library.
 pub mod schema_schemas;

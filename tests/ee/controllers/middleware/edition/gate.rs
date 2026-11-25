@@ -159,7 +159,7 @@ async fn missing_licence_state_closes_the_gate_again() {
         )
         .await;
         let licensed_tools: Vec<_> = serde_json::from_str::<serde_json::Value>(include_str!(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/blackbox/tools.json")
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/contract/tools.json")
         ))
         .unwrap()["licensed"]
             .as_array()

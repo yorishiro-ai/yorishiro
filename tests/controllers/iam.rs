@@ -1,6 +1,6 @@
 use crate::requests::boot_request_with;
 use axum::http::StatusCode;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait, TransactionTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
 use yorishiro::App;
 
 #[tokio::test]
@@ -478,12 +478,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert!(events.iter().any(|event| event.action == "policy_create"));
 
             // Direct write (c): deterministic fault injection making the audit insert fail.
-            ctx.db
-                .execute_unprepared(
-                    "ALTER TABLE iam_audit_events RENAME TO unavailable_iam_audit_events",
-                )
-                .await
-                .unwrap();
+            crate::requests::fixtures::rename_table(&ctx.db, "iam_audit_events", "unavailable_iam_audit_events").await;
             let failed_rest = request
                 .post("/api/iam/groups")
                 .add_header("Authorization", format!("Bearer {api_key}"))
@@ -497,18 +492,16 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 serde_json::json!({"name":"mcp-rollback"}),
             )
             .await;
-            ctx.db
-                .execute_unprepared(
-                    "ALTER TABLE unavailable_iam_audit_events RENAME TO iam_audit_events",
-                )
-                .await
-                .unwrap();
+            crate::requests::fixtures::rename_table(&ctx.db, "unavailable_iam_audit_events", "iam_audit_events").await;
             failed_rest.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
             assert_eq!(failed_mcp["result"]["isError"], true, "{failed_mcp}");
             let groups = yorishiro::models::iam_groups::Entity::find()
                 .all(&ctx.db)
                 .await
-                .unwrap();
+                .unwrap()
+                .into_iter()
+                .filter(|group| !group.name.starts_with("Tenant "))
+                .collect::<Vec<_>>();
             assert_eq!(groups.len(), 1);
             assert_eq!(groups[0].name, "operators");
 
@@ -843,9 +836,12 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             }
             let first = request.get("/api/iam/groups?limit=1")
                 .add_header("Authorization", format!("Bearer {api_key}")).await.json::<serde_json::Value>();
-            let next = request.get("/api/iam/groups?limit=1&offset=1")
+            let all = request.get("/api/iam/groups")
+                .add_header("Authorization", format!("Bearer {api_key}")).await.json::<Vec<serde_json::Value>>();
+            let next = request.get(&format!("/api/iam/groups?limit=1&offset={}", all.len()))
                 .add_header("Authorization", format!("Bearer {api_key}")).await.json::<serde_json::Value>();
             assert_eq!(first.as_array().unwrap().len(), 1);
+            assert_eq!(first[0], all[0]);
             assert_eq!(next, serde_json::json!([]));
             let txn = ctx.db.begin().await.unwrap();
             // Direct write (a): `create_tenant` enforces the one-tenant cap, and the IAM group operations are crate-private.
@@ -878,7 +874,18 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             let groups = request.get("/api/iam/groups")
                 .add_header("Authorization", format!("Bearer {api_key}"))
                 .await.json::<serde_json::Value>();
-            assert_eq!(groups.as_array().unwrap().len(), 1);
+            let mut names = groups
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|group| group["name"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>();
+            names.sort();
+            assert_eq!(
+                names,
+                ["Tenant Administrator", "Tenant Reader", "Tenant Writer", "policy-allowed"],
+                "only this tenant's groups are listed; the foreign group stays hidden"
+            );
             request.post("/api/workspaces")
                 .add_header("Authorization", format!("Bearer {}", user_key.plaintext))
                 .json(&serde_json::json!({"name":"IAM created"})).await.assert_status(StatusCode::CREATED);
@@ -1035,7 +1042,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
 }
 
 #[tokio::test]
-async fn assigned_roles_change_user_permissions_without_changing_identity() {
+async fn assigned_built_in_groups_change_user_permissions_without_changing_identity() {
     use crate::requests::fixtures::{TenantArgs, TestTenant};
     use serde_json::{Value, json};
 
@@ -1044,65 +1051,65 @@ async fn assigned_roles_change_user_permissions_without_changing_identity() {
         let root = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
         let auth = format!("Bearer {root}");
         let user = request.post("/api/members/users").add_header("Authorization", &auth)
-            .json(&json!({"user_name":"role-user","password":"role-user-password"})).await;
+            .json(&json!({"user_name":"group-user","password":"group-user-password"})).await;
         user.assert_status(StatusCode::CREATED);
         let user_id = user.json::<Value>()["user_id"].as_str().unwrap().to_owned();
         let login = request.post("/auth/tenant/login")
-            .json(&json!({"tenant_id":tenant.tenant_id,"user_name":"role-user","password":"role-user-password"})).await;
+            .json(&json!({"tenant_id":tenant.tenant_id,"user_name":"group-user","password":"group-user-password"})).await;
         login.assert_status_ok();
         let login = login.json::<Value>();
         let user_auth = format!("Bearer {}", login["api_key"].as_str().unwrap());
         request.get("/api/iam/policies").add_header("Authorization", &user_auth)
             .await.assert_status(StatusCode::FORBIDDEN);
-        let roles = request.get("/api/iam/roles").add_header("Authorization", &auth).await;
-        roles.assert_status_ok();
-        let roles = roles.json::<Vec<Value>>();
-        assert_eq!(roles.len(), 3);
+        let groups = request.get("/api/iam/groups").add_header("Authorization", &auth).await;
+        groups.assert_status_ok();
+        let groups = groups.json::<Vec<Value>>();
+        assert_eq!(groups.len(), 3);
         let session = crate::controllers::mcp::initialize(&request).await;
-        let listed = crate::controllers::mcp::call_tool(&request, &session, &root, "list_iam_roles", json!({})).await;
+        let listed = crate::controllers::mcp::call_tool(&request, &session, &root, "list_iam_groups", json!({})).await;
         assert_ne!(listed["result"]["isError"], true, "{listed}");
         let listed: Value = serde_json::from_str(listed["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-        assert_eq!(listed, json!(roles));
-        let role = roles.iter().find(|r| r["name"] == "Tenant Administrator").unwrap();
-        request.put(&format!("/api/iam/roles/{}", role["id"].as_str().unwrap()))
+        assert_eq!(listed, json!(groups));
+        let group = groups.iter().find(|r| r["name"] == "Tenant Administrator").unwrap();
+        request.put(&format!("/api/iam/groups/{}", group["id"].as_str().unwrap()))
             .add_header("Authorization", &auth).json(&json!({"name":"changed"}))
             .await.assert_status(StatusCode::CONFLICT);
-        request.delete(&format!("/api/iam/roles/{}", role["id"].as_str().unwrap()))
+        request.delete(&format!("/api/iam/groups/{}", group["id"].as_str().unwrap()))
             .add_header("Authorization", &auth).await.assert_status(StatusCode::CONFLICT);
-        let path = format!("/api/iam/roles/{}/members/{user_id}", role["id"].as_str().unwrap());
+        let path = format!("/api/iam/groups/{}/members/{user_id}", group["id"].as_str().unwrap());
         request.put(&path).add_header("Authorization", &auth).await.assert_status(StatusCode::NO_CONTENT);
         request.get("/api/iam/policies").add_header("Authorization", &user_auth).await.assert_status_ok();
         let identity = request.get("/api/whoami").add_header("Authorization", &user_auth).await;
         identity.assert_status_ok();
         assert_eq!(identity.json::<Value>()["user_id"], user_id);
-        request.put(&format!("/api/iam/roles/{}/members/{}", role["id"].as_str().unwrap(), uuid::Uuid::new_v4()))
+        request.put(&format!("/api/iam/groups/{}/members/{}", group["id"].as_str().unwrap(), uuid::Uuid::new_v4()))
             .add_header("Authorization", &auth).await.assert_status(StatusCode::NOT_FOUND);
         request.delete(&path).add_header("Authorization", &auth).await.assert_status(StatusCode::NO_CONTENT);
         request.get("/api/iam/policies").add_header("Authorization", &user_auth)
             .await.assert_status(StatusCode::FORBIDDEN);
-        let custom = request.post("/api/iam/roles").add_header("Authorization", &auth)
-            .json(&json!({"name":"custom-role"})).await;
+        let custom = request.post("/api/iam/groups").add_header("Authorization", &auth)
+            .json(&json!({"name":"custom-group"})).await;
         custom.assert_status(StatusCode::CREATED);
         let custom = custom.json::<Value>();
         let policies = request.get("/api/iam/policies").add_header("Authorization", &auth).await.json::<Vec<Value>>();
         let reader = policies.iter().find(|p| p["name"] == "Tenant Reader").unwrap();
-        let attachment = format!("/api/iam/roles/{}/policies/{}", custom["id"].as_str().unwrap(), reader["id"].as_str().unwrap());
+        let attachment = format!("/api/iam/groups/{}/policies/{}", custom["id"].as_str().unwrap(), reader["id"].as_str().unwrap());
         request.put(&attachment).add_header("Authorization", &auth).await.assert_status(StatusCode::NO_CONTENT);
-        request.put(&format!("/api/iam/roles/{}/policies/{}", role["id"].as_str().unwrap(), reader["id"].as_str().unwrap()))
+        request.put(&format!("/api/iam/groups/{}/policies/{}", group["id"].as_str().unwrap(), reader["id"].as_str().unwrap()))
             .add_header("Authorization", &auth).await.assert_status(StatusCode::CONFLICT);
         request.delete(&attachment).add_header("Authorization", &auth).await.assert_status(StatusCode::NO_CONTENT);
-        // Direct write (a): `create_tenant` enforces the one-tenant cap, and the IAM role operations are crate-private.
+        // Direct write (a): `create_tenant` enforces the one-tenant cap, and the IAM group operations are crate-private.
         let txn = ctx.db.begin().await.unwrap();
         let foreign = yorishiro::models::tenant_tenants::ActiveModel {
-            name: Set("foreign-role-tenant".into()), ..Default::default()
+            name: Set("foreign-group-tenant".into()), ..Default::default()
         }.insert(&txn).await.unwrap();
-        let foreign_role = yorishiro::models::iam_roles::ActiveModel {
-            tenant_id: Set(foreign.id), name: Set("foreign-role".into()), ..Default::default()
+        let foreign_group = yorishiro::models::iam_groups::ActiveModel {
+            tenant_id: Set(foreign.id), name: Set("foreign-group".into()), ..Default::default()
         }.insert(&txn).await.unwrap();
         txn.commit().await.unwrap();
-        request.put(&format!("/api/iam/roles/{}/members/{user_id}", foreign_role.id))
+        request.put(&format!("/api/iam/groups/{}/members/{user_id}", foreign_group.id))
             .add_header("Authorization", &auth).await.assert_status(StatusCode::NOT_FOUND);
-        request.get(&format!("/api/iam/roles/{}", foreign_role.id))
+        request.get(&format!("/api/iam/groups/{}", foreign_group.id))
             .add_header("Authorization", &auth).await.assert_status(StatusCode::NOT_FOUND);
     }).await;
 }
@@ -1153,9 +1160,7 @@ async fn duplicate_iam_names_and_associations_conflict() {
             .unwrap()
             .to_owned();
 
-        // Creating and renaming onto a taken name (role, policy, group).
-        let role_a = create("/api/iam/roles", json!({"name":"dup-role-a"})).await;
-        let role_b = create("/api/iam/roles", json!({"name":"dup-role-b"})).await;
+        // Creating and renaming onto a taken name (policy, group).
         let policy_a = create(
             "/api/iam/policies",
             json!({"name":"dup-policy-a","document":document("group_list")}),
@@ -1168,18 +1173,11 @@ async fn duplicate_iam_names_and_associations_conflict() {
         .await;
         let group_a = create("/api/iam/groups", json!({"name":"dup-group-a"})).await;
         let group_b = create("/api/iam/groups", json!({"name":"dup-group-b"})).await;
-        for (path, body, message) in [
-            (
-                "/api/iam/roles",
-                json!({"name":"dup-role-a"}),
-                "an IAM role with this name already exists",
-            ),
-            (
-                "/api/iam/policies",
-                json!({"name":"dup-policy-a","document":document("group_list")}),
-                "an IAM policy with this name already exists",
-            ),
-        ] {
+        for (path, body, message) in [(
+            "/api/iam/policies",
+            json!({"name":"dup-policy-a","document":document("group_list")}),
+            "an IAM policy with this name already exists",
+        )] {
             let response = request
                 .post(path)
                 .add_header("Authorization", &auth)
@@ -1189,11 +1187,6 @@ async fn duplicate_iam_names_and_associations_conflict() {
             assert!(response.text().contains(message), "{}", response.text());
         }
         for (path, body, message) in [
-            (
-                format!("/api/iam/roles/{role_b}"),
-                json!({"name":"dup-role-a"}),
-                "an IAM role with this name already exists",
-            ),
             (
                 format!("/api/iam/policies/{policy_b}"),
                 json!({"name":"dup-policy-a","document":document("policy_list")}),
@@ -1216,14 +1209,6 @@ async fn duplicate_iam_names_and_associations_conflict() {
 
         // Associating twice.
         for (path, message) in [
-            (
-                format!("/api/iam/roles/{role_a}/members/{user_id}"),
-                "role association already exists",
-            ),
-            (
-                format!("/api/iam/roles/{role_a}/policies/{policy_a}"),
-                "role association already exists",
-            ),
             (
                 format!("/api/iam/groups/{group_a}/members/{user_id}"),
                 "group association already exists",
@@ -1254,9 +1239,9 @@ async fn duplicate_iam_names_and_associations_conflict() {
     .await;
 }
 
-/// Role member and policy listings map `limit`/`offset` onto the page, on REST and MCP alike.
+/// Group member and policy listings map `limit`/`offset` onto the page, on REST and MCP alike.
 #[tokio::test]
-async fn role_member_and_policy_listings_page_by_limit_and_offset() {
+async fn group_member_and_policy_listings_page_by_limit_and_offset() {
     use crate::requests::fixtures::{TenantArgs, TestTenant};
     use serde_json::{Value, json};
 
@@ -1266,13 +1251,13 @@ async fn role_member_and_policy_listings_page_by_limit_and_offset() {
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
                 .await;
         let auth = format!("Bearer {root}");
-        let role = request
-            .post("/api/iam/roles")
+        let group = request
+            .post("/api/iam/groups")
             .add_header("Authorization", &auth)
-            .json(&json!({"name":"paged-role"}))
+            .json(&json!({"name":"paged-group"}))
             .await;
-        role.assert_status(StatusCode::CREATED);
-        let role_id = role.json::<Value>()["id"].as_str().unwrap().to_owned();
+        group.assert_status(StatusCode::CREATED);
+        let group_id = group.json::<Value>()["id"].as_str().unwrap().to_owned();
         for index in 0..3 {
             let name = format!("paged-user-{index}");
             let user = request
@@ -1283,7 +1268,7 @@ async fn role_member_and_policy_listings_page_by_limit_and_offset() {
             user.assert_status(StatusCode::CREATED);
             let user_id = user.json::<Value>()["user_id"].as_str().unwrap().to_owned();
             request
-                .put(&format!("/api/iam/roles/{role_id}/members/{user_id}"))
+                .put(&format!("/api/iam/groups/{group_id}/members/{user_id}"))
                 .add_header("Authorization", &auth)
                 .await
                 .assert_status(StatusCode::NO_CONTENT);
@@ -1299,18 +1284,18 @@ async fn role_member_and_policy_listings_page_by_limit_and_offset() {
             policy.assert_status(StatusCode::CREATED);
             let policy_id = policy.json::<Value>()["id"].as_str().unwrap().to_owned();
             request
-                .put(&format!("/api/iam/roles/{role_id}/policies/{policy_id}"))
+                .put(&format!("/api/iam/groups/{group_id}/policies/{policy_id}"))
                 .add_header("Authorization", &auth)
                 .await
                 .assert_status(StatusCode::NO_CONTENT);
         }
         let session = crate::controllers::mcp::initialize(&request).await;
         for (path, tool) in [
-            ("members", "list_iam_role_members"),
-            ("policies", "list_iam_role_policies"),
+            ("members", "list_iam_group_members"),
+            ("policies", "list_iam_group_policies"),
         ] {
             let fetch = |query: &'static str| {
-                let url = format!("/api/iam/roles/{role_id}/{path}{query}");
+                let url = format!("/api/iam/groups/{group_id}/{path}{query}");
                 let request = &request;
                 let auth = &auth;
                 async move {
@@ -1332,7 +1317,7 @@ async fn role_member_and_policy_listings_page_by_limit_and_offset() {
                     &session,
                     &root,
                     tool,
-                    json!({"role_id":role_id,"limit":limit,"offset":offset}),
+                    json!({"group_id":group_id,"limit":limit,"offset":offset}),
                 )
                 .await;
                 assert_ne!(paged["result"]["isError"], true, "{paged}");

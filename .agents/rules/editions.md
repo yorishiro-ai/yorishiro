@@ -36,7 +36,7 @@ Fix the base API first, then adapt its overlay; temporary build failures during 
 The files stay at the repository root where `ee/LICENSE` scopes them while compiling into the same crate.
 The root workspace lists `"."` only; there is one binary, `yorishiro`.
 
-One crate is also what lets loco's own logging reach this application at all: its default filter is a fixed module whitelist plus exactly one `Hooks::app_name()` entry (`logger.rs:192-210`), so a second application crate would be silent unless every `config/*.yaml` named it in `override_filter`.
+One crate is also what lets loco's own logging reach this application at all: its default filter is a fixed module allowlist plus exactly one `Hooks::app_name()` entry (`logger.rs:192-210`), so a second application crate would be silent unless every `config/*.yaml` named it in `override_filter`.
 
 **There is one `Hooks` impl, inline in `src/lib.rs`, re-exported as `yorishiro::App`.**
 It delegates base behaviour to `src/app.rs` and overlay contributions to `ee/app.rs`, using `RouteMounts`, `McpToolSet` and the worker registry.

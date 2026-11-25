@@ -7,8 +7,6 @@ use super::*;
 
 #[tokio::test]
 async fn mcp_authentication_database_failure_is_redacted() {
-    use sea_orm::ConnectionTrait;
-
     if !crate::require_sqlite_backend() {
         return;
     }
@@ -16,10 +14,8 @@ async fn mcp_authentication_database_failure_is_redacted() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let session = initialize(&request).await;
         // Direct write (c): fault injection breaking the authentication lookup in this isolated test database.
-        ctx.db
-            .execute_unprepared("ALTER TABLE api_keys RENAME TO private_auth_diagnostic")
-            .await
-            .expect("break authentication lookup in this isolated test database");
+        crate::requests::fixtures::rename_table(&ctx.db, "api_keys", "private_auth_diagnostic")
+            .await;
         let response = mcp_call(
             &request,
             &session,

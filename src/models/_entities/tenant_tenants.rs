@@ -28,8 +28,6 @@ pub enum Relation {
     IamGroups,
     #[sea_orm(has_many = "super::iam_policies::Entity")]
     IamPolicies,
-    #[sea_orm(has_many = "super::iam_roles::Entity")]
-    IamRoles,
     #[sea_orm(has_many = "super::schema_schemas::Entity")]
     SchemaSchemas,
     #[sea_orm(has_many = "super::template_reviews::Entity")]
@@ -77,12 +75,6 @@ impl Related<super::iam_groups::Entity> for Entity {
 impl Related<super::iam_policies::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IamPolicies.def()
-    }
-}
-
-impl Related<super::iam_roles::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::IamRoles.def()
     }
 }
 

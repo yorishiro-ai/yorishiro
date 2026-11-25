@@ -235,12 +235,12 @@ async fn missing_lifecycle_table_returns_workspace_lookup_error() {
         )
         .await;
         // Direct write (c): deterministic fault injection hiding the lifecycle table.
-        ctx.db
-            .execute_unprepared(
-                "ALTER TABLE queue_job_lifecycles RENAME TO queue_job_lifecycles_hidden",
-            )
-            .await
-            .unwrap();
+        crate::requests::fixtures::rename_table(
+            &ctx.db,
+            "queue_job_lifecycles",
+            "queue_job_lifecycles_hidden",
+        )
+        .await;
         let error = yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler
             .run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
             .await
@@ -251,12 +251,12 @@ async fn missing_lifecycle_table_returns_workspace_lookup_error() {
                 .contains(&fixture.workspace_id.to_string()),
             "{error}"
         );
-        ctx.db
-            .execute_unprepared(
-                "ALTER TABLE queue_job_lifecycles_hidden RENAME TO queue_job_lifecycles",
-            )
-            .await
-            .unwrap();
+        crate::requests::fixtures::rename_table(
+            &ctx.db,
+            "queue_job_lifecycles_hidden",
+            "queue_job_lifecycles",
+        )
+        .await;
     })
     .await;
 }

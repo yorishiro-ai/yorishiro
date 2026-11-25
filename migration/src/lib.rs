@@ -18,6 +18,7 @@ mod m20261020_000014_entity_embeddings;
 mod m20261118_000015_iam;
 mod m20261121_000016_workspace_list_rls;
 mod m20261125_000017_drop_workspace_memberships;
+mod m20261125_000018_roles_to_groups;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -78,6 +79,7 @@ impl MigratorTrait for Migrations {
             Box::new(m20261118_000015_iam::Migration),
             Box::new(m20261121_000016_workspace_list_rls::Migration),
             Box::new(m20261125_000017_drop_workspace_memberships::Migration),
+            Box::new(m20261125_000018_roles_to_groups::Migration),
             // inject-above (do not remove this comment)
         ]
     }
