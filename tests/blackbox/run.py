@@ -972,24 +972,11 @@ def iam_lifecycle(app):
         "user_name": "iam-member", "password": password,
     }, status=201, key=app.tenant_key)
     user_id = account["user_id"]
-    role = client.call("create_iam_role", {"name": "workspace-operators"})
-    role_id = role["id"]
-    require(client.call("get_iam_role", {"role_id": role_id}) == role, "IAM role lookup differs")
-    require(role in client.call("list_iam_roles"), "IAM role missing from list")
-    client.call("update_iam_role", {"role_id": role_id, "name": "workspace-reviewers"})
     document = {"statements": [{"effect": "allow", "actions": ["workspace_get"],
                                "resources": [{"type": "workspace", "tenant_id": app.tenant,
                                               "workspace_id": app.workspace}]}]}
     policy = client.call("create_iam_policy", {"name": "workspace-reader", "document": document})
     policy_id = policy["id"]
-    role_member = {"role_id": role_id, "user_id": user_id}
-    role_policy = {"role_id": role_id, "policy_id": policy_id}
-    client.call("add_role_member", role_member)
-    client.call("attach_role_policy", role_policy)
-    for tool, path in (("list_iam_role_members", "members"), ("list_iam_role_policies", "policies")):
-        require(client.call(tool, {"role_id": role_id}) ==
-                app.rest("GET", f"/api/iam/roles/{role_id}/{path}", key=app.tenant_key),
-                "IAM role association transport mismatch")
     require(client.call("get_iam_policy", {"policy_id": policy_id}) == policy,
             "IAM policy lookup differs")
     require(policy in client.call("list_iam_policies"), "IAM policy missing from list")
@@ -1101,9 +1088,6 @@ def iam_lifecycle(app):
     client.call("update_iam_policy", {"policy_id": policy_id, "name": "workspace-denied", "document": denied})
     app.rest("GET", f"/api/workspaces/{app.workspace}", status=403, key=member_key, headers=selected)
     client.call("detach_group_policy", group_policy)
-    client.call("detach_role_policy", role_policy)
-    client.call("remove_role_member", role_member)
-    client.call("delete_iam_role", {"role_id": role_id})
     ordinary.call("list_entities", error=True)
     ordinary.call("list_schemas", error=True)
     app.rest("GET", "/api/entities", status=403, key=bound_key)

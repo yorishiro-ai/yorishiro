@@ -220,8 +220,7 @@ impl Model {
         user_id: Uuid,
     ) -> Result<Vec<Self>, YorishiroError> {
         use crate::models::_entities::{
-            iam_group_memberships, iam_group_policy_attachments, iam_role_policy_attachments,
-            iam_user_policy_attachments, iam_user_role_attachments,
+            iam_group_memberships, iam_group_policy_attachments, iam_user_policy_attachments,
         };
 
         let direct = iam_user_policy_attachments::Entity::find()
@@ -249,26 +248,6 @@ impl Model {
             .into_iter()
             .map(|attachment| attachment.policy_id)
             .chain(attached.into_iter().map(|attachment| attachment.policy_id));
-        let roles = iam_user_role_attachments::Entity::find()
-            .filter(iam_user_role_attachments::Column::TenantId.eq(tenant_id))
-            .filter(iam_user_role_attachments::Column::UserId.eq(user_id))
-            .all(txn)
-            .await
-            .internal()?;
-        let role_policies = iam_role_policy_attachments::Entity::find()
-            .filter(iam_role_policy_attachments::Column::TenantId.eq(tenant_id))
-            .filter(
-                iam_role_policy_attachments::Column::RoleId
-                    .is_in(roles.into_iter().map(|role| role.role_id)),
-            )
-            .all(txn)
-            .await
-            .internal()?;
-        let ids = ids.chain(
-            role_policies
-                .into_iter()
-                .map(|attachment| attachment.policy_id),
-        );
         Entity::find()
             .filter(Column::TenantId.eq(tenant_id))
             .filter(Column::Id.is_in(ids))

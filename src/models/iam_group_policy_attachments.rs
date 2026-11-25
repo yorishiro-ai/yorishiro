@@ -74,12 +74,8 @@ impl Model {
             },
         )
         .await?;
-        if crate::models::iam_groups::Model::find(&txn, actor.tenant_id, group_id)
-            .await?
-            .is_none()
-        {
-            return Err(YorishiroError::not_found("IAM group was not found"));
-        }
+        crate::models::iam_groups::Model::require_user_managed(&txn, actor.tenant_id, group_id)
+            .await?;
         if crate::models::iam_policies::Model::find(&txn, actor.tenant_id, policy_id)
             .await?
             .is_none()
@@ -116,12 +112,8 @@ impl Model {
             },
         )
         .await?;
-        if crate::models::iam_groups::Model::find(&txn, actor.tenant_id, group_id)
-            .await?
-            .is_none()
-        {
-            return Err(YorishiroError::not_found("IAM group was not found"));
-        }
+        crate::models::iam_groups::Model::require_user_managed(&txn, actor.tenant_id, group_id)
+            .await?;
         if crate::models::iam_policies::Model::find(&txn, actor.tenant_id, policy_id)
             .await?
             .is_none()

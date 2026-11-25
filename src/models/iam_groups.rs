@@ -95,8 +95,9 @@ impl Model {
                 hint: "provide a non-empty name of at most 100 characters".into(),
             });
         }
-        if Self::find(&txn, actor.tenant_id, id).await?.is_none() {
-            return Err(YorishiroError::not_found("IAM group was not found"));
+        Self::require_user_managed(&txn, actor.tenant_id, id).await?;
+        if crate::models::iam::builtin::is_builtin_policy_name(name) {
+            return Err(Self::reserved_name());
         }
         if !Self::rename(&txn, actor.tenant_id, id, name.to_owned()).await? {
             return Err(YorishiroError::not_found("IAM group was not found"));
@@ -132,6 +133,7 @@ impl Model {
             },
         )
         .await?;
+        Self::require_user_managed(&txn, actor.tenant_id, id).await?;
         if !Self::delete(&txn, actor.tenant_id, id).await? {
             return Err(YorishiroError::not_found("IAM group was not found"));
         }
@@ -170,6 +172,9 @@ impl Model {
                 hint: "provide a non-empty name of at most 100 characters".into(),
             });
         }
+        if crate::models::iam::builtin::is_builtin_policy_name(name) {
+            return Err(Self::reserved_name());
+        }
         let group = Self::create(&txn, actor.tenant_id, name.to_owned()).await?;
         crate::models::iam_audit_events::record(
             &txn,
@@ -180,6 +185,30 @@ impl Model {
         .await?;
         txn.commit().await.internal()?;
         Ok(group)
+    }
+
+    fn reserved_name() -> YorishiroError {
+        YorishiroError::Conflict {
+            message: "this group name is reserved for a system-managed group".into(),
+        }
+    }
+
+    /// Finds the group and refuses a system-managed one, whose policies and name stay fixed.
+    /// Its membership remains editable.
+    pub(crate) async fn require_user_managed(
+        txn: &sea_orm::DatabaseTransaction,
+        tenant_id: Uuid,
+        id: Uuid,
+    ) -> Result<(), YorishiroError> {
+        let group = Self::find(txn, tenant_id, id)
+            .await?
+            .ok_or_else(|| YorishiroError::not_found("IAM group was not found"))?;
+        if crate::models::iam::builtin::is_builtin_policy_name(&group.name) {
+            return Err(YorishiroError::Conflict {
+                message: "system-managed groups cannot be changed".into(),
+            });
+        }
+        Ok(())
     }
 
     pub(crate) async fn create(

@@ -119,17 +119,6 @@ pub enum Action {
     MarketplaceReviewSubmit,
     MarketplaceFork,
     MarketplaceVisibilityUpdate,
-    RoleList,
-    RoleGet,
-    RoleCreate,
-    RoleUpdate,
-    RoleDelete,
-    RolePolicyList,
-    RolePolicyAttach,
-    RolePolicyDetach,
-    UserRoleList,
-    UserRoleAdd,
-    UserRoleRemove,
 }
 
 impl Action {
@@ -241,17 +230,6 @@ impl Action {
         Self::MarketplaceReviewSubmit,
         Self::MarketplaceFork,
         Self::MarketplaceVisibilityUpdate,
-        Self::RoleList,
-        Self::RoleGet,
-        Self::RoleCreate,
-        Self::RoleUpdate,
-        Self::RoleDelete,
-        Self::RolePolicyList,
-        Self::RolePolicyAttach,
-        Self::RolePolicyDetach,
-        Self::UserRoleList,
-        Self::UserRoleAdd,
-        Self::UserRoleRemove,
     ];
 
     #[expect(
@@ -308,18 +286,7 @@ impl Action {
             | Self::MarketplaceReviewList
             | Self::MarketplaceReviewSubmit
             | Self::MarketplaceFork
-            | Self::MarketplaceVisibilityUpdate
-            | Self::RoleList
-            | Self::RoleGet
-            | Self::RoleCreate
-            | Self::RoleUpdate
-            | Self::RoleDelete
-            | Self::RolePolicyList
-            | Self::RolePolicyAttach
-            | Self::RolePolicyDetach
-            | Self::UserRoleList
-            | Self::UserRoleAdd
-            | Self::UserRoleRemove => {
+            | Self::MarketplaceVisibilityUpdate => {
                 matches!(resource, Resource::Tenant { .. })
             }
             Self::WorkspaceGet

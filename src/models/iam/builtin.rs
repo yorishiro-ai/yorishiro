@@ -1,4 +1,4 @@
-//! The built-in tenant policies (Administrator, Writer, Reader) and their bootstrap for a tenant.
+//! The built-in tenant policies (Administrator, Writer, Reader) and the groups that carry them, bootstrapped per tenant.
 
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait,
@@ -8,7 +8,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::{iam_policies, iam_role_policy_attachments, iam_roles};
+use crate::models::_entities::{iam_group_policy_attachments, iam_groups, iam_policies};
 use crate::models::iam::policy::{Action, Policy};
 
 pub(crate) const ADMINISTRATOR_POLICY_NAME: &str = "Tenant Administrator";
@@ -65,17 +65,6 @@ const fn is_admin_only_action(action: Action) -> bool {
             | Action::GroupPolicyAttach
             | Action::GroupPolicyDetach
             | Action::IamAuditList
-            | Action::RoleList
-            | Action::RoleGet
-            | Action::RoleCreate
-            | Action::RoleUpdate
-            | Action::RoleDelete
-            | Action::RolePolicyList
-            | Action::RolePolicyAttach
-            | Action::RolePolicyDetach
-            | Action::UserRoleList
-            | Action::UserRoleAdd
-            | Action::UserRoleRemove
     )
 }
 
@@ -212,16 +201,16 @@ pub(crate) async fn bootstrap(
         let policy = find_policy(txn, tenant_id, name)
             .await?
             .ok_or_else(|| YorishiroError::not_found("managed IAM policy was not found"))?;
-        let role = iam_roles::Entity::find()
-            .filter(iam_roles::Column::TenantId.eq(tenant_id))
-            .filter(iam_roles::Column::Name.eq(name))
+        let group = iam_groups::Entity::find()
+            .filter(iam_groups::Column::TenantId.eq(tenant_id))
+            .filter(iam_groups::Column::Name.eq(name))
             .one(txn)
             .await
             .internal()?;
-        if role.is_some() {
+        if group.is_some() {
             continue;
         }
-        let role = iam_roles::ActiveModel {
+        let group = iam_groups::ActiveModel {
             tenant_id: Set(tenant_id),
             name: Set(name.to_owned()),
             ..Default::default()
@@ -229,9 +218,9 @@ pub(crate) async fn bootstrap(
         .insert(txn)
         .await
         .internal()?;
-        iam_role_policy_attachments::ActiveModel {
+        iam_group_policy_attachments::ActiveModel {
             tenant_id: Set(tenant_id),
-            role_id: Set(role.id),
+            group_id: Set(group.id),
             policy_id: Set(policy.id),
             ..Default::default()
         }

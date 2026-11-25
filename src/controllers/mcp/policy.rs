@@ -133,7 +133,6 @@ pub(crate) fn read_only_tool(name: &str) -> bool {
             | "list_iam_group_policies"
             | "list_iam_role_policies"
             | "list_iam_groups"
-            | "list_iam_roles"
             | "list_iam_policies"
             | "list_iam_user_policies"
             | "list_members"
