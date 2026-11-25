@@ -110,14 +110,16 @@ class ImageProvenanceTests(unittest.TestCase):
             IMAGES.join(self.args)
         docker.assert_not_called()
 
-    def test_promotion_uses_the_exact_smoked_manifest_and_architecture_digests(self):
+    def test_promotion_tags_only_the_exact_smoked_manifest_of_each_edition(self):
         self.manifests()
-        with patch.object(IMAGES, "docker", side_effect=["", json.dumps({"digest": "sha256:" + "3" * 64}), "", ""] * 2) as docker:
+        with patch.object(IMAGES, "docker", side_effect=["", json.dumps({"digest": "sha256:" + "3" * 64})] * 2) as docker:
             IMAGES.promote(self.args)
-        self.assertEqual(docker.call_count, 8)
+        self.assertEqual(docker.call_count, 4)
         self.assertEqual(docker.call_args_list[0].args,
                          ("create", "-t", self.args.image + ":v0.100.0-ce", self.args.image + "@sha256:" + "3" * 64))
-        self.assertIn(self.args.image + ":v0.100.0-ce-amd64", docker.call_args_list[2].args)
+        tags = [arg for call in docker.call_args_list for arg in call.args if str(arg).startswith(self.args.image + ":")]
+        self.assertEqual(tags, [self.args.image + ":v0.100.0-ce", self.args.image + ":v0.100.0-ce",
+                                self.args.image + ":v0.100.0-ee", self.args.image + ":v0.100.0-ee"])
 
     def test_missing_or_different_smoke_receipt_cannot_promote_any_edition(self):
         self.manifests()
