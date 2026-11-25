@@ -14,9 +14,7 @@ async fn owner_can_inspect_and_confirm_disablement_without_deleting_data() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let target_admin =
             crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id)

@@ -13,14 +13,15 @@ fn licence_active(ctx: &loco_rs::app::AppContext) -> bool {
         .is_some_and(|state| state.is_active())
 }
 
-/// Skip a test that needs more than the unlicensed one-tenant deployment cap.
+/// Makes the booted app licensed for a test that needs more than the unlicensed one-tenant deployment cap.
 ///
+/// A deployment with a valid `YORISHIRO_LICENSE_KEY` already is.
+/// Without a key the helper installs a test licence, so these tests run in every environment instead of only on the licensed CI job.
 /// Call it after boot, before the test creates its tenants.
-/// It runs on the licensed CI job and on a local deployment with a valid `YORISHIRO_LICENSE_KEY`, and skips everywhere else.
 #[cfg(feature = "enterprise")]
-pub(crate) fn skip_unlicensed(ctx: &loco_rs::app::AppContext) -> bool {
+pub(crate) fn require_licence(ctx: &loco_rs::app::AppContext) {
     if licence_active(ctx) {
-        return false;
+        return;
     }
     assert!(
         std::env::var("YORISHIRO_LICENSE_KEY")
@@ -28,8 +29,7 @@ pub(crate) fn skip_unlicensed(ctx: &loco_rs::app::AppContext) -> bool {
             .is_empty(),
         "YORISHIRO_LICENSE_KEY is set but the licence is not valid at boot"
     );
-    eprintln!("skipping licensed test: set YORISHIRO_LICENSE_KEY to run it");
-    true
+    fixtures::install_licence(ctx, "pro");
 }
 
 /// Whether the booted app's queue provider is Redis (Valkey).

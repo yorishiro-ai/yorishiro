@@ -395,9 +395,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let TestTenant {
             tenant_id: tenant_a,
             workspace_id: source_workspace,
@@ -827,9 +825,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let TestTenant {
             tenant_id: tenant_a,
             workspace_id: source_workspace,

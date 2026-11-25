@@ -117,9 +117,7 @@ async fn gated_routes_are_absent_without_a_licence() {
 #[tokio::test]
 async fn gated_routes_are_served_with_a_licence() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
 
         for path in GATED {
             let response = request.get(path).await;
@@ -149,9 +147,7 @@ async fn gated_routes_are_served_with_a_licence() {
 #[tokio::test]
 async fn missing_licence_state_closes_the_gate_again() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let session = mcp::initialize(&request).await;
         let listed = mcp::mcp_call(
             &request,
@@ -243,9 +239,7 @@ async fn missing_licence_state_closes_the_gate_again() {
 #[tokio::test]
 async fn stripe_webhook_is_gated() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let licensed = request.post("/api/stripe/webhook").await.status_code();
         assert_eq!(
             licensed, 501,
@@ -277,9 +271,7 @@ async fn stripe_webhook_is_gated() {
 #[tokio::test]
 async fn oauth_login_is_gated() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let licensed = request.get("/auth/oauth/status").await.status_code();
         assert_eq!(
             licensed, 200,

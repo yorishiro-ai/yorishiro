@@ -638,9 +638,7 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let TestTenant {
             api_key: owner_a_key,
             ..

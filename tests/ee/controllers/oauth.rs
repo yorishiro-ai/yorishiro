@@ -37,9 +37,7 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
         (CLIENT_SECRET_PATH, "".into()),
     ];
     boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let disabled = request.get("/auth/oauth/status").await;
         assert_eq!(disabled.status_code(), StatusCode::OK);
         assert_eq!(
@@ -53,9 +51,7 @@ async fn status_reports_disabled_when_unconfigured_and_enabled_when_configured()
             serde_json::json!({"enabled": false})
         );
         boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
-            if crate::requests::skip_unlicensed(&ctx) {
-                return;
-            }
+            crate::requests::require_licence(&ctx);
             let enabled = request.get("/auth/oauth/status").await;
             assert_eq!(enabled.status_code(), StatusCode::OK);
             assert_eq!(
@@ -77,9 +73,7 @@ async fn status_errors_loudly_when_partially_configured() {
         (CLIENT_SECRET_PATH, "".into()),
     ];
     boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let response = request.get("/auth/oauth/status").await;
 
         assert_eq!(
@@ -97,9 +91,7 @@ async fn status_errors_loudly_when_partially_configured() {
 #[tokio::test]
 async fn authorize_and_callback_404_when_unconfigured() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let authorize = request.get("/auth/oauth/authorize").await;
         assert_eq!(
             authorize.status_code(),
@@ -124,9 +116,7 @@ async fn authorize_and_callback_404_when_unconfigured() {
 #[tokio::test]
 async fn authorize_fails_loudly_against_an_unreachable_issuer() {
     boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let response = request.get("/auth/oauth/authorize").await;
         assert_eq!(
             response.status_code(),
@@ -142,9 +132,7 @@ async fn authorize_fails_loudly_against_an_unreachable_issuer() {
 #[tokio::test]
 async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error() {
     boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let response = request
             .get("/auth/oauth/callback?error=access_denied&error_description=user+declined")
             .await;
@@ -175,9 +163,7 @@ async fn callback_redirects_to_login_failure_when_the_provider_reports_an_error(
 #[tokio::test]
 async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
     boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let missing_state = request.get("/auth/oauth/callback?code=abc").await;
         assert_eq!(missing_state.status_code(), StatusCode::FOUND);
         assert_eq!(
@@ -199,9 +185,7 @@ async fn callback_redirects_to_login_failure_when_code_or_state_is_missing() {
 #[tokio::test]
 async fn callback_rejects_a_state_with_a_bad_signature() {
     boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let response = request
             .get("/auth/oauth/callback?code=abc&state=1234567890.deadbeef.verifier.notasignature")
             .await;
@@ -220,9 +204,7 @@ async fn callback_rejects_a_state_with_a_bad_signature() {
 #[tokio::test]
 async fn callback_rejects_an_expired_state() {
     boot_request_with::<App, _, _>(&oauth_overrides(), |request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let issued_at = chrono::Utc::now().timestamp() - 700; // past STATE_TTL_SECS (600)
         let state = yorishiro::edition::ee::controllers::oauth::state_token::issue_at(
             CLIENT_SECRET.as_bytes(),
@@ -336,9 +318,7 @@ async fn oauth_provisioning_policy_controls_new_caps() {
     for (index, enabled) in ["false", "true"].into_iter().enumerate() {
         let overrides = [("initializers.plan_policy_enabled", enabled.into())];
         boot_request_with::<App, _, _>(&overrides, |_request, ctx| async move {
-            if crate::requests::skip_unlicensed(&ctx) {
-                return;
-            }
+            crate::requests::require_licence(&ctx);
             let txn = ctx.db.begin().await.expect("begin");
             let user_id = yorishiro::edition::ee::models::user_users::find_or_create(
                 &txn,
@@ -372,9 +352,7 @@ async fn oauth_provisioning_policy_controls_new_caps() {
 #[tokio::test]
 async fn oauth_entry_points_are_rate_limited_and_status_is_not() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         for path in ["/auth/oauth/authorize", "/auth/oauth/callback"] {
             let mut last_status = 0;
             for _ in 0..15 {

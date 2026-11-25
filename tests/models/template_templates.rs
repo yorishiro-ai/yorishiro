@@ -78,9 +78,7 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
 
         let owner_a = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let owner_b = TestTenant::create(&request, &ctx, TenantArgs::default()).await;

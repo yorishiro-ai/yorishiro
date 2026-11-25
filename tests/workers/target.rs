@@ -345,9 +345,7 @@ mod concurrency {
         crate::requests::boot_request_with::<yorishiro::App, _, _>(
             &overrides,
             |request, ctx| async move {
-                if crate::requests::skip_unlicensed(&ctx) {
-                    return;
-                }
+                crate::requests::require_licence(&ctx);
                 let (tenant_a, a_first) = workspace_of_new_tenant(&request, &ctx).await;
                 let a_second = workspace_of(&ctx, tenant_a).await;
                 let (tenant_b, b_first) = workspace_of_new_tenant(&request, &ctx).await;
@@ -426,9 +424,7 @@ mod concurrency {
         crate::requests::boot_request_with::<yorishiro::App, _, _>(
             &overrides,
             |request, ctx| async move {
-                if crate::requests::skip_unlicensed(&ctx) {
-                    return;
-                }
+                crate::requests::require_licence(&ctx);
                 let (tenant_id, _) = workspace_of_new_tenant(&request, &ctx).await;
                 for (class, key) in [
                     (WorkerClass::Shared, "shared:shared"),

@@ -58,9 +58,7 @@ async fn without_a_licence_the_marketplace_is_not_served() {
 #[tokio::test]
 async fn a_licence_does_not_replace_authentication() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
 
         let response = request
             .get("/api/marketplace")
@@ -83,9 +81,7 @@ async fn the_marketplace_answers_501_on_sqlite() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id)
@@ -132,9 +128,7 @@ async fn publish_list_fork_and_review_round_trip() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id)
@@ -583,9 +577,7 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id)
@@ -640,9 +632,7 @@ async fn a_rating_outside_the_range_is_rejected() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id)

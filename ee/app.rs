@@ -73,18 +73,18 @@ pub(crate) fn tenant_creation_cap(
     configured: i32,
     ctx: &AppContext,
 ) -> impl Fn() -> Option<i32> + Send + Sync + 'static {
-    let licence = ctx.shared_store.get::<Arc<edition::LicenceState>>();
-    if licence.as_ref().is_none_or(|state| !state.is_active()) && configured != 1 {
+    let store = ctx.shared_store.clone();
+    let licensed = move || {
+        store
+            .get::<Arc<edition::LicenceState>>()
+            .is_some_and(|state| state.is_active())
+    };
+    if !licensed() && configured != 1 {
         tracing::warn!(
             "YORISHIRO_MAX_TENANTS is ignored without a valid enterprise licence; enforcing one tenant"
         );
     }
-    move || {
-        tenant_cap_for_licence(
-            configured,
-            licence.as_ref().is_some_and(|state| state.is_active()),
-        )
-    }
+    move || tenant_cap_for_licence(configured, licensed())
 }
 
 pub(crate) fn tenant_cap_for_licence(configured: i32, licensed: bool) -> Option<i32> {
