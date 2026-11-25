@@ -50,7 +50,7 @@ async fn setup(
         body.display_name.as_deref(),
     )
     .await?;
-    let (created, _, _) =
+    let (created, _) =
         tenancy::issue_login_key(&ctx.db, account.user_id, None, Some(account.tenant_id)).await?;
 
     Ok(Created(SetupResponse {

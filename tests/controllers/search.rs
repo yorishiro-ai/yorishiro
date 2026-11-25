@@ -9,7 +9,6 @@ use axum::http::StatusCode;
 use std::sync::Arc;
 use std::time::Duration;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::query_embedding_requests;
 use yorishiro::models::{entity_embeddings, entity_entities, schema_schemas};
 use yorishiro::services::embedding::EmbeddingProvider;
@@ -278,15 +277,7 @@ async fn configured_live_provider_embeds_stores_and_searches() {
 async fn search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result() {
     let (provider, _server, inputs) = keyword_provider(768).await;
     boot_with_query_worker(provider.clone(), |request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Read,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         embedded_notes(
             &ctx,
             &setup,
@@ -346,15 +337,7 @@ async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fall
         ("settings.query_embedding.poll_interval_ms", 50.into()),
     ];
     boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Read,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         // An entity whose text matches the query literally, so a lexical fallback would find it.
         let (provider, _server, _) = keyword_provider(768).await;
         embedded_notes(&ctx, &setup, provider.as_ref(), &["alpha plan"]).await;
@@ -426,15 +409,7 @@ async fn a_result_for_an_expired_request_is_discarded() {
     boot_with_query_worker_and_drain(
         Arc::new(provider),
         |request, ctx| async move {
-            let setup = TestTenant::create(
-                &request,
-                &ctx,
-                TenantArgs {
-                    key_scope: ApiKeyScope::Read,
-                    ..Default::default()
-                },
-            )
-            .await;
+            let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
             let search = async {
                 request
                     .get("/api/search?query_text=alpha")
@@ -481,15 +456,7 @@ async fn a_result_for_an_expired_request_is_discarded() {
 async fn a_worker_failure_reaches_the_caller_as_service_unavailable() {
     let (provider, _server) = unavailable_provider().await;
     boot_with_query_worker(provider, |request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Read,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let response = request
             .get("/api/search?query_text=alpha")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
@@ -520,15 +487,7 @@ async fn a_worker_failure_reaches_the_caller_as_service_unavailable() {
 async fn a_width_the_workspace_does_not_hold_is_refused_by_the_worker() {
     let (provider, _server, _) = keyword_provider(1024).await;
     boot_with_query_worker(provider, |request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Read,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         // The workspace already holds 768-wide vectors.
         let (provider, _server, _) = keyword_provider(768).await;
         embedded_notes(&ctx, &setup, provider.as_ref(), &["alpha plan"]).await;
@@ -572,15 +531,7 @@ async fn a_disabled_embedding_provider_is_reported_by_the_worker() {
         .await
         .expect("provider");
     boot_with_query_worker(settings_provider, |request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Read,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let response = request
             .get("/api/search?query_text=alpha")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))

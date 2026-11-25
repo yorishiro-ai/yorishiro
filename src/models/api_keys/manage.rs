@@ -1,10 +1,9 @@
 //! Listing, revoking and rotating keys.
 
 use super::{
-    ActiveModel, ActiveModelTrait, ActiveValue, ApiKeyScope, AuthContext, ColumnTrait,
-    ConnectionTrait, CreatedApiKey, DatabaseConnection, Entity, EntityTrait, Expr, KeyGrant, Model,
-    QueryFilter, QueryOrder, QuerySelect, ResultExt, Uuid, YorishiroError, generate_key, hash_key,
-    stored_scope,
+    ActiveModel, ActiveModelTrait, ActiveValue, AuthContext, ColumnTrait, ConnectionTrait,
+    CreatedApiKey, DatabaseConnection, Entity, EntityTrait, Expr, KeyGrant, Model, QueryFilter,
+    QueryOrder, QuerySelect, ResultExt, Uuid, YorishiroError, generate_key, hash_key,
 };
 
 impl Entity {
@@ -39,7 +38,6 @@ impl Entity {
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            ApiKeyScope::Read,
             crate::models::iam::policy::Action::CredentialList,
             crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
@@ -48,7 +46,7 @@ impl Entity {
         .await?;
         let mut records = Vec::new();
         for key in Self::list_for_tenant(&txn, actor.tenant_id).await? {
-            let grant = key.grant_metadata(&txn).await?;
+            let grant = key.grant_metadata();
             records.push((key, grant));
         }
         Ok(records)
@@ -103,7 +101,6 @@ impl Entity {
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            ApiKeyScope::Read,
             crate::models::iam::policy::Action::CredentialRevoke,
             crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
@@ -131,10 +128,6 @@ impl Entity {
         Ok(())
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "validation, revocation and replacement share one transaction"
-    )]
     pub(crate) async fn rotate(
         db: &DatabaseConnection,
         actor: &AuthContext,
@@ -144,7 +137,6 @@ impl Entity {
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            ApiKeyScope::Read,
             crate::models::iam::policy::Action::CredentialRotate,
             crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
@@ -189,9 +181,8 @@ impl Entity {
                     .into(),
             });
         }
-        let scope = stored_scope(&old.scope)?;
         let current = Model::current_context(&txn, actor).await?;
-        crate::models::iam::access::require_key_grant(&txn, &current, scope, old.audit).await?;
+        crate::models::iam::access::require_key_grant(&txn, &current, old.audit).await?;
         if !root_session
             && let Some(limit) = issuer_binding.expires_at
             && old.expires_at.is_none_or(|expiry| expiry > limit)
@@ -209,7 +200,6 @@ impl Entity {
             workspace_id: ActiveValue::Set(old.workspace_id),
             user_id: ActiveValue::Set(old.user_id),
             name: ActiveValue::Set(old.name),
-            scope: ActiveValue::Set(old.scope),
             audit: ActiveValue::Set(old.audit),
             expires_at: ActiveValue::Set(old.expires_at),
             key_prefix: ActiveValue::Set(prefix),
@@ -229,12 +219,11 @@ impl Entity {
             .exec(&txn)
             .await
             .internal()?;
-        let grant = inserted.grant_metadata(&txn).await?;
+        let grant = inserted.grant_metadata();
         txn.commit().await.internal()?;
         Ok(CreatedApiKey {
             id: inserted.id,
             workspace_id: old.workspace_id,
-            scope,
             grant,
             key_prefix: inserted.key_prefix,
             name: inserted.name,

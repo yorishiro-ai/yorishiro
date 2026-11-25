@@ -8,29 +8,32 @@ use rmcp::{tool, tool_router};
 
 use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::dtos::users::{UpdateUserRequest, UserRecord};
-use crate::models::api_keys::ApiKeyScope;
 
 #[tool_router(vis = "pub(crate)", router = tool_router_users)]
 impl YorishiroMcpServer {
-    #[tool(meta = super::scope_requirement(ApiKeyScope::Read), description = "Read your own user profile, including a tenant user's name and tenant, without exposing password hashes or OAuth subjects; service credentials are denied (requires read scope)")]
+    #[tool(
+        description = "Read your own user profile, including a tenant user's name and tenant, without exposing password hashes or OAuth subjects; service credentials are denied"
+    )]
     pub(crate) async fn get_current_user(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "get_current_user");
+        let actor = verified!(self, parts);
         match crate::models::user_users::current_profile(&self.app_context().db, &actor).await {
             Ok(user) => ok_json(UserRecord::render(self.app_context(), user)),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
 
-    #[tool(meta = super::scope_requirement(ApiKeyScope::Read), description = "Update or clear your own display name (shared across tenants for a root user), not another user's identity; email, password and OAuth subjects cannot be changed here (requires read scope)")]
+    #[tool(
+        description = "Update or clear your own display name (shared across tenants for a root user), not another user's identity; email, password and OAuth subjects cannot be changed here"
+    )]
     pub(crate) async fn update_current_user(
         &self,
         Parameters(input): Parameters<UpdateUserRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "update_current_user");
+        let actor = verified!(self, parts);
         match crate::models::user_users::update_profile(
             &self.app_context().db,
             &actor,

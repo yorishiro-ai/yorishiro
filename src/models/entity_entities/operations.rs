@@ -284,7 +284,6 @@ pub(crate) async fn get_for_actor(
         &txn,
         &ctx.db,
         &actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::EntityGet,
     )
     .await
@@ -297,24 +296,14 @@ pub(crate) async fn create_for_actor(
     actor: &crate::models::api_keys::AuthContext,
     input: CreateEntityInput,
 ) -> Result<EntityRecord, YorishiroError> {
-    use crate::models::{
-        api_keys::ApiKeyScope,
-        iam::{access, policy::Action},
-    };
+    use crate::models::iam::{access, policy::Action};
     let mut actor = actor.clone();
-    let workspace_id =
-        access::select_workspace(&ctx.db, &actor, ApiKeyScope::Write, Action::EntityCreate).await?;
+    let workspace_id = access::select_workspace(&ctx.db, &actor, Action::EntityCreate).await?;
     actor.workspace_id = Some(workspace_id);
     let quotas = crate::data::quotas::for_tenant(ctx, actor.tenant_id).await?;
     let txn = crate::db::begin_workspace_write(ctx, actor.tenant_id, workspace_id).await?;
-    let authorization = access::authorize_workspace_action(
-        &txn,
-        &ctx.db,
-        &actor,
-        ApiKeyScope::Write,
-        Action::EntityCreate,
-    )
-    .await?;
+    let authorization =
+        access::authorize_workspace_action(&txn, &ctx.db, &actor, Action::EntityCreate).await?;
     let record =
         create_with_quota(&txn, workspace_id, input, actor.user_id, quotas.entities).await?;
     crate::workers::embedding_sync::enqueue_after_write(ctx, workspace_id, record.id, &txn).await?;
@@ -339,7 +328,6 @@ pub(crate) async fn update_for_actor(
         &txn,
         &ctx.db,
         &actor,
-        crate::models::api_keys::ApiKeyScope::Write,
         crate::models::iam::policy::Action::EntityUpdate,
     )
     .await
@@ -368,7 +356,6 @@ pub(crate) async fn delete_for_actor(
         &txn,
         &ctx.db,
         &actor,
-        crate::models::api_keys::ApiKeyScope::Write,
         crate::models::iam::policy::Action::EntityDelete,
     )
     .await

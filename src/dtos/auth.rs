@@ -1,4 +1,3 @@
-use crate::models::api_keys::ApiKeyScope;
 use crate::models::workspace_workspaces::WorkspaceSummary;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -44,6 +43,5 @@ pub struct LoginResponse {
     pub api_key: String,
     pub api_key_id: Uuid,
     pub tenant_id: Uuid,
-    pub scope: ApiKeyScope,
     pub user_id: Uuid,
 }

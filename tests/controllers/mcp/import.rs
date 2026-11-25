@@ -2,7 +2,6 @@ use chrono::Utc;
 use serde_json::json;
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::schema_schemas;
 
 use crate::requests::boot_request;
@@ -18,15 +17,7 @@ async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
             workspace_id,
             api_key: schema_key,
             ..
-        } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let session = initialize(&request).await;
         let schema_id = Uuid::new_v4();
         let jsonl = format!(

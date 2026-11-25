@@ -9,10 +9,6 @@ use crate::requests::fixtures::{TenantArgs, TestTenant};
 const NEW_PASSWORD: &str = "new-root-password-123";
 
 #[tokio::test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one password reset verifies identity preservation, attributed-key revocation, service-key retention, and old-password fencing together"
-)]
 async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -34,21 +30,14 @@ async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
         let attributed = api_keys::Entity::create_api_key(
             &ctx.db,
             tenant.workspace_id,
-            api_keys::ApiKeyScope::Read,
             Some(tenant.owner_id),
             false,
         )
         .await
         .unwrap();
-        let service = api_keys::Entity::create_api_key(
-            &ctx.db,
-            tenant.workspace_id,
-            api_keys::ApiKeyScope::Read,
-            None,
-            false,
-        )
-        .await
-        .unwrap();
+        let service = api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, None, false)
+            .await
+            .unwrap();
         user_users::reset_root_password_by_operator(
             &ctx.db,
             tenant.owner_id,
@@ -196,7 +185,6 @@ async fn root_reset_rejects_unsafe_targets_without_changing_credentials() {
         let key = api_keys::Entity::create_api_key(
             &ctx.db,
             tenant.workspace_id,
-            api_keys::ApiKeyScope::Read,
             Some(tenant.owner_id),
             false,
         )
@@ -366,7 +354,7 @@ async fn root_reset_rolls_back_password_when_key_revocation_fails() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let before = user_users::Entity::find_by_id(tenant.owner_id).one(&ctx.db).await.unwrap().unwrap();
         let key = api_keys::Entity::create_api_key(
-            &ctx.db, tenant.workspace_id, api_keys::ApiKeyScope::Read, Some(tenant.owner_id), false,
+            &ctx.db, tenant.workspace_id, Some(tenant.owner_id), false,
         ).await.unwrap();
         // Direct write (c): deterministic fault injection failing key revocation.
         ctx.db.execute_unprepared(

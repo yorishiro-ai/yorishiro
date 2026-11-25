@@ -7,7 +7,6 @@ use loco_rs::app::AppContext;
 use sea_orm::TransactionTrait;
 use uuid::Uuid;
 use yorishiro::models::_entities::api_keys;
-use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy;
 
 /// Caps the tenant's workspaces.
@@ -88,7 +87,6 @@ impl TestTenant {
             .add_header("X-Workspace-Id", workspace_id.to_string())
             .json(&serde_json::json!({
                 "name": "test-workspace-key",
-                "scope": args.key_scope,
                 "audit": args.key_audit,
             }))
             .await;
@@ -152,6 +150,39 @@ pub(crate) async fn create_iam_administrator(ctx: &AppContext, tenant_id: Uuid) 
     user.id
 }
 
+/// A tenant member who holds only the built-in `Tenant Reader` policy: it reads, and every write is denied by IAM.
+pub(crate) async fn create_iam_reader(ctx: &AppContext, tenant_id: Uuid) -> Uuid {
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+    let txn = ctx.db.begin().await.expect("begin reader setup");
+    let user = tenancy::register_member(
+        &txn,
+        tenant_id,
+        &unique_email("reader"),
+        "hunter2-hunter2",
+        None,
+    )
+    .await
+    .expect("create reader");
+    let policy = yorishiro::models::iam_policies::Entity::find()
+        .filter(yorishiro::models::iam_policies::Column::TenantId.eq(tenant_id))
+        .filter(yorishiro::models::iam_policies::Column::Name.eq("Tenant Reader"))
+        .one(&txn)
+        .await
+        .expect("find the built-in reader policy")
+        .expect("the tenant has the built-in reader policy");
+    yorishiro::models::iam_user_policy_attachments::ActiveModel {
+        tenant_id: Set(tenant_id),
+        user_id: Set(user.id),
+        policy_id: Set(policy.id),
+        ..Default::default()
+    }
+    .insert(&txn)
+    .await
+    .expect("attach the reader policy");
+    txn.commit().await.expect("commit reader setup");
+    user.id
+}
+
 /// Arguments for shared tenant/workspace/owner setup.
 pub(crate) struct TenantArgs {
     /// Tenant name. Defaults to a unique name.
@@ -162,8 +193,6 @@ pub(crate) struct TenantArgs {
     pub owner_email: String,
     /// Owner password. Defaults to `"hunter2-hunter2"`.
     pub owner_password: String,
-    /// API key scope. Defaults to `Migration`.
-    pub key_scope: ApiKeyScope,
     /// Whether the audit key is audit-scoped.
     pub key_audit: bool,
 }
@@ -175,7 +204,6 @@ impl Default for TenantArgs {
             workspace_name: format!("workspace-{}", Uuid::new_v4().simple()),
             owner_email: unique_email("owner"),
             owner_password: "hunter2-hunter2".into(),
-            key_scope: ApiKeyScope::Migration,
             key_audit: false,
         }
     }
@@ -188,10 +216,9 @@ pub(crate) async fn issue_api_key(
     ctx: &AppContext,
     workspace_id: Uuid,
     user_id: Uuid,
-    scope: ApiKeyScope,
     audit: bool,
 ) -> String {
-    api_keys::Entity::create_api_key(&ctx.db, workspace_id, scope, Some(user_id), audit)
+    api_keys::Entity::create_api_key(&ctx.db, workspace_id, Some(user_id), audit)
         .await
         .expect("issue api key")
         .plaintext
@@ -214,7 +241,6 @@ pub(crate) async fn issue_tenant_key(ctx: &AppContext, tenant_id: Uuid, user_id:
     api_keys::Entity::create_tenant_api_key(
         &ctx.db,
         tenant_id,
-        ApiKeyScope::Migration,
         Some(user_id),
         false,
         "test-tenant-admin",

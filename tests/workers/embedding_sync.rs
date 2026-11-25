@@ -13,7 +13,6 @@ mod conflict {
     use uuid::Uuid;
     use yorishiro::App;
     use yorishiro::models::_entities::{api_keys, workspace_workspaces};
-    use yorishiro::models::api_keys::ApiKeyScope;
     use yorishiro::models::queue_job_lifecycles::{Entity, LifecycleStatus};
     use yorishiro::models::{entity_entities, schema_schemas};
     use yorishiro::services::embedding::{
@@ -1547,16 +1546,11 @@ mod conflict {
             let txn = ctx.db.begin().await.unwrap();
             crate::requests::fixtures::grant_iam_administrator(&txn, tenant_id, owner.id).await;
             txn.commit().await.unwrap();
-            let write_key = api_keys::Entity::create_api_key(
-                &ctx.db,
-                workspace_id,
-                ApiKeyScope::Write,
-                Some(owner.id),
-                false,
-            )
-            .await
-            .expect("create write key")
-            .plaintext;
+            let write_key =
+                api_keys::Entity::create_api_key(&ctx.db, workspace_id, Some(owner.id), false)
+                    .await
+                    .expect("create write key")
+                    .plaintext;
             let mut worker_ctx = ctx.clone();
             let queue = crate::requests::jobs::shared_target_queue(&mut worker_ctx).await;
             yorishiro::workers::embedding_sync::enqueue_for_class(

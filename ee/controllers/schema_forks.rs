@@ -2,7 +2,7 @@
 
 use crate::controllers::ApiError;
 use crate::controllers::Created;
-use crate::controllers::extractors::{ReadScope, SchemaScope, Verified};
+use crate::controllers::extractors::Verified;
 use crate::controllers::openapi::Routes;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -13,7 +13,7 @@ use crate::edition::ee::models::workspace_schema_forks as model;
 
 async fn list(
     State(ctx): State<AppContext>,
-    verified: Verified<ReadScope>,
+    verified: Verified,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<model::ForkRecord>>, ApiError> {
     Ok(Json(
@@ -23,7 +23,7 @@ async fn list(
 
 async fn get(
     State(ctx): State<AppContext>,
-    verified: Verified<ReadScope>,
+    verified: Verified,
     Path(crate::dtos::common::ForkIdPath { fork_id }): Path<crate::dtos::common::ForkIdPath<Uuid>>,
 ) -> Result<Json<model::ForkRecord>, ApiError> {
     Ok(Json(
@@ -33,7 +33,7 @@ async fn get(
 
 async fn create(
     State(ctx): State<AppContext>,
-    verified: Verified<SchemaScope>,
+    verified: Verified,
     Json(input): Json<model::CreateInput>,
 ) -> Result<Created<model::ForkRecord>, ApiError> {
     Ok(Created(
@@ -43,7 +43,7 @@ async fn create(
 
 async fn update(
     State(ctx): State<AppContext>,
-    verified: Verified<SchemaScope>,
+    verified: Verified,
     Path(crate::dtos::common::ForkIdPath { fork_id }): Path<crate::dtos::common::ForkIdPath<Uuid>>,
     Json(input): Json<model::UpdateInput>,
 ) -> Result<Json<model::ForkRecord>, ApiError> {
@@ -54,7 +54,7 @@ async fn update(
 
 async fn delete(
     State(ctx): State<AppContext>,
-    verified: Verified<SchemaScope>,
+    verified: Verified,
     Path(crate::dtos::common::ForkIdPath { fork_id }): Path<crate::dtos::common::ForkIdPath<Uuid>>,
 ) -> Result<axum::response::NoContent, ApiError> {
     model::delete_for_actor(&ctx, verified.ctx, fork_id).await?;

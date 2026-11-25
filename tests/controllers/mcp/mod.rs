@@ -27,7 +27,6 @@ use serde_json::{Value, json};
 #[cfg(feature = "enterprise")]
 use yorishiro::App;
 use yorishiro::controllers::mcp::{community_tool_router, compose_tool_routers};
-use yorishiro::models::api_keys::ApiKeyScope;
 
 #[cfg(feature = "enterprise")]
 /// One provider kind's MCP tools: the secret never comes back, REST agrees with MCP, a read key cannot write, and an invalid input leaves the saved value untouched.
@@ -61,8 +60,7 @@ pub(crate) async fn provider_tools_keep_secrets_private_and_match_rest(
         let read_key = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             tenant.workspace_id,
-            ApiKeyScope::Read,
-            Some(crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await),
+            Some(crate::requests::fixtures::create_iam_reader(&ctx, tenant.tenant_id).await),
             false,
         )
         .await
@@ -361,12 +359,6 @@ pub(crate) fn assert_inventory_contract(label: &str, tools: &[Tool]) {
         "duplicate {label} MCP tool names: {names:?}"
     );
     for tool in tools {
-        let required = tool
-            .meta
-            .as_ref()
-            .and_then(|meta| meta.0.get("yorishiro/required_scope"))
-            .expect("every registered tool declares its authorization scope");
-        serde_json::from_value::<ApiKeyScope>(required.clone()).expect("tool scope is valid");
         assert!(
             tool.description
                 .as_deref()

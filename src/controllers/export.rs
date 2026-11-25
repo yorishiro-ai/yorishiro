@@ -3,14 +3,14 @@ use axum::http::header;
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{ReadScope, Verified};
+use crate::controllers::extractors::Verified;
 use crate::controllers::openapi::Routes;
 use crate::models::transfer::export;
 
 /// Line-delimited JSON export of every schema, entity, and relation belonging to the workspace, one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 pub(crate) async fn export_jsonl(
     State(ctx): State<AppContext>,
-    verified: Verified<ReadScope>,
+    verified: Verified,
 ) -> Result<impl aide::axum::IntoApiResponse, ApiError> {
     let body = export::export_jsonl_for_actor(&ctx, verified.ctx).await?;
 

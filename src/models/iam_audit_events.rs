@@ -30,7 +30,6 @@ impl Model {
         access::require_iam_action(
             &txn,
             actor,
-            api_keys::ApiKeyScope::Read,
             Action::IamAuditList,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,

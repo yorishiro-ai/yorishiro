@@ -1,6 +1,5 @@
 use serde_json::{Value, json};
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
@@ -14,14 +13,7 @@ async fn audit_tool_preserves_independent_grant_and_rest_parity() {
         let session = initialize(&request).await;
         let administrator =
             crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
-        let without_audit = issue_api_key(
-            &ctx,
-            tenant.workspace_id,
-            administrator,
-            ApiKeyScope::Migration,
-            false,
-        )
-        .await;
+        let without_audit = issue_api_key(&ctx, tenant.workspace_id, administrator, false).await;
         let denied = mcp_call(
             &request,
             &session,
@@ -32,14 +24,7 @@ async fn audit_tool_preserves_independent_grant_and_rest_parity() {
         )
         .await;
         assert_eq!(denied["result"]["isError"], true);
-        let audit_key = issue_api_key(
-            &ctx,
-            tenant.workspace_id,
-            administrator,
-            ApiKeyScope::Read,
-            true,
-        )
-        .await;
+        let audit_key = issue_api_key(&ctx, tenant.workspace_id, administrator, true).await;
         let listed = mcp_call(
             &request,
             &session,

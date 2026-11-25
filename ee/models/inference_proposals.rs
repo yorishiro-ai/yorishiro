@@ -23,7 +23,6 @@ pub(crate) async fn for_job_as(
     let txn = super::iam::access::workspace_transaction(
         db,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::InferenceProposalList,
     )
     .await?;
@@ -40,7 +39,6 @@ pub(crate) async fn reject_as(
     let txn = super::iam::access::workspace_transaction(
         db,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::policy::Action::InferenceReject,
     )
     .await?;
@@ -59,7 +57,6 @@ pub(crate) async fn discard_as(
     let txn = super::iam::access::workspace_transaction(
         db,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::policy::Action::InferenceDiscard,
     )
     .await?;

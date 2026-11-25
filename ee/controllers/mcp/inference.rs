@@ -16,7 +16,6 @@ use crate::edition::ee::dtos::inference::{
     InferFillResponse, InferFillStatus, InferJobStatusResponse,
 };
 use crate::edition::ee::models::{inference_jobs, inference_proposals};
-use crate::models::api_keys::ApiKeyScope;
 
 pub(super) const TOOL_NAMES: &[&str] = &[
     "infer_fill",
@@ -42,13 +41,15 @@ pub(crate) struct InferenceJobArgs {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_inference)]
 impl YorishiroMcpServer {
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Queue inference for missing fields in the selected workspace; poll get_inference_job, then review proposals before confirmation (requires an active licence, schema scope and inference_create IAM permission)")]
+    #[tool(
+        description = "Queue inference for missing fields in the selected workspace; poll get_inference_job, then review proposals before confirmation (requires an active licence, inference_create IAM permission)"
+    )]
     pub(crate) async fn infer_fill(
         &self,
         Parameters(input): Parameters<InferArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "infer_fill");
+        let actor = verified!(self, parts);
         match crate::edition::ee::workers::infer_fill::enqueue_infer_fill(
             self.app_context(),
             &actor,
@@ -64,13 +65,15 @@ impl YorishiroMcpServer {
         }
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Poll an inference job in the selected workspace (requires an active licence, read scope and inference_job_get IAM permission)")]
+    #[tool(
+        description = "Poll an inference job in the selected workspace (requires an active licence, inference_job_get IAM permission)"
+    )]
     pub(crate) async fn get_inference_job(
         &self,
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "get_inference_job");
+        let actor = verified!(self, parts);
         match inference_jobs::get_as(&self.app_context().db, &actor, input.job_id).await {
             Ok(record) => {
                 let completed = record.status == inference_jobs::InferenceJobStatus::Completed;
@@ -87,23 +90,27 @@ impl YorishiroMcpServer {
         }
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read), description = "Review proposed inference values without applying them (requires an active licence, read scope and inference_proposal_list IAM permission on the selected workspace)")]
+    #[tool(
+        description = "Review proposed inference values without applying them (requires an active licence, inference_proposal_list IAM permission on the selected workspace)"
+    )]
     pub(crate) async fn list_inference_proposals(
         &self,
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "list_inference_proposals");
+        let actor = verified!(self, parts);
         render(inference_proposals::for_job_as(&self.app_context().db, &actor, input.job_id).await)
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Queue application of reviewed inference proposals; poll get_inference_confirmation with the returned job_id (requires an active licence, schema scope and inference_confirm IAM permission on the selected workspace)")]
+    #[tool(
+        description = "Queue application of reviewed inference proposals; poll get_inference_confirmation with the returned job_id (requires an active licence, inference_confirm IAM permission on the selected workspace)"
+    )]
     pub(crate) async fn confirm_inference_proposals(
         &self,
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "confirm_inference_proposals");
+        let actor = verified!(self, parts);
         match crate::edition::ee::workers::confirm_proposals::enqueue(
             self.app_context(),
             &actor,
@@ -116,33 +123,39 @@ impl YorishiroMcpServer {
         }
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Reject pending inference proposals (requires an active licence, schema scope and inference_reject IAM permission on the selected workspace)")]
+    #[tool(
+        description = "Reject pending inference proposals (requires an active licence, inference_reject IAM permission on the selected workspace)"
+    )]
     pub(crate) async fn reject_inference_proposals(
         &self,
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "reject_inference_proposals");
+        let actor = verified!(self, parts);
         render(inference_proposals::reject_as(&self.app_context().db, &actor, input.job_id).await)
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Discard inference proposals without applying them (requires an active licence, schema scope and inference_discard IAM permission on the selected workspace)")]
+    #[tool(
+        description = "Discard inference proposals without applying them (requires an active licence, inference_discard IAM permission on the selected workspace)"
+    )]
     pub(crate) async fn discard_inference_proposals(
         &self,
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "discard_inference_proposals");
+        let actor = verified!(self, parts);
         render(inference_proposals::discard_as(&self.app_context().db, &actor, input.job_id).await)
     }
 
-    #[tool(meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Schema), description = "Poll durable inference confirmation results (requires an active licence, schema scope and inference_confirmation_get IAM permission on the selected workspace)")]
+    #[tool(
+        description = "Poll durable inference confirmation results (requires an active licence, inference_confirmation_get IAM permission on the selected workspace)"
+    )]
     pub(crate) async fn get_inference_confirmation(
         &self,
         Parameters(input): Parameters<InferenceJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "get_inference_confirmation");
+        let actor = verified!(self, parts);
         render(
             inference_jobs::confirmation_status_as(&self.app_context().db, &actor, input.job_id)
                 .await,

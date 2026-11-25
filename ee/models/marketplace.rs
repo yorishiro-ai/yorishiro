@@ -31,7 +31,6 @@ async fn authorized_transaction(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         action,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,

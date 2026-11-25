@@ -4,7 +4,6 @@ use chrono::{Offset, TimeZone};
 use sea_orm::{EntityTrait, TransactionTrait};
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
 
@@ -28,7 +27,7 @@ async fn setup(request: &loco_rs::TestServer, ctx: &loco_rs::app::AppContext) ->
         owner_id,
         api_key: migration_key,
     } = TestTenant::create(request, ctx, TenantArgs::default()).await;
-    let audit_key = issue_api_key(ctx, workspace_id, owner_id, ApiKeyScope::Read, true).await;
+    let audit_key = issue_api_key(ctx, workspace_id, owner_id, true).await;
 
     Setup {
         owner_id,
@@ -61,7 +60,7 @@ async fn audit_reads_require_iam_and_preserve_the_configured_timezone() {
             &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("audit-reader"),
             "audit-reader-password", None).await.unwrap();
         txn.commit().await.unwrap();
-        let delegated = issue_api_key(&ctx, setup.workspace_id, member.id, ApiKeyScope::Read, true).await;
+        let delegated = issue_api_key(&ctx, setup.workspace_id, member.id, true).await;
         let root_key = crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
         let document = serde_json::json!({"statements":[{"effect":"allow","actions":["audit_log_list"],
             "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
@@ -288,14 +287,7 @@ async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
         let setup = setup(&request, &ctx).await;
         let administrator =
             crate::requests::fixtures::create_iam_administrator(&ctx, setup.tenant_id).await;
-        let key = issue_api_key(
-            &ctx,
-            setup.workspace_id,
-            administrator,
-            ApiKeyScope::Migration,
-            false,
-        )
-        .await;
+        let key = issue_api_key(&ctx, setup.workspace_id, administrator, false).await;
         let response = request
             .get("/api/audit-log")
             .add_header("Authorization", format!("Bearer {key}"))

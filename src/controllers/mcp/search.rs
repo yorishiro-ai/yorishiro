@@ -12,7 +12,6 @@ use serde_json::Value;
 
 use super::{YorishiroMcpServer, ok_json};
 use crate::controllers::extractors::search_token_limiter;
-use crate::models::api_keys::ApiKeyScope;
 use crate::models::search;
 
 #[derive(Deserialize, JsonSchema)]
@@ -32,15 +31,14 @@ pub(crate) struct SearchEntitiesArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_search)]
 impl YorishiroMcpServer {
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Search entities by vector similarity and selective literal text; PostgreSQL uses gated rank fusion, SQLite uses text fallback (requires read scope and search IAM permission)"
+        description = "Search entities by vector similarity and selective literal text; PostgreSQL uses gated rank fusion, SQLite uses text fallback (requires search IAM permission)"
     )]
     pub(crate) async fn search_entities(
         &self,
         Parameters(args): Parameters<SearchEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth_ctx = verified!(self, parts, "search_entities");
+        let auth_ctx = verified!(self, parts);
 
         let default = search::SearchQuery::default();
         let query = search::SearchQuery {

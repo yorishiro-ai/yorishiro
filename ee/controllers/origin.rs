@@ -4,7 +4,7 @@
 //!
 use crate::controllers::ApiError;
 use crate::controllers::Created;
-use crate::controllers::extractors::{ReadScope, SchemaScope, Verified};
+use crate::controllers::extractors::Verified;
 use crate::controllers::openapi::Routes;
 use crate::models::schema_schemas::UpstreamChange;
 use axum::Json;
@@ -20,7 +20,7 @@ use crate::edition::ee::models::schema_schemas::MergePlan;
 /// `GET /api/schemas/upstream-changes`: schemas whose origin template has moved on.
 async fn list_upstream_changes(
     State(ctx): State<AppContext>,
-    verified: Verified<ReadScope>,
+    verified: Verified,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<UpstreamChange>>, ApiError> {
     let changes = origin_model::list_for_actor(&ctx, &verified.ctx, page.try_into()?).await?;
@@ -30,7 +30,7 @@ async fn list_upstream_changes(
 /// `GET /api/schemas/{schema_id}/merge-preview`: what following the template would do.
 async fn merge_preview(
     State(ctx): State<AppContext>,
-    verified: Verified<ReadScope>,
+    verified: Verified,
     Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
         crate::dtos::common::SchemaIdPath<Uuid>,
     >,
@@ -43,7 +43,7 @@ async fn merge_preview(
 /// `POST /api/schemas/{schema_id}/merge`: write the merged definition as the next version.
 async fn merge_apply(
     State(ctx): State<AppContext>,
-    verified: Verified<SchemaScope>,
+    verified: Verified,
     Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
         crate::dtos::common::SchemaIdPath<Uuid>,
     >,

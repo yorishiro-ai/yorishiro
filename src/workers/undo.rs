@@ -79,10 +79,8 @@ impl UndoWorker {
                 workspace_id: Some(args.workspace_id),
                 api_key_id: args.api_key_id,
                 user_id: args.user_id,
-                scope: crate::models::api_keys::ApiKeyScope::Migration,
                 audit: false,
             },
-            crate::models::api_keys::ApiKeyScope::Migration,
             crate::models::iam::policy::Action::MigrationUndo,
             crate::models::iam::policy::Resource::Workspace {
                 tenant_id: args.tenant_id,
@@ -125,7 +123,6 @@ pub(crate) async fn enqueue_for_actor(
     WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Migration,
         crate::models::iam::access::WorkspaceTarget::SnapshotJob(snapshot_job_id),
         None,
         async |session| enqueue(ctx, session.txn(), &session.ctx, snapshot_job_id).await,
@@ -143,7 +140,6 @@ pub(crate) async fn enqueue(
     crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         auth,
-        crate::models::api_keys::ApiKeyScope::Migration,
         crate::models::iam::policy::Action::MigrationUndo,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: auth.tenant_id,

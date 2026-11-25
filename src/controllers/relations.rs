@@ -7,7 +7,7 @@ use loco_rs::app::AppContext;
 use uuid::Uuid;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{AuthContext, ReadScope, Verified, WriteScope};
+use crate::controllers::extractors::{AuthContext, Verified};
 use crate::controllers::openapi::Routes;
 use crate::dtos::relations::{
     CreateRelationRequest, ListRelationsParams, SetRelationStatusRequest,
@@ -16,7 +16,7 @@ use crate::models::entity_relations::{self, RelationRecord};
 
 pub(crate) async fn create_relation(
     State(ctx): State<AppContext>,
-    verified: Verified<WriteScope>,
+    verified: Verified,
     Json(body): Json<CreateRelationRequest>,
 ) -> Result<Created<RelationRecord>, ApiError> {
     Ok(Created(
@@ -26,7 +26,7 @@ pub(crate) async fn create_relation(
 
 pub(crate) async fn get_relation(
     State(ctx): State<AppContext>,
-    verified: Verified<ReadScope>,
+    verified: Verified,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<Json<RelationRecord>, ApiError> {
     Ok(Json(
@@ -36,7 +36,7 @@ pub(crate) async fn get_relation(
 
 pub(crate) async fn delete_relation(
     State(ctx): State<AppContext>,
-    verified: Verified<WriteScope>,
+    verified: Verified,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
 ) -> Result<axum::response::NoContent, ApiError> {
     entity_relations::delete_for_actor(&ctx, verified.ctx, id).await?;
@@ -56,7 +56,7 @@ pub(crate) async fn list_relations(
 
 pub(crate) async fn set_relation_status(
     State(ctx): State<AppContext>,
-    verified: Verified<WriteScope>,
+    verified: Verified,
     Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
     Json(body): Json<SetRelationStatusRequest>,
 ) -> Result<Json<RelationRecord>, ApiError> {

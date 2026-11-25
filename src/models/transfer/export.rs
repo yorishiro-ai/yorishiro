@@ -158,7 +158,6 @@ pub(crate) async fn export_jsonl_for_actor(
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::Export,
         ),

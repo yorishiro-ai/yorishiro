@@ -4,15 +4,15 @@ use sea_orm::{DatabaseConnection, DatabaseTransaction};
 
 use crate::error::ResultExt;
 use crate::error::YorishiroError;
-use crate::models::api_keys::{ApiKeyScope, AuthContext};
+use crate::models::api_keys::AuthContext;
 use crate::models::iam::access::{
-    WorkspaceTarget, authorize_workspace_action, hide_inferred_resource, require_scope,
+    WorkspaceTarget, authorize_workspace_action, hide_inferred_resource,
 };
 use crate::models::iam::policy::Action;
 
 /// An authenticated caller bound to one workspace, with a transaction whose RLS context is already set.
 ///
-/// There is no way to obtain a `DatabaseTransaction` on the tenant pool except through this type, which structurally prevents forgetting the scope check.
+/// There is no way to obtain a `DatabaseTransaction` on the tenant pool except through this type, which structurally prevents forgetting the authorization check.
 ///
 /// **A write handler must call `.commit().await?` before returning, or every write it made is silently discarded** (`DatabaseTransaction` rolls back on drop).
 /// A read-only handler can just let it drop; a rollback of nothing-written is a no-op.
@@ -22,7 +22,6 @@ pub struct WorkspaceSession {
     identity: DatabaseConnection,
     authorization: Option<DatabaseTransaction>,
     inferred_resource: bool,
-    scope: ApiKeyScope,
 }
 
 impl WorkspaceSession {
@@ -33,12 +32,12 @@ impl WorkspaceSession {
     pub async fn begin(
         app: &loco_rs::app::AppContext,
         ctx: AuthContext,
-        scope: ApiKeyScope,
+        write: bool,
     ) -> Result<Self, YorishiroError> {
         let workspace_id = ctx.require_workspace()?;
         // Touch independently: read handlers roll their workspace transaction back on drop.
         crate::models::api_keys::Entity::touch_authenticated(app, &ctx).await?;
-        let txn = if scope >= ApiKeyScope::Write {
+        let txn = if write {
             crate::db::begin_workspace_write(app, ctx.tenant_id, workspace_id).await?
         } else {
             crate::db::begin_workspace(app, ctx.tenant_id, workspace_id).await?
@@ -49,29 +48,27 @@ impl WorkspaceSession {
             identity: app.db.clone(),
             authorization: None,
             inferred_resource: false,
-            scope,
         })
     }
 
-    /// Verifies the scope, resolves the target workspace and opens the transaction.
+    /// Resolves the target workspace and opens a write or read transaction.
     ///
     /// # Errors
-    /// Returns the scope, target-resolution or transaction error.
+    /// Returns the target-resolution or transaction error.
     pub(crate) async fn open(
         app: &loco_rs::app::AppContext,
         mut actor: AuthContext,
-        scope: ApiKeyScope,
+        write: bool,
         target: WorkspaceTarget,
     ) -> Result<Self, YorishiroError> {
-        require_scope(&actor, scope)?;
         let inferred_resource = target.inferred_resource(&actor);
         actor.workspace_id = Some(
             target
-                .resolve(&app.db, &actor, scope)
+                .resolve(&app.db, &actor)
                 .await
                 .map_err(|error| hide_inferred_resource(inferred_resource, error))?,
         );
-        let mut session = Self::begin(app, actor, scope).await?;
+        let mut session = Self::begin(app, actor, write).await?;
         session.inferred_resource = inferred_resource;
         Ok(session)
     }
@@ -85,12 +82,11 @@ impl WorkspaceSession {
     pub(crate) async fn run<T>(
         app: &loco_rs::app::AppContext,
         actor: AuthContext,
-        scope: ApiKeyScope,
         target: WorkspaceTarget,
         action: Option<Action>,
         op: impl AsyncFnOnce(&Self) -> Result<T, YorishiroError>,
     ) -> Result<T, YorishiroError> {
-        let mut session = Self::open(app, actor, scope, target).await?;
+        let mut session = Self::open(app, actor, true, target).await?;
         if let Some(action) = action {
             session.require_action(action).await?;
         }
@@ -106,12 +102,11 @@ impl WorkspaceSession {
     pub(crate) async fn read<T>(
         app: &loco_rs::app::AppContext,
         actor: AuthContext,
-        scope: ApiKeyScope,
         target: WorkspaceTarget,
         action: Action,
         op: impl AsyncFnOnce(&Self) -> Result<T, YorishiroError>,
     ) -> Result<T, YorishiroError> {
-        let mut session = Self::open(app, actor, scope, target).await?;
+        let mut session = Self::open(app, actor, false, target).await?;
         session.require_action(action).await?;
         op(&session).await
     }
@@ -135,7 +130,7 @@ impl WorkspaceSession {
     /// Returns the authorization error, hiding an inferred resource.
     pub async fn require_action(&mut self, action: Action) -> Result<(), YorishiroError> {
         self.authorization =
-            authorize_workspace_action(&self.txn, &self.identity, &self.ctx, self.scope, action)
+            authorize_workspace_action(&self.txn, &self.identity, &self.ctx, action)
                 .await
                 .map_err(|error| hide_inferred_resource(self.inferred_resource, error))?;
         Ok(())

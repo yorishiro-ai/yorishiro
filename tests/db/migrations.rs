@@ -268,7 +268,11 @@ async fn group_id(db: &sea_orm::DatabaseConnection, name: &str) -> uuid::Uuid {
 /// Applies every migration before roles-to-groups and seeds one tenant that holds roles.
 async fn seed_roles(db: &sea_orm::DatabaseConnection) {
     use sea_orm::sea_query::Expr;
-    let steps = Migrator::migrations().len() - 1;
+    // Everything before the roles-to-groups migration, found by name so later migrations do not move the seed point.
+    let steps = Migrator::migrations()
+        .iter()
+        .position(|migration| migration.name().ends_with("roles_to_groups"))
+        .expect("the roles-to-groups migration is registered");
     Migrator::up(db, Some(u32::try_from(steps).unwrap()))
         .await
         .unwrap();

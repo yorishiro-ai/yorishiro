@@ -36,14 +36,7 @@ pub async fn issue_login_key(
     user_id: Uuid,
     expected_password_hash: Option<&str>,
     expected_tenant: Option<Uuid>,
-) -> Result<
-    (
-        crate::models::api_keys::CreatedTenantApiKey,
-        Uuid,
-        crate::models::api_keys::ApiKeyScope,
-    ),
-    YorishiroError,
-> {
+) -> Result<(crate::models::api_keys::CreatedTenantApiKey, Uuid), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     let memberships = tenant_memberships::Entity::find()
         .filter(tenant_memberships::Column::UserId.eq(user_id))
@@ -87,11 +80,9 @@ pub async fn issue_login_key(
     if !crate::models::tenant_memberships::is_member(&txn, tenant_id, user_id).await? {
         return Err(YorishiroError::Unauthenticated);
     }
-    let scope = crate::models::api_keys::ApiKeyScope::Migration;
-    let key =
-        crate::models::api_keys::Entity::create_login_key(&txn, tenant_id, user_id, scope).await?;
+    let key = crate::models::api_keys::Entity::create_login_key(&txn, tenant_id, user_id).await?;
     txn.commit().await.internal()?;
-    Ok((key, tenant_id, scope))
+    Ok((key, tenant_id))
 }
 
 /// # Errors
@@ -437,7 +428,6 @@ pub(crate) async fn create_workspace_in_context(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::WorkspaceCreate,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -474,7 +464,6 @@ pub async fn delete_workspace_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::policy::Action::WorkspaceDelete,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,

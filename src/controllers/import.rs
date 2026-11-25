@@ -4,17 +4,17 @@ use axum::{Json, extract::State};
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{SchemaScope, Verified};
+use crate::controllers::extractors::Verified;
 use crate::controllers::openapi::Routes;
 use crate::dtos::jobs::QueuedJobResponse;
 
 /// Line-delimited JSON import in the same format `GET /api/export.jsonl` produces: one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
-/// Requires `SchemaScope` (rather than `WriteScope`) since an import can create schemas, which is itself a schema-scope-only operation elsewhere in the API.
+/// Requires the `import_create` IAM permission.
 ///
 /// Accepted imports run all-or-nothing on a worker; poll `/api/import-jobs/{job_id}` for completion.
 pub(crate) async fn import_jsonl(
     State(ctx): State<AppContext>,
-    verified: Verified<SchemaScope>,
+    verified: Verified,
     body: String,
 ) -> Result<Accepted<QueuedJobResponse>, ApiError> {
     let job_id = crate::workers::import::enqueue_for_actor(&ctx, verified.ctx, body).await?;
@@ -46,7 +46,7 @@ pub fn routes() -> Routes {
 
 async fn import_job_status(
     State(ctx): State<AppContext>,
-    verified: Verified<SchemaScope>,
+    verified: Verified,
     Path(crate::dtos::common::JobIdPath { job_id: id }): Path<
         crate::dtos::common::JobIdPath<uuid::Uuid>,
     >,

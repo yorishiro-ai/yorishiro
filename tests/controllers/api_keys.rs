@@ -10,79 +10,6 @@ use crate::requests::fixtures::{self, TenantArgs, TestTenant};
 use crate::requests::{boot_request, boot_request_with_timezone};
 
 mod issuance_race;
-
-#[tokio::test]
-async fn scope_rejection_does_not_touch_a_key_but_a_read_does() {
-    use yorishiro::models::api_keys::{ApiKeyScope, Entity};
-
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant {
-            workspace_id,
-            tenant_id,
-            ..
-        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let key = fixtures::issue_api_key(
-            &ctx,
-            workspace_id,
-            fixtures::create_iam_administrator(&ctx, tenant_id).await,
-            ApiKeyScope::Read,
-            false,
-        )
-        .await;
-        let before = Entity::list_for_workspace(
-            &ctx.db,
-            workspace_id,
-            yorishiro::models::pagination::ListParams::default(),
-        )
-        .await
-        .expect("list workspace keys")
-        .into_iter()
-        .find(|key| key.scope == "read")
-        .expect("read key");
-        assert!(before.last_used_at.is_none());
-        let denied = request
-            .post("/api/entities")
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({"entity_type":"note", "data":{}}))
-            .await;
-        assert_eq!(denied.status_code(), StatusCode::FORBIDDEN);
-        assert!(
-            Entity::list_for_workspace(
-                &ctx.db,
-                workspace_id,
-                yorishiro::models::pagination::ListParams::default()
-            )
-            .await
-            .expect("list workspace keys")
-            .into_iter()
-            .find(|key| key.id == before.id)
-            .expect("read key remains")
-            .last_used_at
-            .is_none()
-        );
-        let read = request
-            .get(&format!("/api/workspaces/{workspace_id}"))
-            .add_header("Authorization", format!("Bearer {key}"))
-            .await;
-        assert_eq!(read.status_code(), StatusCode::OK);
-        assert!(
-            Entity::list_for_workspace(
-                &ctx.db,
-                workspace_id,
-                yorishiro::models::pagination::ListParams::default()
-            )
-            .await
-            .expect("list workspace keys")
-            .into_iter()
-            .find(|key| key.id == before.id)
-            .expect("read key remains")
-            .last_used_at
-            .is_some()
-        );
-    })
-    .await;
-}
-
 #[tokio::test]
 async fn workspace_bound_issuer_cannot_rotate_another_workspaces_key() {
     use sea_orm::TransactionTrait;
@@ -100,24 +27,12 @@ async fn workspace_bound_issuer_cannot_rotate_another_workspaces_key() {
         .await
         .unwrap();
         txn.commit().await.unwrap();
-        let target = api_keys::Entity::create_api_key(
-            &ctx.db,
-            sibling.id,
-            api_keys::ApiKeyScope::Read,
-            Some(tenant.owner_id),
-            false,
-        )
-        .await
-        .unwrap();
+        let target =
+            api_keys::Entity::create_api_key(&ctx.db, sibling.id, Some(tenant.owner_id), false)
+                .await
+                .unwrap();
         let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
-        let issuer = fixtures::issue_api_key(
-            &ctx,
-            tenant.workspace_id,
-            administrator,
-            api_keys::ApiKeyScope::Migration,
-            false,
-        )
-        .await;
+        let issuer = fixtures::issue_api_key(&ctx, tenant.workspace_id, administrator, false).await;
         request
             .post(&format!("/api/api-keys/{}/rotate", target.id))
             .add_header("Authorization", format!("Bearer {issuer}"))
@@ -162,14 +77,13 @@ async fn delegated_expiry_cannot_outlive_the_issuing_key() {
 
 #[tokio::test]
 async fn rotation_preserves_service_identity_and_serializes_with_revocation() {
-    use yorishiro::models::api_keys::{ApiKeyScope, Entity};
+    use yorishiro::models::api_keys::Entity;
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let service =
-            Entity::create_api_key(&ctx.db, tenant.workspace_id, ApiKeyScope::Read, None, false)
-                .await
-                .unwrap();
+        let service = Entity::create_api_key(&ctx.db, tenant.workspace_id, None, false)
+            .await
+            .unwrap();
         let auth = format!("Bearer {tenant_key}");
         let path = format!("/api/api-keys/{}/rotate", service.id);
         let (rotated, revoked) = tokio::join!(
@@ -186,7 +100,6 @@ async fn rotation_preserves_service_identity_and_serializes_with_revocation() {
             let body = rotated.json::<Value>();
             assert_eq!(body["identity_kind"], "service");
             assert!(body["user_id"].is_null());
-            assert_eq!(body["scope"], "read");
             assert!(revoked.is_err());
         } else {
             rotated.assert_status(StatusCode::CONFLICT);
@@ -263,7 +176,7 @@ async fn key_rotation_preserves_grants_and_retains_secret_free_history() {
         let auth = format!("Bearer {tenant_key}");
         let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
         let created = request.post("/api/api-keys").add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
-            .json(&serde_json::json!({"name":"rotate-me","scope":"read","expires_at":expiry})).await;
+            .json(&serde_json::json!({"name":"rotate-me","expires_at":expiry})).await;
         created.assert_status(StatusCode::CREATED);
         let original: Value = created.json();
         let id = original["id"].as_str().unwrap();
@@ -271,7 +184,7 @@ async fn key_rotation_preserves_grants_and_retains_secret_free_history() {
             .add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string()).await;
         rotated.assert_status(StatusCode::CREATED);
         let replacement: Value = rotated.json();
-        for field in ["scope","audit","workspace_id","tenant_id","user_id","expires_at"] {
+        for field in ["audit","workspace_id","tenant_id","user_id","expires_at"] {
             assert_eq!(original[field],replacement[field]);
         }
         request.get("/api/whoami").add_header("Authorization",format!("Bearer {}",original["full_key"].as_str().unwrap()))
@@ -284,7 +197,6 @@ async fn key_rotation_preserves_grants_and_retains_secret_free_history() {
         let old = listed["keys"].as_array().unwrap().iter().find(|key|key["id"]==original["id"]).unwrap();
         assert_eq!(old["state"],"revoked");
         assert_eq!(old["replaced_by_id"],replacement["id"]);
-        assert!(old["effective_scope"].is_null());
         assert!(!listed.to_string().contains(original["full_key"].as_str().unwrap()));
         assert!(!listed.to_string().contains("key_hash"));
         // Direct write (c): issuance rejects a past expiry, so time passing is injected by moving the stored expiry.
@@ -298,7 +210,6 @@ async fn key_rotation_preserves_grants_and_retains_secret_free_history() {
         let expired = request.get("/api/api-keys").add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string()).await.json::<Value>();
         let expired = expired["keys"].as_array().unwrap().iter().find(|key|key["id"]==replacement["id"]).unwrap();
         assert_eq!(expired["state"],"expired");
-        assert!(expired["effective_scope"].is_null());
         request.post("/api/api-keys").add_header("Authorization",&auth).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"past","expires_at":chrono::Utc::now()-chrono::Duration::seconds(1)}))
             .await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
@@ -337,8 +248,6 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         assert_eq!(created.status_code(), StatusCode::CREATED);
         let created_body: Value = created.json();
         assert_eq!(created_body["name"], "my-client");
-        assert_eq!(created_body["scope"], "read");
-        assert_eq!(created_body["effective_scope"], "read");
         assert_eq!(created_body["identity_kind"], "user");
         assert_eq!(created_body["audit"], false);
         assert!(created_body["full_key"].as_str().is_some());
@@ -362,17 +271,14 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             .add_header("Authorization", format!("Bearer {full_key}"))
             .await;
         assert_eq!(identity.status_code(), StatusCode::OK);
-        assert_eq!(identity.json::<Value>()["scope"], created_body["scope"]);
         let identity = identity.json::<Value>();
-        assert_eq!(identity["scope"], created_body["effective_scope"]);
-        assert_eq!(identity["stored_scope"], created_body["scope"]);
         assert_eq!(identity["audit"], created_body["audit"]);
         assert_eq!(identity["bound_workspace_id"], created_body["workspace_id"]);
         assert_eq!(identity["identity_kind"], created_body["identity_kind"]);
         let escalation = request
             .post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {full_key}"))
-            .json(&serde_json::json!({"name":"escalation", "scope":"migration"}))
+            .json(&serde_json::json!({"name":"escalation"}))
             .await;
         assert_eq!(escalation.status_code(), StatusCode::FORBIDDEN);
         let unsupported = request
@@ -413,8 +319,6 @@ async fn api_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             .iter()
             .find(|record| record["id"] == created_body["id"])
             .unwrap();
-        assert_eq!(record["scope"], "read");
-        assert_eq!(record["effective_scope"], created_body["effective_scope"]);
         assert_eq!(record["identity_kind"], created_body["identity_kind"]);
         assert_eq!(record["audit"], created_body["audit"]);
         assert_eq!(record["workspace_id"], created_body["workspace_id"]);
@@ -500,8 +404,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
 
         // A workspace-bound key cannot mint a tenant-scoped one.
         let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
-        let bound = fixtures::issue_api_key(&ctx, tenant.workspace_id, administrator,
-            api_keys::ApiKeyScope::Migration, false).await;
+        let bound = fixtures::issue_api_key(&ctx, tenant.workspace_id, administrator, false).await;
         let denied = request
             .post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {bound}"))
@@ -513,7 +416,6 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         let issuer = api_keys::Entity::create_tenant_api_key(
             &ctx.db,
             tenant.tenant_id,
-            api_keys::ApiKeyScope::Migration,
             Some(administrator),
             true,
             "initial-admin",
@@ -525,15 +427,12 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
             .json(&serde_json::json!({
                 "name": "tenant-scoped",
-                "scope": "write",
                 "tenant_scoped": true,
             }))
             .await;
         created.assert_status(StatusCode::CREATED);
         let record = created.json::<Value>();
         assert!(record["workspace_id"].is_null(), "response: {record:?}");
-        assert_eq!(record["scope"], "write");
-        assert_eq!(record["effective_scope"], "write");
         assert_eq!(record["tenant_id"], tenant.tenant_id.to_string());
 
         // A non-admin member cannot issue tenant-scoped keys.
@@ -551,7 +450,6 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             &ctx,
             tenant.workspace_id,
             member.id,
-            api_keys::ApiKeyScope::Write,
             false,
         )
         .await;
@@ -563,11 +461,11 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .assert_status(StatusCode::FORBIDDEN);
 
         let member_tenant_key = api_keys::Entity::create_tenant_api_key(
-            &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Write,
+            &ctx.db, tenant.tenant_id,
             Some(member.id), false, "member-tenant-issuer",
         ).await.unwrap();
         let _elevated = api_keys::Entity::create_tenant_api_key(
-            &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Migration,
+            &ctx.db, tenant.tenant_id,
             Some(member.id), false, "iam-not-role-ceiling",
         ).await.unwrap();
         let document = serde_json::json!({"statements":[{"effect":"allow","actions":["credential_create"],
@@ -582,12 +480,8 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .await.assert_status(StatusCode::NO_CONTENT);
         request.post("/api/api-keys")
             .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
-            .json(&serde_json::json!({"name":"iam-member-write","scope":"write","tenant_scoped":true}))
+            .json(&serde_json::json!({"name":"iam-member-write","tenant_scoped":true}))
             .await.assert_status(StatusCode::CREATED);
-        request.post("/api/api-keys")
-            .add_header("Authorization", format!("Bearer {}", member_tenant_key.plaintext))
-            .json(&serde_json::json!({"name":"iam-member-escalation","scope":"schema","tenant_scoped":true}))
-            .await.assert_status(StatusCode::FORBIDDEN);
         request.delete(&attachment).add_header("Authorization", format!("Bearer {}", issuer.plaintext))
             .await.assert_status(StatusCode::NO_CONTENT);
         request.post("/api/api-keys")
@@ -599,7 +493,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         let inaccessible = tenancy::create_workspace(&txn, tenant.tenant_id, "no-policy", None, None).await.unwrap();
         txn.commit().await.unwrap();
         let ungranted = api_keys::Entity::create_api_key(
-            &ctx.db, inaccessible.id, api_keys::ApiKeyScope::Schema, Some(member.id), false,
+            &ctx.db, inaccessible.id, Some(member.id), false,
         ).await.expect("workspace-bound issuance succeeds");
         // The key authenticates, but without a policy for the workspace it reads nothing.
         request.get("/api/entities")
@@ -616,18 +510,13 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
             .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await.json::<Value>();
-        let member_record = listed["keys"].as_array().unwrap().iter()
-            .find(|key| key["id"] == member_tenant_key.id.to_string()).unwrap();
-        assert_eq!(member_record["effective_scope"], "write");
+        assert!(listed["keys"].as_array().unwrap().iter()
+            .any(|key| key["id"] == member_tenant_key.id.to_string()));
 
         let read_issuer = api_keys::Entity::create_tenant_api_key(
-            &ctx.db, tenant.tenant_id, api_keys::ApiKeyScope::Read,
+            &ctx.db, tenant.tenant_id,
             Some(administrator), false, "read-tenant-issuer",
         ).await.unwrap();
-        request.post("/api/api-keys")
-            .add_header("Authorization", format!("Bearer {}", read_issuer.plaintext))
-            .json(&serde_json::json!({"name":"denied-escalation", "scope":"write", "tenant_scoped":true}))
-            .await.assert_status(StatusCode::FORBIDDEN);
 
         let expiry = chrono::Utc::now() + chrono::Duration::hours(1);
         // Direct write (a): the model issuer operation takes no expiry, and this key must stay the same issuer principal.

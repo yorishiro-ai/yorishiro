@@ -138,14 +138,8 @@ async fn reindex_queues_one_job_for_the_workspace() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let workspace = tenant.workspace_id;
-        let key = crate::requests::fixtures::issue_api_key(
-            &ctx,
-            workspace,
-            tenant.owner_id,
-            yorishiro::models::api_keys::ApiKeyScope::Migration,
-            false,
-        )
-        .await;
+        let key =
+            crate::requests::fixtures::issue_api_key(&ctx, workspace, tenant.owner_id, false).await;
         request
             .post("/api/migration-jobs/reindex")
             .add_header("Authorization", format!("Bearer {key}"))

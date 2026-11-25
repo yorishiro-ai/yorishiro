@@ -8,7 +8,6 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{tenant_memberships::Column, user_users};
-use crate::models::api_keys::ApiKeyScope;
 use crate::models::iam::policy::{Action, Resource};
 
 use super::{ActiveModel, Entity, MembershipRecord};
@@ -43,7 +42,6 @@ pub async fn preview_removal(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        ApiKeyScope::Read,
         Action::TenantUserDelete,
         Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -201,7 +199,6 @@ pub(crate) async fn create_tenant_user_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        ApiKeyScope::Read,
         Action::TenantUserCreate,
         Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -237,7 +234,6 @@ pub async fn reset_tenant_user_password(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        ApiKeyScope::Read,
         Action::TenantUserPasswordReset,
         Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -282,7 +278,6 @@ pub async fn remove_member_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        ApiKeyScope::Read,
         Action::TenantUserDelete,
         Resource::Tenant {
             tenant_id: actor.tenant_id,
@@ -333,7 +328,6 @@ pub(crate) async fn list_members_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        ApiKeyScope::Read,
         Action::TenantUserList,
         Resource::Tenant {
             tenant_id: actor.tenant_id,

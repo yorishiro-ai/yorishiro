@@ -158,8 +158,6 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
         assert_eq!(whoami.status_code(), StatusCode::OK);
         let identity: serde_json::Value = whoami.json();
         assert_eq!(identity["workspace_id"], workspace_id);
-        assert_eq!(identity["stored_scope"], "migration");
-        assert_eq!(identity["scope"], "migration");
         assert_eq!(identity["audit"], true);
         assert_eq!(identity["identity_kind"], "user");
         assert!(identity["bound_workspace_id"].is_null());

@@ -22,15 +22,14 @@ async fn tenant_key_issuance_rechecks_authority_after_waiting_for_policy_detachm
             "hunter2-hunter2", None).await.unwrap();
         crate::requests::fixtures::grant_iam_administrator(&txn, tenant.tenant_id, admin.id).await;
         txn.commit().await.unwrap();
-        let issuer = api_keys::Entity::create_tenant_api_key(&ctx.db, tenant.tenant_id,
-            api_keys::ApiKeyScope::Migration, Some(admin.id), false, "demotion-issuer").await.unwrap();
+        let issuer = api_keys::Entity::create_tenant_api_key(&ctx.db, tenant.tenant_id, Some(admin.id), false, "demotion-issuer").await.unwrap();
         let txn = ctx.db.begin().await.unwrap();
         let fence = format!("tenant-membership:{}", tenant.tenant_id);
         yorishiro::db::lock_for_update(&txn, &fence).await.unwrap();
         let issue = async {
             request.post("/api/api-keys")
                 .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
-                .json(&serde_json::json!({"name":"must-not-exist", "scope":"read", "tenant_scoped":true})).await
+                .json(&serde_json::json!({"name":"must-not-exist", "tenant_scoped":true})).await
         };
         let demote = async {
             // Observe the real fence wait rather than guessing how long the HTTP request needs.

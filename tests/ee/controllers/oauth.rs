@@ -291,7 +291,7 @@ async fn first_oauth_login_creates_a_tenant_root_without_a_workspace() {
         .expect("first login provisioning");
         txn.commit().await.expect("commit provisioning");
 
-        let (_, tenant_id, _) =
+        let (_, tenant_id) =
             yorishiro::models::tenancy::issue_login_key(&ctx.db, user_id, None, None)
                 .await
                 .expect("first login can issue a tenant key without a workspace");

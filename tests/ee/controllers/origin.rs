@@ -4,7 +4,6 @@ use sea_orm::TransactionTrait;
 use serde_json::json;
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 
@@ -35,10 +34,7 @@ fn note_definition() -> serde_json::Value {
 #[tokio::test]
 async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(&request, &ctx, TenantArgs {
-            key_scope: ApiKeyScope::Schema,
-            ..Default::default()
-        }).await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let create = request
             .post("/api/schemas")
@@ -96,15 +92,7 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
 async fn concurrent_rest_merges_commit_for_separate_workspaces() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let mut inputs = Vec::new();
-        let tenant = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let library_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
                 .await;
@@ -125,7 +113,6 @@ async fn concurrent_rest_merges_commit_for_separate_workspaces() {
                 &ctx,
                 workspace.id,
                 tenant.owner_id,
-                ApiKeyScope::Schema,
                 false,
             )
             .await;
@@ -174,10 +161,7 @@ async fn concurrent_rest_merges_commit_for_separate_workspaces() {
 )]
 async fn upstream_changes_preview_and_merge_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(&request, &ctx, TenantArgs {
-            key_scope: ApiKeyScope::Schema,
-            ..Default::default()
-        }).await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let library_key = crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
         let template = create_template(&request, &library_key, note_definition()).await;
 
@@ -358,10 +342,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
         let setup = TestTenant::create(
             &request,
             &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
+            TenantArgs::default(),
         )
         .await;
         let library_key = crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
@@ -471,15 +452,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
 #[tokio::test]
 async fn merging_a_conflicting_field_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let base_def = json!({
             "name": "library-note",
             "entity_types": {

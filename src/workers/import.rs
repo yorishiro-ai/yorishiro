@@ -78,10 +78,8 @@ impl ImportWorker {
                     workspace_id: Some(args.workspace_id),
                     api_key_id: args.api_key_id,
                     user_id: args.user_id,
-                    scope: crate::models::api_keys::ApiKeyScope::Schema,
                     audit: false,
                 },
-                crate::models::api_keys::ApiKeyScope::Schema,
                 crate::models::iam::policy::Action::ImportCreate,
                 crate::models::iam::policy::Resource::Workspace {
                     tenant_id: args.tenant_id,
@@ -121,7 +119,7 @@ impl ImportWorker {
     }
 }
 
-/// Opens the caller's schema-scope session, enqueues an import and commits.
+/// Opens the caller's write session, enqueues an import and commits.
 ///
 /// # Errors
 /// Returns the session, authorization or enqueue error.
@@ -133,7 +131,6 @@ pub(crate) async fn enqueue_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::ImportCreate,
         ),
@@ -153,7 +150,6 @@ pub(crate) async fn enqueue(
     crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         auth,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::policy::Action::ImportCreate,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: auth.tenant_id,

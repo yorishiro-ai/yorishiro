@@ -2,7 +2,6 @@ use axum::http::StatusCode;
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::{entity_entities, schema_schemas};
 
 use crate::requests::boot_request;
@@ -26,20 +25,10 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             workspace_id,
             owner_id,
             api_key: migration_key,
-        } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Migration,
-                ..Default::default()
-            },
-        )
-        .await;
-        let administrator =
-            crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await;
-        let read_key =
-            issue_api_key(&ctx, workspace_id, administrator, ApiKeyScope::Read, false).await;
-        let audit_key = issue_api_key(&ctx, workspace_id, owner_id, ApiKeyScope::Read, true).await;
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let administrator = crate::requests::fixtures::create_iam_reader(&ctx, tenant_id).await;
+        let read_key = issue_api_key(&ctx, workspace_id, administrator, false).await;
+        let audit_key = issue_api_key(&ctx, workspace_id, owner_id, true).await;
 
         let v1 = serde_json::from_value(serde_json::json!({
             "name": "note",
@@ -97,15 +86,11 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         )
         .await;
         assert_eq!(denied["result"]["isError"], true);
-        assert_eq!(
-            denied["result"]["structuredContent"]["error"]["required_scope"],
-            "migration"
-        );
         assert!(
             denied["result"]["content"][0]["text"]
                 .as_str()
                 .expect("denial text")
-                .contains("scope")
+                .contains("IAM policy")
         );
         let unchanged = entity_entities::get(&ctx.db, workspace_id, entity.id)
             .await
@@ -152,25 +137,17 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         assert_eq!(updated.schema_version, 1);
         let job_id: Uuid = report["job_id"].as_str().unwrap().parse().unwrap();
 
-        for (index, name) in ["migration_job_status", "undo_migration_job"]
-            .iter()
-            .enumerate()
-        {
-            let denied = mcp_call(
-                &request,
-                &session,
-                &read_key,
-                10 + i64::try_from(index).unwrap(),
-                "tools/call",
-                json!({"name":name,"arguments":{"job_id":job_id}}),
-            )
-            .await;
-            assert_eq!(denied["result"]["isError"], true);
-            assert_eq!(
-                denied["result"]["structuredContent"]["error"]["required_scope"],
-                "migration"
-            );
-        }
+        // The reader may read a job's status; undoing it needs a write permission.
+        let denied = mcp_call(
+            &request,
+            &session,
+            &read_key,
+            10,
+            "tools/call",
+            json!({"name":"undo_migration_job","arguments":{"job_id":job_id}}),
+        )
+        .await;
+        assert_eq!(denied["result"]["isError"], true);
         let status = mcp_call(
             &request,
             &session,
@@ -237,10 +214,6 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         )
         .await;
         assert_eq!(denied["result"]["isError"], true);
-        assert_eq!(
-            denied["result"]["structuredContent"]["error"]["required_scope"],
-            "migration"
-        );
         let reindex = mcp_call(
             &request,
             &session,

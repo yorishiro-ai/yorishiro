@@ -1,6 +1,6 @@
 //! Records of authorization-gated operations: who did it, when, against which workspace, and what.
 //!
-//! Starts with the operations `ApiKeyScope::Migration` already gates (`entity_entities::undo_job`, `system_maintenance::set`), not every write in the system: those are exactly the ones an operator most needs an after-the-fact record of, since a `Migration`-scoped key can rewrite stored data or take the whole deployment down for other callers.
+//! Starts with the migration operations (`entity_entities::undo_job`, `system_maintenance::set`), not every write in the system: those are exactly the ones an operator most needs an after-the-fact record of, since they can rewrite stored data or take the whole deployment down for other callers.
 //! A new audited operation is added by extending [`AuditAction`], not by writing ad hoc `INSERT`s elsewhere: `action`'s CHECK constraint (`migration/src/m20260829_000000_initial_schema.rs`) only allows what this enum's `as_db_str()` can produce, so the two always match by construction.
 //!
 //! Append-only by construction, not just convention: `yorishiro_app` holds `SELECT, INSERT` on this table and nothing else (see the migration's own comment), so there is no code path, correct or buggy, that can update or delete a row once written.
@@ -73,13 +73,13 @@ db_enum! {
     /// Matches `action`'s CHECK constraint string-for-string; a variant added here without a matching value in the constraint fails every insert at the database, not silently.
     #[derive(Clone, Copy, PartialEq, Eq)]
     pub enum AuditAction {
-        /// `entity_entities::undo_job`: a `Migration`-scoped batch undo, restoring every entity a job's snapshots cover.
+        /// `entity_entities::undo_job`: a batch undo, restoring every entity a job's snapshots cover.
         UndoMigrationJob = "undo_migration_job",
-        /// `system_maintenance::set`: a `Migration`-scoped maintenance mode change.
+        /// `system_maintenance::set`: a maintenance mode change.
         SetMaintenance = "set_maintenance",
-        /// `embedding::reindex_workspace`: a `Migration`-scoped embedding reindex, replacing all vectors in a workspace with those from a new model.
+        /// `embedding::reindex_workspace`: an embedding reindex, replacing all vectors in a workspace with those from a new model.
         ReindexEmbeddings = "reindex_embeddings",
-        /// `entity_entities::fill_defaults`: a `Migration`-scoped batch fill of absent required fields.
+        /// `entity_entities::fill_defaults`: a batch fill of absent required fields.
         FillDefaults = "fill_defaults",
         /// A bulk worker's durable result, committed with its effects.
         BackgroundJobCompleted = "background_job_completed",

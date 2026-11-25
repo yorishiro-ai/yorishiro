@@ -171,7 +171,6 @@ pub(crate) async fn set_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Write,
         crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::EntityColumnsUpdate,
         ),
@@ -193,7 +192,6 @@ pub(crate) async fn clear_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Write,
         crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::EntityColumnsDelete,
         ),

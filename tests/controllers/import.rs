@@ -2,7 +2,6 @@ use crate::requests::boot_request;
 use axum::http::StatusCode;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, IntoActiveModel, TransactionTrait};
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::fixtures::{self, TenantArgs, TestTenant};
 
@@ -10,15 +9,7 @@ use crate::requests::fixtures::{self, TenantArgs, TestTenant};
 fn concurrent_import_workers_keep_each_apps_database() {
     let run = || {
         boot_request::<App, _, _>(|request, ctx| async move {
-            let setup = TestTenant::create(
-                &request,
-                &ctx,
-                TenantArgs {
-                    key_scope: ApiKeyScope::Schema,
-                    ..Default::default()
-                },
-            )
-            .await;
+            let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
             let accepted = request
                 .post("/api/import.jsonl")
                 .add_header("Authorization", format!("Bearer {}", setup.api_key))
@@ -71,11 +62,10 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
             owner_id: user_id,
             api_key: key,
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let administrator = fixtures::create_iam_administrator(&ctx, tenant_id).await;
+        let administrator = fixtures::create_iam_reader(&ctx, tenant_id).await;
         let read_key = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             workspace_id,
-            ApiKeyScope::Read,
             Some(administrator),
             false,
         )
@@ -92,14 +82,7 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
         .await
         .expect("create another workspace");
         txn.commit().await.unwrap();
-        let other_key = fixtures::issue_api_key(
-            &ctx,
-            other_workspace.id,
-            user_id,
-            ApiKeyScope::Migration,
-            false,
-        )
-        .await;
+        let other_key = fixtures::issue_api_key(&ctx, other_workspace.id, user_id, false).await;
         let accepted = request
             .post("/api/import.jsonl")
             .add_header("Authorization", format!("Bearer {key}"))
@@ -150,11 +133,12 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
             .add_header("Authorization", format!("Bearer {other_key}"))
             .await;
         assert_eq!(foreign.status_code(), StatusCode::NOT_FOUND);
-        let denied = request
+        // The built-in reader policy includes `import_job_get`.
+        request
             .get(&path)
             .add_header("Authorization", format!("Bearer {}", read_key.plaintext))
-            .await;
-        assert_eq!(denied.status_code(), StatusCode::FORBIDDEN);
+            .await
+            .assert_status_ok();
         let wrong_type = request
             .get(&format!("/api/migration-jobs/{id}"))
             .add_header("Authorization", format!("Bearer {key}"))
@@ -177,15 +161,8 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
 )]
 async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant { api_key: key, .. } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        let TestTenant { api_key: key, .. } =
+            TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let auth = format!("Bearer {key}");
 
         let schema_response = request

@@ -1,7 +1,6 @@
 use axum::http::StatusCode;
 use serde_json::json;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
@@ -16,7 +15,6 @@ async fn service_keys_cannot_act_as_a_current_user() {
         let service = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             tenant.workspace_id,
-            ApiKeyScope::Read,
             None,
             false,
         )

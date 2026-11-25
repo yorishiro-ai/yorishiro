@@ -2,7 +2,6 @@ use axum::http::{HeaderValue, StatusCode};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::schema_schemas;
 
 use crate::requests::boot_request;
@@ -43,7 +42,7 @@ async fn workspace_deletion_reports_fork_references_without_exposing_destination
         request.get(&format!("/api/workspaces/{}", tenant.workspace_id))
             .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status_ok();
         fork.delete(&ctx.db).await.unwrap();
-        let destination_key = issue_api_key(&ctx, destination.id, tenant.owner_id, ApiKeyScope::Read, false).await;
+        let destination_key = issue_api_key(&ctx, destination.id, tenant.owner_id, false).await;
         let deleted = mcp_call(&request, &session, &tenant_admin_key, 3, "tools/call",
             json!({"name":"delete_workspace","arguments":{"workspace_id":tenant.workspace_id}})).await;
         assert_eq!(tool_result_json(&deleted)["deleted"], true);
@@ -151,7 +150,6 @@ async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity
         let service = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db,
             tenant.workspace_id,
-            ApiKeyScope::Read,
             None,
             false,
         )
@@ -183,7 +181,6 @@ async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity
         )
         .await;
         let grants = tool_result_json(&grants);
-        assert_eq!(grants["scopes"], json!(["read"]));
         assert_eq!(grants["audit"], false);
         assert_eq!(grants["tenant_root"], false);
         let rest = request
@@ -205,8 +202,6 @@ async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity
         assert_eq!(identity["identity_kind"], "service");
         assert!(identity.get("workspace_access").is_none());
         assert!(identity["user_id"].is_null());
-        assert_eq!(identity["stored_scope"], "read");
-        assert_eq!(identity["scope"], "read");
         assert_eq!(
             identity["bound_workspace_id"],
             tenant.workspace_id.to_string()

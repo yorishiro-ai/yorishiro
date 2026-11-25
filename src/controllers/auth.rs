@@ -77,13 +77,12 @@ async fn finish_login(
         .password_hash
         .as_deref()
         .ok_or(YorishiroError::Unauthenticated)?;
-    let (created, tenant_id, scope) =
+    let (created, tenant_id) =
         tenancy::issue_login_key(&ctx.db, user.id, Some(hash), expected_tenant).await?;
     Ok(Json(LoginResponse {
         api_key: created.plaintext,
         api_key_id: created.id,
         tenant_id,
-        scope,
         user_id: user.id,
     }))
 }

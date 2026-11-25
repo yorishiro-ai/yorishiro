@@ -171,7 +171,6 @@ pub(crate) async fn merge_preview_for_actor(
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
         crate::models::iam::policy::Action::SchemaMergePreview,
         async |session| {
@@ -189,7 +188,7 @@ pub(crate) async fn merge_preview_for_actor(
     .await
 }
 
-/// Opens the caller's schema-scope session and writes the merged definition as the next version.
+/// Opens the caller's write session and writes the merged definition as the next version.
 ///
 /// # Errors
 /// Returns the session, authorization or merge error.
@@ -201,7 +200,6 @@ pub(crate) async fn merge_apply_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
         Some(crate::models::iam::policy::Action::SchemaMergeApply),
         async |session| {

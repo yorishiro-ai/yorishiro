@@ -3,7 +3,6 @@ use crate::requests::fixtures::{TenantArgs, TestTenant};
 use aws_lc_rs::digest::{SHA256, digest};
 use sea_orm::TransactionTrait;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::api_keys::Entity as ApiKeys;
 use yorishiro::models::tenancy;
 
@@ -30,22 +29,15 @@ async fn list_for_workspace_returns_only_that_workspaces_keys_oldest_first() {
         let workspace_id = empty_workspace(&ctx, tenant.tenant_id).await;
         let other_workspace_id = empty_workspace(&ctx, tenant.tenant_id).await;
 
-        let first = ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Read, None, false)
+        let first = ApiKeys::create_api_key(&ctx.db, workspace_id, None, false)
             .await
             .expect("create first key");
-        let second =
-            ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Write, None, false)
-                .await
-                .expect("create second key");
-        ApiKeys::create_api_key(
-            &ctx.db,
-            other_workspace_id,
-            ApiKeyScope::Migration,
-            None,
-            false,
-        )
-        .await
-        .expect("create key in other workspace");
+        let second = ApiKeys::create_api_key(&ctx.db, workspace_id, None, false)
+            .await
+            .expect("create second key");
+        ApiKeys::create_api_key(&ctx.db, other_workspace_id, None, false)
+            .await
+            .expect("create key in other workspace");
 
         let keys = ApiKeys::list_for_workspace(
             &ctx.db,
@@ -73,10 +65,9 @@ async fn revoke_retains_history_and_a_second_revoke_reports_not_found() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let workspace_id = empty_workspace(&ctx, tenant.tenant_id).await;
-        let created =
-            ApiKeys::create_api_key(&ctx.db, workspace_id, ApiKeyScope::Read, None, false)
-                .await
-                .expect("create key");
+        let created = ApiKeys::create_api_key(&ctx.db, workspace_id, None, false)
+            .await
+            .expect("create key");
 
         ApiKeys::revoke(&ctx.db, created.id)
             .await

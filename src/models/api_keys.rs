@@ -1,4 +1,4 @@
-//! API key model: key shapes, scopes and the authenticated context, with issuing, authentication and management in the submodules.
+//! API key model: key shapes and the authenticated context, with issuing, authentication and management in the submodules.
 
 mod authenticate;
 mod issue;
@@ -28,8 +28,6 @@ pub struct KeyGrant {
     pub expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub revoked_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub replaced_by_id: Option<Uuid>,
-    pub scope: ApiKeyScope,
-    pub effective_scope: Option<ApiKeyScope>,
     pub audit: bool,
     pub workspace_id: Option<Uuid>,
     pub tenant_id: Uuid,
@@ -111,38 +109,14 @@ impl Model {
             workspace_id: presented.workspace_id,
             tenant_id: key.tenant_id,
             user_id: key.user_id,
-            scope: stored_scope(&key.scope)?,
             audit: key.audit,
         }
         .with_current_membership(conn)
         .await
     }
 
-    pub(crate) async fn grant_metadata(
-        &self,
-        conn: &impl ConnectionTrait,
-    ) -> Result<KeyGrant, YorishiroError> {
-        let scope = stored_scope(&self.scope)?;
-        let effective_scope = if self.is_active() {
-            let presented = AuthContext {
-                api_key_id: self.id,
-                workspace_id: self.workspace_id,
-                tenant_id: self.tenant_id,
-                user_id: self.user_id,
-                scope,
-                audit: self.audit,
-            };
-            match Self::current_context(conn, &presented).await {
-                Ok(current) => Some(current.scope),
-                Err(YorishiroError::Unauthenticated | YorishiroError::ScopeInsufficient { .. }) => {
-                    None
-                }
-                Err(error) => return Err(error),
-            }
-        } else {
-            None
-        };
-        Ok(KeyGrant {
+    pub(crate) fn grant_metadata(&self) -> KeyGrant {
+        KeyGrant {
             state: if self.revoked_at.is_some() {
                 KeyState::Revoked
             } else if !self.is_active() {
@@ -153,8 +127,6 @@ impl Model {
             expires_at: self.expires_at,
             revoked_at: self.revoked_at,
             replaced_by_id: self.replaced_by_id,
-            scope,
-            effective_scope,
             audit: self.audit,
             workspace_id: self.workspace_id,
             tenant_id: self.tenant_id,
@@ -164,7 +136,7 @@ impl Model {
             } else {
                 "service"
             },
-        })
+        }
     }
 }
 
@@ -177,40 +149,15 @@ db_enum! {
     }
 }
 
-db_enum! {
-    /// Permission level held by an API key.
-    /// Declaration order feeds the derived `Ord`: `Read < Write < Schema < Migration`, a higher scope subsumes lower ones.
-    /// The wire form matches the DB `scope` column ('read'/'write'/'schema'/'migration').
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-    pub enum ApiKeyScope {
-        Read = "read",
-        Write = "write",
-        Schema = "schema",
-        /// Running a batch migration, and switching maintenance mode.
-        /// Above `schema` because both act on data already stored.
-        Migration = "migration",
-    }
-}
-
-impl ApiKeyScope {
-    /// Whether a key with this scope can perform an operation requiring `required`.
-    #[must_use]
-    pub fn satisfies(self, required: Self) -> bool {
-        self >= required
-    }
-}
-
-/// Workspace, tenant, and scope information resolved by API key authentication.
+/// The workspace, tenant and user resolved by API key authentication.
 #[derive(Clone)]
 pub struct AuthContext {
     pub api_key_id: Uuid,
     pub workspace_id: Option<Uuid>,
     pub tenant_id: Uuid,
-    pub scope: ApiKeyScope,
     /// The human user this key was issued for, if any.
     pub user_id: Option<Uuid>,
-    /// Independent of `scope`: not one more rung above `Migration` on the read/write/schema/migration ladder, but a separate grant a key holds alongside whatever `scope` it has.
-    /// Checked with `require_audit`, never through `ApiKeyScope`'s `Ord`/`satisfies`.
+    /// A separate grant a key holds, checked with `require_audit`.
     pub audit: bool,
 }
 
@@ -235,7 +182,6 @@ impl AuthContext {
             return Err(YorishiroError::Unauthenticated);
         }
         if key.is_login_session() && key.has_root_principal(conn).await? {
-            self.scope = ApiKeyScope::Migration;
             self.audit = true;
         }
         Ok(self)
@@ -259,7 +205,6 @@ pub struct CreatedApiKey {
     pub id: Uuid,
     /// `None` for tenant-scoped keys, which name their workspace per request instead.
     pub workspace_id: Option<Uuid>,
-    pub scope: ApiKeyScope,
     pub(crate) grant: KeyGrant,
     pub(crate) key_prefix: String,
     pub(crate) name: String,
@@ -326,11 +271,4 @@ fn validate_key_name(name: &str) -> Result<String, YorishiroError> {
         });
     }
     Ok(name.to_owned())
-}
-
-/// A stored scope this crate does not define is a corrupt row, not a missing scope.
-fn stored_scope(value: &str) -> Result<ApiKeyScope, YorishiroError> {
-    ApiKeyScope::from_db_str(value).ok_or_else(|| {
-        YorishiroError::Internal(format!("unknown api key scope in database: {value}").into())
-    })
 }

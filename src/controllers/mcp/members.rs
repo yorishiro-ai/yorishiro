@@ -12,7 +12,6 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
-use crate::models::api_keys::ApiKeyScope;
 use crate::models::tenant_memberships;
 
 #[derive(Deserialize, JsonSchema)]
@@ -39,30 +38,28 @@ pub(crate) struct ResetTenantUserPasswordArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_members)]
 impl YorishiroMcpServer {
     #[tool(
-        meta = super::scope_requirement(ApiKeyScope::Read),
-        description = "Create a tenant user with a tenant-local user name and password; the user starts with no IAM permissions until policies or groups are attached (requires read scope and tenant_user_create IAM permission with a tenant-scoped credential)"
+        description = "Create a tenant user with a tenant-local user name and password; the user starts with no IAM permissions until policies or groups are attached (requires tenant_user_create IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn create_tenant_user(
         &self,
         Parameters(input): Parameters<crate::dtos::members::CreateTenantUserRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(self, parts, "create_tenant_user");
+        let auth = verified!(self, parts);
         render(
             tenant_memberships::create_tenant_user_as(&self.app_context().db, &auth, &input).await,
         )
     }
 
     #[tool(
-        meta = super::scope_requirement(ApiKeyScope::Read),
-        description = "Reset a tenant user's password and revoke all their credentials; tenant root recovery is CLI-only (requires read scope and tenant_user_password_reset IAM permission with a tenant-scoped credential)"
+        description = "Reset a tenant user's password and revoke all their credentials; tenant root recovery is CLI-only (requires tenant_user_password_reset IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn reset_tenant_user_password(
         &self,
         Parameters(input): Parameters<ResetTenantUserPasswordArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(self, parts, "reset_tenant_user_password");
+        let auth = verified!(self, parts);
         match tenant_memberships::reset_tenant_user_password(
             &self.app_context().db,
             &auth,
@@ -77,45 +74,42 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "List members of the current tenant (requires read scope and tenant_user_list IAM permission with a tenant-scoped credential; service credentials are rejected)"
+        description = "List members of the current tenant (requires tenant_user_list IAM permission with a tenant-scoped credential; service credentials are rejected)"
     )]
     pub(crate) async fn list_members(
         &self,
         Parameters(args): Parameters<ListMembersArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(self, parts, "list_members");
+        let auth = verified!(self, parts);
         let db = &self.app_context().db;
         let page = crate::models::pagination::ListParams::from(&args);
         render(tenant_memberships::list_members_as(db, &auth, page).await)
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Preview tenant membership removal and credential revocation without changing data (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential)"
+        description = "Preview tenant membership removal and credential revocation without changing data (requires tenant_user_delete IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn preview_member_removal(
         &self,
         Parameters(args): Parameters<MemberArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(self, parts, "preview_member_removal");
+        let auth = verified!(self, parts);
         render(
             tenant_memberships::preview_removal(&self.app_context().db, &auth, args.user_id).await,
         )
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
-        description = "Remove a current-tenant membership and revoke attributed tenant credentials; a tenant user's account is deleted with its membership, and tenant root removal is rejected (requires read scope and tenant_user_delete IAM permission with a tenant-scoped credential)"
+        description = "Remove a current-tenant membership and revoke attributed tenant credentials; a tenant user's account is deleted with its membership, and tenant root removal is rejected (requires tenant_user_delete IAM permission with a tenant-scoped credential)"
     )]
     pub(crate) async fn remove_member(
         &self,
         Parameters(args): Parameters<MemberArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let auth = verified!(self, parts, "remove_member");
+        let auth = verified!(self, parts);
         match tenant_memberships::remove_member_as(&self.app_context().db, &auth, args.user_id)
             .await
         {

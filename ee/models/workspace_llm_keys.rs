@@ -7,7 +7,7 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_llm_keys::{ActiveModel, Column, Entity};
-use crate::models::api_keys::{ApiKeyScope, AuthContext};
+use crate::models::api_keys::AuthContext;
 use crate::models::iam::policy::Action;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
@@ -36,13 +36,8 @@ pub(crate) async fn set_as(
     model: &str,
     api_key: &str,
 ) -> Result<(), YorishiroError> {
-    let txn = super::iam::access::workspace_transaction(
-        db,
-        actor,
-        ApiKeyScope::Schema,
-        Action::LlmProviderUpdate,
-    )
-    .await?;
+    let txn =
+        super::iam::access::workspace_transaction(db, actor, Action::LlmProviderUpdate).await?;
     set(&txn, actor.require_workspace()?, base_url, model, api_key).await?;
     txn.commit().await.internal()
 }
@@ -51,13 +46,8 @@ pub(crate) async fn clear_as(
     db: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
 ) -> Result<(), YorishiroError> {
-    let txn = super::iam::access::workspace_transaction(
-        db,
-        actor,
-        ApiKeyScope::Schema,
-        Action::LlmProviderDelete,
-    )
-    .await?;
+    let txn =
+        super::iam::access::workspace_transaction(db, actor, Action::LlmProviderDelete).await?;
     clear(&txn, actor.require_workspace()?).await?;
     txn.commit().await.internal()
 }
@@ -66,13 +56,7 @@ pub(crate) async fn describe_as(
     db: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
 ) -> Result<Option<LlmKeyDescription>, YorishiroError> {
-    let txn = super::iam::access::workspace_transaction(
-        db,
-        actor,
-        ApiKeyScope::Read,
-        Action::LlmProviderGet,
-    )
-    .await?;
+    let txn = super::iam::access::workspace_transaction(db, actor, Action::LlmProviderGet).await?;
     describe(&txn, actor.require_workspace()?).await
 }
 

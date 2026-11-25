@@ -635,7 +635,6 @@ pub(crate) async fn get_for_actor(
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         target,
         crate::models::iam::policy::Action::SchemaForkGet,
         async |session| {
@@ -663,7 +662,6 @@ pub(crate) async fn create_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         crate::models::iam::access::WorkspaceTarget::Permission(
             crate::models::iam::policy::Action::SchemaForkCreate,
         ),
@@ -697,7 +695,6 @@ pub(crate) async fn update_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         target,
         Some(crate::models::iam::policy::Action::SchemaForkUpdate),
         async |session| {
@@ -729,7 +726,6 @@ pub(crate) async fn delete_for_actor(
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Schema,
         target,
         Some(crate::models::iam::policy::Action::SchemaForkDelete),
         async |session| {

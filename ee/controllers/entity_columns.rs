@@ -5,7 +5,7 @@
 //! Reading needs `read`, writing needs `write`: this is a display preference, not schema state, so a key that may create entities may also decide how they are listed.
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::{ReadScope, Verified, WriteScope};
+use crate::controllers::extractors::Verified;
 use crate::controllers::openapi::Routes;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -17,7 +17,7 @@ use crate::edition::ee::models::entity_column_preferences::{self, ColumnPreferen
 /// `GET /api/workspace/entity-columns`
 async fn list_columns(
     State(ctx): State<AppContext>,
-    verified: Verified<ReadScope>,
+    verified: Verified,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<ColumnPreference>>, ApiError> {
     let stored =
@@ -28,7 +28,7 @@ async fn list_columns(
 /// `PUT /api/workspace/entity-columns/{entity_type}`
 async fn set_columns(
     State(ctx): State<AppContext>,
-    verified: Verified<WriteScope>,
+    verified: Verified,
     Path(crate::dtos::common::EntityTypePath { entity_type }): Path<
         crate::dtos::common::EntityTypePath<String>,
     >,
@@ -43,7 +43,7 @@ async fn set_columns(
 /// `DELETE /api/workspace/entity-columns/{entity_type}`
 async fn reset_columns(
     State(ctx): State<AppContext>,
-    verified: Verified<WriteScope>,
+    verified: Verified,
     Path(crate::dtos::common::EntityTypePath { entity_type }): Path<
         crate::dtos::common::EntityTypePath<String>,
     >,

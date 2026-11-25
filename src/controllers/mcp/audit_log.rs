@@ -10,7 +10,6 @@ use serde::Deserialize;
 
 use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
 use crate::controllers::middleware::auth;
-use crate::models::api_keys::ApiKeyScope;
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -65,7 +64,7 @@ impl YorishiroMcpServer {
 }
 
 fn audit_requirement() -> rmcp::model::MetaObject {
-    let mut meta = super::scope_requirement(ApiKeyScope::Read);
+    let mut meta = rmcp::model::MetaObject::new();
     meta.0.insert(
         "yorishiro/required_grants".into(),
         serde_json::json!(["audit"]),

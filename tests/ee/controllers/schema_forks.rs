@@ -9,7 +9,6 @@ use yorishiro::App;
 use yorishiro::models::_entities::{
     entity_entities, tenant_tenants, workspace_schema_fork_heads, workspace_schema_forks,
 };
-use yorishiro::models::api_keys::ApiKeyScope;
 
 // Fork heads are archived, so normal entity creation cannot reference them.
 // Inject an existing historical reference to exercise deletion's integrity guard.
@@ -48,15 +47,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
             workspace_id: source_workspace_id,
             owner_id,
             api_key: source_key,
-        } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let schema_response = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {source_key}"))
@@ -67,13 +58,11 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let source_schema_id: Uuid = schema["schema"]["id"].as_str().unwrap().parse().unwrap();
 
         let target = fixtures::create_workspace(&ctx, tenant_id, "target").await;
-        let target_key =
-            fixtures::issue_api_key(&ctx, target.id, owner_id, ApiKeyScope::Schema, false).await;
+        let target_key = fixtures::issue_api_key(&ctx, target.id, owner_id, false).await;
         let read_key = fixtures::issue_api_key(
             &ctx,
             target.id,
-            fixtures::create_iam_administrator(&ctx, tenant_id).await,
-            ApiKeyScope::Read,
+            fixtures::create_iam_reader(&ctx, tenant_id).await,
             false,
         )
         .await;
@@ -407,7 +396,6 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
             TenantArgs {
                 tenant_name: "fork-http-tenant-a".into(),
                 owner_email: fixtures::unique_email("fork-http-a"),
-                key_scope: ApiKeyScope::Schema,
                 ..Default::default()
             },
         )
@@ -421,8 +409,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
         let source: serde_json::Value = source_response.json();
         let source_schema_id = source["schema"]["id"].as_str().unwrap();
         let target = fixtures::create_workspace(&ctx, tenant_a, "fork-http-target").await;
-        let target_key =
-            fixtures::issue_api_key(&ctx, target.id, owner_a, ApiKeyScope::Schema, false).await;
+        let target_key = fixtures::issue_api_key(&ctx, target.id, owner_a, false).await;
         let created = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {target_key}"))
@@ -451,15 +438,12 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
                 tenant_name: "fork-http-tenant-b".into(),
                 workspace_name: "fork-http-b".into(),
                 owner_email: fixtures::unique_email("fork-http-b"),
-                key_scope: ApiKeyScope::Read,
                 ..Default::default()
             },
         )
         .await;
-        let read_b =
-            fixtures::issue_api_key(&ctx, workspace_b, owner_b, ApiKeyScope::Read, false).await;
-        let schema_b =
-            fixtures::issue_api_key(&ctx, workspace_b, owner_b, ApiKeyScope::Schema, false).await;
+        let read_b = fixtures::issue_api_key(&ctx, workspace_b, owner_b, false).await;
+        let schema_b = fixtures::issue_api_key(&ctx, workspace_b, owner_b, false).await;
 
         let list_b = request
             .get("/api/schema-forks")
@@ -514,23 +498,11 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
             workspace_id: workspace_a,
             owner_id,
             api_key: key_a,
-        } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let workspace_b = fixtures::create_workspace(&ctx, tenant_id, "workspace-b").await;
         let workspace_c = fixtures::create_workspace(&ctx, tenant_id, "workspace-c").await;
-        let key_b =
-            fixtures::issue_api_key(&ctx, workspace_b.id, owner_id, ApiKeyScope::Schema, false)
-                .await;
-        let key_c =
-            fixtures::issue_api_key(&ctx, workspace_c.id, owner_id, ApiKeyScope::Schema, false)
-                .await;
+        let key_b = fixtures::issue_api_key(&ctx, workspace_b.id, owner_id, false).await;
+        let key_c = fixtures::issue_api_key(&ctx, workspace_c.id, owner_id, false).await;
 
         let mut schemas = Vec::new();
         for key in [&key_a, &key_b, &key_c] {
@@ -618,19 +590,9 @@ async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
             workspace_id: workspace_a,
             owner_id,
             api_key: key_a,
-        } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let workspace_b = fixtures::create_workspace(&ctx, tenant_id, "opposite-cycle-b").await;
-        let key_b =
-            fixtures::issue_api_key(&ctx, workspace_b.id, owner_id, ApiKeyScope::Schema, false)
-                .await;
+        let key_b = fixtures::issue_api_key(&ctx, workspace_b.id, owner_id, false).await;
 
         let first_response = request
             .post("/api/schemas")
@@ -736,15 +698,7 @@ async fn fork_creation_shares_the_schema_version_lock() {
             workspace_id: source_workspace_id,
             api_key: source_key,
             ..
-        } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let source_response = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {source_key}"))
@@ -837,7 +791,6 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
             TenantArgs {
                 tenant_name: "tenant-a".into(),
                 owner_email: fixtures::unique_email("owner-a"),
-                key_scope: ApiKeyScope::Schema,
                 ..Default::default()
             },
         )
@@ -850,8 +803,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
         let source: serde_json::Value = source_response.json();
         let source_schema_id = source["schema"]["id"].as_str().unwrap();
         let target = fixtures::create_workspace(&ctx, tenant_a, "target-a").await;
-        let target_key =
-            fixtures::issue_api_key(&ctx, target.id, owner_a, ApiKeyScope::Schema, false).await;
+        let target_key = fixtures::issue_api_key(&ctx, target.id, owner_a, false).await;
         let created = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {target_key}"))
@@ -880,7 +832,6 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
                 tenant_name: "tenant-b".into(),
                 workspace_name: "workspace-b".into(),
                 owner_email: fixtures::unique_email("owner-b"),
-                key_scope: ApiKeyScope::Schema,
                 ..Default::default()
             },
         )
@@ -959,15 +910,7 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
             workspace_id: source_workspace,
             owner_id,
             api_key: source_key,
-        } = TestTenant::create(
-            &request,
-            &ctx,
-            TenantArgs {
-                key_scope: ApiKeyScope::Schema,
-                ..Default::default()
-            },
-        )
-        .await;
+        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let source_response = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {source_key}"))
@@ -975,8 +918,7 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
             .await;
         let source: serde_json::Value = source_response.json();
         let target = fixtures::create_workspace(&ctx, tenant_a, "sqlite-target").await;
-        let target_key =
-            fixtures::issue_api_key(&ctx, target.id, owner_id, ApiKeyScope::Schema, false).await;
+        let target_key = fixtures::issue_api_key(&ctx, target.id, owner_id, false).await;
         let created = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {target_key}"))

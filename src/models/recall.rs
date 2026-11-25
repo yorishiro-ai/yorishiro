@@ -189,7 +189,6 @@ pub(crate) async fn recall_context_for_actor(
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::api_keys::ApiKeyScope::Read,
         target,
         crate::models::iam::policy::Action::Recall,
         async |session| {

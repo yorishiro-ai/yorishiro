@@ -15,7 +15,6 @@ use uuid::Uuid;
 
 use super::{YorishiroMcpServer, ok_json};
 use crate::dtos::entities::{CreateEntityRequest, FillDefaultsRequest, UpdateEntityRequest};
-use crate::models::api_keys::ApiKeyScope;
 use crate::models::entity_entities;
 
 #[derive(Deserialize, JsonSchema)]
@@ -74,41 +73,40 @@ impl TryFrom<ListEntitiesArgs> for entity_entities::ListEntitiesQuery {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_entities)]
 impl YorishiroMcpServer {
-    #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Create a new entity (requires write scope and entity_create IAM permission)")]
+    #[tool(description = "Create a new entity (requires entity_create IAM permission)")]
     pub async fn create_entity(
         &self,
         Parameters(args): Parameters<CreateEntityRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "create_entity");
+        let actor = verified!(self, parts);
         let record = try_tool!(
             entity_entities::create_for_actor(self.app_context(), &actor, args.into(),).await
         );
         ok_json(record)
     }
 
-    #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "Get a single entity by ID (requires read scope and entity_get IAM permission)")]
+    #[tool(description = "Get a single entity by ID (requires entity_get IAM permission)")]
     pub async fn get_entity(
         &self,
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "get_entity");
+        let actor = verified!(self, parts);
         let record =
             try_tool!(entity_entities::get_for_actor(self.app_context(), &actor, args.id).await);
         ok_json(record)
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Replace the data of an existing entity (requires write scope and entity_update IAM permission); pass expected_updated_at from a prior read to refuse the write with a conflict when the entity changed in between")]
+        description = "Replace the data of an existing entity (requires entity_update IAM permission); pass expected_updated_at from a prior read to refuse the write with a conflict when the entity changed in between"
+    )]
     pub(crate) async fn update_entity(
         &self,
         Parameters(args): Parameters<UpdateEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "update_entity");
+        let actor = verified!(self, parts);
         let updated_by = actor.user_id;
         let record = try_tool!(
             entity_entities::update_for_actor(
@@ -126,26 +124,24 @@ impl YorishiroMcpServer {
         ok_json(record)
     }
 
-    #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Write),description = "Delete an entity (requires write scope and entity_delete IAM permission)")]
+    #[tool(description = "Delete an entity (requires entity_delete IAM permission)")]
     pub(crate) async fn delete_entity(
         &self,
         Parameters(args): Parameters<DeleteEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "delete_entity");
+        let actor = verified!(self, parts);
         try_tool!(entity_entities::delete_for_actor(self.app_context(), &actor, args.id).await);
         ok_json(serde_json::json!({ "deleted": true }))
     }
 
-    #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),description = "List entities (requires read scope and entity_list IAM permission)")]
+    #[tool(description = "List entities (requires entity_list IAM permission)")]
     pub async fn list_entities(
         &self,
         Parameters(args): Parameters<ListEntitiesArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "list_entities");
+        let actor = verified!(self, parts);
 
         let query = try_tool!(args.try_into());
 
@@ -155,9 +151,8 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "Report how an entity stands against the active version of its schema \
-                           (requires read scope and entity_drift_get IAM permission). Entities are migrated lazily, so one written \
+                           (requires entity_drift_get IAM permission). Entities are migrated lazily, so one written \
                            against an older version can still contain newer fields. Reports active \
                            fields absent from stored data, including nested fields in existing \
                            objects. Present nulls and type errors are not missing-value diagnostics."
@@ -167,14 +162,13 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "get_entity_drift");
+        let actor = verified!(self, parts);
         render(entity_entities::drift_for_actor(self.app_context(), actor, args.id).await)
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Read),
         description = "Count what migrating a schema's entities to its active version would \
-                           face, without doing it (requires read scope and migration_dry_run IAM permission). Reports how many are \
+                           face, without doing it (requires migration_dry_run IAM permission). Reports how many are \
                            current, how many are behind without missing required fields, and how many lack a \
                            field the active version requires: the last being the work a \
                            migration would have to fill in. Inspects stored data, not only schema \
@@ -185,7 +179,7 @@ impl YorishiroMcpServer {
         Parameters(args): Parameters<MigrationDryRunArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "migration_dry_run");
+        let actor = verified!(self, parts);
         render(
             entity_entities::migration_dry_run_for_actor(self.app_context(), actor, &args.name)
                 .await,
@@ -193,15 +187,14 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
-        description = "Enqueue a fill-defaults job (requires migration scope and migration_fill_defaults IAM permission, rechecked at execution). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log."
+        description = "Enqueue a fill-defaults job (requires migration_fill_defaults IAM permission, rechecked at execution). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log."
     )]
     pub async fn fill_defaults(
         &self,
         Parameters(args): Parameters<FillDefaultsRequest>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "fill_defaults");
+        let actor = verified!(self, parts);
         let job_id = try_tool!(
             crate::workers::fill_defaults::enqueue_for_actor(
                 self.app_context(),
@@ -217,15 +210,14 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
-        description = "Get a migration job's status (requires migration scope and migration_job_get IAM permission)"
+        description = "Get a migration job's status (requires migration_job_get IAM permission)"
     )]
     pub(crate) async fn migration_job_status(
         &self,
         Parameters(args): Parameters<MigrationJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "migration_job_status");
+        let actor = verified!(self, parts);
         render(
             crate::models::queue_job_lifecycles::migration_job_status_for_actor(
                 self.app_context(),
@@ -237,14 +229,13 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
-        description = "Enqueue workspace embedding reindex (requires migration scope and workspace_reindex IAM permission, rechecked before execution and publication)"
+        description = "Enqueue workspace embedding reindex (requires workspace_reindex IAM permission, rechecked before execution and publication)"
     )]
     pub(crate) async fn reindex_workspace(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "reindex_workspace");
+        let actor = verified!(self, parts);
         let job_id = try_tool!(
             crate::workers::reindex::enqueue_requested_for_actor(self.app_context(), actor).await
         );
@@ -252,15 +243,14 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        meta = crate::controllers::mcp::scope_requirement(ApiKeyScope::Migration),
-        description = "Enqueue undo of a migration job's snapshots (requires migration scope and migration_undo IAM permission, rechecked at execution)"
+        description = "Enqueue undo of a migration job's snapshots (requires migration_undo IAM permission, rechecked at execution)"
     )]
     pub(crate) async fn undo_migration_job(
         &self,
         Parameters(args): Parameters<MigrationJobArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts, "undo_migration_job");
+        let actor = verified!(self, parts);
         let job_id = try_tool!(
             crate::workers::undo::enqueue_for_actor(self.app_context(), actor, args.job_id).await
         );
