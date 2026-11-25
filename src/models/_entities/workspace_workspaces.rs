@@ -72,8 +72,6 @@ pub enum Relation {
     WorkspaceEmbeddingKeys,
     #[sea_orm(has_one = "super::workspace_llm_keys::Entity")]
     WorkspaceLlmKeys,
-    #[sea_orm(has_many = "super::workspace_memberships::Entity")]
-    WorkspaceMemberships,
     #[sea_orm(has_one = "super::workspace_worker_classes::Entity")]
     WorkspaceWorkerClasses,
 }
@@ -159,12 +157,6 @@ impl Related<super::workspace_embedding_keys::Entity> for Entity {
 impl Related<super::workspace_llm_keys::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::WorkspaceLlmKeys.def()
-    }
-}
-
-impl Related<super::workspace_memberships::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::WorkspaceMemberships.def()
     }
 }
 

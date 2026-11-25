@@ -19,8 +19,6 @@ mod system_maintenance;
 mod template_templates;
 mod tenancy;
 
-mod workspace_memberships;
-
 mod entity_entities;
 mod schema_schemas;
 mod tenant_retirement_events;

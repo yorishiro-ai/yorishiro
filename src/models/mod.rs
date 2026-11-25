@@ -24,7 +24,6 @@ pub mod tenant_tenants;
 pub mod user_users;
 pub mod workspace_embedding_keys;
 pub mod workspace_llm_keys;
-pub mod workspace_memberships;
 pub mod workspace_worker_classes;
 pub mod workspace_workspaces;
 

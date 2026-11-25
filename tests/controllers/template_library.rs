@@ -52,13 +52,6 @@ async fn member_role_cannot_manage_the_template_library() {
         yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant.tenant_id, member.id)
             .await
             .expect("add member");
-        fixtures::grant_workspace(
-            &ctx,
-            tenant.workspace_id,
-            member.id,
-            yorishiro::models::workspace_memberships::WorkspaceRole::Member,
-        )
-        .await;
         let member_key = issue_api_key(
             &ctx,
             tenant.workspace_id,

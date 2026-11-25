@@ -102,10 +102,7 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
 async fn queued_import_rechecks_iam_policies_before_writing() {
     use axum::http::StatusCode;
     use serde_json::json;
-    use yorishiro::models::{
-        api_keys, schema_schemas, tenancy,
-        workspace_memberships::{Model, WorkspaceRole},
-    };
+    use yorishiro::models::{api_keys, schema_schemas, tenancy};
 
     boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let tenant = crate::requests::fixtures::TestTenant::create(
@@ -124,9 +121,6 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
             None)
         .await
         .unwrap();
-        Model::grant(&txn, tenant.workspace_id, member.id, WorkspaceRole::Admin)
-            .await
-            .unwrap();
         txn.commit().await.unwrap();
         let key = api_keys::Entity::create_api_key(
             &ctx.db,

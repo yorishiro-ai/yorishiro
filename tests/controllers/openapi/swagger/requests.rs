@@ -44,11 +44,6 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
             document["paths"]["/api/members"]["get"]["x-yorishiro-required-actions"],
             serde_json::json!(["tenant_user_list"])
         );
-        for method in ["put", "delete"] {
-            let operation = &document["paths"]["/api/workspaces/{id}/members/{user_id}"][method];
-            assert_eq!(operation["x-yorishiro-required-actions"], serde_json::json!(["workspace_update"]));
-            assert!(operation.get("x-yorishiro-required-roles").is_none());
-        }
         assert_eq!(
             document["paths"]["/api/entities"]["post"]["security"][0]["bearer_auth"],
             serde_json::json!([])

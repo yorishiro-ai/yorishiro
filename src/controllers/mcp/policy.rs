@@ -141,7 +141,6 @@ pub(crate) fn read_only_tool(name: &str) -> bool {
             | "list_schemas"
             | "list_template_library"
             | "list_templates"
-            | "list_workspace_members"
             | "list_workspaces"
             | "preview_member_removal"
             | "recall_context"

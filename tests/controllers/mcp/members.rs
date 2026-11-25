@@ -2,66 +2,11 @@ use axum::http::StatusCode;
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::models::api_keys::ApiKeyScope;
 
 use crate::requests::boot_request;
-use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
+use crate::requests::fixtures::{TenantArgs, TestTenant};
 
 use super::*;
-
-#[tokio::test]
-async fn workspace_member_tools_match_rest_and_revoke_bound_credentials() {
-    use yorishiro::models::{tenant_memberships, user_users, workspace_memberships::WorkspaceRole};
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let user = user_users::create_user(&ctx.db, &crate::requests::fixtures::unique_email("workspace-managed"), "test-password", None).await.unwrap();
-        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id).await.unwrap();
-        let session = initialize(&request).await;
-        let granted = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"grant_workspace_member","arguments":{"workspace_id":tenant.workspace_id,"user_id":user.id,"role":"admin"}})).await;
-        assert_eq!(tool_result_json(&granted)["granted"], true);
-        let txn = sea_orm::TransactionTrait::begin(&ctx.db).await.unwrap();
-        crate::requests::fixtures::grant_iam_administrator(&txn, tenant.tenant_id, user.id).await;
-        txn.commit().await.unwrap();
-        let member_key = issue_api_key(&ctx, tenant.workspace_id, user.id, ApiKeyScope::Read, false).await;
-        let listed = mcp_call(&request, &session, &member_key, 3, "tools/call", json!({"name":"list_workspace_members","arguments":{"workspace_id":tenant.workspace_id}})).await;
-        let rest = request.get(&format!("/api/workspaces/{}/members", tenant.workspace_id)).add_header("Authorization", format!("Bearer {member_key}")).await;
-        rest.assert_status_ok();
-        assert_eq!(tool_result_json(&listed), rest.json::<Value>());
-        assert_eq!(tool_result_json(&listed), json!([{"user_id":user.id,"role":"admin"}]));
-        let tenant_admin = mcp_call(&request, &session, &member_key, 4, "tools/call", json!({"name":"create_api_key","arguments":{"name":"forbidden"}})).await;
-        assert_eq!(tenant_admin["result"]["isError"], true);
-        crate::requests::fixtures::grant_workspace(&ctx, tenant.workspace_id, user.id, WorkspaceRole::Viewer).await;
-        let denied = mcp_call(&request, &session, &member_key, 5, "tools/call", json!({"name":"list_workspace_members","arguments":{"workspace_id":tenant.workspace_id}})).await;
-        assert_ne!(denied["result"]["isError"], true);
-        let revoked = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"revoke_workspace_member","arguments":{"workspace_id":tenant.workspace_id,"user_id":user.id}})).await;
-        assert_eq!(tool_result_json(&revoked)["revoked"], true);
-        request.get("/api/whoami").add_header("Authorization", format!("Bearer {member_key}")).await.assert_status(StatusCode::UNAUTHORIZED);
-        let administrator_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let members = request.get("/api/members").add_header("Authorization", format!("Bearer {administrator_key}")).await.json::<Value>();
-        assert!(members.as_array().unwrap().iter().any(|member| member["user_id"] == user.id.to_string()));
-    }).await;
-}
-
-#[tokio::test]
-#[cfg(feature = "enterprise")]
-async fn workspace_member_tools_reject_cross_tenant_grants() {
-    use yorishiro::models::{tenant_memberships, user_users};
-
-    if !crate::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let user = user_users::create_user(&ctx.db, &crate::requests::fixtures::unique_email("workspace-managed"), "test-password", None).await.unwrap();
-        tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id).await.unwrap();
-        let session = initialize(&request).await;
-        let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        assert_ne!(tenant.tenant_id, other.tenant_id);
-        let foreign = mcp_call(&request, &session, &tenant.api_key, 2, "tools/call", json!({"name":"grant_workspace_member","arguments":{"workspace_id":other.workspace_id,"user_id":user.id,"role":"admin"}})).await;
-        assert_eq!(foreign["result"]["isError"], true);
-    }).await;
-}
 
 #[tokio::test]
 async fn mcp_membership_tools_treat_tenant_users_as_tenant_bound_accounts() {
