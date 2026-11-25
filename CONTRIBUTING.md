@@ -54,7 +54,7 @@ An app booted by other means must call `close_app_pools` before it returns, or t
 
 Licensed tests install a test licence when `YORISHIRO_LICENSE_KEY` is unset, and the E5 model tests skip without `models/multilingual-e5-base/`.
 Stripe tests run in the ordinary EE suite, install their own test licence state and require no Stripe account.
-`make test-python` runs the Python checks, and `make test-contract` runs the real-binary public contracts described in `tests/blackbox/README.md`.
+`make test-python` runs the Python checks, and `make test-contract` runs the real-binary public contracts described in `tests/contract/README.md`.
 Run the optional SQLite search benchmark with `cargo bench --bench sqlite_ann -- sqlite:///path/to/database.sqlite3 WORKSPACE_UUID`; it opens the database read-only.
 Run the PostgreSQL benchmark with `cargo bench --bench postgres_search -- DATABASE_URL TENANT_UUID WORKSPACE_UUID QUERY_VECTOR_FILE`, using a JSON file of vector coordinates and an existing populated workspace.
 The connection role must be allowed to assume `yorishiro_app`; the benchmark applies that restricted role and transaction-local tenant/workspace scope inside a read-only transaction.

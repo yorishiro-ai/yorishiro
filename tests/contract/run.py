@@ -26,7 +26,7 @@ MAX_BODY = 2 * 1024 * 1024
 PROTOCOL = "2025-03-26"
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = {
-    "name": "blackbox",
+    "name": "contract",
     "entity_types": {"note": {"fields": {
         "title": {"type": "string", "required": True},
     }}},
@@ -206,10 +206,10 @@ class App:
     def issue(self, workspace, scope, *, issuer=None, audit=False, expires_at=None):
         if issuer is None:
             if not hasattr(self, "administrator_key"):
-                password = "blackbox-administrator-password"
+                password = "contract-administrator-password"
                 self.secrets.append(password)
                 member = self.rest("POST", "/api/members/users", {
-                    "user_name": "blackbox-administrator", "password": password,
+                    "user_name": "contract-administrator", "password": password,
                 }, status=201, key=self.tenant_key)
                 policies = self.rest("GET", "/api/iam/policies", key=self.tenant_key)
                 policy = next(row for row in policies if row["name"] == "Tenant Administrator")
@@ -225,7 +225,7 @@ class App:
         if expires_at is None:
             from datetime import UTC, datetime, timedelta
             expires_at = (datetime.now(UTC) + timedelta(minutes=30)).isoformat()
-        body = {"name": "blackbox-delegated", "scope": scope, "audit": audit}
+        body = {"name": "contract-delegated", "scope": scope, "audit": audit}
         if expires_at is not None:
             body["expires_at"] = expires_at
         created = self.rest("POST", "/api/api-keys", body, status=201, key=issuer,
@@ -268,7 +268,7 @@ class App:
             time.sleep(0.1)
         else:
             raise AssertionError("server readiness deadline exceeded")
-        password = "blackbox-owned-password"
+        password = "contract-owned-password"
         self.secrets.append(password)
         if self.args.suite == "tenant-postgres":
             account = self.rest("POST", "/auth/signup", {
@@ -281,7 +281,7 @@ class App:
             }, status=201, key="")
             self.tenant_key = account["api_key"]
             self.secrets.append(self.tenant_key)
-        self.workspace = self.create_workspace("blackbox")
+        self.workspace = self.create_workspace("contract")
         self.account = account
         self.tenant = account["tenant_id"]
         self.key_id, self.key = self.issue(self.workspace, "schema")
@@ -433,7 +433,7 @@ class MCP:
         self.session = None
         self.version = PROTOCOL
         result = self.rpc("initialize", {"protocolVersion": PROTOCOL, "capabilities": {},
-                          "clientInfo": {"name": "blackbox", "version": "1"}})["result"]
+                          "clientInfo": {"name": "contract", "version": "1"}})["result"]
         require(self.session, "MCP initialize did not issue a session")
         require(result.get("capabilities", {}).get("tools") is not None, "MCP tools unsupported")
         self.version = result["protocolVersion"]
@@ -493,9 +493,9 @@ def crud(app, surface):
         created = client.call("create_schema", {"definition": SCHEMA})
     schema_id = created["schema"]["id"]
     historical_definition = app.rest("GET", f"/api/schemas/{schema_id}")["definition"]
-    require(historical_definition["name"] == "blackbox",
+    require(historical_definition["name"] == "contract",
             "schema not visible through REST")
-    require(client.call("get_active_schema", {"name": "blackbox"})["id"] == schema_id,
+    require(client.call("get_active_schema", {"name": "contract"})["id"] == schema_id,
             "schema not visible through MCP")
     app.rest("DELETE", f"/api/schemas/{schema_id}", status=409)
     evolved = {**SCHEMA, "entity_types": {"note": {"fields": {
@@ -503,12 +503,12 @@ def crud(app, surface):
     next_version = app.rest("POST", "/api/schemas", evolved, status=201)["schema"]
     require(next_version["version"] == created["schema"]["version"] + 1,
             "schema evolution did not increment version")
-    require(client.call("get_active_schema", {"name": "blackbox"})["id"] == next_version["id"],
+    require(client.call("get_active_schema", {"name": "contract"})["id"] == next_version["id"],
             "schema evolution did not change active version")
     require(app.rest("GET", f"/api/schemas/{schema_id}")["definition"] == historical_definition,
             "schema evolution mutated historical definition")
     schema_id = next_version["id"]
-    payload = {"schema_name": "blackbox", "entity_type": "note", "data": {"title": "before"}}
+    payload = {"schema_name": "contract", "entity_type": "note", "data": {"title": "before"}}
     if surface == "rest":
         entity = app.rest("POST", "/api/entities", payload, status=201)
     else:
@@ -856,7 +856,7 @@ def mcp_suite(app):
         list(pool.map(concurrent_call, range(2)))
     listed = client.rpc("tools/list")["result"]
     names = {tool["name"] for tool in listed["tools"]}
-    reviewed = json.loads((ROOT / "tests/blackbox/tools.json").read_text())
+    reviewed = json.loads((ROOT / "tests/contract/tools.json").read_text())
     expected = set(reviewed["ce"])
     if app.args.edition == "ee":
         expected.update(reviewed["ee_additions"])
@@ -912,11 +912,11 @@ def cli_suite(app):
     for method, body in (("GET", None), ("PUT", {"mode": "full_lock"})):
         status, _, _ = app.http(method, "/api/system/maintenance", body, key=app.key)
         require(status == 404, "maintenance must only be controlled through the CLI")
-    app.task("maintenance", mode="read_only", retry_after=7, reason="blackbox-maintenance")
+    app.task("maintenance", mode="read_only", retry_after=7, reason="contract-maintenance")
     try:
         state = app.task("maintenance_status")
         require("mode=read_only" in state and "retry_after=7s" in state
-                and "blackbox-maintenance" in state, "maintenance task did not persist its arguments")
+                and "contract-maintenance" in state, "maintenance task did not persist its arguments")
         app.rest("POST", "/api/entities", {}, status=423)
         app.rest("GET", "/api/schemas")
         reader = MCP(app, app.key)
@@ -936,7 +936,7 @@ def cli_suite(app):
 
 
 def root_recovery(app):
-    password = "blackbox-recovered-password"
+    password = "contract-recovered-password"
     app.secrets.append(password)
     user_id = app.account["user_id"]
     old_key = app.tenant_key
@@ -966,7 +966,7 @@ def iam_lifecycle(app):
     require(group in client.call("list_iam_groups"), "IAM group missing from list")
     renamed = client.call("update_iam_group", {"group_id": group_id, "name": "reviewers"})
     require(renamed["name"] == "reviewers", "IAM group rename failed")
-    password = "blackbox-iam-member-password"
+    password = "contract-iam-member-password"
     app.secrets.append(password)
     account = app.rest("POST", "/api/members/users", {
         "user_name": "iam-member", "password": password,
@@ -1209,7 +1209,7 @@ def template_library_lifecycle(app):
     client = MCP(app, owner)
     definition = {**SCHEMA, "name": "library-contract"}
     created = client.call("create_template_library_item", {
-        "name": "library-contract", "definition": definition, "tags": ["blackbox"],
+        "name": "library-contract", "definition": definition, "tags": ["contract"],
     })
     template_id = created["id"]
     path = f"/api/template-library/{template_id}"
@@ -1305,7 +1305,7 @@ def workspace_key_lifecycle(app):
     client = MCP(app, owner)
     identity = client.call("whoami")
     login = app.rest("POST", "/auth/root/login", {
-        "email": "owner@example.invalid", "password": "blackbox-owned-password",
+        "email": "owner@example.invalid", "password": "contract-owned-password",
     })
     tenant_key = login["api_key"]
     app.secrets.append(tenant_key)
@@ -1383,10 +1383,10 @@ def membership_retirement_lifecycle(app):
     client.call("preview_member_removal", {"user_id": owner_id}, error=True)
     client.call("remove_member", {"user_id": owner_id}, error=True)
     app.rest("DELETE", f"/api/members/{owner_id}", status=409, key=owner)
-    client.call("reset_tenant_user_password", {"user_id": owner_id, "password": "blackbox-root-reset"}, error=True)
+    client.call("reset_tenant_user_password", {"user_id": owner_id, "password": "contract-root-reset"}, error=True)
     require(all(row["user_id"] != owner_id for row in client.call("list_members")),
             "the tenant root was listed as a member")
-    password = "blackbox-successor-password"
+    password = "contract-successor-password"
     app.secrets.append(password)
     account = client.call("create_tenant_user", {"user_name": "successor", "password": password})
     user_id = account["user_id"]
@@ -1445,7 +1445,7 @@ def membership_retirement_lifecycle(app):
     successor = MCP(app, successor_key)
     successor.call("tenant_retirement_inventory")
     root_recovery(app)
-    new_key = app.login("owner@example.invalid", "blackbox-recovered-password")
+    new_key = app.login("owner@example.invalid", "contract-recovered-password")
     client = MCP(app, new_key)
     inventory = client.call("tenant_retirement_inventory")
     require(inventory == app.rest("GET", "/api/tenants/current/retirement", key=new_key)
@@ -1616,7 +1616,7 @@ def enterprise_providers(app):
     reader = MCP(app, read_key)
     for kind in ("llm", "embedding"):
         path = f"/api/workspace/{kind}-key"
-        secret = f"blackbox-{kind}-provider-secret"
+        secret = f"contract-{kind}-provider-secret"
         app.secrets.append(secret)
         settings = {"base_url": f"https://{kind}.example.invalid/v1",
                     "model": f"test-{kind}", "api_key": secret}
@@ -1648,7 +1648,7 @@ def enterprise_providers(app):
         app.rest("GET", path, status=404)
 
     root = MCP(app, app.tenant_key)
-    password = "blackbox-provider-admin-password"
+    password = "contract-provider-admin-password"
     app.secrets.append(password)
     member = app.rest("POST", "/api/members/users", {
         "user_name": "provider-admin", "password": password,
@@ -1840,7 +1840,7 @@ def inference_endpoint():
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
             document = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            if (self.path != "/chat/completions" or document.get("model") != "blackbox-inference"
+            if (self.path != "/chat/completions" or document.get("model") != "contract-inference"
                     or self.headers.get("Authorization") != "Bearer owned-llm-secret"):
                 self.send_error(400)
                 return
@@ -1873,9 +1873,9 @@ def embedding_endpoint():
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
             document = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            require(self.path == "/embeddings" and document["model"] == "blackbox-owned",
+            require(self.path == "/embeddings" and document["model"] == "contract-owned",
                     "unexpected embedding request")
-            require(self.headers.get("Authorization") == "Bearer blackbox-provider-secret",
+            require(self.headers.get("Authorization") == "Bearer contract-provider-secret",
                     "embedding credential missing")
             requests.extend(document["input"])
             data = [{"index": index, "embedding": [1.0] + [0.0] * 767}
@@ -1912,11 +1912,11 @@ def enterprise_search(app):
     writer.call("create_schema", {"definition": definition})
     entity = writer.call("create_entity", {"schema_name": definition["name"], "entity_type": "note",
                                            "data": {"title": "owned search document"}})
-    secret = "blackbox-provider-secret"
+    secret = "contract-provider-secret"
     app.secrets.append(secret)
     with embedding_endpoint() as (url, requests):
         writer.call("set_embedding_provider", {"base_url": url, "api_key": secret,
-                                                "model": "blackbox-owned", "dimensions": 768})
+                                                "model": "contract-owned", "dimensions": 768})
         job_id = client.call("reindex_workspace")["job_id"]
         with app.job_worker("worker-target:shared") as worker:
             while True:
@@ -1943,7 +1943,7 @@ def cross_tenant_rejection(app):
     account, key = human_owner(app)
     client = MCP(app, key)
     before = client.call("whoami")
-    password = "blackbox-target-password"
+    password = "contract-target-password"
     app.secrets.append(password)
     target_owner = app.rest("POST", "/auth/signup", {
         "email": "target@example.invalid", "password": password,
@@ -2007,7 +2007,7 @@ def licensed_marketplace(app):
     listings = publisher.call("list_marketplace")
     require(listings == app.rest("GET", "/api/marketplace", key=app.tenant_key)
             and any(row["template_id"] == template_id for row in listings), "published template is not listed")
-    password = "blackbox-marketplace-password"
+    password = "contract-marketplace-password"
     app.secrets.append(password)
     app.rest("POST", "/auth/signup", {"email": "marketplace-reader@example.invalid", "password": password},
              status=201, key="")
@@ -2065,7 +2065,7 @@ def licensed_inference(app):
             time.sleep(min(0.1, app.remaining()))
 
     with inference_endpoint() as (url, requests), app.job_worker() as worker:
-        client.call("set_llm_provider", {"base_url": url, "model": "blackbox-inference", "api_key": "owned-llm-secret"})
+        client.call("set_llm_provider", {"base_url": url, "model": "contract-inference", "api_key": "owned-llm-secret"})
         job = client.call("infer_fill", {"schema_name": definition["name"]})
         job_id = job["job_id"]
         path = f"/api/inference-jobs/{job_id}"
@@ -2144,7 +2144,7 @@ def main(argv=None):
     args = parse_args(argv)
     self_check()
     if args.self_check:
-        print("blackbox scenario definitions: OK")
+        print("contract scenario definitions: OK")
         return 0
     if args.list:
         print(json.dumps([name for name, _ in scenarios(args.suite, args.edition)]))
@@ -2154,7 +2154,7 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, interrupted)
     failure = None
     # Owned state is never placed in the artifact directory or a caller's configured database.
-    with tempfile.TemporaryDirectory(prefix="yorishiro-blackbox-") as directory:
+    with tempfile.TemporaryDirectory(prefix="yorishiro-contract-") as directory:
         app = App(args, directory)
         try:
             for result, (_, function) in zip(app.results, scenarios(args.suite, args.edition)):
