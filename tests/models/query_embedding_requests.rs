@@ -426,9 +426,7 @@ async fn postgres_row_level_security_scopes_requests_to_the_current_workspace() 
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let db = ctx
             .shared_store
             .get::<yorishiro::db::DbHandle>()

@@ -638,9 +638,7 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let TestTenant {
             api_key: owner_a_key,
             ..
@@ -719,6 +717,47 @@ async fn a_new_workspace_becomes_active_on_first_schema() {
             .expect("the new workspace is listed");
         assert_eq!(row["status"], "active", "row: {row:?}");
         assert_eq!(row["schema_id"], schema_id, "row: {row:?}");
+    })
+    .await;
+}
+
+/// Creating or renaming a workspace to an existing name returns 409 with a duplicate-name message.
+#[tokio::test]
+async fn duplicate_workspace_names_conflict_instead_of_failing_internally() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key =
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
+        let auth = format!("Bearer {key}");
+        let create = |name: &'static str| {
+            request
+                .post("/api/workspaces")
+                .add_header("Authorization", auth.clone())
+                .json(&serde_json::json!({ "name": name }))
+        };
+        create("demo").await.assert_status(StatusCode::CREATED);
+        let other = create("other").await;
+        other.assert_status(StatusCode::CREATED);
+        let other_id = other.json::<serde_json::Value>()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let duplicate = create("demo").await;
+        duplicate.assert_status(StatusCode::CONFLICT);
+        assert!(
+            duplicate
+                .text()
+                .contains("a workspace with this name already exists")
+        );
+
+        let rename = request
+            .put(&format!("/api/workspaces/{other_id}"))
+            .add_header("Authorization", auth.clone())
+            .json(&serde_json::json!({ "name": "demo" }))
+            .await;
+        rename.assert_status(StatusCode::CONFLICT);
     })
     .await;
 }

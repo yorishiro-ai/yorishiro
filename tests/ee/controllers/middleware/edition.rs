@@ -92,3 +92,23 @@ fn active_enterprise_licence_uses_team_policy() {
     assert_eq!(licensed.active_plan_at(999), Some(Plan::Team));
     assert_eq!(Plan::Team.compute_policy().base_official_concurrency, 8);
 }
+
+/// Needs a real signed key, so it runs only in the CI job that holds the secret (`make test-licence`).
+#[tokio::test]
+async fn a_signed_licence_key_activates_enterprise_at_boot() {
+    if std::env::var("YORISHIRO_LICENSE_KEY")
+        .unwrap_or_default()
+        .is_empty()
+    {
+        eprintln!("skipping: set YORISHIRO_LICENSE_KEY to verify a signed key");
+        return;
+    }
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+        let state = ctx
+            .shared_store
+            .get::<std::sync::Arc<LicenceState>>()
+            .expect("production boot installs licence state");
+        assert!(state.is_active(), "the signed key does not verify at boot");
+    })
+    .await;
+}

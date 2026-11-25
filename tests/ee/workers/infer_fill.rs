@@ -43,6 +43,7 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
             .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
+        define_schema(&request, &fixture.api_key, "note").await;
         let db = ctx.db.clone();
         let target = WorkerTarget::Shared;
         let mut ctx = ctx;
@@ -115,6 +116,10 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one scenario holds the queue lock while a second producer commits"
+)]
 async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
     use futures::FutureExt;
     use yorishiro::models::_entities::queue_job_dispatch_outbox::Entity as Outbox;
@@ -133,6 +138,8 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
             .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
+        define_schema(&request, &fixture.api_key, "note").await;
+        define_schema(&request, &fixture.api_key, "next-note").await;
         let mut blocker = SqliteConnection::connect(&config.uri).await.unwrap();
         sea_orm::sqlx::query("BEGIN IMMEDIATE")
             .execute(&mut blocker)
@@ -689,6 +696,7 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
         let key = yorishiro::models::api_keys::Entity::create_api_key(
             &ctx.db, fixture.workspace_id, yorishiro::models::api_keys::ApiKeyScope::Schema,
             Some(member.id), false).await.unwrap();
+        define_schema(&request, &tenant_key, "note").await;
         let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
             .await
             .unwrap()
@@ -848,6 +856,23 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
         let entity = yorishiro::models::entity_entities::get(&ctx.db, setup.workspace_id, entity_id).await.unwrap();
         assert_eq!(entity.data, serde_json::json!({"title":"original"}));
     }).await;
+}
+
+/// Defines the schema `name` in the key's workspace, which `enqueue_infer_fill` requires.
+#[expect(
+    clippy::future_not_send,
+    reason = "the request harness uses thread-local HTTP futures"
+)]
+async fn define_schema(request: &loco_rs::TestServer, key: &str, name: &str) {
+    request
+        .post("/api/schemas")
+        .add_header("Authorization", format!("Bearer {key}"))
+        .json(&serde_json::json!({
+            "name": name,
+            "entity_types": {"note": {"fields": {"title": {"type": "string", "required": true}}}}
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
 }
 
 async fn actor(ctx: &AppContext, key: &str) -> yorishiro::models::api_keys::AuthContext {

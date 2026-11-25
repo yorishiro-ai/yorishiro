@@ -123,9 +123,7 @@ async fn a_non_http_base_url_is_refused() {
 #[tokio::test]
 async fn infer_fill_without_a_configured_key_is_refused() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let create_schema = request
@@ -208,9 +206,7 @@ async fn an_unlicensed_deployment_answers_the_same_without_a_valid_key() {
 )]
 async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
 
@@ -508,9 +504,7 @@ async fn create_completed_proposal(
 )]
 async fn proposals_can_be_listed_rejected_and_discarded() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let session = crate::controllers::mcp::initialize(&request).await;
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
@@ -649,9 +643,7 @@ async fn proposals_cannot_be_listed_by_another_tenant() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let rejected_job = Uuid::new_v4();
@@ -800,9 +792,7 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
 #[tokio::test]
 async fn incomplete_and_failed_jobs_cannot_confirm_proposals() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let queued_job = Uuid::new_v4();
@@ -889,9 +879,7 @@ async fn create_pending_proposal(
 #[tokio::test]
 async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         // Set up a workspace LLM key so infer-fill passes its validation gate.
@@ -1006,9 +994,7 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
 #[tokio::test]
 async fn infer_fill_dispatch_failure_rolls_back_job() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let put_key = request
             .put("/api/workspace/llm-key")
@@ -1020,6 +1006,16 @@ async fn infer_fill_dispatch_failure_rolls_back_job() {
             }))
             .await;
         assert_eq!(put_key.status_code(), StatusCode::NO_CONTENT);
+
+        request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({
+                "name": "article",
+                "entity_types": {"article": {"fields": {"title": {"type": "string", "required": true}}}}
+            }))
+            .await
+            .assert_status(StatusCode::CREATED);
 
         // Direct write (c): deterministic fault injection refusing every dispatch, isolated from other tests and using real enqueue.
         let fault = match ctx.db.get_database_backend() {
@@ -1049,9 +1045,7 @@ async fn infer_fill_dispatch_failure_rolls_back_job() {
 #[tokio::test]
 async fn inference_status_polling_preserves_all_wire_values() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let mut jobs = Vec::new();
 
@@ -1121,9 +1115,7 @@ async fn inference_status_polling_preserves_all_wire_values() {
 #[tokio::test]
 async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert_ne!(setup.tenant_id, setup.workspace_id);
         crate::requests::fixtures::rest_create_entity(&request, &setup).await;
@@ -1204,6 +1196,43 @@ async fn the_infer_fill_scope_carries_the_workspaces_tenant() {
 
         let unknown = open_workspace_scope(&ctx, Uuid::new_v4()).await;
         assert!(unknown.is_err(), "a workspace that does not exist has no scope");
+    })
+    .await;
+}
+
+/// `infer-fill` for a schema the workspace does not define returns 404 and creates no job.
+#[tokio::test]
+async fn infer_fill_for_an_unknown_schema_is_not_found_and_queues_nothing() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        crate::requests::require_licence(&ctx);
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        request
+            .put("/api/workspace/llm-key")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({
+                "base_url": "https://api.example.com/v1",
+                "model": "gpt-4o-mini",
+                "api_key": "sk-test-key"
+            }))
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+
+        let response = request
+            .post("/api/schemas/active/does-not-exist/infer-fill")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::NOT_FOUND,
+            "{:?}",
+            response.text()
+        );
+        let jobs = rows::Entity::find()
+            .filter(rows::Column::WorkspaceId.eq(setup.workspace_id))
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(jobs.len(), 0);
     })
     .await;
 }

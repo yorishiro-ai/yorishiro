@@ -60,7 +60,7 @@ jobs:
               {name:"ce-postgres", edition:"ce", database:"postgres"},
               {name:"ee-postgres", edition:"ee", database:"postgres"}
             ] + if $licensed then
-              [{name:"ee-postgres-licensed", edition:"ee", database:"postgres", licensed:true, models:true}]
+              [{name:"ee-licence", edition:"ee", database:"sqlite", licensed:true}]
             else [] end')
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           if [[ "$enabled" != true ]]; then
@@ -300,6 +300,10 @@ jobs:
           container: ${{ job.services.db.id }}
       - name: Run the tests
         run: |
+          if [[ '${{ matrix.licensed }}' == true ]]; then
+            make test-licence
+            exit 0
+          fi
           # Bound concurrent database setup and teardown without changing the worker races inside each test.
           if [[ '${{ matrix.name }}' == 'ee-postgres' ]]; then
             export RUST_TEST_THREADS=2

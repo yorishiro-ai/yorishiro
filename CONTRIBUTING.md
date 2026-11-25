@@ -52,7 +52,7 @@ The backend comes from `DATABASE_URL` and the edition from the feature set; ther
 Request tests boot through `boot_request`: SQLite gets its own database file and PostgreSQL its own throwaway database per test, both torn down with the test.
 An app booted by other means must call `close_app_pools` before it returns, or teardown panics even on a passing test.
 
-Licensed tests skip without `YORISHIRO_LICENSE_KEY`, and the E5 model tests skip without `models/multilingual-e5-base/`.
+Licensed tests install a test licence when `YORISHIRO_LICENSE_KEY` is unset, and the E5 model tests skip without `models/multilingual-e5-base/`.
 Stripe tests run in the ordinary EE suite, install their own test licence state and require no Stripe account.
 `make test-python` runs the Python checks, and `make test-contract` runs the real-binary public contracts described in `tests/blackbox/README.md`.
 Run the optional SQLite search benchmark with `cargo bench --bench sqlite_ann -- sqlite:///path/to/database.sqlite3 WORKSPACE_UUID`; it opens the database read-only.

@@ -68,9 +68,7 @@ async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let mut ids = Vec::new();
@@ -173,9 +171,7 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
     }
 
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let service = api_keys::Entity::create_api_key(
@@ -236,9 +232,7 @@ async fn retirement_inventory_does_not_expose_accounts() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let second = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert!(
@@ -275,9 +269,7 @@ async fn retirement_inventory_preserves_cross_tenant_fork_integrity() {
     }
 
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let source = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = yorishiro::data::templates::get_template("general-notes").unwrap();

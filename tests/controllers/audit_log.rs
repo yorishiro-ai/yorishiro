@@ -321,9 +321,7 @@ async fn an_audit_key_cannot_read_another_tenants_audit_log() {
         return;
     }
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let tenant_a = setup(&request, &ctx).await;
         let tenant_b = setup(&request, &ctx).await;
 

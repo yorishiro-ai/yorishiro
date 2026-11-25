@@ -421,7 +421,9 @@ pub(crate) async fn create_workspace_with_quota(
         ..Default::default()
     };
 
-    active.insert(conn).await.internal()
+    active.insert(conn).await.map_err(|error| {
+        YorishiroError::conflict_on_unique(error, "a workspace with this name already exists")
+    })
 }
 
 pub(crate) async fn create_workspace_in_context(

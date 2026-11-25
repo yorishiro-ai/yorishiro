@@ -16,9 +16,7 @@ use super::*;
 #[tokio::test]
 async fn mcp_origin_tools_match_ungated_rest_when_same_session_licence_state_is_missing() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let TestTenant {
             workspace_id,
             owner_id,
@@ -99,9 +97,7 @@ async fn mcp_origin_tools_match_ungated_rest_when_same_session_licence_state_is_
 )]
 async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        if crate::requests::skip_unlicensed(&ctx) {
-            return;
-        }
+        crate::requests::require_licence(&ctx);
         let TestTenant {
             tenant_id,
             workspace_id,

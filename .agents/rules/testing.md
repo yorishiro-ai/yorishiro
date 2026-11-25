@@ -29,7 +29,9 @@ Run commands from the repository root, or use `make -C /path/to/repo <target>`.
 | `DB_CONNECT_TIMEOUT` | `5000` in CI and the PostgreSQL example | PostgreSQL connection timeout |
 The backend comes from `DATABASE_URL` and the edition from the feature set; there is no other test selector.
 A Valkey (Redis-compatible) queue runs with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` naming a server; the Valkey tests skip otherwise.
-Licensed tests skip unless `YORISHIRO_LICENSE_KEY` holds a valid key; the CI job `ee-postgres-licensed` supplies it.
+A test that needs a licensed edition calls `crate::requests::require_licence(&ctx)` after boot.
+It installs a test licence unless `YORISHIRO_LICENSE_KEY` already holds a valid key, so these tests run in every environment.
+Only the signature check needs the real key: `make test-licence` runs it, and the CI job `ee-licence` supplies the key.
 The pinned E5 model tests skip unless `models/multilingual-e5-base/` holds the model files.
 
 Custom PostgreSQL:
@@ -54,13 +56,11 @@ Development databases are not used; entity generation requires PostgreSQL.
 ### Multi-tenant tests
 
 Community Edition and unlicensed Enterprise enforce a one-tenant deployment cap.
-A test that creates more than one tenant in one boot therefore only passes on a licensed Enterprise deployment: gate it after boot, so it runs in CI's `ee-postgres-licensed` job and skips everywhere else.
+A test that creates more than one tenant in one boot therefore needs a licensed Enterprise deployment: call `require_licence` after boot.
 
 ```rust
 boot_request::<App, _, _>(|request, ctx| async move {
-    if crate::requests::skip_unlicensed(&ctx) {
-        return;
-    }
+    crate::requests::require_licence(&ctx);
 ```
 
 A test that must observe the unlicensed cap boots with `crate::requests::unlicensed()`, so the gate never sees a key.
@@ -68,7 +68,7 @@ A test changes the booted app's configuration by passing overrides to `boot_requ
 
 ### CI
 
-CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus a licensed EE PostgreSQL job.
+CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus `make test-licence`, which verifies a signed key with the repository secret.
 Each job runs every test; nothing is assigned or inventoried per test, so a new test needs no registration.
 The real-binary REST/MCP/CLI contracts live in `tests/blackbox/`; common suites own SQLite processes and the licensed tenant suite owns a PostgreSQL database.
 Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
