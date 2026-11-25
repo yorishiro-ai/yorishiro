@@ -368,3 +368,18 @@ pub(crate) async fn rest_create_entity(request: &loco_rs::TestServer, setup: &Te
 
     entity_id
 }
+
+/// Renames a table, for tests that inject a fault by hiding it from the code under test.
+pub(crate) async fn rename_table(db: &sea_orm::DatabaseConnection, from: &str, to: &str) {
+    use sea_orm::{
+        ConnectionTrait,
+        sea_query::{Alias, Table},
+    };
+    db.execute(
+        &Table::rename()
+            .table(Alias::new(from), Alias::new(to))
+            .to_owned(),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("rename {from} to {to}: {error}"));
+}

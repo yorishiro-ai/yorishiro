@@ -1,6 +1,6 @@
 use crate::requests::boot_request_with;
 use axum::http::StatusCode;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait, TransactionTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
 use yorishiro::App;
 
 #[tokio::test]
@@ -478,12 +478,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
             assert!(events.iter().any(|event| event.action == "policy_create"));
 
             // Direct write (c): deterministic fault injection making the audit insert fail.
-            ctx.db
-                .execute_unprepared(
-                    "ALTER TABLE iam_audit_events RENAME TO unavailable_iam_audit_events",
-                )
-                .await
-                .unwrap();
+            crate::requests::fixtures::rename_table(&ctx.db, "iam_audit_events", "unavailable_iam_audit_events").await;
             let failed_rest = request
                 .post("/api/iam/groups")
                 .add_header("Authorization", format!("Bearer {api_key}"))
@@ -497,12 +492,7 @@ async fn iam_management_preserves_credential_boundaries_and_audit_atomicity() {
                 serde_json::json!({"name":"mcp-rollback"}),
             )
             .await;
-            ctx.db
-                .execute_unprepared(
-                    "ALTER TABLE unavailable_iam_audit_events RENAME TO iam_audit_events",
-                )
-                .await
-                .unwrap();
+            crate::requests::fixtures::rename_table(&ctx.db, "unavailable_iam_audit_events", "iam_audit_events").await;
             failed_rest.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
             assert_eq!(failed_mcp["result"]["isError"], true, "{failed_mcp}");
             let groups = yorishiro::models::iam_groups::Entity::find()

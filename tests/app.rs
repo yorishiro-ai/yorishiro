@@ -1,5 +1,4 @@
 use loco_rs::app::Hooks;
-use sea_orm::ConnectionTrait;
 
 #[tokio::test]
 async fn shutdown_hook_keeps_database_available_until_loco_drains_workers() {
@@ -12,7 +11,7 @@ async fn shutdown_hook_keeps_database_available_until_loco_drains_workers() {
         // Loco signals and awaits its queue runner only after this hook returns.
         assert!(!db.identity.is_closed());
         assert!(!db.tenant.pool().is_closed());
-        ctx.db.execute_unprepared("SELECT 1").await.unwrap();
+        ctx.db.ping().await.unwrap();
         for pool in [&db.identity, db.tenant.pool()] {
             sea_orm::sqlx::query("SELECT 1")
                 .execute(pool)
