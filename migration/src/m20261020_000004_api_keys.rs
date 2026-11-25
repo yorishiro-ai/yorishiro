@@ -71,9 +71,6 @@ async fn up_api_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                         .unique_key(),
                 )
                 .col(ColumnDef::new(Alias::new("key_prefix")).text().not_null())
-                .col(ColumnDef::new(Alias::new("scope")).text().not_null().check(
-                    Expr::col(Alias::new("scope")).is_in(["read", "write", "schema", "migration"]),
-                ))
                 .col(helpers::created_at(manager))
                 .col(helpers::ts_tz_col(manager, Alias::new("last_used_at")))
                 .col(helpers::ts_tz_col(manager, Alias::new("expires_at")))
@@ -118,12 +115,12 @@ async fn up_api_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     helpers::pg_only(
                 manager,
                 "CREATE FUNCTION authenticate_api_key(p_key_hash bytea)
-                 RETURNS TABLE (id uuid, workspace_id uuid, tenant_id uuid, scope text, user_id uuid, audit boolean)
+                 RETURNS TABLE (id uuid, workspace_id uuid, tenant_id uuid, user_id uuid, audit boolean)
                  LANGUAGE sql
                  SECURITY DEFINER
                  SET search_path = pg_catalog, public, pg_temp
                  AS $$
-                    SELECT k.id, k.workspace_id, k.tenant_id, k.scope, k.user_id, k.audit
+                    SELECT k.id, k.workspace_id, k.tenant_id, k.user_id, k.audit
                    FROM api_keys k
                     LEFT JOIN workspace_workspaces w ON w.id = k.workspace_id
                     WHERE k.key_hash = p_key_hash AND k.revoked_at IS NULL
@@ -138,7 +135,7 @@ async fn up_api_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                    p_key_hash bytea,
                    p_requested_workspace uuid
                  )
-                 RETURNS TABLE (id uuid, workspace_id uuid, tenant_id uuid, scope text, user_id uuid, audit boolean)
+                 RETURNS TABLE (id uuid, workspace_id uuid, tenant_id uuid, user_id uuid, audit boolean)
                  LANGUAGE sql
                  SECURITY DEFINER
                  SET search_path = pg_catalog, public, pg_temp
@@ -146,7 +143,6 @@ async fn up_api_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                    SELECT k.id,
                           COALESCE(k.workspace_id, w.id) AS workspace_id,
                           k.tenant_id,
-                          k.scope,
                           k.user_id,
                           k.audit
                    FROM api_keys k
