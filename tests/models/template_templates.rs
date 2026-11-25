@@ -113,7 +113,7 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
                     .get::<Arc<LicenceState>>()
                     .expect("production boot installs licence state")
                     .is_active(),
-                "licensed template publication tests require a valid YORISHIRO_LICENSE_KEY at boot"
+                "licensed template publication tests require an active licence"
             );
             let response = request
                 .put(&format!("/api/marketplace/{community}/visibility"))

@@ -12,9 +12,9 @@ test-postgres task doctor migrate entities: export DATABASE_URL := $(DATABASE_UR
 task doctor migrate entities: export LOCO_ENV = test
 test-postgres migrate entities: export DB_MAX_CONNECTIONS ?= 100
 test-postgres migrate entities: export DB_CONNECT_TIMEOUT ?= 5000
-test-postgres test-sqlite test-valkey: export RUST_BACKTRACE ?= 1
+test-postgres test-sqlite test-licence test-valkey: export RUST_BACKTRACE ?= 1
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check test-location-check test-postgres test-sqlite test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check patch-check test-python test-contract
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check test-location-check test-postgres test-sqlite test-licence test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check patch-check test-python test-contract
 
 check: check-ce
 
@@ -72,6 +72,11 @@ test-postgres: patch-check
 
 test-sqlite: patch-check
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' cargo test --locked --workspace $(TEST_FEATURES)
+
+# Verify that a signed `YORISHIRO_LICENSE_KEY` activates the enterprise edition at boot.
+test-licence: patch-check
+	@test -n "$$YORISHIRO_LICENSE_KEY" || { echo 'YORISHIRO_LICENSE_KEY is required' >&2; exit 1; }
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' cargo test --locked --features enterprise -- --exact ee::controllers::middleware::edition::a_signed_licence_key_activates_enterprise_at_boot
 
 # Run queue-provider tests against Valkey with SQLite for application data.
 VALKEY_URL ?= redis://localhost:6379
