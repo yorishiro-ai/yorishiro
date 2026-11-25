@@ -46,8 +46,6 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     TenantTenants,
-    #[sea_orm(has_many = "super::workspace_memberships::Entity")]
-    WorkspaceMemberships,
 }
 
 impl Related<super::api_key_audit_log::Entity> for Entity {
@@ -89,11 +87,5 @@ impl Related<super::tenant_memberships::Entity> for Entity {
 impl Related<super::tenant_tenants::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::TenantTenants.def()
-    }
-}
-
-impl Related<super::workspace_memberships::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::WorkspaceMemberships.def()
     }
 }

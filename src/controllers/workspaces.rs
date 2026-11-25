@@ -1,4 +1,4 @@
-//! REST routes for workspaces and their members.
+//! REST routes for workspaces.
 
 use crate::controllers::Created;
 use axum::Json;
@@ -81,40 +81,6 @@ pub(crate) async fn delete_workspace(
     Ok(axum::response::NoContent)
 }
 
-async fn grant_member(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    Path(crate::dtos::common::IdUserIdPath { id, user_id }): Path<
-        crate::dtos::common::IdUserIdPath<Uuid, Uuid>,
-    >,
-    Json(body): Json<crate::dtos::workspaces::GrantWorkspaceMemberRequest>,
-) -> Result<axum::response::NoContent, ApiError> {
-    crate::models::workspace_memberships::Model::grant_as(&ctx.db, &actor, id, user_id, body.role)
-        .await?;
-    Ok(axum::response::NoContent)
-}
-
-async fn revoke_member(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    Path(crate::dtos::common::IdUserIdPath { id, user_id }): Path<
-        crate::dtos::common::IdUserIdPath<Uuid, Uuid>,
-    >,
-) -> Result<axum::response::NoContent, ApiError> {
-    crate::models::workspace_memberships::Model::revoke_as(&ctx.db, &actor, id, user_id).await?;
-    Ok(axum::response::NoContent)
-}
-
-async fn list_members(
-    State(ctx): State<AppContext>,
-    AuthContext(actor): AuthContext,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
-) -> Result<Json<Vec<crate::dtos::workspaces::WorkspaceMemberRecord>>, ApiError> {
-    Ok(Json(
-        crate::models::workspace_memberships::Model::list_as(&ctx.db, &actor, id).await?,
-    ))
-}
-
 pub fn routes() -> Routes {
     Routes::new()
         .tag("community")
@@ -161,36 +127,6 @@ pub fn routes() -> Routes {
                 op.with(crate::controllers::openapi::extension(
                     "x-yorishiro-required-actions",
                     serde_json::json!(["workspace_delete"]),
-                ))
-            }),
-        )
-        .add(
-            "/{id}/members/{user_id}",
-            aide::axum::routing::put_with(grant_member, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["workspace_update"]),
-                ))
-            }),
-        )
-        .add(
-            "/{id}/members/{user_id}",
-            aide::axum::routing::delete_with(revoke_member, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["workspace_update"]),
-                ))
-                .response_with::<204, (), _>(|op| {
-                    op.description("Direct workspace grant and bound credentials revoked")
-                })
-            }),
-        )
-        .add(
-            "/{id}/members",
-            aide::axum::routing::get_with(list_members, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["workspace_get"]),
                 ))
             }),
         )

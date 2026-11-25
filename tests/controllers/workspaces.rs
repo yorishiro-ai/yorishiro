@@ -20,13 +20,6 @@ async fn member_key(
     tenant_memberships::add_member(&ctx.db, tenant_id, member.id)
         .await
         .expect("add member");
-    crate::requests::fixtures::grant_workspace(
-        ctx,
-        workspace_id,
-        member.id,
-        yorishiro::models::workspace_memberships::WorkspaceRole::Member,
-    )
-    .await;
     issue_api_key(ctx, workspace_id, member.id, key_scope, false).await
 }
 
@@ -211,7 +204,7 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
     use sea_orm::TransactionTrait;
     use std::sync::Arc;
     use yorishiro::controllers::middleware::auth::Authenticator;
-    use yorishiro::models::{api_keys, tenancy, workspace_memberships::WorkspaceRole};
+    use yorishiro::models::{api_keys, tenancy};
 
     struct PausedAuthentication {
         inner: Arc<dyn Authenticator>,
@@ -243,14 +236,6 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             &crate::requests::fixtures::unique_email("workspace-stale-admin"),
             "hunter2-hunter2",
             None,
-        )
-        .await
-        .unwrap();
-        yorishiro::models::workspace_memberships::Model::grant(
-            &txn,
-            tenant.workspace_id,
-            admin.id,
-            WorkspaceRole::Member,
         )
         .await
         .unwrap();
@@ -384,249 +369,6 @@ async fn workspaces_endpoints_require_authentication() {
     boot_request::<App, _, _>(|request, _ctx| async move {
         let response = request.get("/api/workspaces").await;
         assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
-    })
-    .await;
-}
-
-#[tokio::test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one grant history checks credential binding and IAM through rejected, allowed, and revoked workspace access"
-)]
-async fn workspace_grant_management_requires_iam_and_respects_credential_binding() {
-    use yorishiro::models::workspace_memberships::WorkspaceRole;
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let administrator_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let local = user_users::create_user(
-            &ctx.db,
-            &format!("local-{}@example.com", Uuid::new_v4()),
-            "hunter2-hunter2",
-            None,
-        )
-        .await
-        .unwrap();
-        let target = user_users::create_user(
-            &ctx.db,
-            &format!("target-{}@example.com", Uuid::new_v4()),
-            "hunter2-hunter2",
-            None,
-        )
-        .await
-        .unwrap();
-        for user_id in [local.id, target.id] {
-            tenant_memberships::add_member(
-                &ctx.db,
-                tenant.tenant_id,
-                user_id)
-            .await
-            .unwrap();
-        }
-        let local_path = format!(
-            "/api/workspaces/{}/members/{}",
-            tenant.workspace_id, local.id
-        );
-        request
-            .put(&local_path)
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
-            .json(&serde_json::json!({"role":"admin"}))
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-        let key = issue_api_key(
-            &ctx,
-            tenant.workspace_id,
-            local.id,
-            yorishiro::models::api_keys::ApiKeyScope::Write,
-            false,
-        )
-        .await;
-        request.put(&local_path)
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({"role":"admin"}))
-            .await.assert_status(StatusCode::FORBIDDEN);
-        let policy = request.post("/api/iam/policies")
-            .add_header("Authorization", format!("Bearer {administrator_key}"))
-            .json(&serde_json::json!({"name":"workspace-grant-manager", "document":{"statements":[{
-                "effect":"allow", "actions":["workspace_get", "workspace_update"],
-                "resources":[{"type":"workspace","tenant_id":tenant.tenant_id,"workspace_id":tenant.workspace_id}]
-            }]}})).await;
-        policy.assert_status(StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
-        request.put(&format!("/api/iam/users/{}/policies/{policy_id}", local.id))
-            .add_header("Authorization", format!("Bearer {administrator_key}"))
-            .await.assert_status(StatusCode::NO_CONTENT);
-        let path = format!(
-            "/api/workspaces/{}/members/{}",
-            tenant.workspace_id, target.id
-        );
-        request
-            .put(&path)
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({"role":"viewer"}))
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-        assert_eq!(
-            yorishiro::models::workspace_memberships::Model::role(
-                &ctx.db,
-                tenant.workspace_id,
-                target.id
-            )
-            .await
-            .unwrap(),
-            Some(WorkspaceRole::Viewer)
-        );
-        let target_key = issue_api_key(
-            &ctx,
-            tenant.workspace_id,
-            target.id,
-            yorishiro::models::api_keys::ApiKeyScope::Read,
-            false,
-        )
-        .await;
-        request
-            .put(&path)
-            .add_header("Authorization", format!("Bearer {target_key}"))
-            .json(&serde_json::json!({"role":"admin"}))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-        let service = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db,
-            tenant.workspace_id,
-            yorishiro::models::api_keys::ApiKeyScope::Migration,
-            None,
-            false,
-        )
-        .await
-        .unwrap();
-        request
-            .put(&path)
-            .add_header("Authorization", format!("Bearer {}", service.plaintext))
-            .json(&serde_json::json!({"role":"admin"}))
-            .await
-            .assert_status(StatusCode::UNAUTHORIZED);
-        request
-            .delete(&format!(
-                "/api/workspaces/{}/members/{}",
-                tenant.workspace_id, tenant.owner_id
-            ))
-            .add_header("Authorization", format!("Bearer {key}"))
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-        request
-            .get("/api/whoami")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
-            .await
-            .assert_status(StatusCode::OK);
-        request
-            .post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({"name":"forbidden"}))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-        request
-            .post("/api/members/users")
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({"user_name":"denied","password":"workspace-bound-key"}))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-        let administrator = crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
-        let tenant_key = yorishiro::models::api_keys::Entity::create_tenant_api_key(
-            &ctx.db,
-            tenant.tenant_id,
-            yorishiro::models::api_keys::ApiKeyScope::Migration,
-            Some(administrator),
-            false,
-            "workspace-admin-test",
-        )
-        .await
-        .unwrap();
-        let sibling = request
-            .post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
-            .json(&serde_json::json!({"name":format!("sibling-{}", Uuid::new_v4())}))
-            .await;
-        sibling.assert_status(StatusCode::CREATED);
-        let sibling_id = sibling.json::<serde_json::Value>()["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        request
-            .get(&format!("/api/workspaces/{sibling_id}"))
-            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
-            .await
-            .assert_status(StatusCode::OK);
-        request
-            .put(&format!("/api/workspaces/{sibling_id}"))
-            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
-            .json(&serde_json::json!({"name":"tenant-key-target"}))
-            .await
-            .assert_status(StatusCode::OK);
-        request
-            .put(&format!(
-                "/api/workspaces/{sibling_id}/members/{}",
-                target.id
-            ))
-            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
-            .json(&serde_json::json!({"role":"viewer"}))
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-        let bound_admin = issue_api_key(
-            &ctx,
-            tenant.workspace_id,
-            administrator,
-            yorishiro::models::api_keys::ApiKeyScope::Migration,
-            false,
-        )
-        .await;
-        crate::requests::fixtures::grant_workspace(
-            &ctx,
-            sibling_id.parse().unwrap(),
-            local.id,
-            WorkspaceRole::Admin,
-        )
-        .await;
-        request
-            .put(&format!(
-                "/api/workspaces/{sibling_id}/members/{}",
-                target.id
-            ))
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({"role":"admin"}))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-        let sibling_path = format!("/api/workspaces/{sibling_id}");
-        request
-            .delete(&sibling_path)
-            .add_header("Authorization", format!("Bearer {bound_admin}"))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
-        request
-            .delete(&sibling_path)
-            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-        request
-            .delete(&path)
-            .add_header("Authorization", format!("Bearer {key}"))
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-        request
-            .get("/api/whoami")
-            .add_header("Authorization", format!("Bearer {target_key}"))
-            .await
-            .assert_status(StatusCode::UNAUTHORIZED);
-        request
-            .put(&local_path)
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
-            .json(&serde_json::json!({"role":"viewer"}))
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-        request
-            .put(&path)
-            .add_header("Authorization", format!("Bearer {key}"))
-            .json(&serde_json::json!({"role":"admin"}))
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
     })
     .await;
 }

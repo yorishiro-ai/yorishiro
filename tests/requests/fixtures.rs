@@ -10,27 +10,6 @@ use yorishiro::models::_entities::api_keys;
 use yorishiro::models::api_keys::ApiKeyScope;
 use yorishiro::models::tenancy;
 
-pub(crate) async fn grant_workspace(
-    ctx: &AppContext,
-    workspace_id: Uuid,
-    user_id: Uuid,
-    role: yorishiro::models::workspace_memberships::WorkspaceRole,
-) {
-    // SQLite fails a deferred transaction that upgrades to a write after another connection has written; take the writer slot up front.
-    let txn = ctx
-        .db
-        .begin_with_options(sea_orm::TransactionOptions {
-            sqlite_transaction_mode: Some(sea_orm::SqliteTransactionMode::Immediate),
-            ..Default::default()
-        })
-        .await
-        .expect("begin workspace grant");
-    yorishiro::models::workspace_memberships::Model::grant(&txn, workspace_id, user_id, role)
-        .await
-        .expect("grant explicit workspace access");
-    txn.commit().await.expect("commit workspace grant");
-}
-
 /// Caps the tenant's workspaces.
 /// No public operation changes this cap (only a plan does), so this is the one place a test writes it directly.
 pub(crate) async fn set_workspace_cap(ctx: &AppContext, tenant_id: Uuid, cap: i32) {

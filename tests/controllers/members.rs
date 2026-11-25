@@ -128,13 +128,6 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, user.id)
             .await
             .unwrap();
-        crate::requests::fixtures::grant_workspace(
-            &ctx,
-            tenant.workspace_id,
-            user.id,
-            yorishiro::models::workspace_memberships::WorkspaceRole::Viewer,
-        )
-        .await;
         if tenant_key {
             let created = api_keys::Entity::create_tenant_api_key(
                 &ctx.db,

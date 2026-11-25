@@ -1108,9 +1108,6 @@ def iam_lifecycle(app):
     ordinary.call("list_schemas", error=True)
     app.rest("GET", "/api/entities", status=403, key=bound_key)
     app.rest("GET", "/api/schemas", status=403, key=bound_key)
-    ordinary.call("list_workspace_members", {"workspace_id": app.workspace}, error=True)
-    ordinary.call("grant_workspace_member", {"workspace_id": app.workspace, "user_id": user_id,
-                                              "role": "viewer"}, error=True)
     client.call("remove_group_member", membership)
     require(not client.call("list_iam_group_members", {"group_id": group_id}), "IAM membership retained")
     require(not client.call("list_iam_group_policies", {"group_id": group_id}), "IAM group grant retained")
@@ -1139,11 +1136,6 @@ def iam_lifecycle(app):
     admin_document["statements"].append({"effect": "allow", "actions": ["workspace_get", "workspace_update"],
         "resources": [{"type": "workspace", "tenant_id": app.tenant, "workspace_id": app.workspace}]})
     client.call("update_iam_policy", {"policy_id": delegated["id"], "name": "delegated-management", "document": admin_document})
-    grant = {"workspace_id": app.workspace, "user_id": user_id}
-    tenant_client.call("grant_workspace_member", {**grant, "role": "viewer"})
-    require(tenant_client.call("list_workspace_members", {"workspace_id": app.workspace}) ==
-            app.rest("GET", f"/api/workspaces/{app.workspace}/members", key=member_key),
-            "delegated direct-grant listing differs across transports")
     require(tenant_client.call("list_members") == app.rest("GET", "/api/members", key=member_key),
             "delegated member listing differs across transports")
     mcp_keys = tenant_client.call("list_api_keys")["keys"]
@@ -1162,16 +1154,13 @@ def iam_lifecycle(app):
     client.call("update_iam_policy", {"policy_id": delegated["id"], "name": "delegated-management", "document": denied_admin})
     for tool, args in (("list_members", {}), ("list_api_keys", {}),
                        ("tenant_retirement_inventory", {}),
-                       ("revoke_workspace_member", grant),
                        ("preview_member_removal", {"user_id": user_id}),
                        ("revoke_api_key", {"key_id": replacement["id"]})):
         tenant_client.call(tool, args, error=True)
     app.rest("DELETE", f"/api/api-keys/{replacement['id']}", status=403, key=member_key)
-    app.rest("DELETE", f"/api/workspaces/{app.workspace}/members/{user_id}", status=403, key=member_key)
     app.rest("GET", "/api/whoami", key=replacement["full_key"])
     client.call("update_iam_policy", {"policy_id": delegated["id"], "name": "delegated-management", "document": admin_document})
     tenant_client.call("revoke_api_key", {"key_id": replacement["id"]})
-    tenant_client.call("revoke_workspace_member", grant)
     app.rest("GET", "/api/whoami", status=401, key=replacement["full_key"])
     client.call("detach_user_policy", delegated_attachment)
     client.call("delete_iam_policy", {"policy_id": delegated["id"]})
@@ -1394,15 +1383,6 @@ def workspace_key_lifecycle(app):
             "MCP workspace update not persisted")
     require(app.rest("GET", f"/api/workspaces/{workspace_id}", key=selected_key) == detail,
             "workspace detail differs across transports")
-    args = {"workspace_id": workspace_id, "user_id": identity["user_id"]}
-    tenant_client.call("grant_workspace_member", {**args, "role": "viewer"})
-    require(any(row["user_id"] == identity["user_id"] for row in tenant_client.call("list_workspace_members", {
-        "workspace_id": workspace_id,
-    })), "MCP workspace grant missing")
-    tenant_client.call("revoke_workspace_member", args)
-    require(not any(row["user_id"] == identity["user_id"] for row in tenant_client.call("list_workspace_members", {
-        "workspace_id": workspace_id,
-    })), "MCP workspace grant survived revocation")
     tenant_client.call("delete_workspace", {"workspace_id": workspace_id})
     app.rest("GET", f"/api/workspaces/{workspace_id}", key=tenant_key, status=404)
     selected.call("whoami", error=True)
@@ -1448,9 +1428,6 @@ def membership_retirement_lifecycle(app):
     member.call("list_members")
     member.call("list_api_keys")
     member.call("remove_member", {"user_id": owner_id}, error=True)
-    client.call("grant_workspace_member", {
-        "workspace_id": app.workspace, "user_id": user_id, "role": "viewer",
-    })
     client.call("reset_tenant_user_password", {"user_id": user_id, "password": password})
     app.rest("GET", "/api/whoami", key=key, status=401)
     login = app.rest("POST", "/auth/tenant/login", {"tenant_id": app.tenant, "user_name": member_name, "password": password},

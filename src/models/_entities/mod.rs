@@ -39,7 +39,6 @@ pub mod tenant_tenants;
 pub mod user_users;
 pub mod workspace_embedding_keys;
 pub mod workspace_llm_keys;
-pub mod workspace_memberships;
 pub mod workspace_schema_fork_heads;
 pub mod workspace_schema_forks;
 pub mod workspace_worker_classes;

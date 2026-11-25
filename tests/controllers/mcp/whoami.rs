@@ -86,13 +86,8 @@ async fn mcp_whoami_matches_rest_identity_without_secrets() {
 }
 
 #[tokio::test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one viewer and policy compare login, REST, and MCP discovery while proving a sibling workspace stays private"
-)]
 async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
     use sea_orm::TransactionTrait;
-    use yorishiro::models::workspace_memberships::WorkspaceRole;
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -111,14 +106,6 @@ async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
             &crate::requests::fixtures::unique_email("viewer-discovery"),
             "hunter2-hunter2",
             None)
-        .await
-        .unwrap();
-        yorishiro::models::workspace_memberships::Model::grant(
-            &txn,
-            tenant.workspace_id,
-            user.id,
-            WorkspaceRole::Viewer,
-        )
         .await
         .unwrap();
         txn.commit().await.unwrap();

@@ -152,7 +152,7 @@ async fn down_workspaces(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     Ok(())
 }
 
-async fn up_workspace_memberships(m: &SchemaManager<'_>) -> Result<(), DbErr> {
+pub(crate) async fn up_workspace_memberships(m: &SchemaManager<'_>) -> Result<(), DbErr> {
     let table = Table::create()
         .table(Alias::new("workspace_memberships"))
         .col(helpers::uuidv7_pk(m))
@@ -219,7 +219,7 @@ async fn up_workspace_memberships(m: &SchemaManager<'_>) -> Result<(), DbErr> {
     Ok(())
 }
 
-async fn down_workspace_memberships(m: &SchemaManager<'_>) -> Result<(), DbErr> {
+pub(crate) async fn down_workspace_memberships(m: &SchemaManager<'_>) -> Result<(), DbErr> {
     m.drop_table(
         Table::drop()
             .table(Alias::new("workspace_memberships"))

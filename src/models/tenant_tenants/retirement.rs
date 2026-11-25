@@ -12,8 +12,8 @@ const DELETE_GRACE_PERIOD: chrono::Duration = chrono::Duration::days(7);
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{
     api_keys, entity_entities, entity_relations, queue_job_dispatch_outbox, queue_job_lifecycles,
-    schema_schemas, template_templates, tenant_memberships, workspace_memberships,
-    workspace_schema_forks, workspace_workspaces,
+    schema_schemas, template_templates, tenant_memberships, workspace_schema_forks,
+    workspace_workspaces,
 };
 
 /// A secret-free snapshot, not approval for a later destructive operation.
@@ -28,7 +28,6 @@ pub struct RetirementInventory {
     pub shared_user_accounts: u64,
     /// External forks must be resolved explicitly before irreversible cleanup.
     pub external_workspace_forks: u64,
-    pub workspace_grants: u64,
     pub api_keys: u64,
     pub jobs: u64,
     pub active_jobs: u64,
@@ -558,11 +557,6 @@ pub async fn inventory(
         .count(conn)
         .await
         .internal()?;
-    let workspace_grants = workspace_memberships::Entity::find()
-        .filter(workspace_memberships::Column::WorkspaceId.is_in(workspace_ids.clone()))
-        .count(conn)
-        .await
-        .internal()?;
     let api_keys = api_keys::Entity::find()
         .filter(api_keys::Column::TenantId.eq(tenant_id))
         .filter(api_keys::Column::RevokedAt.is_null())
@@ -615,7 +609,6 @@ pub async fn inventory(
         memberships,
         shared_user_accounts,
         external_workspace_forks,
-        workspace_grants,
         api_keys,
         jobs,
         active_jobs,
