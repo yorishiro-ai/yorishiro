@@ -290,20 +290,49 @@ async fn assert_roles_become_groups(db: &sea_orm::DatabaseConnection, id: fn(u8)
     };
     assert_eq!(
         count("SELECT COUNT(*) AS n FROM iam_groups WHERE name = 'Tenant Writer'".into()).await,
-        1
+        1,
+        "the role becomes a new group of its name"
+    );
+    assert_eq!(
+        count(format!(
+            "SELECT COUNT(*) AS n FROM iam_groups WHERE id = {} AND name LIKE 'Tenant Writer (user-defined %'",
+            id(21)
+        ))
+        .await,
+        1,
+        "the user-made group with the role's name is renamed, not merged"
+    );
+    assert_eq!(
+        count(format!(
+            "SELECT COUNT(*) AS n FROM iam_group_memberships WHERE group_id = {}",
+            id(21)
+        ))
+        .await,
+        0,
+        "the renamed group gains no member from the role"
+    );
+    assert_eq!(
+        count(format!(
+            "SELECT COUNT(*) AS n FROM iam_group_policy_attachments WHERE group_id = {}",
+            id(21)
+        ))
+        .await,
+        0,
+        "the renamed group gains no policy from the role"
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) AS n FROM iam_group_policy_attachments a JOIN iam_groups g ON g.id = a.group_id WHERE g.name = 'Tenant Writer'".into()).await,
+        1,
+        "the new group carries the role's policy"
     );
     assert_eq!(
         count("SELECT COUNT(*) AS n FROM iam_groups WHERE name = 'ops'".into()).await,
-        2 - 1
+        1
     );
     assert_eq!(
         count("SELECT COUNT(*) AS n FROM iam_group_memberships".into()).await,
-        2
-    );
-    assert_eq!(
-        count(format!("SELECT COUNT(*) AS n FROM iam_group_policy_attachments WHERE group_id = {} AND policy_id = {}", id(21), id(31))).await,
-        1,
-        "the merged group keeps the role's policy"
+        2,
+        "each role membership becomes a group membership"
     );
     assert_eq!(
         count(format!("SELECT COUNT(*) AS n FROM iam_group_policy_attachments a JOIN iam_groups g ON g.id = a.group_id WHERE g.name = 'ops' AND a.policy_id = {}", id(33))).await,
@@ -326,6 +355,15 @@ async fn assert_roles_become_groups(db: &sea_orm::DatabaseConnection, id: fn(u8)
         .await,
         0
     );
+    assert_documents_and_tables_migrated(db, id).await;
+}
+
+/// A stored policy document loses the removed role actions, and the role tables are gone.
+async fn assert_documents_and_tables_migrated(
+    db: &sea_orm::DatabaseConnection,
+    id: fn(u8) -> String,
+) {
+    let backend = db.get_database_backend();
     let document = db
         .query_one_raw(Statement::from_string(
             backend,

@@ -1,7 +1,8 @@
 //! Replaces IAM roles with groups.
 //!
-//! Each role becomes a group of the same name, keeping its members and attached policies.
-//! A group that already has the role's name receives them instead of a duplicate.
+//! Each role becomes a new group of the same name, keeping its members and attached policies.
+//! A group that already has the role's name is a different principal with different members, so it is renamed first.
+//! Merging would hand the role's policies to that group's members.
 //! Stored policy documents lose the removed role actions, so every tenant keeps documents the application can parse.
 
 use sea_orm_migration::prelude::*;
@@ -40,6 +41,16 @@ impl MigrationTrait for Migration {
             ("", "")
         };
         let db = manager.get_connection();
+        let suffix = if manager.get_database_backend() == DbBackend::Sqlite {
+            "lower(substr(hex(g.id), 1, 8))"
+        } else {
+            "substr(g.id::text, 1, 8)"
+        };
+        db.execute_unprepared(&format!(
+            "UPDATE iam_groups SET name = name || ' (user-defined ' || (SELECT {suffix} FROM iam_groups g WHERE g.id = iam_groups.id) || ')'
+             WHERE EXISTS (SELECT 1 FROM iam_roles r WHERE r.tenant_id = iam_groups.tenant_id AND r.name = iam_groups.name)"
+        ))
+        .await?;
         db.execute_unprepared(&format!(
             "INSERT INTO iam_groups ({id_column}tenant_id, name)
              SELECT {id_value}r.tenant_id, r.name FROM iam_roles r
