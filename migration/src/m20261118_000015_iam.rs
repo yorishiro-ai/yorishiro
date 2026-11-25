@@ -37,7 +37,7 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-        for table in ["iam_groups", "iam_policies", "iam_roles"] {
+        for table in ["iam_groups", "iam_policies"] {
             let mut create = Table::create();
             create
                 .table(Alias::new(table))
@@ -91,20 +91,6 @@ impl MigrationTrait for Migration {
                 "iam_group_policy_attachments",
                 "group_id",
                 "iam_groups",
-                "policy_id",
-                "iam_policies",
-            ),
-            (
-                "iam_user_role_attachments",
-                "user_id",
-                "tenant_memberships",
-                "role_id",
-                "iam_roles",
-            ),
-            (
-                "iam_role_policy_attachments",
-                "role_id",
-                "iam_roles",
                 "policy_id",
                 "iam_policies",
             ),
@@ -192,12 +178,9 @@ impl MigrationTrait for Migration {
             "iam_audit_events",
             "iam_groups",
             "iam_policies",
-            "iam_roles",
             "iam_group_memberships",
             "iam_user_policy_attachments",
             "iam_group_policy_attachments",
-            "iam_role_policy_attachments",
-            "iam_user_role_attachments",
         ] {
             helpers::enable_rls_with_policy(
                 manager,
@@ -221,12 +204,9 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         for table in [
             "iam_audit_events",
-            "iam_role_policy_attachments",
-            "iam_user_role_attachments",
             "iam_group_policy_attachments",
             "iam_user_policy_attachments",
             "iam_group_memberships",
-            "iam_roles",
             "iam_policies",
             "iam_groups",
             "iam_tenant_roots",
