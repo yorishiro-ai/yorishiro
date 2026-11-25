@@ -77,8 +77,6 @@ def promote(args):
         actual = json.loads(docker("inspect", target, "--format", "{{json .Manifest}}"))
         if actual.get("digest") != record["digest"]:
             raise ValueError("promoted manifest changed identity")
-        for arch, value in record["architectures"].items():
-            docker("create", "--prefer-index=false", "-t", f"{target}-{arch}", f"{args.image}@{value}")
 
 
 def main():
