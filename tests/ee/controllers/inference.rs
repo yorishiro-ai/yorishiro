@@ -1021,6 +1021,16 @@ async fn infer_fill_dispatch_failure_rolls_back_job() {
             .await;
         assert_eq!(put_key.status_code(), StatusCode::NO_CONTENT);
 
+        request
+            .post("/api/schemas")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({
+                "name": "article",
+                "entity_types": {"article": {"fields": {"title": {"type": "string", "required": true}}}}
+            }))
+            .await
+            .assert_status(StatusCode::CREATED);
+
         // Direct write (c): deterministic fault injection refusing every dispatch, isolated from other tests and using real enqueue.
         let fault = match ctx.db.get_database_backend() {
             DbBackend::Postgres => "ALTER TABLE queue_job_dispatch_outbox ADD CONSTRAINT refuse_test_dispatch CHECK (false)",
