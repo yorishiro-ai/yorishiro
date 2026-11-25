@@ -539,6 +539,7 @@ pub async fn enqueue_infer_fill(
             hint: "configure the workspace LLM provider before requesting inference".into(),
         });
     }
+    schema_schemas::get_active_schema(&txn, workspace_id, &schema_name).await?;
     inference_jobs::create(&txn, job_id, workspace_id, &schema_name)
         .await
         .internal()?;

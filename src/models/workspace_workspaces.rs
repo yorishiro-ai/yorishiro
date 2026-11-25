@@ -479,7 +479,9 @@ pub(crate) async fn update_as(
         .await?;
         active.max_entities = Set(input.max_entities);
     }
-    let saved = active.update(&txn).await.internal()?;
+    let saved = active.update(&txn).await.map_err(|error| {
+        YorishiroError::conflict_on_unique(error, "a workspace with this name already exists")
+    })?;
     txn.commit().await.internal()?;
     WorkspaceRecord::try_from(saved)
 }

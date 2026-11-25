@@ -28,8 +28,8 @@ impl McpToolPolicy for ManagementToolPolicy {
                 name,
                 "confirm_inference_proposals"
                     | "create_schema_fork"
-                    | "delete_embedding_provider"
-                    | "delete_llm_provider"
+                    | "reset_embedding_provider"
+                    | "reset_llm_provider"
                     | "delete_schema_fork"
                     | "discard_inference_proposals"
                     | "get_embedding_provider"
@@ -47,6 +47,7 @@ impl McpToolPolicy for ManagementToolPolicy {
                     | "merge_preview"
                     | "reject_inference_proposals"
                     | "reset_entity_columns"
+                    | "reset_worker_class"
                     | "set_embedding_provider"
                     | "set_entity_columns"
                     | "set_llm_provider"

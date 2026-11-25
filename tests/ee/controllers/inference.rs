@@ -1207,3 +1207,42 @@ async fn the_infer_fill_scope_carries_the_workspaces_tenant() {
     })
     .await;
 }
+
+/// `infer-fill` for a schema the workspace does not define returns 404 and creates no job.
+#[tokio::test]
+async fn infer_fill_for_an_unknown_schema_is_not_found_and_queues_nothing() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        if crate::requests::skip_unlicensed(&ctx) {
+            return;
+        }
+        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        request
+            .put("/api/workspace/llm-key")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .json(&serde_json::json!({
+                "base_url": "https://api.example.com/v1",
+                "model": "gpt-4o-mini",
+                "api_key": "sk-test-key"
+            }))
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+
+        let response = request
+            .post("/api/schemas/active/does-not-exist/infer-fill")
+            .add_header("Authorization", format!("Bearer {}", setup.api_key))
+            .await;
+        assert_eq!(
+            response.status_code(),
+            StatusCode::NOT_FOUND,
+            "{:?}",
+            response.text()
+        );
+        let jobs = rows::Entity::find()
+            .filter(rows::Column::WorkspaceId.eq(setup.workspace_id))
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(jobs.len(), 0);
+    })
+    .await;
+}
