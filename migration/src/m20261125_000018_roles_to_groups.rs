@@ -6,7 +6,8 @@
 //! Stored policy documents lose the removed role actions, so every tenant keeps documents the application can parse.
 
 use sea_orm_migration::prelude::*;
-use sea_orm_migration::sea_orm::{ConnectionTrait, DbBackend, Statement, Value};
+use sea_orm_migration::sea_orm::{ConnectionTrait, DbBackend, QueryResult};
+use uuid::Uuid;
 
 use crate::helpers;
 
@@ -34,49 +35,45 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // SQLite has no column default for ids; a random 16-byte value is a valid UUID blob.
-        let (id_column, id_value) = if manager.get_database_backend() == DbBackend::Sqlite {
-            ("id, ", "randomblob(16), ")
-        } else {
-            ("", "")
-        };
-        let db = manager.get_connection();
-        let suffix = if manager.get_database_backend() == DbBackend::Sqlite {
-            "lower(substr(hex(g.id), 1, 8))"
-        } else {
-            "substr(g.id::text, 1, 8)"
-        };
-        db.execute_unprepared(&format!(
-            "UPDATE iam_groups SET name = name || ' (user-defined ' || (SELECT {suffix} FROM iam_groups g WHERE g.id = iam_groups.id) || ')'
-             WHERE EXISTS (SELECT 1 FROM iam_roles r WHERE r.tenant_id = iam_groups.tenant_id AND r.name = iam_groups.name)"
-        ))
+        rename_groups_that_share_a_role_name(manager).await?;
+        let roles = rows(
+            manager,
+            Query::select()
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("tenant_id"),
+                    Alias::new("name"),
+                ])
+                .from(Alias::new("iam_roles"))
+                .to_owned(),
+        )
         .await?;
-        db.execute_unprepared(&format!(
-            "INSERT INTO iam_groups ({id_column}tenant_id, name)
-             SELECT {id_value}r.tenant_id, r.name FROM iam_roles r
-             WHERE NOT EXISTS (SELECT 1 FROM iam_groups g WHERE g.tenant_id = r.tenant_id AND g.name = r.name)"
-        ))
-        .await?;
-        db.execute_unprepared(&format!(
-            "INSERT INTO iam_group_memberships ({id_column}tenant_id, group_id, user_id)
-             SELECT {id_value}a.tenant_id, g.id, a.user_id
-             FROM iam_user_role_attachments a
-             JOIN iam_roles r ON r.tenant_id = a.tenant_id AND r.id = a.role_id
-             JOIN iam_groups g ON g.tenant_id = r.tenant_id AND g.name = r.name
-             WHERE NOT EXISTS (SELECT 1 FROM iam_group_memberships m
-                 WHERE m.tenant_id = a.tenant_id AND m.group_id = g.id AND m.user_id = a.user_id)"
-        ))
-        .await?;
-        db.execute_unprepared(&format!(
-            "INSERT INTO iam_group_policy_attachments ({id_column}tenant_id, group_id, policy_id)
-             SELECT {id_value}a.tenant_id, g.id, a.policy_id
-             FROM iam_role_policy_attachments a
-             JOIN iam_roles r ON r.tenant_id = a.tenant_id AND r.id = a.role_id
-             JOIN iam_groups g ON g.tenant_id = r.tenant_id AND g.name = r.name
-             WHERE NOT EXISTS (SELECT 1 FROM iam_group_policy_attachments p
-                 WHERE p.tenant_id = a.tenant_id AND p.group_id = g.id AND p.policy_id = a.policy_id)"
-        ))
-        .await?;
+        for role in roles {
+            let (role_id, tenant_id) = (uuid(&role, "id")?, uuid(&role, "tenant_id")?);
+            let name: String = role.try_get("", "name")?;
+            let group_id = Uuid::now_v7();
+            insert(
+                manager,
+                "iam_groups",
+                ["id", "tenant_id", "name"],
+                [group_id.into(), tenant_id.into(), name.into()],
+            )
+            .await?;
+            copy_associations(
+                manager,
+                ("iam_user_role_attachments", "user_id"),
+                ("iam_group_memberships", "user_id"),
+                (role_id, group_id, tenant_id),
+            )
+            .await?;
+            copy_associations(
+                manager,
+                ("iam_role_policy_attachments", "policy_id"),
+                ("iam_group_policy_attachments", "policy_id"),
+                (role_id, group_id, tenant_id),
+            )
+            .await?;
+        }
         strip_removed_actions(manager).await?;
         for table in [
             "iam_user_role_attachments",
@@ -96,26 +93,129 @@ impl MigrationTrait for Migration {
     }
 }
 
+async fn rows(
+    manager: &SchemaManager<'_>,
+    select: SelectStatement,
+) -> Result<Vec<QueryResult>, DbErr> {
+    manager.get_connection().query_all(&select).await
+}
+
+fn uuid(row: &QueryResult, column: &str) -> Result<Uuid, DbErr> {
+    row.try_get("", column)
+}
+
+async fn insert<const N: usize>(
+    manager: &SchemaManager<'_>,
+    table: &str,
+    columns: [&str; N],
+    values: [SimpleExpr; N],
+) -> Result<(), DbErr> {
+    manager
+        .exec_stmt(
+            Query::insert()
+                .into_table(Alias::new(table))
+                .columns(columns.map(Alias::new))
+                .values_panic(values)
+                .to_owned(),
+        )
+        .await
+}
+
+/// A user-made group with a role's name keeps its members and gains none of the role's policies.
+async fn rename_groups_that_share_a_role_name(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    let colliding = rows(
+        manager,
+        Query::select()
+            .columns([
+                (Alias::new("iam_groups"), Alias::new("id")),
+                (Alias::new("iam_groups"), Alias::new("name")),
+            ])
+            .from(Alias::new("iam_groups"))
+            .inner_join(
+                Alias::new("iam_roles"),
+                Expr::col((Alias::new("iam_roles"), Alias::new("tenant_id")))
+                    .equals((Alias::new("iam_groups"), Alias::new("tenant_id")))
+                    .and(
+                        Expr::col((Alias::new("iam_roles"), Alias::new("name")))
+                            .equals((Alias::new("iam_groups"), Alias::new("name"))),
+                    ),
+            )
+            .to_owned(),
+    )
+    .await?;
+    for group in colliding {
+        let id = uuid(&group, "id")?;
+        let name: String = group.try_get("", "name")?;
+        manager
+            .exec_stmt(
+                Query::update()
+                    .table(Alias::new("iam_groups"))
+                    .value(
+                        Alias::new("name"),
+                        format!("{name} (user-defined {})", &id.simple().to_string()[..8]),
+                    )
+                    .and_where(Expr::col(Alias::new("id")).eq(id))
+                    .to_owned(),
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+/// Copies one role's rows of `from` onto the new group's rows of `to`.
+async fn copy_associations(
+    manager: &SchemaManager<'_>,
+    from: (&str, &str),
+    to: (&str, &str),
+    (role_id, group_id, tenant_id): (Uuid, Uuid, Uuid),
+) -> Result<(), DbErr> {
+    let (from_table, column) = from;
+    let attachments = rows(
+        manager,
+        Query::select()
+            .column(Alias::new(column))
+            .from(Alias::new(from_table))
+            .and_where(Expr::col(Alias::new("tenant_id")).eq(tenant_id))
+            .and_where(Expr::col(Alias::new("role_id")).eq(role_id))
+            .to_owned(),
+    )
+    .await?;
+    for attachment in attachments {
+        insert(
+            manager,
+            to.0,
+            ["id", "tenant_id", "group_id", to.1],
+            [
+                Uuid::now_v7().into(),
+                tenant_id.into(),
+                group_id.into(),
+                uuid(&attachment, column)?.into(),
+            ],
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 /// Removes the role actions from every stored policy document.
 /// A statement left without actions is dropped, and a document left without statements cannot be valid, so its policy and attachments are deleted.
 async fn strip_removed_actions(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    let db = manager.get_connection();
-    let backend = manager.get_database_backend();
-    let sqlite = backend == DbBackend::Sqlite;
-    let (p1, p2) = if sqlite { ("?", "?") } else { ("$1", "$2") };
-    let rows = db
-        .query_all_raw(Statement::from_string(
-            backend,
-            "SELECT id, document FROM iam_policies",
-        ))
-        .await?;
-    for row in rows {
-        let id: uuid::Uuid = row.try_get("", "id")?;
-        let document: serde_json::Value = if backend == DbBackend::Sqlite {
-            let text: String = row.try_get("", "document")?;
+    let sqlite = manager.get_database_backend() == DbBackend::Sqlite;
+    let policies = rows(
+        manager,
+        Query::select()
+            .columns([Alias::new("id"), Alias::new("document")])
+            .from(Alias::new("iam_policies"))
+            .to_owned(),
+    )
+    .await?;
+    for policy in policies {
+        let id = uuid(&policy, "id")?;
+        let document: serde_json::Value = if sqlite {
+            let text: String = policy.try_get("", "document")?;
             serde_json::from_str(&text).map_err(|error| DbErr::Custom(error.to_string()))?
         } else {
-            row.try_get("", "document")?
+            policy.try_get("", "document")?
         };
         let Some(statements) = document.get("statements").and_then(|s| s.as_array()) else {
             continue;
@@ -135,9 +235,7 @@ async fn strip_removed_actions(manager: &SchemaManager<'_>) -> Result<(), DbErr>
                     })
                     .cloned()
                     .collect();
-                if remaining.len() != actions.len() {
-                    changed = true;
-                }
+                changed |= remaining.len() != actions.len();
                 if remaining.is_empty() {
                     return None;
                 }
@@ -149,33 +247,33 @@ async fn strip_removed_actions(manager: &SchemaManager<'_>) -> Result<(), DbErr>
             continue;
         }
         if kept.is_empty() {
-            for sql in [
-                format!("DELETE FROM iam_user_policy_attachments WHERE policy_id = {p1}"),
-                format!("DELETE FROM iam_group_policy_attachments WHERE policy_id = {p1}"),
-                format!("DELETE FROM iam_role_policy_attachments WHERE policy_id = {p1}"),
-                format!("DELETE FROM iam_policies WHERE id = {p1}"),
+            for (table, column) in [
+                ("iam_user_policy_attachments", "policy_id"),
+                ("iam_group_policy_attachments", "policy_id"),
+                ("iam_role_policy_attachments", "policy_id"),
+                ("iam_policies", "id"),
             ] {
-                db.execute_raw(Statement::from_sql_and_values(
-                    backend,
-                    sql.as_str(),
-                    [Value::from(id)],
-                ))
-                .await?;
+                manager
+                    .exec_stmt(
+                        Query::delete()
+                            .from_table(Alias::new(table))
+                            .and_where(Expr::col(Alias::new(column)).eq(id))
+                            .to_owned(),
+                    )
+                    .await?;
             }
             continue;
         }
-        let updated = serde_json::json!({"statements": kept}).to_string();
-        let sql = if sqlite {
-            format!("UPDATE iam_policies SET document = {p1} WHERE id = {p2}")
-        } else {
-            format!("UPDATE iam_policies SET document = {p1}::jsonb WHERE id = {p2}")
-        };
-        db.execute_raw(Statement::from_sql_and_values(
-            backend,
-            sql.as_str(),
-            [Value::from(updated), Value::from(id)],
-        ))
-        .await?;
+        let updated = serde_json::json!({"statements": kept});
+        manager
+            .exec_stmt(
+                Query::update()
+                    .table(Alias::new("iam_policies"))
+                    .value(Alias::new("document"), updated)
+                    .and_where(Expr::col(Alias::new("id")).eq(id))
+                    .to_owned(),
+            )
+            .await?;
     }
     Ok(())
 }
