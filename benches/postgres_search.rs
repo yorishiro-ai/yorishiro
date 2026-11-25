@@ -6,7 +6,7 @@
 
 use std::time::Instant;
 
-use sea_orm::{ConnectionTrait, Database, DatabaseBackend, Statement, TransactionTrait};
+use sea_orm::{ConnectionTrait, Database, TransactionTrait};
 use uuid::Uuid;
 use yorishiro::models::search::{SearchQuery, search_by_vector};
 
@@ -34,15 +34,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = Database::connect(url).await?;
     let txn = db.begin().await?;
     txn.execute_unprepared("SET TRANSACTION READ ONLY").await?;
-    // The application's tenant-pool constructor is private; mirror its role and transaction-local RLS scope without booting jobs or migrations.
+    // The role switch has no query-builder form; the RLS scope is the application's own.
     txn.execute_unprepared("SET LOCAL ROLE yorishiro_app")
         .await?;
-    txn.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        "SELECT set_config('app.current_tenant', $1, true), set_config('app.current_workspace', $2, true)",
-        [tenant.to_string().into(), workspace.to_string().into()],
-    ))
-    .await?;
+    yorishiro::db::set_workspace_scope(&txn, tenant, workspace).await?;
     let mut milliseconds = Vec::with_capacity(5);
     for _ in 0..5 {
         let query = SearchQuery {

@@ -363,15 +363,7 @@ impl TenantDb {
         workspace_id: Uuid,
     ) -> Result<DatabaseTransaction, DbErr> {
         let txn = self.orm.begin().await?;
-
-        // `set_config` sets PostgreSQL session variables for RLS scoping.
-        // SeaORM has no API for executing non-SELECT configuration statements, so raw SQL is required.
-        txn.execute_raw(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "SELECT set_config('app.current_tenant', $1, true), set_config('app.current_workspace', $2, true)",
-            [tenant_id.to_string().into(), workspace_id.to_string().into()],
-        ))
-        .await?;
+        set_workspace_scope(&txn, tenant_id, workspace_id).await?;
 
         Ok(txn)
     }
@@ -414,6 +406,38 @@ impl TenantDb {
         .await?;
         Ok(conn)
     }
+}
+
+/// Scopes the transaction to a tenant and workspace for row-level security.
+///
+/// It sets the transaction-local `app.current_tenant` and `app.current_workspace`.
+/// `set_config` is a function call, so the statement is an ordinary `SELECT` built with `sea-query`.
+///
+/// # Errors
+/// Returns an error if the operation cannot be completed.
+pub async fn set_workspace_scope(
+    txn: &DatabaseTransaction,
+    tenant_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<(), DbErr> {
+    use sea_orm::sea_query::{Alias, Expr, Func, Query, SimpleExpr};
+
+    let set_local = |name: &str, value: Uuid| -> SimpleExpr {
+        Func::cust(Alias::new("set_config"))
+            .args([
+                Expr::val(name),
+                Expr::val(value.to_string()),
+                Expr::val(true),
+            ])
+            .into()
+    };
+    let scope = Query::select()
+        .expr(set_local("app.current_tenant", tenant_id))
+        .expr(set_local("app.current_workspace", workspace_id))
+        .to_owned();
+    txn.execute_raw(sea_orm::DatabaseBackend::Postgres.build(&scope))
+        .await?;
+    Ok(())
 }
 
 /// Begins the transaction one workspace's request work runs in.
