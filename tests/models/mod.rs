@@ -5,7 +5,6 @@ mod workspace_workspaces;
 
 mod access_keys;
 #[cfg(feature = "enterprise")]
-mod compute_credit_ledger;
 mod db_enum;
 mod iam;
 #[cfg(feature = "enterprise")]

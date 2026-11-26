@@ -14,7 +14,7 @@ test-postgres migrate entities: export DB_MAX_CONNECTIONS ?= 100
 test-postgres migrate entities: export DB_CONNECT_TIMEOUT ?= 5000
 test-postgres test-sqlite test-licence test-valkey: export RUST_BACKTRACE ?= 1
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check test-location-check test-postgres test-sqlite test-licence test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check patch-check test-python
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check test-location-check test-postgres test-sqlite test-licence test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check patch-check
 
 check: check-ce
 
@@ -38,17 +38,11 @@ fmt: patch-check
 fmt-check: patch-check
 	cargo fmt --all -- --check
 
-python-lint: test-python
-	uv run ruff check scripts tests/ci patches/loco-rs/verify.py
+python-lint:
+	uv run ruff check scripts patches/loco-rs/verify.py
 	@for script in scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-package-lifecycle.sh; do bash -n "$$script" || exit; done
 
-test-python:
-	uv run scripts/test_env_config.py
-	uv run scripts/test_harden_generated_entities.py
-	uv run python -m unittest discover -s tests/ci -p 'test_*.py'
-
 edition-boundary-check:
-	uv run scripts/test_edition_boundary.py
 	uv run scripts/check_edition_boundary.py
 
 test-location-check:

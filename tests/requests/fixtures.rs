@@ -11,6 +11,7 @@ use yorishiro::models::tenancy;
 
 /// Caps the tenant's workspaces.
 /// No public operation changes this cap (only a plan does), so this is the one place a test writes it directly.
+#[cfg(feature = "enterprise")]
 pub(crate) async fn set_workspace_cap(ctx: &AppContext, tenant_id: Uuid, cap: i32) {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
     yorishiro::models::tenant_tenants::ActiveModel {
@@ -22,7 +23,6 @@ pub(crate) async fn set_workspace_cap(ctx: &AppContext, tenant_id: Uuid, cap: i3
     .await
     .expect("set the workspace cap");
 }
-
 /// Disables the tenant through the operator operation the `disable_tenant` task runs.
 pub(crate) async fn disable_tenant(ctx: &AppContext, tenant_id: Uuid) {
     yorishiro::models::tenant_tenants::retirement::disable_by_operator(

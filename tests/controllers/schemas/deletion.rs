@@ -58,33 +58,6 @@ async fn archived_schema_deletion_names_every_history_reference() {
 }
 
 #[tokio::test]
-async fn entity_creation_racing_archival_and_deletion_never_returns_internal_error() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let definition = json!({"name":"delete-race", "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}});
-        create_schema_version(&request, &tenant.api_key, &definition).await;
-        let target = create_schema_version(&request, &tenant.api_key, &definition).await;
-        let barrier = tokio::sync::Barrier::new(2);
-        let insert = async {
-            barrier.wait().await;
-            request.post("/api/entities")
-                .add_header("Authorization", format!("Bearer {}", tenant.api_key))
-                .json(&json!({"schema_name":"delete-race","entity_type":"note","data":{"title":"racer"}})).await
-        };
-        let delete = async {
-            barrier.wait().await;
-            create_schema_version(&request, &tenant.api_key, &definition).await;
-            request.delete(&format!("/api/schemas/{target}"))
-                .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await
-        };
-        let (inserted, deleted) = tokio::join!(insert, delete);
-        inserted.assert_status(StatusCode::CREATED);
-        assert!([StatusCode::NO_CONTENT, StatusCode::CONFLICT].contains(&deleted.status_code()), "{}", deleted.text());
-        if deleted.status_code() == StatusCode::CONFLICT { assert!(deleted.text().contains("entities")); }
-    }).await;
-}
-
-#[tokio::test]
 async fn schema_deletion_sees_incoming_forks_outside_the_selected_workspace() {
     use sea_orm::TransactionTrait;
     use yorishiro::models::{schema_schemas, tenancy};

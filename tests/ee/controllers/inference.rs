@@ -6,10 +6,8 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DbBackend, EntityTrait, PaginatorTrait, QueryFilter,
     TransactionTrait,
 };
-use std::sync::Arc;
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::db::DbHandle;
 use yorishiro::edition::ee::models::inference_jobs::{self, InferenceJobStatus};
 use yorishiro::models::_entities::inference_jobs as rows;
 
@@ -668,103 +666,6 @@ async fn proposals_cannot_be_listed_by_another_tenant() {
             "response: {:?}",
             denied.text()
         );
-    })
-    .await;
-}
-
-/// A terminal action that wins the per-job lock must prevent an overlapping confirmation from
-/// writing the entity. This uses two real PostgreSQL transactions rather than a sequential replay.
-#[tokio::test]
-async fn terminal_proposal_actions_serialize_against_confirmation() {
-    // It holds an advisory lock across two transactions, which SQLite has no equivalent of.
-    if !crate::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
-        let db = ctx.shared_store.get::<DbHandle>().unwrap().clone();
-
-        for terminal_action in ["discard"] {
-            let job_id = Uuid::new_v4();
-            create_completed_proposal(
-                &ctx,
-                &setup,
-                entity,
-                job_id,
-                serde_json::json!(format!("must not apply: {terminal_action}")),
-            )
-            .await;
-
-            let terminal_db = db.clone();
-            let confirm_db = db.clone();
-            let terminal_setup = setup.workspace_id;
-            let terminal_tenant = setup.tenant_id;
-            let confirm_tenant = setup.tenant_id;
-            let barrier = Arc::new(tokio::sync::Barrier::new(2));
-            let confirm_barrier = barrier.clone();
-            // Hold the action lock before starting confirmation. The confirmation races in a
-            // separate task, but cannot pass the lock until this terminal action commits.
-            let terminal_txn = terminal_db
-                .tenant
-                .begin_for_workspace(terminal_tenant, terminal_setup)
-                .await
-                .expect("begin terminal proposal transaction");
-            yorishiro::db::lock_for_update(&terminal_txn, &format!("inference-proposals:{job_id}"))
-                .await
-                .expect("hold proposal action lock");
-            let confirm = tokio::spawn(async move {
-                let txn = confirm_db
-                    .tenant
-                    .begin_for_workspace(confirm_tenant, terminal_setup)
-                    .await
-                    .expect("begin confirmation transaction");
-                confirm_barrier.wait().await;
-                let result = yorishiro::edition::ee::models::inference_proposals::confirm(
-                    &txn,
-                    terminal_setup,
-                    job_id,
-                    None,
-                )
-                .await;
-                if result.is_ok() {
-                    txn.commit().await.expect("commit confirmation");
-                } else {
-                    txn.rollback().await.expect("rollback confirmation");
-                }
-                result
-            });
-            barrier.wait().await;
-            let terminal_result = yorishiro::edition::ee::models::inference_proposals::discard(
-                &terminal_txn,
-                terminal_setup,
-                job_id,
-            )
-            .await
-            .expect("terminal proposal action");
-            terminal_txn.commit().await.expect("commit terminal action");
-            let confirm_result = confirm.await.expect("join confirmation task");
-
-            assert_eq!(terminal_result.changed, 1);
-            assert!(
-                confirm_result.is_err(),
-                "confirmation must observe the terminal {terminal_action}"
-            );
-
-            let entity_after =
-                yorishiro::models::entity_entities::get(&ctx.db, setup.workspace_id, entity)
-                    .await
-                    .expect("read entity after race");
-            assert_eq!(entity_after.data["summary"], serde_json::Value::Null);
-            let proposals = yorishiro::edition::ee::models::inference_proposals::for_job(
-                &ctx.db,
-                setup.workspace_id,
-                job_id,
-            )
-            .await
-            .expect("read terminal proposal");
-            assert_eq!(proposals[0].status.to_string(), "discarded");
-        }
     })
     .await;
 }

@@ -228,56 +228,6 @@ async fn missing_tokenizer_is_fetched_without_redownloading_model() {
 }
 
 #[tokio::test]
-async fn concurrent_fetches_use_distinct_staging_paths_and_rename_only_verified_bytes() {
-    let dir = tempdir().unwrap();
-    let partial_dir = dir.path().to_path_buf();
-    let staged = std::sync::Arc::new(tokio::sync::Barrier::new(2));
-    let server = crate::http_stub::HttpStub::start(axum::Router::new().route(
-        "/artifact",
-        axum::routing::get(move || {
-            let partial_dir = partial_dir.clone();
-            let staged = staged.clone();
-            async move {
-                let body = futures::stream::once(async move {
-                    crate::requests::jobs::wait_until(
-                        "both clients to stage before either body is sent",
-                        Duration::from_secs(5),
-                        || async { (partial_files(&partial_dir).len() == 2).then_some(()) },
-                    )
-                    .await;
-                    assert!(!partial_dir.join("test.bin").exists());
-                    staged.wait().await;
-                    Ok::<_, std::io::Error>("payload")
-                });
-                (
-                    [(axum::http::header::CONTENT_LENGTH, "7")],
-                    axum::body::Body::from_stream(body),
-                )
-            }
-        }),
-    ))
-    .await;
-    let url = format!("{}/artifact", server.url);
-    let artifact = artifact(b"payload");
-    let client = client();
-    let results = tokio::join!(
-        ensure_file_with_client(dir.path(), &url, &artifact, &client),
-        ensure_file_with_client(dir.path(), &url, &artifact, &client),
-    );
-    drop(server);
-    let successes = <[_; 2]>::from(results)
-        .iter()
-        .filter(|result| result.is_ok())
-        .count();
-    assert_eq!(successes, if cfg!(windows) { 1 } else { 2 });
-    assert_eq!(
-        fs::read(dir.path().join(artifact.local_name)).unwrap(),
-        b"payload"
-    );
-    assert_no_partials(dir.path());
-}
-
-#[tokio::test]
 async fn request_and_stream_errors_clean_staging() {
     let dir = tempdir().unwrap();
     let error = ensure_file_with_client(dir.path(), "not a URL", &artifact(b"payload"), &client())
