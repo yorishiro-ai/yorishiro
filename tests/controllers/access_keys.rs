@@ -214,9 +214,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
-        // A workspace-bound key cannot mint a tenant-scoped one.
         let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
-        // A tenant-scoped admin key can, and the new key carries no workspace binding.
         let issuer = access_keys::Entity::create_tenant_access_key(
             &ctx.db,
             tenant.tenant_id,

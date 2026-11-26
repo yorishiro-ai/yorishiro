@@ -1507,7 +1507,7 @@ async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
 /// On SQLite, the search function's trigram half (`pg_trgm` on PostgreSQL) is replaced by an
 /// FTS5 query against `entity_fts` with `tokenize='trigram'`. This test boots
 /// against a SQLite file database to confirm the FTS5 path works end to end, including schema
-/// creation, entity insertion, and trigger-driven index updates.
+/// creation, entity insertion, and the FTS index updates the entity model makes.
 #[tokio::test]
 async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
     if !crate::require_sqlite_backend() {

@@ -500,7 +500,7 @@ pub struct AccessIdentity {
     pub tenant_root: bool,
 }
 
-/// Resolves names and binding after revalidating the credential and membership.
+/// Resolves names and the target workspace after revalidating the credential and membership.
 ///
 /// # Errors
 /// Rejects stale credentials and invalid target bindings or propagates lookup failures.

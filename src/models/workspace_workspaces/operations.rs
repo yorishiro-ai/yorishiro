@@ -86,7 +86,7 @@ pub(crate) async fn delete_workspace(
         .await
         .map_err(|err| {
             // Let the foreign key fence concurrent fork creation instead of racing a preflight count.
-            // SeaORM does not map PostgreSQL restrict_violation or SQLite RESTRICT triggers.
+            // SeaORM does not map PostgreSQL restrict_violation or SQLite RESTRICT foreign keys.
             let restricted_foreign_key = matches!(
                 &err,
                 DbErr::Exec(RuntimeErr::SqlxError(error))

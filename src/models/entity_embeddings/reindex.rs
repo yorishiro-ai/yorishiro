@@ -204,7 +204,7 @@ pub(crate) async fn reindex_workspace_as(
     }
 
     if failures.is_empty() {
-        // Mutation triggers take this same row lock before changing entities or provider settings.
+        // Entity and provider writes take this same row lock before changing entities or provider settings.
         let txn = crate::db::begin_write(conn).await.internal()?;
         authorize_reindex(&txn, workspace_id, actor).await?;
         workspace_workspaces::fence_embedding(&txn, workspace_id, revision).await?;

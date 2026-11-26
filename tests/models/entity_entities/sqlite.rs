@@ -133,8 +133,8 @@ async fn fts_rows(db: &sea_orm::DatabaseConnection) -> i64 {
         .n
 }
 
-/// The token triggers update the row they just wrote.
-/// That nested update must not reach `entity_fts_au`, or every entity would be indexed twice.
+/// Assigning the sync token updates the row the write just stored.
+/// That second update must not index the entity again, or every entity would appear twice.
 #[tokio::test]
 async fn token_rotation_does_not_duplicate_fts_rows_on_sqlite() {
     if !crate::require_sqlite_backend() {

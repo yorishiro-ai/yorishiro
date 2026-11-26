@@ -74,8 +74,8 @@ pub trait Authenticator: Send + Sync {
     ) -> Result<AuthContext, YorishiroError>;
 }
 
-/// Authentication preserves a key's binding or the requested workspace.
-/// When neither is set, each operation decides whether to span or infer workspaces.
+/// Authentication resolves the workspace from the request, or from the tenant's only workspace.
+/// When neither applies, each operation decides whether to span workspaces or ask for a selection.
 pub(crate) struct DefaultAuthenticator;
 
 /// Reads the workspace a request asks a tenant-scoped key to act on.

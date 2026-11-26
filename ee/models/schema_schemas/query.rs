@@ -36,7 +36,7 @@ struct Row {
 /// Nothing is applied.
 /// The upstream edit does not reach the copy on its own (an automatic update could make stored entities invalid against a definition nobody here chose), so this reports and the workspace decides.
 ///
-/// A schema whose template was deleted is not reported: the trigger has already detached it, and there is no longer an update to take.
+/// A schema whose template was deleted is not reported: deleting the template already detached it, and there is no longer an update to take.
 /// `linked` is the whole population here.
 ///
 /// The explicit `origin_updated_at IS NULL` state is the source of truth.
