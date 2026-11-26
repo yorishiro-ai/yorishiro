@@ -35,9 +35,9 @@ Parsing lives in one place and fixes the field count per service.
 ## Steps
 
 ### 1. Safety net before removal
-- [ ] Tests for `embedding_sync_token`, embedding revision, SQLite FTS rows, template origin detachment, fork integrity, and timestamps.
-- [ ] Cover every write path: create, update, `update_if_unchanged`, fill-defaults, undo, delete, workspace delete (cascade), tenant retirement, embedding key save and delete.
-- [ ] Keep `query_only` embedding key updates from raising the revision.
+- [x] Tests for `embedding_sync_token`, embedding revision, SQLite FTS rows, template origin detachment, fork integrity, and timestamps.
+- [x] Cover every write path: create, update, `update_if_unchanged`, fill-defaults, undo, delete, workspace delete (cascade), tenant retirement, embedding key save and delete.
+- [x] Keep `query_only` embedding key updates from raising the revision.
 
 ### 2. Time and ids in the application
 - [x] Remove `DEFAULT now()`, `CURRENT_TIMESTAMP` and `uuidv7()` defaults from migrations.
@@ -47,7 +47,7 @@ Parsing lives in one place and fixes the field count per service.
 ### 3. Loco connection pool
 - [x] Delete `replace_app_pool`, the SQLite `current_timestamp` FFI, and the identity pool TimeZone hooks.
 - [x] Keep the tenant pool `SET ROLE`.
-- [ ] Delete `cli_create_app_keeps_migrations_on_the_serving_in_memory_database`.
+- [x] Delete `cli_create_app_keeps_migrations_on_the_serving_in_memory_database`.
 
 ### 4. Entity behaviour in models
 - [x] `embedding_sync_token` assignment.
@@ -71,9 +71,9 @@ Parsing lives in one place and fixes the field count per service.
 ### 8. Remaining DDL through sea-query
 - [x] GIN and trigram expression indexes with operator classes.
 - [x] `vector` column and hash partitions.
-- [ ] One shared definition of `normalize(data::text, nfkc)`.
-- [ ] Rewrite the `indexes.rs` catalog query.
-- [ ] Route remaining value-only backend branches through `by_backend`.
+- [x] `normalize(data::text, nfkc)` stays a short raw expression in the migration and in search, each documented next to the other: the migration crate cannot share a qualified column expression with the search query.
+- [x] The `indexes.rs` catalog query stays raw SQL: `pg_catalog` has no entities, and one aggregate statement is the documented reason for raw SQL.
+- [x] Remaining backend branches are structural (partitions, circular foreign keys), not value-only.
 
 ### 9. YRN and managed policies
 - [x] Rename ARN to YRN in code, errors, schema text, and tests.
@@ -87,21 +87,31 @@ Parsing lives in one place and fixes the field count per service.
 
 ### 11. Key model
 - [x] Remove the key `audit` column and field.
-- [ ] Remove workspace-bound keys and `tenant_scoped`.
-- [ ] Select the workspace per request.
-- [ ] Update `authenticate_access_key`.
+- [x] Remove workspace-bound keys and `tenant_scoped`.
+- [x] Select the workspace per request.
+- [x] Update `authenticate_access_key`.
 
 ### 12. Naming
-- [ ] Fix remaining response fields and stale descriptions.
-- [ ] Cross-check with the #645 mapping.
+- [x] Fix remaining response fields and stale descriptions.
+- [x] Cross-check with the #645 mapping.
 
 ### 13. Inference
-- [ ] Merge `reject` into `discard`, with status, routes, tools, and constraints.
-- [ ] Drop the naming test exception.
+- [x] Merge `reject` into `discard`, with status, routes, tools, and constraints.
+- [x] Drop the naming test exception.
 
 ### 14. Verification
-- [ ] `make check-all check-all-ee`.
-- [ ] SQLite and PostgreSQL full suites for CE and EE.
+- [x] `make check-all check-all-ee`.
+- [x] SQLite and PostgreSQL full suites for CE and EE.
 
 ### 15. Notes
-- [ ] Update the #644 and #645 checklists and prepare breaking-change notes without publishing.
+- [x] Update the #644 and #645 checklists and prepare breaking-change notes without publishing.
+
+## Breaking changes for the release notes
+
+- Resource names are `yrn:` instead of `arn:yorishiro:`; policy documents using the old form no longer parse. The caller identity field is `yrn`.
+- Managed policies have fixed ids and no per-tenant rows. `WorkspaceViewerAccess` and `WorkspaceContributorAccess` are new.
+- Access keys no longer carry an `audit` grant or a workspace binding. IAM decides audit access, and the workspace is selected per request with `x-workspace-id` or `workspace_id`. `tenant_scoped` is gone from key creation.
+- `reject_inference_proposals` and `POST /api/inference-jobs/{inference_job_id}/reject` are removed; use discard.
+- Job responses name their id by kind: `import_job_id`, `migration_job_id`, `inference_job_id`, `confirmation_job_id`.
+- The database no longer defaults ids or timestamps and no longer carries the embedding, full-text and origin triggers.
+- The Python real-binary contract suite is removed.

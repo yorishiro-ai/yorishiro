@@ -3,33 +3,10 @@
 use super::{
     AccessKeyChange, ActiveModel, ActiveModelTrait, ActiveValue, AuthContext, ColumnTrait,
     ConnectionTrait, DatabaseConnection, Entity, EntityTrait, Expr, KeyGrant, Model, QueryFilter,
-    QueryOrder, QuerySelect, ResultExt, Uuid, YorishiroError, generate_key, hash_key,
-    validate_key_name,
+    QueryOrder, ResultExt, Uuid, YorishiroError, generate_key, hash_key, validate_key_name,
 };
 
 impl Entity {
-    /// Every access key issued for a workspace, oldest first.
-    /// Never returns `key_hash`: the plaintext key is shown once, at creation, and this listing exists for operators to see what exists and revoke by id, not to recover a lost key.
-    ///
-    /// # Errors
-    /// Returns an error if the operation cannot be completed.
-    pub async fn list_for_workspace(
-        conn: &impl ConnectionTrait,
-        workspace_id: Uuid,
-        page: crate::models::pagination::ListParams,
-    ) -> Result<Vec<Model>, YorishiroError> {
-        use crate::models::_entities::access_keys::Column;
-
-        Self::find()
-            .filter(Column::WorkspaceId.eq(workspace_id))
-            .order_by_asc(Column::CreatedAt)
-            .limit(page.limit())
-            .offset(page.offset())
-            .all(conn)
-            .await
-            .internal()
-    }
-
     /// Every key in a tenant, oldest first.
     pub(crate) async fn list_with_grants_as(
         db: &DatabaseConnection,

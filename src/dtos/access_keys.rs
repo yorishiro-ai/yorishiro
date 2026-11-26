@@ -8,10 +8,6 @@ use uuid::Uuid;
 pub(crate) struct CreateAccessKeyRequest {
     pub(crate) name: String,
     pub(crate) expires_at: Option<DateTime<chrono::FixedOffset>>,
-    /// Issue a tenant-scoped key without a workspace binding.
-    /// Requires the `iam:CreateAccessKey` action and a tenant-scoped issuing credential.
-    #[serde(default)]
-    pub(crate) tenant_scoped: bool,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -40,22 +36,6 @@ impl UpdateAccessKeyRequest {
             replace_expires_at: self.replace_expires_at,
             enabled: self.enabled,
         }
-    }
-}
-
-impl CreateAccessKeyRequest {
-    pub(crate) fn validate_workspace_selection(
-        &self,
-        selected: bool,
-    ) -> Result<(), crate::YorishiroError> {
-        if self.tenant_scoped && selected {
-            return Err(crate::YorishiroError::ValidationFailed {
-                message: "tenant_scoped cannot be combined with a workspace selector".into(),
-                details: vec![],
-                hint: "omit the workspace selector for an unbound key".into(),
-            });
-        }
-        Ok(())
     }
 }
 

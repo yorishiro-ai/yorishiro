@@ -497,7 +497,7 @@ async fn create_completed_proposal(
     clippy::too_many_lines,
     reason = "the same reviewer crosses implicit deny, explicit deny, detached, and allowed policies before comparing REST and MCP proposal results"
 )]
-async fn proposals_can_be_listed_rejected_and_discarded() {
+async fn proposals_can_be_listed_and_discarded() {
     boot_request::<App, _, _>(|request, ctx| async move {
         crate::requests::require_licence(&ctx);
         let session = crate::controllers::mcp::initialize(&request).await;
@@ -558,13 +558,13 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
                 request.get(&path).add_header("Authorization", format!("Bearer {}", key.plaintext))
                     .await.assert_status(StatusCode::FORBIDDEN);
             }
-            for action in ["reject", "discard"] {
+            for action in ["discard"] {
                 request.post(&format!("/api/inference-jobs/{rejected_job}/{action}"))
                     .add_header("Authorization", format!("Bearer {}", key.plaintext))
                     .await.assert_status(StatusCode::FORBIDDEN);
             }
             for (index, name) in ["get_inference_job", "list_inference_proposals", "get_inference_confirmation",
-                "reject_inference_proposals", "discard_inference_proposals", "confirm_inference_proposals"].into_iter().enumerate() {
+                "discard_inference_proposals", "confirm_inference_proposals"].into_iter().enumerate() {
                 let arguments = if name == "get_inference_confirmation" {
                     serde_json::json!({"confirmation_job_id":rejected_job})
                 } else {
@@ -607,7 +607,7 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
         assert_eq!(unchanged.json::<serde_json::Value>()[0]["status"], "pending");
 
         let rejected = request
-            .post(&format!("/api/inference-jobs/{rejected_job}/reject"))
+            .post(&format!("/api/inference-jobs/{rejected_job}/discard"))
             .add_header("Authorization", format!("Bearer {}", key.plaintext))
             .await;
         assert_eq!(
@@ -652,7 +652,7 @@ async fn proposals_cannot_be_listed_by_another_tenant() {
         )
         .await;
         let rejected = request
-            .post(&format!("/api/inference-jobs/{rejected_job}/reject"))
+            .post(&format!("/api/inference-jobs/{rejected_job}/discard"))
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         rejected.assert_status_ok();
@@ -685,7 +685,7 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
         let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let db = ctx.shared_store.get::<DbHandle>().unwrap().clone();
 
-        for terminal_action in ["reject", "discard"] {
+        for terminal_action in ["discard"] {
             let job_id = Uuid::new_v4();
             create_completed_proposal(
                 &ctx,
@@ -735,21 +735,12 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
                 result
             });
             barrier.wait().await;
-            let terminal_result = if terminal_action == "reject" {
-                yorishiro::edition::ee::models::inference_proposals::reject(
-                    &terminal_txn,
-                    terminal_setup,
-                    job_id,
-                )
-                .await
-            } else {
-                yorishiro::edition::ee::models::inference_proposals::discard(
-                    &terminal_txn,
-                    terminal_setup,
-                    job_id,
-                )
-                .await
-            }
+            let terminal_result = yorishiro::edition::ee::models::inference_proposals::discard(
+                &terminal_txn,
+                terminal_setup,
+                job_id,
+            )
+            .await
             .expect("terminal proposal action");
             terminal_txn.commit().await.expect("commit terminal action");
             let confirm_result = confirm.await.expect("join confirmation task");
@@ -772,14 +763,7 @@ async fn terminal_proposal_actions_serialize_against_confirmation() {
             )
             .await
             .expect("read terminal proposal");
-            assert_eq!(
-                proposals[0].status.to_string(),
-                if terminal_action == "reject" {
-                    "rejected"
-                } else {
-                    "discarded"
-                }
-            );
+            assert_eq!(proposals[0].status.to_string(), "discarded");
         }
     })
     .await;

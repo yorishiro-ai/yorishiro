@@ -137,12 +137,6 @@ pub fn inference_job_status_routes() -> Routes {
             }),
         )
         .add(
-            "/{inference_job_id}/reject",
-            aide::axum::routing::post_with(reject_proposals, |op| {
-                op.id("RejectInferenceProposals")
-            }),
-        )
-        .add(
             "/{inference_job_id}/discard",
             aide::axum::routing::post_with(discard_proposals, |op| {
                 op.id("DiscardInferenceProposals")
@@ -186,18 +180,6 @@ async fn list_proposals(
 ) -> Result<Json<Vec<inference_proposals::ProposalRecord>>, ApiError> {
     Ok(Json(
         inference_proposals::for_job_as(&ctx.db, &auth, parse_job_id(&job_id)?).await?,
-    ))
-}
-
-async fn reject_proposals(
-    State(ctx): State<AppContext>,
-    WorkspaceAuthenticated(auth): WorkspaceAuthenticated,
-    Path(crate::dtos::common::InferenceJobIdPath {
-        inference_job_id: job_id,
-    }): Path<crate::dtos::common::InferenceJobIdPath>,
-) -> Result<Json<inference_proposals::ProposalActionReport>, ApiError> {
-    Ok(Json(
-        inference_proposals::reject_as(&ctx.db, &auth, parse_job_id(&job_id)?).await?,
     ))
 }
 

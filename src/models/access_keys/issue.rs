@@ -7,20 +7,21 @@ use super::{
 };
 
 impl Entity {
-    /// Issues a new access key of the form `ysr_<prefix>_<secret>`, with 48 random alphanumeric secret characters (over 285 bits of entropy).
-    /// SHA-256 is sufficient here rather than a slow KDF like bcrypt/argon2, since access keys already carry enough entropy that offline brute-forcing isn't a realistic threat.
+    /// Issues a key for the tenant that owns `workspace_id`, which only names the tenant.
     ///
     /// # Errors
-    /// Returns an error if the operation cannot be completed.
+    /// Returns an error if the workspace does not exist or the key cannot be stored.
     pub async fn create_access_key(
         db: &DatabaseConnection,
         workspace_id: Uuid,
         user_id: Option<Uuid>,
-    ) -> Result<CreatedAccessKey, YorishiroError> {
-        Self::create_named_access_key(db, workspace_id, user_id, "unnamed", None, None).await
+    ) -> Result<CreatedTenantAccessKey, YorishiroError> {
+        let tenant_id =
+            crate::models::workspace_workspaces::get_workspace_tenant(db, workspace_id).await?;
+        Self::create_tenant_access_key(db, tenant_id, user_id, "unnamed").await
     }
 
-    /// Issues a key without a workspace, so it acts on the caller's tenant and names its workspace per request.
+    /// Issues a key that acts on the tenant and names its workspace per request.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -48,7 +49,6 @@ impl Entity {
         let (prefix, plaintext) = generate_key();
         let inserted = ActiveModel {
             tenant_id: ActiveValue::Set(tenant_id),
-            workspace_id: ActiveValue::Set(None),
             user_id: ActiveValue::Set(user_id),
             key_hash: ActiveValue::Set(hash_key(&plaintext)),
             key_prefix: ActiveValue::Set(prefix),
@@ -74,7 +74,6 @@ impl Entity {
         let (prefix, plaintext) = super::generate_key_with_prefix(super::LOGIN_KEY_PREFIX);
         let inserted = ActiveModel {
             tenant_id: ActiveValue::Set(tenant_id),
-            workspace_id: ActiveValue::Set(None),
             user_id: ActiveValue::Set(Some(user_id)),
             key_hash: ActiveValue::Set(hash_key(&plaintext)),
             key_prefix: ActiveValue::Set(prefix),
@@ -93,29 +92,11 @@ impl Entity {
         })
     }
 
-    pub(crate) async fn create_delegated_access_key(
-        db: &DatabaseConnection,
-        issuer: &AuthContext,
-        name: &str,
-        expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,
-    ) -> Result<CreatedAccessKey, YorishiroError> {
-        Self::create_named_access_key(
-            db,
-            issuer.require_workspace()?,
-            issuer.user_id,
-            name,
-            Some(issuer),
-            expires_at,
-        )
-        .await
-    }
-
-    /// Issues a tenant-scoped key on the issuer's behalf: no workspace binding, per-request workspace selection, tenant Admin or Owner only.
-    /// A workspace-bound issuer cannot mint one, since its authority never left that workspace.
+    /// Issues a key on the issuer's behalf, limited by the issuer's own expiry unless the issuer is a root session.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
-    pub(crate) async fn create_delegated_tenant_access_key(
+    pub(crate) async fn create_delegated_access_key(
         db: &DatabaseConnection,
         issuer: &AuthContext,
         name: &str,
@@ -147,15 +128,6 @@ impl Entity {
             .await
             .internal()?
             .ok_or(YorishiroError::Unauthenticated)?;
-        if issuer_key.workspace_id.is_some()
-            && !Model::is_root_credential(&txn, issuer.access_key_id).await?
-        {
-            return Err(YorishiroError::AccessDenied {
-                message: "a tenant-scoped key can only be issued with a tenant-scoped credential"
-                    .into(),
-                hint: "issue it from a key without a workspace binding".into(),
-            });
-        }
         if !Model::is_root_credential(&txn, issuer.access_key_id).await?
             && let Some(limit) = issuer_key.expires_at
             && expires_at.is_none_or(|expiry| expiry > limit)
@@ -171,7 +143,6 @@ impl Entity {
         let (prefix, plaintext) = generate_key();
         let inserted = ActiveModel {
             tenant_id: ActiveValue::Set(issuer.tenant_id),
-            workspace_id: ActiveValue::Set(None),
             user_id: ActiveValue::Set(issuer.user_id),
             key_hash: ActiveValue::Set(hash_key(&plaintext)),
             key_prefix: ActiveValue::Set(prefix),
@@ -194,102 +165,6 @@ impl Entity {
 
         Ok(CreatedAccessKey {
             id: inserted.id,
-            workspace_id: None,
-            grant,
-            key_prefix: inserted.key_prefix,
-            name: inserted.name,
-            created_at: inserted.created_at,
-            plaintext,
-        })
-    }
-
-    /// Issues a key and validates attribution while holding the membership fence.
-    async fn create_named_access_key(
-        db: &DatabaseConnection,
-        workspace_id: Uuid,
-        user_id: Option<Uuid>,
-        name: &str,
-        issuer: Option<&AuthContext>,
-        expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,
-    ) -> Result<CreatedAccessKey, YorishiroError> {
-        use crate::models::_entities::workspace_workspaces;
-
-        let txn = crate::db::begin_write(db).await.internal()?;
-        let name = validate_key_name(name)?;
-        if expires_at.is_some_and(|expires| expires <= crate::data::time::now()) {
-            return Err(YorishiroError::ValidationFailed {
-                message: "key expiry must be in the future".into(),
-                details: vec![],
-                hint: "choose a future expires_at or omit it".into(),
-            });
-        }
-
-        let workspace = workspace_workspaces::Entity::find_by_id(workspace_id)
-            .one(&txn)
-            .await
-            .internal()?
-            .ok_or_else(|| YorishiroError::not_found("workspace not found"))?;
-
-        crate::models::iam::access::require_key_attribution(&txn, workspace.tenant_id, user_id)
-            .await?;
-
-        if let Some(issuer) = issuer {
-            crate::models::iam::access::require_iam_action(
-                &txn,
-                issuer,
-                crate::models::iam::policy::Action::CreateAccessKey,
-                crate::models::iam::policy::Resource::Tenant {
-                    tenant_id: workspace.tenant_id,
-                },
-            )
-            .await?;
-            let current = Model::current_context(&txn, issuer).await?;
-            crate::models::tenant_tenants::Model::require_active(&txn, current.tenant_id).await?;
-            let issuer_key = Self::find_by_id(issuer.access_key_id)
-                .one(&txn)
-                .await
-                .internal()?
-                .ok_or(YorishiroError::Unauthenticated)?;
-            if !Model::is_root_credential(&txn, issuer.access_key_id).await?
-                && let Some(limit) = issuer_key.expires_at
-                && expires_at.is_none_or(|expiry| expiry > limit)
-            {
-                return Err(YorishiroError::AccessDenied {
-                    message: "requested expiry exceeds the issuing key's lifetime".into(),
-                    hint: "set expires_at no later than the issuing key's expiry".into(),
-                });
-            }
-        }
-
-        let (prefix, plaintext) = generate_key();
-        let key_hash = hash_key(&plaintext);
-
-        let active = ActiveModel {
-            workspace_id: ActiveValue::Set(Some(workspace_id)),
-            tenant_id: ActiveValue::Set(workspace.tenant_id),
-            user_id: ActiveValue::Set(user_id),
-            key_hash: ActiveValue::Set(key_hash),
-            key_prefix: ActiveValue::Set(prefix),
-            name: ActiveValue::Set(name.clone()),
-            expires_at: ActiveValue::Set(expires_at),
-            ..Default::default()
-        };
-        let inserted = active.insert(&txn).await.internal()?;
-        let grant = inserted.grant_metadata();
-        if let Some(issuer) = issuer {
-            crate::models::iam_audit_events::record(
-                &txn,
-                issuer,
-                crate::models::iam::policy::Action::CreateAccessKey,
-                serde_json::json!({"access_key_id": inserted.id}),
-            )
-            .await?;
-        }
-        txn.commit().await.internal()?;
-
-        Ok(CreatedAccessKey {
-            id: inserted.id,
-            workspace_id: Some(workspace_id),
             grant,
             key_prefix: inserted.key_prefix,
             name: inserted.name,

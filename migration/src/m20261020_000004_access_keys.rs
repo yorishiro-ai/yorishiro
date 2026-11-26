@@ -23,10 +23,6 @@ impl MigrationTrait for Migration {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "ordered migration DDL keeps table definitions, constraints, and grants together"
-)]
 async fn up_access_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     manager
         .create_table(
@@ -38,14 +34,6 @@ async fn up_access_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                         .string()
                         .not_null()
                         .default("unnamed"),
-                )
-                .col(helpers::uuid_col(manager, Alias::new("workspace_id")))
-                .foreign_key(
-                    ForeignKey::create()
-                        .name("fk_access_keys_workspace_id")
-                        .from(Alias::new("access_keys"), Alias::new("workspace_id"))
-                        .to(Alias::new("workspace_workspaces"), Alias::new("id"))
-                        .on_delete(ForeignKeyAction::Cascade),
                 )
                 .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
                 .foreign_key(
@@ -97,14 +85,8 @@ async fn up_access_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     helpers::pg_only(
         manager,
         "ALTER TABLE access_keys ENABLE ROW LEVEL SECURITY;
-                 CREATE POLICY workspace_isolation ON access_keys
-                   USING (
-                     workspace_id = NULLIF(current_setting('app.current_workspace', true), '')::uuid
-                     OR (
-                       workspace_id IS NULL
-                       AND tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid
-                     )
-                   );",
+                 CREATE POLICY tenant_isolation ON access_keys
+                   USING (tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid);",
     )
     .await?;
 
@@ -112,47 +94,19 @@ async fn up_access_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     helpers::pg_only(
         manager,
         "CREATE FUNCTION authenticate_access_key(p_key_hash bytea)
-                 RETURNS TABLE (id uuid, workspace_id uuid, tenant_id uuid, user_id uuid)
+                 RETURNS TABLE (id uuid, tenant_id uuid, user_id uuid)
                  LANGUAGE sql
                  SECURITY DEFINER
                  SET search_path = pg_catalog, public, pg_temp
                  AS $$
-                    SELECT k.id, k.workspace_id, k.tenant_id, k.user_id
+                   SELECT k.id, k.tenant_id, k.user_id
                    FROM access_keys k
-                    LEFT JOIN workspace_workspaces w ON w.id = k.workspace_id
-                    WHERE k.key_hash = p_key_hash AND k.revoked_at IS NULL AND k.enabled
-                      AND (k.expires_at IS NULL OR k.expires_at > CURRENT_TIMESTAMP)
-                      AND (k.workspace_id IS NULL OR w.tenant_id = k.tenant_id)
+                   WHERE k.key_hash = p_key_hash AND k.revoked_at IS NULL AND k.enabled
+                     AND (k.expires_at IS NULL OR k.expires_at > CURRENT_TIMESTAMP)
                  $$;
 
                  REVOKE ALL ON FUNCTION authenticate_access_key(bytea) FROM PUBLIC;
-                 GRANT EXECUTE ON FUNCTION authenticate_access_key(bytea) TO yorishiro_app;
-
-                 CREATE FUNCTION authenticate_access_key(
-                   p_key_hash bytea,
-                   p_requested_workspace uuid
-                 )
-                 RETURNS TABLE (id uuid, workspace_id uuid, tenant_id uuid, user_id uuid)
-                 LANGUAGE sql
-                 SECURITY DEFINER
-                 SET search_path = pg_catalog, public, pg_temp
-                 AS $$
-                   SELECT k.id,
-                          COALESCE(k.workspace_id, w.id) AS workspace_id,
-                          k.tenant_id,
-                          k.user_id
-                   FROM access_keys k
-                   LEFT JOIN workspace_workspaces w
-                          ON k.workspace_id IS NULL
-                         AND w.id = p_requested_workspace
-                         AND w.tenant_id = k.tenant_id
-                    WHERE k.key_hash = p_key_hash AND k.revoked_at IS NULL AND k.enabled
-                      AND (k.expires_at IS NULL OR k.expires_at > CURRENT_TIMESTAMP)
-                     AND (k.workspace_id IS NOT NULL OR w.id IS NOT NULL)
-                 $$;
-
-                 REVOKE ALL ON FUNCTION authenticate_access_key(bytea, uuid) FROM PUBLIC;
-                 GRANT EXECUTE ON FUNCTION authenticate_access_key(bytea, uuid) TO yorishiro_app;",
+                 GRANT EXECUTE ON FUNCTION authenticate_access_key(bytea) TO yorishiro_app;",
     )
     .await?;
 
@@ -160,7 +114,7 @@ async fn up_access_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
 }
 
 async fn down_access_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    helpers::pg_only(manager,"DROP FUNCTION authenticate_access_key(bytea); DROP FUNCTION authenticate_access_key(bytea, uuid);").await?;
+    helpers::pg_only(manager, "DROP FUNCTION authenticate_access_key(bytea);").await?;
     manager
         .drop_table(Table::drop().table(Alias::new("access_keys")).to_owned())
         .await?;

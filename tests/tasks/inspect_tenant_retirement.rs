@@ -332,7 +332,7 @@ async fn retirement_inventory_is_read_only_and_target_specific() {
             .unwrap()
             .unwrap();
         let keys_before = access_keys::Entity::find()
-            .filter(access_keys::Column::WorkspaceId.eq(tenant.workspace_id))
+            .filter(access_keys::Column::TenantId.eq(tenant.tenant_id))
             .all(&ctx.db)
             .await
             .unwrap();
@@ -365,7 +365,7 @@ async fn retirement_inventory_is_read_only_and_target_specific() {
             workspace_before
         );
         let keys_after = access_keys::Entity::find()
-            .filter(access_keys::Column::WorkspaceId.eq(tenant.workspace_id))
+            .filter(access_keys::Column::TenantId.eq(tenant.tenant_id))
             .all(&ctx.db)
             .await
             .unwrap();

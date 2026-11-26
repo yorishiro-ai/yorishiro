@@ -144,7 +144,6 @@ async fn issuance_and_removal_are_serialized(tenant_key: bool) {
                 .expect("issued tenant key must be persisted");
             assert!(!stored.id.is_nil());
             assert_eq!(stored.user_id, Some(user.id));
-            assert_eq!(stored.workspace_id, None);
             access_keys::Entity::revoke(&ctx.db, created.id)
                 .await
                 .unwrap();

@@ -27,12 +27,11 @@ impl Entity {
         #[derive(sea_orm::FromQueryResult)]
         struct Credential {
             id: Uuid,
-            workspace_id: Option<Uuid>,
             tenant_id: Uuid,
             user_id: Option<Uuid>,
         }
         let query = Query::select()
-            .columns(["id", "workspace_id", "tenant_id", "user_id"].map(Alias::new))
+            .columns(["id", "tenant_id", "user_id"].map(Alias::new))
             .from_function(
                 Func::cust(Alias::new("authenticate_access_key"))
                     .arg(Expr::val(hash_key(presented_key))),
@@ -49,7 +48,6 @@ impl Entity {
         let row = row.ok_or(YorishiroError::Unauthenticated)?;
         let workspace_id = Self::resolve_key_workspace(
             &db.identity_connection(),
-            row.workspace_id,
             row.tenant_id,
             requested_workspace,
         )
@@ -64,33 +62,15 @@ impl Entity {
         .await
     }
 
-    /// Chooses which workspace a verified credential acts on.
-    ///
-    /// Workspace-scoped keys cannot select a different workspace.
-    /// A tenant-scoped key acts on the requested workspace when it belongs to the same tenant, or has no workspace.
+    /// Chooses which workspace a verified credential acts on: the requested one, when it belongs to the credential's tenant.
     ///
     /// # Errors
-    /// Rejects a workspace outside the credential binding.
+    /// Rejects a workspace of another tenant.
     async fn resolve_key_workspace(
         conn: &impl ConnectionTrait,
-        key_workspace: Option<Uuid>,
         tenant_id: Uuid,
         requested: Option<Uuid>,
     ) -> Result<Option<Uuid>, YorishiroError> {
-        if let Some(workspace_id) = key_workspace {
-            if let Some(requested) = requested
-                && requested != workspace_id
-            {
-                // A foreign workspace is a scope denial, not a malformed request: the header itself is well formed, the pairing is not.
-                return Err(YorishiroError::AccessDenied {
-                    message: format!("{WORKSPACE_HEADER} names a workspace this key cannot act on"),
-                    hint: "this key is scoped to a single workspace; omit the header, or use a \
-                            tenant-scoped key to choose a workspace per request"
-                        .into(),
-                });
-            }
-            return Ok(Some(workspace_id));
-        }
         if let Some(requested) = requested {
             let tenant =
                 crate::models::workspace_workspaces::get_workspace_tenant(conn, requested).await?;
@@ -111,7 +91,7 @@ impl Entity {
     /// SQLite equivalent of [`Self::authenticate`], for a deployment with no `DbHandle` (see `Hooks::after_context`).
     ///
     /// The Postgres path goes through the SECURITY DEFINER function specifically to read rows RLS would otherwise hide from an unauthenticated caller; SQLite has no RLS at all, so there is nothing to bypass, and this queries the tables directly with the `SeaORM` entity API.
-    /// Workspace resolution follows the same rules as the Postgres path, for both workspace-scoped and tenant-scoped keys.
+    /// Workspace resolution follows the same rules as the Postgres path.
     ///
     /// The default authenticator selects this implementation for SQLite.
     ///
@@ -126,8 +106,7 @@ impl Entity {
             .await?
             .ok_or(YorishiroError::Unauthenticated)?;
         let workspace_id =
-            Self::resolve_key_workspace(conn, key.workspace_id, key.tenant_id, requested_workspace)
-                .await?;
+            Self::resolve_key_workspace(conn, key.tenant_id, requested_workspace).await?;
         AuthContext {
             access_key_id: key.id,
             workspace_id,
@@ -217,17 +196,6 @@ impl Entity {
         };
         if !key.is_active() {
             return Ok(None);
-        }
-        if let Some(workspace_id) = key.workspace_id {
-            // Mirrors the SQL join: a workspace-scoped key authenticates only while its workspace still belongs to its stored tenant.
-            return Ok(
-                crate::models::workspace_workspaces::Entity::find_by_id(workspace_id)
-                    .one(conn)
-                    .await
-                    .internal()?
-                    .filter(|workspace| workspace.tenant_id == key.tenant_id)
-                    .map(|_| key),
-            );
         }
         Ok(Some(key))
     }

@@ -55,7 +55,5 @@ fn tool_names_match_the_policy_action_catalog() {
     }
     // Caller identity is available without a policy grant.
     expected.insert("get_caller_identity".to_owned());
-    // Legacy operations retain their current authorization until their removal.
-    expected.insert("reject_inference_proposals".to_owned());
     assert_eq!(names, expected);
 }

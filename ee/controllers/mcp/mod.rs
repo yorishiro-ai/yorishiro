@@ -44,7 +44,6 @@ impl McpToolPolicy for ManagementToolPolicy {
                     | "list_schema_upstream_changes"
                     | "apply_schema_merge"
                     | "preview_schema_merge"
-                    | "reject_inference_proposals"
                     | "delete_workspace_entity_columns"
                     | "delete_workspace_worker_class"
                     | "update_workspace_embedding_provider"

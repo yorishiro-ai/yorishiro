@@ -10,10 +10,8 @@ pub(crate) struct CallerIdentityResponse {
     pub(crate) user_id: Option<Uuid>,
     pub(crate) workspace_name: Option<String>,
     pub(crate) tenant_name: String,
-    /// None for a tenant-bound credential that selects a workspace per request.
-    pub(crate) bound_workspace_id: Option<Uuid>,
     pub(crate) identity_kind: &'static str,
-    /// Root identity does not bypass credential binding.
+    /// Whether the credential is a tenant root sign-in session.
     pub(crate) tenant_root: bool,
 }
 
@@ -24,7 +22,6 @@ impl From<crate::models::iam::access::AccessIdentity> for CallerIdentityResponse
             yrn: identity.yrn,
             workspace_name: identity.workspace_name,
             tenant_name: identity.tenant_name,
-            bound_workspace_id: identity.bound_workspace_id,
             tenant_root: identity.tenant_root,
             identity_kind: if ctx.user_id.is_some() {
                 "user"

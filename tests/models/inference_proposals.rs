@@ -157,7 +157,7 @@ async fn proposals_are_idempotent_and_confirmation_is_validated_and_undoable() {
 }
 
 #[tokio::test]
-async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
+async fn invalid_and_discarded_proposals_never_write_entities() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let (workspace_id, entity) = prepare(&request, &ctx).await;
         let db = ctx.db.clone();
@@ -188,7 +188,7 @@ async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
             .unwrap();
         assert_eq!(invalid.invalid, 1);
 
-        for (job_id, rejected) in [(Uuid::now_v7(), true), (Uuid::now_v7(), false)] {
+        for job_id in [Uuid::now_v7(), Uuid::now_v7()] {
             inference_jobs::create(&db, job_id, workspace_id, "notes")
                 .await
                 .unwrap();
@@ -206,17 +206,10 @@ async fn invalid_rejected_and_discarded_proposals_never_write_entities() {
             crate::ee::inference_fixtures::complete(&db, job_id, 0, 0)
                 .await
                 .unwrap();
-            let changed = if rejected {
-                inference_proposals::reject(&db, workspace_id, job_id)
-                    .await
-                    .unwrap()
-                    .changed
-            } else {
-                inference_proposals::discard(&db, workspace_id, job_id)
-                    .await
-                    .unwrap()
-                    .changed
-            };
+            let changed = inference_proposals::discard(&db, workspace_id, job_id)
+                .await
+                .unwrap()
+                .changed;
             assert_eq!(changed, 1);
         }
         assert_eq!(
@@ -262,11 +255,6 @@ async fn incomplete_and_failed_jobs_cannot_change_proposals() {
             }
             assert!(
                 inference_proposals::confirm(&db, workspace_id, job_id, None)
-                    .await
-                    .is_err()
-            );
-            assert!(
-                inference_proposals::reject(&db, workspace_id, job_id)
                     .await
                     .is_err()
             );

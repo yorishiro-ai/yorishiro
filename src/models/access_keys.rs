@@ -6,7 +6,7 @@ mod manage;
 
 use aws_lc_rs::digest::{SHA256, digest};
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect};
+use sea_orm::{ActiveValue, FromQueryResult, QueryOrder};
 
 use crate::db::DbHandle;
 use crate::error::{ResultExt, YorishiroError};
@@ -28,7 +28,6 @@ pub struct KeyGrant {
     pub expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub revoked_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub enabled: bool,
-    pub workspace_id: Option<Uuid>,
     pub tenant_id: Uuid,
     pub user_id: Option<Uuid>,
     pub identity_kind: &'static str,
@@ -90,12 +89,6 @@ impl Model {
                     && key.user_id == presented.user_id
             })
             .ok_or(YorishiroError::Unauthenticated)?;
-        if key
-            .workspace_id
-            .is_some_and(|id| Some(id) != presented.workspace_id)
-        {
-            return Err(YorishiroError::Unauthenticated);
-        }
         if let Some(workspace_id) = presented.workspace_id {
             let tenant =
                 crate::models::workspace_workspaces::get_workspace_tenant(conn, workspace_id)
@@ -128,7 +121,6 @@ impl Model {
             expires_at: self.expires_at,
             revoked_at: self.revoked_at,
             enabled: self.enabled,
-            workspace_id: self.workspace_id,
             tenant_id: self.tenant_id,
             user_id: self.user_id,
             identity_kind: if self.user_id.is_some() {
@@ -212,8 +204,6 @@ pub(crate) struct AccessKeyChange {
 
 pub struct CreatedAccessKey {
     pub id: Uuid,
-    /// `None` for tenant-scoped keys, which name their workspace per request instead.
-    pub workspace_id: Option<Uuid>,
     pub(crate) grant: KeyGrant,
     pub(crate) key_prefix: String,
     pub(crate) name: String,

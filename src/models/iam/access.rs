@@ -183,7 +183,6 @@ pub(crate) async fn read_workspaces(
 pub(crate) struct IamEvaluation<'a> {
     txn: &'a DatabaseTransaction,
     current: AuthContext,
-    bound_workspace_id: Option<Uuid>,
     root: bool,
     root_session: bool,
     policies: Vec<crate::models::iam::policy::Policy>,
@@ -384,7 +383,6 @@ impl<'a> IamEvaluation<'a> {
             txn,
             root_session: key.is_login_session() && root,
             current,
-            bound_workspace_id: key.workspace_id,
             root,
             policies,
             policy_names,
@@ -419,28 +417,18 @@ impl<'a> IamEvaluation<'a> {
             return Err(YorishiroError::Unauthenticated);
         }
         if let Resource::Workspace { workspace_id, .. } = target
-            && (self
+            && self
                 .current
                 .workspace_id
                 .is_some_and(|id| id != workspace_id)
-                || self.bound_workspace_id.is_some_and(|id| id != workspace_id))
         {
             return Err(YorishiroError::AccessDenied {
-                message: "credential workspace does not match the target workspace".into(),
-                hint: "use a credential for the target workspace".into(),
+                message: "the selected workspace does not match the target workspace".into(),
+                hint: "select the target workspace, or omit the selection".into(),
             });
         }
         let workspace = match target {
-            Resource::Tenant { tenant_id } if tenant_id == self.current.tenant_id => {
-                if self.bound_workspace_id.is_some() {
-                    return Err(YorishiroError::AccessDenied {
-                        message: "workspace-bound credentials cannot access tenant resources"
-                            .into(),
-                        hint: "use a tenant-scoped credential".into(),
-                    });
-                }
-                None
-            }
+            Resource::Tenant { tenant_id } if tenant_id == self.current.tenant_id => None,
             Resource::Workspace {
                 tenant_id,
                 workspace_id,
@@ -448,8 +436,7 @@ impl<'a> IamEvaluation<'a> {
                 && self
                     .current
                     .workspace_id
-                    .is_none_or(|id| id == workspace_id)
-                && self.bound_workspace_id.is_none_or(|id| id == workspace_id) =>
+                    .is_none_or(|id| id == workspace_id) =>
             {
                 if !tenant_owns_workspace
                     && crate::models::workspace_workspaces::get_workspace_tenant(
@@ -509,7 +496,6 @@ pub struct AccessIdentity {
     pub yrn: String,
     pub workspace_name: Option<String>,
     pub tenant_name: String,
-    pub bound_workspace_id: Option<Uuid>,
     pub tenant_root: bool,
 }
 
@@ -560,7 +546,6 @@ pub async fn identity(
         yrn,
         workspace_name: workspace.map(|workspace| workspace.name),
         tenant_name: tenant.name,
-        bound_workspace_id: key.workspace_id,
         tenant_root,
     })
 }

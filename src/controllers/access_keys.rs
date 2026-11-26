@@ -3,7 +3,6 @@
 use crate::controllers::Created;
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::HeaderMap;
 use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
@@ -31,24 +30,15 @@ pub(crate) fn render_grant(
 pub(crate) async fn create(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    headers: HeaderMap,
     Json(body): Json<CreateAccessKeyRequest>,
 ) -> Result<impl aide::axum::IntoApiResponse, ApiError> {
-    body.validate_workspace_selection(
-        headers.contains_key(crate::models::access_keys::WORKSPACE_HEADER),
-    )?;
-    let created = if body.tenant_scoped {
-        IdentityAccessKeys::create_delegated_tenant_access_key(
-            &ctx.db,
-            &auth,
-            &body.name,
-            body.expires_at,
-        )
-        .await?
-    } else {
-        IdentityAccessKeys::create_delegated_access_key(&ctx.db, &auth, &body.name, body.expires_at)
-            .await?
-    };
+    let created = IdentityAccessKeys::create_delegated_access_key(
+        &ctx.db,
+        &auth,
+        &body.name,
+        body.expires_at,
+    )
+    .await?;
     Ok(Created(CreateAccessKeyResponse {
         id: created.id,
         prefix: created.key_prefix,

@@ -158,7 +158,7 @@ async fn up_inference_proposals(manager: &SchemaManager<'_>) -> Result<(), DbErr
         table,
         &[(
             "inference_proposals_status_check",
-            "status IN ('pending', 'confirmed', 'rejected', 'discarded', 'stale', 'invalid')",
+            "status IN ('pending', 'confirmed', 'discarded', 'stale', 'invalid')",
         )],
     )
     .await?;

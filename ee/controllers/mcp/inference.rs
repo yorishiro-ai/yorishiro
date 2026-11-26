@@ -1,4 +1,4 @@
-//! MCP tools for LLM-assisted fill: starting an inference job and reviewing, confirming or rejecting its proposals.
+//! MCP tools for LLM-assisted fill: starting an inference job and reviewing, confirming or discarding its proposals.
 //! These tools are licence-gated like their REST routes.
 
 use crate::controllers::mcp::{YorishiroMcpServer, err_to_tool_result, ok_json, render, verified};
@@ -22,7 +22,6 @@ pub(super) const TOOL_NAMES: &[&str] = &[
     "get_inference_job",
     "list_inference_proposals",
     "confirm_inference_proposals",
-    "reject_inference_proposals",
     "discard_inference_proposals",
     "get_inference_confirmation",
 ];
@@ -130,19 +129,6 @@ impl YorishiroMcpServer {
             ),
             Err(error) => Ok(err_to_tool_result(error)),
         }
-    }
-
-    #[tool(description = "Mark pending inference proposals as rejected.")]
-    pub(crate) async fn reject_inference_proposals(
-        &self,
-        Parameters(input): Parameters<InferenceJobArgs>,
-        Extension(parts): Extension<Parts>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let actor = verified!(self, parts);
-        render(
-            inference_proposals::reject_as(&self.app_context().db, &actor, input.inference_job_id)
-                .await,
-        )
     }
 
     #[tool(description = "Discard inference proposals without applying them.")]

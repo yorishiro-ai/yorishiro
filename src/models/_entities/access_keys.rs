@@ -9,7 +9,6 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub name: String,
-    pub workspace_id: Option<Uuid>,
     pub tenant_id: Uuid,
     pub user_id: Option<Uuid>,
     #[sea_orm(column_type = "VarBinary(StringLen::None)", unique)]
@@ -41,14 +40,6 @@ pub enum Relation {
         on_delete = "SetNull"
     )]
     UserUsers,
-    #[sea_orm(
-        belongs_to = "super::workspace_workspaces::Entity",
-        from = "Column::WorkspaceId",
-        to = "super::workspace_workspaces::Column::Id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    WorkspaceWorkspaces,
 }
 
 impl Related<super::tenant_tenants::Entity> for Entity {
@@ -60,11 +51,5 @@ impl Related<super::tenant_tenants::Entity> for Entity {
 impl Related<super::user_users::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::UserUsers.def()
-    }
-}
-
-impl Related<super::workspace_workspaces::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::WorkspaceWorkspaces.def()
     }
 }

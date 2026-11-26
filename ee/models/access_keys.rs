@@ -1,4 +1,4 @@
-//! Enterprise access-key persistence for keys bound to a tenant rather than one workspace.
+//! Enterprise access-key persistence for keys that act on a tenant.
 
 use uuid::Uuid;
 

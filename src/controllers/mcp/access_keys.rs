@@ -1,6 +1,6 @@
 //! MCP tools for creating, listing, updating and deleting access keys.
 
-use crate::controllers::mcp::{render, try_tool, verified};
+use crate::controllers::mcp::{render, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -41,7 +41,7 @@ pub(crate) struct UpdateAccessKeyArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_access_keys)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Issue an access key and return its secret once. Select a workspace to bind the key, or set tenant_scoped without a workspace selector for an unbound key. Requires a tenant-scoped issuer allowed to perform iam:CreateAccessKey. The new key cannot exceed the issuer's effective scope. An expiring issuer must supply expires_at no later than its own expiration, except for a root sign-in session."
+        description = "Issue an access key and return its secret once. The key acts on the tenant and selects its workspace per request. Requires iam:CreateAccessKey. The new key cannot exceed the issuer's effective scope. An expiring issuer must supply expires_at no later than its own expiration, except for a root sign-in session."
     )]
     pub(crate) async fn create_access_key(
         &self,
@@ -49,30 +49,13 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts);
-        try_tool!(
-            args.validate_workspace_selection(
-                parts
-                    .headers
-                    .contains_key(crate::models::access_keys::WORKSPACE_HEADER),
-            )
-        );
-        let created = if args.tenant_scoped {
-            IdentityAccessKeys::create_delegated_tenant_access_key(
-                &self.app_context().db,
-                &auth,
-                &args.name,
-                args.expires_at,
-            )
-            .await
-        } else {
-            IdentityAccessKeys::create_delegated_access_key(
-                &self.app_context().db,
-                &auth,
-                &args.name,
-                args.expires_at,
-            )
-            .await
-        };
+        let created = IdentityAccessKeys::create_delegated_access_key(
+            &self.app_context().db,
+            &auth,
+            &args.name,
+            args.expires_at,
+        )
+        .await;
         match created {
             Ok(created) => ok_json(CreateAccessKeyResponse {
                 id: created.id,

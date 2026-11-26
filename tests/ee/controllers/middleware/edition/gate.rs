@@ -159,7 +159,6 @@ async fn missing_licence_state_closes_the_gate_again() {
         let licensed_tools = [
             "confirm_inference_proposals",
             "discard_inference_proposals",
-            "reject_inference_proposals",
             "create_inference_job",
             "get_inference_job",
             "get_inference_confirmation",
