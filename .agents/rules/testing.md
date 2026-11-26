@@ -70,7 +70,6 @@ A test changes the booted app's configuration by passing overrides to `boot_requ
 
 CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus `make test-licence`, which verifies a signed key with the repository secret.
 Each job runs every test; nothing is assigned or inventoried per test, so a new test needs no registration.
-The real-binary REST/MCP/CLI contracts live in `tests/contract/`; common suites own SQLite processes and the licensed tenant suite owns a PostgreSQL database.
 Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
 The package and Docker installability checks run in `packaging.yml`, selected by its path filters on pull requests and on pushes to `develop`.
 

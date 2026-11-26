@@ -27,11 +27,11 @@ jobs:
         run: |
           case "$EDITION" in ce) features=community ;; ee) features=enterprise ;; *) exit 1 ;; esac
           cargo build --locked --no-default-features --features "$features" --bin yorishiro
-          tar -C target/debug -czf "$RUNNER_TEMP/public-contract-$EDITION.tar.gz" yorishiro
+          tar -C target/debug -czf "$RUNNER_TEMP/binary-$EDITION.tar.gz" yorishiro
       - uses: actions/upload-artifact@v7
         with:
-          name: public-contract-binary-${{ inputs.edition }}
-          path: ${{ runner.temp }}/public-contract-${{ inputs.edition }}.tar.gz
+          name: binary-${{ inputs.edition }}
+          path: ${{ runner.temp }}/binary-${{ inputs.edition }}.tar.gz
           if-no-files-found: error
           compression-level: 0
           retention-days: 1

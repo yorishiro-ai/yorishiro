@@ -11,6 +11,7 @@ Delete it before the pull request is opened.
 - Application code creates timestamps and ids. The database does not default them.
 - Tenant isolation stays in SQL: RLS, GRANT, the `yorishiro_app` role, `authenticate_access_key`, tenant pool `SET ROLE`, and the search `SET LOCAL`.
 - Tests run only after all changes are made. After a migration change, run `make entities`.
+- The real-binary Python contract suite and its CI jobs are removed; so are migration-content tests.
 - No migration tests are added. Moved behaviour is verified through model operations.
 - No push, pull request, or merge without authorisation.
 
@@ -88,7 +89,7 @@ Parsing lives in one place and fixes the field count per service.
 - [x] Remove the key `audit` column and field.
 - [ ] Remove workspace-bound keys and `tenant_scoped`.
 - [ ] Select the workspace per request.
-- [ ] Update `authenticate_access_key` and the real-binary contracts.
+- [ ] Update `authenticate_access_key`.
 
 ### 12. Naming
 - [ ] Fix remaining response fields and stale descriptions.
@@ -101,7 +102,6 @@ Parsing lives in one place and fixes the field count per service.
 ### 14. Verification
 - [ ] `make check-all check-all-ee`.
 - [ ] SQLite and PostgreSQL full suites for CE and EE.
-- [ ] CE real-binary contracts for rest, mcp, and management.
 
 ### 15. Notes
 - [ ] Update the #644 and #645 checklists and prepare breaking-change notes without publishing.
