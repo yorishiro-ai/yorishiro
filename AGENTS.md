@@ -151,7 +151,7 @@ SQLite has the fork integrity triggers.
 - Request tests boot through `boot_request`: SQLite gets its own file and PostgreSQL its own throwaway database per test.
 - `make test-postgres` runs the whole suite (`EDITION=ce|ee`).
 - `make test-sqlite` uses `SQLITE_TEST_FILTERS` to cover SQLite storage, locking, queue behavior, and request smoke tests.
-- Licensed tests install a test licence when `YORISHIRO_LICENSE_KEY` is unset, and the E5 model tests skip without the model files.
+- Licensed tests install a test licence when `YORISHIRO_LICENSE_KEY` is unset.
 - Tests need PostgreSQL with `vector` in `template1` (not just the deployment database). Loco's harness creates each test database via `CREATE DATABASE`, which copies `template1`.
 - Tests need a non-superuser role (superuser bypasses RLS regardless of `FORCE`).
 

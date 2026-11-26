@@ -52,7 +52,7 @@ The backend comes from `DATABASE_URL` and the edition from the feature set; ther
 Request tests boot through `boot_request`: SQLite gets its own database file and PostgreSQL its own throwaway database per test, both torn down with the test.
 An app booted by other means must call `close_app_pools` before it returns, or teardown panics even on a passing test.
 
-Licensed tests install a test licence when `YORISHIRO_LICENSE_KEY` is unset, and the E5 model tests skip without `models/multilingual-e5-base/`.
+Licensed tests install a test licence when `YORISHIRO_LICENSE_KEY` is unset.
 Stripe tests run in the ordinary EE suite, install their own test licence state and require no Stripe account.
 Run the optional SQLite search benchmark with `cargo bench --bench sqlite_ann -- sqlite:///path/to/database.sqlite3 WORKSPACE_UUID`; it opens the database read-only.
 Run the PostgreSQL benchmark with `cargo bench --bench postgres_search -- DATABASE_URL TENANT_UUID WORKSPACE_UUID QUERY_VECTOR_FILE`, using a JSON file of vector coordinates and an existing populated workspace.

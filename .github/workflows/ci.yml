@@ -21,17 +21,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   PYTHONDONTWRITEBYTECODE: "1"
-  EMBEDDING_MODEL_REVISION: d128750597153bb5987e10b1c3493a34e5a4502a
-  EMBEDDING_MODEL_ID: intfloat/multilingual-e5-base
-  EMBEDDING_MODEL_SHORT_ID: multilingual-e5-base
-  EMBEDDING_MODEL_REMOTE_PATH: model.safetensors
-  EMBEDDING_MODEL_LOCAL_NAME: model.safetensors
-  EMBEDDING_MODEL_SHA256: a18a44fad1d0b46ded15928144138cff1135d5cc8233bdd90be5f18822de09a7
-  EMBEDDING_MODEL_SIZE: "1112201288"
-  EMBEDDING_TOKENIZER_REMOTE_PATH: tokenizer.json
-  EMBEDDING_TOKENIZER_LOCAL_NAME: tokenizer.json
-  EMBEDDING_TOKENIZER_SHA256: 62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626
-  EMBEDDING_TOKENIZER_SIZE: "17082660"
 
 jobs:
   licensed-validation:
@@ -56,7 +45,7 @@ jobs:
           matrix=$(jq -cn --argjson licensed "$enabled" '
             [
               {name:"ce-sqlite", edition:"ce", database:"sqlite"},
-              {name:"ee-sqlite", edition:"ee", database:"sqlite", models:true},
+              {name:"ee-sqlite", edition:"ee", database:"sqlite"},
               {name:"ce-postgres", edition:"ce", database:"postgres"},
               {name:"ee-postgres", edition:"ee", database:"postgres"}
             ] + if $licensed then
@@ -259,34 +248,6 @@ jobs:
       - name: Require the signed licence
         if: matrix.licensed
         run: test -n "$YORISHIRO_LICENSE_KEY"
-      - name: Restore the multilingual-e5-base cache
-        if: matrix.models
-        uses: actions/cache/restore@v6
-        id: embedding-cache
-        with:
-          path: |
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
-          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
-      - name: Report a model cache miss on an external run
-        if: matrix.models && steps.embedding-cache.outputs.cache-hit != 'true' && needs.licensed-validation.outputs.enabled != 'true'
-        run: echo 'E5 model tests are skipped on this run because the verified model cache was not available.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Prepare and verify multilingual-e5-base artifacts
-        if: matrix.models && (steps.embedding-cache.outputs.cache-hit == 'true' || needs.licensed-validation.outputs.enabled == 'true')
-        env:
-          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
-          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
-          MODEL_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_REMOTE_PATH }}
-          TOKENIZER_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_TOKENIZER_REMOTE_PATH }}
-        run: python3 scripts/embedding_cache.py prepare
-      - name: Save verified multilingual-e5-base cache
-        if: matrix.models && steps.embedding-cache.outputs.cache-hit != 'true' && needs.licensed-validation.outputs.enabled == 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
-          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
       - name: Bootstrap PostgreSQL extensions and a non-superuser migration identity
         if: matrix.database == 'postgres'
         uses: ./.github/actions/postgres-test-setup

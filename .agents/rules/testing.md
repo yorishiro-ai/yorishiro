@@ -32,7 +32,6 @@ A Valkey (Redis-compatible) queue runs with `YORISHIRO_QUEUE_KIND=Redis` and `QU
 A test that needs a licensed edition calls `crate::requests::require_licence(&ctx)` after boot.
 It installs a test licence unless `YORISHIRO_LICENSE_KEY` already holds a valid key, so these tests run in every environment.
 Only the signature check needs the real key: `make test-licence` runs it, and the CI job `ee-licence` supplies the key.
-The pinned E5 model tests skip unless `models/multilingual-e5-base/` holds the model files.
 
 Custom PostgreSQL:
 
