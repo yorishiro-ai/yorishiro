@@ -479,6 +479,16 @@ pub(crate) async fn update_as(
     let saved = active.update(&txn).await.map_err(|error| {
         YorishiroError::conflict_on_unique(error, "a workspace with this name already exists")
     })?;
+    crate::models::iam_audit_events::record(
+        &txn,
+        actor,
+        crate::models::iam::policy::Action::UpdateWorkspace,
+        serde_json::json!({"target": crate::models::iam::policy::Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id: id,
+        }.yrn()}),
+    )
+    .await?;
     txn.commit().await.internal()?;
     WorkspaceRecord::try_from(saved)
 }

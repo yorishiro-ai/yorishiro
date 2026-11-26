@@ -296,7 +296,7 @@ pub(crate) async fn create_workspace(
     name: &str,
 ) -> yorishiro::models::_entities::workspace_workspaces::Model {
     let txn = ctx.db.begin().await.expect("begin workspace creation");
-    let workspace = tenancy::create_workspace(&txn, tenant_id, name, None, None)
+    let workspace = tenancy::create_workspace(&txn, tenant_id, name, None)
         .await
         .expect("create workspace");
     txn.commit().await.expect("commit workspace creation");

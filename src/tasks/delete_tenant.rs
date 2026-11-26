@@ -6,7 +6,7 @@ impl Task for DeleteTenant {
     fn task(&self) -> TaskInfo {
         TaskInfo {
             name: "delete_tenant".to_string(),
-            detail: "Irreversibly delete a disabled tenant, retaining root accounts and audit: tenant_id:<uuid> confirmed_tenant_id:<same-uuid>".to_string(),
+            detail: "Irreversibly delete a disabled tenant, retaining root accounts and retirement evidence: tenant_id:<uuid> confirmed_tenant_id:<same-uuid>".to_string(),
         }
     }
     async fn run(&self, ctx: &AppContext, vars: &task::Vars) -> Result<()> {

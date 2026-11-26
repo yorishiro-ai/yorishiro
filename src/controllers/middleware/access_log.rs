@@ -2,10 +2,10 @@ use std::time::Instant;
 
 use axum::{extract::Request, middleware::Next, response::Response};
 use loco_rs::{
-    controller::middleware::{MiddlewareLayer, logger},
+    app::AppContext,
+    controller::middleware::request_id::{LocoRequestId, request_id_middleware},
     environment::Environment,
 };
-use serde::Serialize;
 use tracing::Instrument;
 
 /// The request target used by the access log.
@@ -14,43 +14,17 @@ pub fn path_only(uri: &axum::http::Uri) -> &str {
     uri.path()
 }
 
-#[derive(Clone, Serialize)]
-pub struct Middleware {
-    enable: bool,
-    environment: Environment,
-}
-
-impl Middleware {
-    #[must_use]
-    pub fn new(config: &logger::Config, environment: &Environment) -> Self {
-        Self {
-            enable: config.enable,
-            environment: environment.clone(),
-        }
-    }
-}
-
-impl MiddlewareLayer for Middleware {
-    fn name(&self) -> &'static str {
-        "logger"
-    }
-
-    fn is_enabled(&self) -> bool {
-        self.enable
-    }
-
-    fn config(&self) -> serde_json::Result<serde_json::Value> {
-        serde_json::to_value(self)
-    }
-
-    fn apply(
-        &self,
-        app: axum::Router<loco_rs::app::AppContext>,
-    ) -> loco_rs::Result<axum::Router<loco_rs::app::AppContext>> {
-        Ok(app
+pub(crate) fn layer(mut router: axum::Router, ctx: &AppContext) -> axum::Router {
+    let config = &ctx.config.server.middlewares;
+    if config.logger.as_ref().is_none_or(|logger| logger.enable) {
+        router = router
             .layer(axum::middleware::from_fn(log_request))
-            .layer(axum::Extension(self.environment.clone())))
+            .layer(axum::Extension(ctx.environment.clone()));
     }
+    if config.request_id.as_ref().is_none_or(|id| id.enable) {
+        router = router.layer(axum::middleware::from_fn(request_id_middleware));
+    }
+    router
 }
 
 async fn log_request(request: Request, next: Next) -> Response {
@@ -65,7 +39,7 @@ async fn log_request(request: Request, next: Next) -> Response {
         .to_owned();
     let request_id = request
         .extensions()
-        .get::<loco_rs::controller::middleware::request_id::LocoRequestId>()
+        .get::<LocoRequestId>()
         .map_or_else(|| "req-id-none".to_string(), |id| id.get().to_string());
     let environment = request
         .extensions()
@@ -83,16 +57,20 @@ async fn log_request(request: Request, next: Next) -> Response {
         caller = tracing::field::Empty,
         workspace = tracing::field::Empty,
     );
-    let response = next.run(request).instrument(span).await;
-    tracing::info!(
-        http_method = %method,
-        http_uri = %path,
-        http_status = response.status().as_u16(),
-        latency_ms = started.elapsed().as_secs_f64() * 1000.0,
-        user_agent = %user_agent,
-        environment = %environment,
-        request_id = %request_id,
-        "http request completed",
-    );
-    response
+    async move {
+        let response = next.run(request).await;
+        tracing::info!(
+            http_method = %method,
+            http_uri = %path,
+            http_status = response.status().as_u16(),
+            latency_ms = started.elapsed().as_secs_f64() * 1000.0,
+            user_agent = %user_agent,
+            environment = %environment,
+            request_id = %request_id,
+            "http request completed",
+        );
+        response
+    }
+    .instrument(span)
+    .await
 }

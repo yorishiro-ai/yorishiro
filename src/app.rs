@@ -163,7 +163,6 @@ impl RouteMounts {
 /// Mounts the MCP server under `/mcp` and the swagger docs.
 ///
 /// Rate limiting and the maintenance guard are layered here because `/mcp` is mounted here: `Hooks::routes` layers would not cover it.
-/// The `server.middlewares:` config block is used only for Loco's built-in middleware (`request_id`, `logger`, and shared REST/MCP CORS).
 ///
 /// `rmcp`'s `StreamableHttpService` is a plain `tower::Service` that `Hooks::routes()` cannot carry, so it is mounted in this hook, which runs after Loco's own routes are built.
 pub(crate) fn after_routes(
@@ -199,39 +198,23 @@ pub(crate) fn after_routes(
         controllers::middleware::maintenance::maintenance_guard,
     ));
     let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
-    if settings.http_allowed_networks.is_empty() {
-        return Ok(router);
-    }
-    Ok(router.layer(axum::middleware::from_fn_with_state(
-        std::sync::Arc::<[ipnet::IpNet]>::from(settings.http_allowed_networks),
-        controllers::middleware::client_network::require_allowed_network,
-    )))
+    let router = if settings.http_allowed_networks.is_empty() {
+        router
+    } else {
+        router.layer(axum::middleware::from_fn_with_state(
+            std::sync::Arc::<[ipnet::IpNet]>::from(settings.http_allowed_networks),
+            controllers::middleware::client_network::require_allowed_network,
+        ))
+    };
+    Ok(controllers::middleware::access_log::layer(router, ctx))
 }
 
-/// Enables Loco's built-in middleware stack (`request_id`, `logger`, etc.).
-/// Custom middleware (rate limiter, maintenance guard) stays in `after_routes` so it also covers the `/mcp` mount.
+/// Keeps REST-only middleware in Loco's stack.
 pub(crate) fn middlewares(
     ctx: &AppContext,
 ) -> Vec<Box<dyn loco_rs::controller::middleware::MiddlewareLayer>> {
-    use loco_rs::controller::middleware::MiddlewareStackExt;
-
-    let logger_config = ctx
-        .config
-        .server
-        .middlewares
-        .logger
-        .clone()
-        .unwrap_or(loco_rs::controller::middleware::logger::Config { enable: true });
     let mut stack = loco_rs::controller::middleware::default_middleware_stack(ctx);
-    // Apply CORS after mounting MCP so REST and MCP share the same layer.
-    stack.retain(|middleware| middleware.name() != "cors");
-    stack.replace(
-        "logger",
-        Box::new(controllers::middleware::access_log::Middleware::new(
-            &logger_config,
-            &ctx.environment,
-        )),
-    );
+    stack.retain(|middleware| !matches!(middleware.name(), "cors" | "logger" | "request_id"));
     stack
 }
 

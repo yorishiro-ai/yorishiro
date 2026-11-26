@@ -157,12 +157,9 @@ impl Model {
             },
         )
         .await?;
-        if crate::models::iam_policies::Model::find(&txn, actor.tenant_id, policy_id)
+        let policy = crate::models::iam_policies::Model::find(&txn, actor.tenant_id, policy_id)
             .await?
-            .is_none()
-        {
-            return Err(YorishiroError::not_found("IAM policy was not found"));
-        }
+            .or_not_found("IAM policy was not found")?;
         if !Self::remove(&txn, actor.tenant_id, group_id, policy_id).await? {
             return Err(YorishiroError::not_found("group association was not found"));
         }
@@ -170,7 +167,7 @@ impl Model {
             &txn,
             actor,
             Action::DetachGroupPolicy,
-            serde_json::json!({"group_id": group_id, "policy_id": policy_id}),
+            serde_json::json!({"group_id": group_id, "policy_id": policy_id, "policy_name": policy.name}),
         )
         .await?;
         txn.commit().await.internal()?;

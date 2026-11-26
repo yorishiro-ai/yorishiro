@@ -76,6 +76,15 @@ pub(crate) async fn update_as(
         tenant.max_workspaces = sea_orm::ActiveValue::Set(input.max_workspaces);
     }
     let updated = tenant.update(&txn).await.internal()?;
+    crate::models::iam_audit_events::record(
+        &txn,
+        actor,
+        crate::models::iam::policy::Action::UpdateTenant,
+        serde_json::json!({"target": crate::models::iam::policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        }.yrn()}),
+    )
+    .await?;
     txn.commit().await.internal()?;
     Ok(updated)
 }

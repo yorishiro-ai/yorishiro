@@ -22,7 +22,7 @@ async fn assert_disabled_creation_rejected(ctx: &loco_rs::app::AppContext, tenan
         .unwrap();
     let txn = ctx.db.begin().await.unwrap();
     let workspace_error =
-        yorishiro::models::tenancy::create_workspace(&txn, tenant_id, "must-not-exist", None, None)
+        yorishiro::models::tenancy::create_workspace(&txn, tenant_id, "must-not-exist", None)
             .await
             .unwrap_err();
     txn.rollback().await.unwrap();

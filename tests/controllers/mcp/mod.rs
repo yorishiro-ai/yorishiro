@@ -156,6 +156,7 @@ pub(crate) async fn initialize(request: &TestServer) -> String {
     let response = request
         .post("/mcp")
         .add_header("Accept", "application/json, text/event-stream")
+        .add_header("x-request-id", "mcp-initialize-test")
         .json(&json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -172,6 +173,10 @@ pub(crate) async fn initialize(request: &TestServer) -> String {
         StatusCode::OK,
         "response: {}",
         response.text()
+    );
+    assert_eq!(
+        response.headers().get("x-request-id").unwrap(),
+        "mcp-initialize-test"
     );
     let _ = rpc_body(&response.text());
     let session = response

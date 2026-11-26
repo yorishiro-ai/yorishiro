@@ -552,7 +552,6 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             tenant_id,
             &format!("other-{}", uuid::Uuid::new_v4()),
             None,
-            None,
         )
         .await
         .unwrap();
@@ -1362,7 +1361,6 @@ async fn reindex_switches_between_arbitrary_widths() {
             &transaction,
             fixture.tenant_id,
             &format!("other-width-{}", uuid::Uuid::new_v4()),
-            None,
             None,
         )
         .await

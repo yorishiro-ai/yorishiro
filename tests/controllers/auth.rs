@@ -130,7 +130,6 @@ async fn login_issues_tenant_key_after_credentials_are_verified() {
             tenant.tenant_id,
             &format!("login-selection-{}", uuid::Uuid::new_v4()),
             None,
-            None,
         )
         .await
         .unwrap();

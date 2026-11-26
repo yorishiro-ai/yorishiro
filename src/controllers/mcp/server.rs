@@ -1,5 +1,8 @@
 //! The MCP server type and its tool dispatch.
 
+use loco_rs::controller::middleware::request_id::LocoRequestId;
+use tracing::Instrument;
+
 use super::{
     AppContext, Arc, CallToolRequestParams, CallToolResponse, ErrorData, ListToolsResult,
     McpToolPolicy, PaginatedRequestParams, RequestContext, ResultType, RoleServer,
@@ -120,8 +123,31 @@ impl ServerHandler for YorishiroMcpServer {
         {
             return Ok(err_to_tool_result(error).into());
         }
-        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-        self.tool_router.call(tcc).await
+        let request_id = context
+            .extensions
+            .get::<axum::http::request::Parts>()
+            .and_then(|parts| parts.extensions.get::<LocoRequestId>())
+            .map_or("req-id-none", LocoRequestId::get);
+        let span = tracing::error_span!(
+            "mcp-tool",
+            tool = %request.name,
+            request_id,
+            caller = tracing::field::Empty,
+            workspace = tracing::field::Empty,
+        );
+        async move {
+            let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+            let result = self.tool_router.call(tcc).await;
+            let failed = match &result {
+                Err(_) => true,
+                Ok(CallToolResponse::Complete(response)) => response.is_error.unwrap_or(false),
+                Ok(_) => false,
+            };
+            tracing::info!(failed, "mcp tool completed");
+            result
+        }
+        .instrument(span)
+        .await
     }
 
     fn list_tools(

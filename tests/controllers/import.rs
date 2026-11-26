@@ -72,7 +72,6 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
             tenant_id,
             &format!("other-{}", uuid::Uuid::new_v4()),
             None,
-            None,
         )
         .await
         .expect("create another workspace");

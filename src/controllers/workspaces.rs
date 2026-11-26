@@ -35,14 +35,8 @@ async fn create_workspace(
     AuthContext(auth): AuthContext,
     Json(body): Json<CreateWorkspaceRequest>,
 ) -> Result<Created<WorkspaceRecord>, ApiError> {
-    let workspace = tenancy::create_workspace_in_context(
-        &ctx,
-        &auth,
-        &body.name,
-        body.max_entities,
-        body.schema_id,
-    )
-    .await?;
+    let workspace =
+        tenancy::create_workspace_in_context(&ctx, &auth, &body.name, body.max_entities).await?;
     Ok(Created(WorkspaceRecord::try_from(workspace)?))
 }
 

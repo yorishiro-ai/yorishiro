@@ -10,6 +10,44 @@ use crate::requests::fixtures::{self, TenantArgs, TestTenant};
 use crate::requests::{boot_request, boot_request_with_timezone};
 
 mod issuance_race;
+
+#[tokio::test]
+async fn root_credential_management_requires_a_root_session() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
+        let delegated = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, administrator).await;
+        let (target, _) = yorishiro::models::tenancy::issue_login_key(
+            &ctx.db,
+            tenant.owner_id,
+            None,
+            Some(tenant.tenant_id),
+        )
+        .await
+        .unwrap();
+        let root = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+        let path = format!("/api/access-keys/{}", target.id);
+
+        request
+            .patch(&path)
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .json(&serde_json::json!({"enabled":false}))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        request
+            .delete(&path)
+            .add_header("Authorization", format!("Bearer {delegated}"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        request
+            .delete(&path)
+            .add_header("Authorization", format!("Bearer {root}"))
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn delegated_expiry_cannot_outlive_the_issuing_key() {
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -289,7 +327,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .await.assert_status(StatusCode::FORBIDDEN);
 
         let txn = ctx.db.begin().await.unwrap();
-        let inaccessible = tenancy::create_workspace(&txn, tenant.tenant_id, "no-policy", None, None).await.unwrap();
+        let inaccessible = tenancy::create_workspace(&txn, tenant.tenant_id, "no-policy", None).await.unwrap();
         txn.commit().await.unwrap();
         let ungranted = fixtures::create_key(
             &ctx.db, inaccessible.id, Some(member.id),
@@ -339,7 +377,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         let full_key = record["full_key"].as_str().unwrap().to_owned();
         let txn = ctx.db.begin().await.unwrap();
         let second_name = format!("second-key-target-{}", Uuid::now_v7());
-        let second = tenancy::create_workspace(&txn, tenant.tenant_id, &second_name, None, None).await.unwrap();
+        let second = tenancy::create_workspace(&txn, tenant.tenant_id, &second_name, None).await.unwrap();
         txn.commit().await.unwrap();
         request.get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {full_key}"))

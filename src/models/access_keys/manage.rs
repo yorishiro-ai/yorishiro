@@ -88,6 +88,7 @@ impl Entity {
             },
         )
         .await?;
+        Self::management_target(&txn, actor, access_key_id).await?;
         Self::delete_for_tenant(&txn, actor.tenant_id, access_key_id).await?;
         crate::models::iam_audit_events::record(
             &txn,
@@ -112,8 +113,6 @@ impl Entity {
         access_key_id: Uuid,
         change: AccessKeyChange,
     ) -> Result<(Model, KeyGrant), YorishiroError> {
-        use crate::models::_entities::access_keys::Column;
-
         let txn = crate::db::begin_write(db).await.internal()?;
         crate::models::iam::access::require_iam_action(
             &txn,
@@ -124,16 +123,7 @@ impl Entity {
             },
         )
         .await?;
-        let key = Self::find()
-            .filter(Column::Id.eq(access_key_id))
-            .filter(Column::TenantId.eq(actor.tenant_id))
-            .filter(Column::RevokedAt.is_null())
-            .one(&txn)
-            .await
-            .internal()?
-            .ok_or_else(|| {
-                YorishiroError::not_found(format!("access key '{access_key_id}' was not found"))
-            })?;
+        let key = Self::management_target(&txn, actor, access_key_id).await?;
         let mut active: ActiveModel = key.into();
         if let Some(name) = change.name {
             active.name = ActiveValue::Set(validate_key_name(&name)?);
@@ -177,6 +167,33 @@ impl Entity {
         .await?;
         txn.commit().await.internal()?;
         Ok((updated, grant))
+    }
+
+    async fn management_target(
+        txn: &sea_orm::DatabaseTransaction,
+        actor: &AuthContext,
+        access_key_id: Uuid,
+    ) -> Result<Model, YorishiroError> {
+        use crate::models::_entities::access_keys::Column;
+
+        let key = Self::find_by_id(access_key_id)
+            .filter(Column::TenantId.eq(actor.tenant_id))
+            .filter(Column::RevokedAt.is_null())
+            .one(txn)
+            .await
+            .internal()?
+            .ok_or_else(|| {
+                YorishiroError::not_found(format!("access key '{access_key_id}' was not found"))
+            })?;
+        if key.has_root_principal(txn).await?
+            && !Model::is_root_credential(txn, actor.access_key_id).await?
+        {
+            return Err(YorishiroError::AccessDenied {
+                message: "only a root sign-in session can manage root credentials".into(),
+                hint: "sign in as the tenant root".into(),
+            });
+        }
+        Ok(key)
     }
 
     pub(crate) async fn revoke_matching(

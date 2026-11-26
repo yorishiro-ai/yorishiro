@@ -421,6 +421,13 @@ async fn a_new_workspace_becomes_active_on_first_schema() {
             .unwrap()
             .to_owned();
 
+        request
+            .post("/api/workspaces")
+            .add_header("Authorization", format!("Bearer {tenant_key}"))
+            .json(&serde_json::json!({"name":"rejected", "schema_id":null}))
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+
         let listed = request
             .get("/api/workspaces")
             .add_header("Authorization", format!("Bearer {tenant_key}"))

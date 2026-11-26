@@ -157,7 +157,7 @@ pub struct AuthContext {
 }
 
 impl AuthContext {
-    /// The YRN of the access key, which every log line about the caller carries.
+    /// The YRN of the calling access key.
     #[must_use]
     pub fn yrn(&self) -> String {
         crate::models::iam::names::access_key_yrn(self.tenant_id, self.access_key_id)

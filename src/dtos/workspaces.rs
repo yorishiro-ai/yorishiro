@@ -4,15 +4,12 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CreateWorkspaceRequest {
     pub(crate) name: String,
     /// Explicit operational cap on entities, independent of any additional deployment policy.
     /// Omit for no explicit cap.
     pub(crate) max_entities: Option<i32>,
-    /// Schema to associate with this workspace.
-    /// Omit to leave it unset.
-    #[serde(default)]
-    pub(crate) schema_id: Option<Uuid>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]

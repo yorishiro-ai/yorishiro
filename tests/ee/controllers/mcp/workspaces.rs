@@ -21,7 +21,7 @@ async fn workspace_deletion_reports_fork_references_without_exposing_destination
         let definition = json!({"name":"workspace-fork", "entity_types":{"note":{"fields":{"title":{"type":"string"}}}}});
         let txn = ctx.db.begin().await.unwrap();
         let destination = tenancy::create_workspace(&txn, tenant.tenant_id,
-            &format!("workspace-fork-{}", Uuid::now_v7()), None, None).await.unwrap();
+            &format!("workspace-fork-{}", Uuid::now_v7()), None).await.unwrap();
         let source = schema_schemas::create_schema(&txn, tenant.tenant_id, tenant.workspace_id,
             serde_json::from_value(definition.clone()).unwrap(), None, None).await.unwrap().0;
         let target = schema_schemas::create_schema(&txn, tenant.tenant_id, destination.id,

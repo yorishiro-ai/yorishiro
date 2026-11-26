@@ -115,12 +115,6 @@ pub struct WorkspaceIdPath<T> {
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
-pub struct IdUserIdPath<T0, T1> {
-    pub id: T0,
-    pub user_id: T1,
-}
-
-#[derive(serde::Deserialize, schemars::JsonSchema)]
 pub struct InferenceJobIdPath {
     pub inference_job_id: String,
 }

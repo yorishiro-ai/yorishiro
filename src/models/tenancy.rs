@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::error::{OptionExt, ResultExt, YorishiroError};
 use crate::models::_entities::{tenant_memberships, workspace_workspaces};
+use crate::models::iam::policy::Resource;
 
 use crate::models::workspace_workspaces::{WorkspaceSummary, workspace_count_lock_key};
 
@@ -83,6 +84,10 @@ pub async fn issue_login_key(
     let key =
         crate::models::access_keys::Entity::create_login_key(&txn, tenant_id, user_id).await?;
     txn.commit().await.internal()?;
+    tracing::info!(
+        caller = %crate::models::iam::names::access_key_yrn(tenant_id, key.id),
+        "login succeeded",
+    );
     Ok((key, tenant_id))
 }
 
@@ -308,7 +313,7 @@ async fn login_options(
                     policies,
                     workspace.tenant_id,
                     crate::models::iam::policy::Action::GetWorkspace,
-                    crate::models::iam::policy::Resource::Workspace {
+                    Resource::Workspace {
                         tenant_id: workspace.tenant_id,
                         workspace_id: workspace.id,
                     },
@@ -344,9 +349,8 @@ pub async fn create_workspace(
     tenant_id: Uuid,
     name: &str,
     max_entities: Option<i32>,
-    schema_id: Option<Uuid>,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
-    create_workspace_with_quota(conn, tenant_id, name, max_entities, schema_id, None).await
+    create_workspace_with_quota(conn, tenant_id, name, max_entities, None).await
 }
 
 pub(crate) async fn create_workspace_with_quota(
@@ -354,7 +358,6 @@ pub(crate) async fn create_workspace_with_quota(
     tenant_id: Uuid,
     name: &str,
     max_entities: Option<i32>,
-    schema_id: Option<Uuid>,
     workspace_quota: Option<i32>,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
     use crate::models::_entities::tenant_tenants;
@@ -394,15 +397,7 @@ pub(crate) async fn create_workspace_with_quota(
         tenant_id: ActiveValue::Set(tenant_id),
         name: ActiveValue::Set(name.to_string()),
         max_entities: ActiveValue::Set(max_entities),
-        schema_id: ActiveValue::Set(schema_id),
-        status: ActiveValue::Set(
-            if schema_id.is_some() {
-                WorkspaceStatus::Active.as_db_str()
-            } else {
-                WorkspaceStatus::SchemaPending.as_db_str()
-            }
-            .to_string(),
-        ),
+        status: ActiveValue::Set(WorkspaceStatus::SchemaPending.as_db_str().to_owned()),
         ..Default::default()
     };
 
@@ -416,7 +411,6 @@ pub(crate) async fn create_workspace_in_context(
     actor: &crate::models::access_keys::AuthContext,
     name: &str,
     max_entities: Option<i32>,
-    schema_id: Option<Uuid>,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 100 {
@@ -429,19 +423,23 @@ pub(crate) async fn create_workspace_in_context(
         &txn,
         actor,
         crate::models::iam::policy::Action::CreateWorkspace,
-        crate::models::iam::policy::Resource::Tenant {
+        Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
     )
     .await?;
     let quota = crate::data::quotas::for_tenant(ctx, actor.tenant_id).await?;
-    let workspace = create_workspace_with_quota(
+    let workspace =
+        create_workspace_with_quota(&txn, actor.tenant_id, name, max_entities, quota.workspaces)
+            .await?;
+    crate::models::iam_audit_events::record(
         &txn,
-        actor.tenant_id,
-        name,
-        max_entities,
-        schema_id,
-        quota.workspaces,
+        actor,
+        crate::models::iam::policy::Action::CreateWorkspace,
+        serde_json::json!({"target": Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id: workspace.id,
+        }.yrn()}),
     )
     .await?;
     txn.commit().await.internal()?;
@@ -465,13 +463,23 @@ pub async fn delete_workspace_as(
         &txn,
         actor,
         crate::models::iam::policy::Action::DeleteWorkspace,
-        crate::models::iam::policy::Resource::Workspace {
+        Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id,
         },
     )
     .await?;
     crate::models::workspace_workspaces::delete_workspace(&txn, workspace_id).await?;
+    crate::models::iam_audit_events::record(
+        &txn,
+        actor,
+        crate::models::iam::policy::Action::DeleteWorkspace,
+        serde_json::json!({"target": Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id,
+        }.yrn()}),
+    )
+    .await?;
     txn.commit().await.internal()?;
     Ok(())
 }

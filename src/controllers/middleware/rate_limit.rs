@@ -111,7 +111,6 @@ impl RateLimiter {
 ///
 /// Charged before embedding, since embedding is the work the budget protects.
 /// The server holds no tokenizer, so a query costs one token per four bytes, rounded up.
-/// REST and MCP search both call this function, so neither can spend the budget unchecked.
 ///
 /// # Errors
 /// Returns an error when the workspace's token budget is spent.

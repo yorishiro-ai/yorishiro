@@ -13,7 +13,6 @@ async fn empty_workspace(ctx: &loco_rs::app::AppContext, tenant_id: uuid::Uuid) 
         tenant_id,
         &format!("keys-{}", uuid::Uuid::new_v4().simple()),
         None,
-        None,
     )
     .await
     .expect("create workspace without keys");

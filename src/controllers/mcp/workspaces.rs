@@ -86,7 +86,6 @@ impl YorishiroMcpServer {
             &auth,
             &args.name,
             args.max_entities,
-            args.schema_id,
         )
         .await
         {
