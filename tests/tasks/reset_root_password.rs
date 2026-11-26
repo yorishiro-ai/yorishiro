@@ -27,14 +27,14 @@ async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
         .await
         .unwrap()
         .0;
-        let attributed = access_keys::Entity::create_access_key(
+        let attributed = crate::requests::fixtures::create_key(
             &ctx.db,
             tenant.workspace_id,
             Some(tenant.owner_id),
         )
         .await
         .unwrap();
-        let service = access_keys::Entity::create_access_key(&ctx.db, tenant.workspace_id, None)
+        let service = crate::requests::fixtures::create_key(&ctx.db, tenant.workspace_id, None)
             .await
             .unwrap();
         user_users::reset_root_password_by_operator(
@@ -181,7 +181,7 @@ async fn root_reset_rejects_unsafe_targets_without_changing_credentials() {
             .await
             .unwrap()
             .unwrap();
-        let key = access_keys::Entity::create_access_key(
+        let key = crate::requests::fixtures::create_key(
             &ctx.db,
             tenant.workspace_id,
             Some(tenant.owner_id),
@@ -351,7 +351,7 @@ async fn root_reset_rolls_back_password_when_key_revocation_fails() {
         use sea_orm::ConnectionTrait;
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let before = user_users::Entity::find_by_id(tenant.owner_id).one(&ctx.db).await.unwrap().unwrap();
-        let key = access_keys::Entity::create_access_key(
+        let key = crate::requests::fixtures::create_key(
             &ctx.db, tenant.workspace_id, Some(tenant.owner_id),
         ).await.unwrap();
         // Direct write (c): deterministic fault injection failing key revocation.

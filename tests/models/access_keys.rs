@@ -28,7 +28,7 @@ async fn revoke_retains_history_and_a_second_revoke_reports_not_found() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let workspace_id = empty_workspace(&ctx, tenant.tenant_id).await;
-        let created = AccessKeys::create_access_key(&ctx.db, workspace_id, None)
+        let created = crate::requests::fixtures::create_key(&ctx.db, workspace_id, None)
             .await
             .expect("create key");
 

@@ -27,7 +27,7 @@ async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
             json!({"name":"fork_template_library_item","arguments":{"template_id":id,"name":format!("fork-{}",Uuid::now_v7())}})).await;
         let fork = tool_result_json(&fork);
         assert_ne!(fork["id"], created["id"]);
-        let service = yorishiro::models::access_keys::Entity::create_access_key(&ctx.db, tenant.workspace_id, None).await.unwrap();
+        let service = crate::requests::fixtures::create_key(&ctx.db, tenant.workspace_id, None).await.unwrap();
         let denied = mcp_call(&request, &session, &service.plaintext, 5, "tools/call",
             json!({"name":"delete_template_library_item","arguments":{"template_id":id}})).await;
         assert_eq!(denied["result"]["isError"], true);

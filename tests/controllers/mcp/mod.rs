@@ -56,7 +56,7 @@ pub(crate) async fn provider_tools_keep_secrets_private_and_match_rest(
         .await;
         assert_eq!(tool_result_json(&saved)["saved"], true);
         assert!(!saved.to_string().contains(secret));
-        let read_key = yorishiro::models::access_keys::Entity::create_access_key(
+        let read_key = crate::requests::fixtures::create_key(
             &ctx.db,
             tenant.workspace_id,
             Some(crate::requests::fixtures::create_iam_reader(&ctx, tenant.tenant_id).await),

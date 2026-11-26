@@ -38,14 +38,10 @@ async fn worker_class_tools_match_rest_and_enforce_schema_scope() {
         http_response.assert_status_ok();
         assert_eq!(tool_result_json(&current), http_response.json::<Value>());
         assert_eq!(tool_result_json(&current)["worker_class"], "shared");
-        let read_key = yorishiro::models::access_keys::Entity::create_access_key(
-            &ctx.db,
-            tenant.workspace_id,
-            None,
-        )
-        .await
-        .unwrap()
-        .plaintext;
+        let read_key = crate::requests::fixtures::create_key(&ctx.db, tenant.workspace_id, None)
+            .await
+            .unwrap()
+            .plaintext;
         for (id, name, arguments) in [
             (
                 4,

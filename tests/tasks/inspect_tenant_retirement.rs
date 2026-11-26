@@ -164,7 +164,7 @@ async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
-    use yorishiro::models::{access_keys, tenancy};
+    use yorishiro::models::tenancy;
 
     if !crate::require_postgres_backend() {
         return;
@@ -174,7 +174,7 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
         crate::requests::require_licence(&ctx);
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let service = access_keys::Entity::create_access_key(&ctx.db, target.workspace_id, None)
+        let service = crate::requests::fixtures::create_key(&ctx.db, target.workspace_id, None)
             .await
             .unwrap();
         // Set persisted state directly until a fully fenced disable operation is available.
@@ -188,8 +188,7 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
         }
         for user_id in [None, Some(target.owner_id)] {
             assert!(matches!(
-                access_keys::Entity::create_access_key(&ctx.db, target.workspace_id, user_id,)
-                    .await,
+                crate::requests::fixtures::create_key(&ctx.db, target.workspace_id, user_id,).await,
                 Err(yorishiro::YorishiroError::Unauthenticated)
             ));
         }

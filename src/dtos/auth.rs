@@ -1,4 +1,3 @@
-use crate::models::workspace_workspaces::WorkspaceSummary;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -15,8 +14,6 @@ pub struct SignupResponse {
     pub user_id: Uuid,
     pub email: String,
     pub tenant_id: Uuid,
-    /// Workspaces currently accessible to the new tenant root.
-    pub(crate) workspaces: Vec<WorkspaceSummary>,
 }
 
 #[derive(Deserialize)]

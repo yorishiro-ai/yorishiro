@@ -6,9 +6,9 @@ Run commands from the repository root, or use `make -C /path/to/repo <target>`.
 
 | Command | What it does | Backend |
 |---|---|---|
-| `make test-sqlite` | The whole suite on SQLite (`cargo test`); `EDITION=ce` selects community, the default is `ee` | SQLite |
+| `make test-sqlite` | The store, worker and task layers plus a few request smoke tests on SQLite, selected by `SQLITE_TEST_FILTERS` in the `Makefile`; `EDITION=ce` selects community, the default is `ee` | SQLite |
 | `make test-valkey` | Only the Valkey queue provider tests, with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` (default: the compose `redis` service) | SQLite + Valkey |
-| `make test-postgres` | The whole suite on PostgreSQL; every test creates and drops its own database | PostgreSQL |
+| `make test-postgres` | The whole suite, which is the primary one, on PostgreSQL; every test creates and drops its own database | PostgreSQL |
 | `make check-ce` | `cargo check --locked --no-default-features --features community --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
 | `make clippy-ce` | Strict Clippy for every CE target, including tests | CE |
@@ -69,7 +69,9 @@ A test changes the booted app's configuration by passing overrides to `boot_requ
 ### CI
 
 CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus `make test-licence`, which verifies a signed key with the repository secret.
-Each job runs every test; nothing is assigned or inventoried per test, so a new test needs no registration.
+The PostgreSQL job runs every test.
+The SQLite job runs the module prefixes in `SQLITE_TEST_FILTERS`, so a new test in those modules is covered without registration.
+A new request test belongs to PostgreSQL unless it checks something SQLite-specific.
 The package and Docker installability checks run in `packaging.yml`, selected by its path filters on pull requests and on pushes to `develop`.
 
 The integration tests are one binary rooted at `tests/mod.rs`.

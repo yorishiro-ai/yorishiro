@@ -30,7 +30,7 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
             crate::requests::fixtures::TenantArgs::default(),
         )
         .await;
-        let key = access_keys::Entity::create_access_key(
+        let key = crate::requests::fixtures::create_key(
             &ctx.db,
             tenant.workspace_id,
             Some(tenant.owner_id),
@@ -97,7 +97,7 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
 async fn queued_import_rechecks_iam_policies_before_writing() {
     use axum::http::StatusCode;
     use serde_json::json;
-    use yorishiro::models::{access_keys, schema_schemas, tenancy};
+    use yorishiro::models::{schema_schemas, tenancy};
 
     boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let tenant = crate::requests::fixtures::TestTenant::create(
@@ -117,7 +117,7 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
         .await
         .unwrap();
         txn.commit().await.unwrap();
-        let key = access_keys::Entity::create_access_key(
+        let key = crate::requests::fixtures::create_key(
             &ctx.db,
             tenant.workspace_id,
             Some(member.id),

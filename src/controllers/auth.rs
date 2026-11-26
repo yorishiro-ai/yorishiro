@@ -39,7 +39,6 @@ async fn signup(
         user_id: user.id,
         email: user.root_email(),
         tenant_id,
-        workspaces: vec![],
     }))
 }
 

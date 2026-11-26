@@ -63,13 +63,9 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
             api_key: key,
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let administrator = fixtures::create_iam_reader(&ctx, tenant_id).await;
-        let read_key = yorishiro::models::access_keys::Entity::create_access_key(
-            &ctx.db,
-            workspace_id,
-            Some(administrator),
-        )
-        .await
-        .unwrap();
+        let read_key = fixtures::create_key(&ctx.db, workspace_id, Some(administrator))
+            .await
+            .unwrap();
         let txn = TransactionTrait::begin(&ctx.db).await.unwrap();
         let other_workspace = yorishiro::models::tenancy::create_workspace(
             &txn,

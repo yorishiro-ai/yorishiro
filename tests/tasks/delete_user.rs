@@ -79,7 +79,7 @@ async fn operator_user_deletion_requires_confirmation_and_schedules_root_tenants
             user_users::create_user(&ctx.db, "detached@example.com", "long-test-password", None)
                 .await
                 .unwrap();
-        let key = access_keys::Entity::create_access_key(&ctx.db, tenant.workspace_id, None)
+        let key = crate::requests::fixtures::create_key(&ctx.db, tenant.workspace_id, None)
             .await
             .unwrap();
         // Simulate retained attributed credentials after out-of-band membership cleanup.

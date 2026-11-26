@@ -266,7 +266,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         let member = yorishiro::models::tenancy::register_member(&txn, setup.tenant_id,
             &crate::requests::fixtures::unique_email("confirm-iam"), "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
-        let key = yorishiro::models::access_keys::Entity::create_access_key(&ctx.db, setup.workspace_id, Some(member.id)).await.unwrap();
+        let key = crate::requests::fixtures::create_key(&ctx.db, setup.workspace_id, Some(member.id)).await.unwrap();
         let document = serde_json::json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["inference:ConfirmInferenceProposals"],
             "Resource":[format!("yrn:workspace:{}:{}", setup.tenant_id, setup.workspace_id)]}]});
         for deny in [false, true] {
@@ -297,7 +297,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             unchanged.assert_status_ok();
             assert_eq!(unchanged.json::<serde_json::Value>()["data"], fetched["data"]);
         }
-        let revoked = yorishiro::models::access_keys::Entity::create_access_key(
+        let revoked = crate::requests::fixtures::create_key(
             &ctx.db,
             setup.workspace_id,
             Some(setup.owner_id),
@@ -527,7 +527,7 @@ async fn proposals_can_be_listed_and_discarded() {
             &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("proposal-reviewer"),
             "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
-        let key = yorishiro::models::access_keys::Entity::create_access_key(
+        let key = crate::requests::fixtures::create_key(
             &ctx.db, setup.workspace_id,
             Some(member.id),
         ).await.unwrap();

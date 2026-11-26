@@ -59,7 +59,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         assert_eq!(entity_entities::migration_dry_run(&ctx.db, workspace, "note").await.unwrap().needs_values, 1);
         assert_eq!(entity_entities::drift(&ctx.db, workspace, entity_id).await.unwrap().missing_fields[0].name, "rank");
 
-        let revoked = yorishiro::models::access_keys::Entity::create_access_key(
+        let revoked = crate::requests::fixtures::create_key(
             &ctx.db, workspace, Some(owner_id),
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
@@ -87,7 +87,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
-        let attributed = yorishiro::models::access_keys::Entity::create_access_key(
+        let attributed = crate::requests::fixtures::create_key(
             &ctx.db, workspace, Some(member.id),
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
@@ -118,7 +118,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         assert_eq!(failed.status_code(), StatusCode::OK);
         assert_eq!(failed.json::<serde_json::Value>()["status"], "failed");
 
-        let removed = yorishiro::models::access_keys::Entity::create_access_key(
+        let removed = crate::requests::fixtures::create_key(
             &ctx.db, workspace, Some(member.id),
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
@@ -140,7 +140,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
 
-        let attributed = yorishiro::models::access_keys::Entity::create_access_key(
+        let attributed = crate::requests::fixtures::create_key(
             &ctx.db, workspace, Some(member.id),
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
@@ -149,7 +149,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         assert_eq!(response.status_code(), StatusCode::ACCEPTED);
         let filled_id = response.json::<serde_json::Value>()["migration_job_id"].as_str().unwrap().parse().unwrap();
         finish_via_api(&request, &ctx, filled_id, &key, &format!("/api/migration-jobs/{filled_id}")).await;
-        let revoked = yorishiro::models::access_keys::Entity::create_access_key(
+        let revoked = crate::requests::fixtures::create_key(
             &ctx.db, workspace, Some(owner_id),
         ).await.unwrap();
         let response = request.post(&format!("/api/migration-jobs/{filled_id}:undo"))

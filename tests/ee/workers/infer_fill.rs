@@ -693,7 +693,7 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
         let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
-        let key = yorishiro::models::access_keys::Entity::create_access_key(
+        let key = crate::requests::fixtures::create_key(
             &ctx.db, fixture.workspace_id,
             Some(member.id)).await.unwrap();
         define_schema(&request, &tenant_key, "note").await;
@@ -812,7 +812,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
         let attachment = format!("/api/users/{}/policies/{policy_id}", user.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
-        let key = yorishiro::models::access_keys::Entity::create_access_key(
+        let key = crate::requests::fixtures::create_key(
             &ctx.db, setup.workspace_id, Some(user.id),
         ).await.unwrap();
         let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())

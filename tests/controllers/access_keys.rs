@@ -291,7 +291,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         let txn = ctx.db.begin().await.unwrap();
         let inaccessible = tenancy::create_workspace(&txn, tenant.tenant_id, "no-policy", None, None).await.unwrap();
         txn.commit().await.unwrap();
-        let ungranted = access_keys::Entity::create_access_key(
+        let ungranted = fixtures::create_key(
             &ctx.db, inaccessible.id, Some(member.id),
         ).await.expect("workspace-bound issuance succeeds");
         // The key authenticates, but without a policy for the workspace it reads nothing.

@@ -199,7 +199,7 @@ pub(crate) async fn issue_access_key(
     workspace_id: Uuid,
     user_id: Uuid,
 ) -> String {
-    access_keys::Entity::create_access_key(&ctx.db, workspace_id, Some(user_id))
+    create_key(&ctx.db, workspace_id, Some(user_id))
         .await
         .expect("issue access key")
         .plaintext
@@ -464,4 +464,20 @@ pub(crate) async fn replace_policy_document(
         .add_header("Authorization", authorization)
         .await
         .assert_status(StatusCode::NO_CONTENT);
+}
+
+/// Issues an access key for the tenant that owns `workspace_id`.
+pub(crate) async fn create_key(
+    db: &sea_orm::DatabaseConnection,
+    workspace_id: Uuid,
+    user_id: Option<Uuid>,
+) -> Result<yorishiro::models::access_keys::CreatedTenantAccessKey, yorishiro::YorishiroError> {
+    use sea_orm::EntityTrait;
+    let tenant_id = yorishiro::models::workspace_workspaces::Entity::find_by_id(workspace_id)
+        .one(db)
+        .await
+        .map_err(|error| yorishiro::YorishiroError::Internal(error.into()))?
+        .ok_or_else(|| yorishiro::YorishiroError::not_found("workspace not found"))?
+        .tenant_id;
+    access_keys::Entity::create_tenant_access_key(db, tenant_id, user_id, "unnamed").await
 }

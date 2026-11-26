@@ -213,14 +213,10 @@ async fn service_keys_cannot_read_users() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let session = initialize(&request).await;
-        let service = yorishiro::models::access_keys::Entity::create_access_key(
-            &ctx.db,
-            tenant.workspace_id,
-            None,
-        )
-        .await
-        .unwrap()
-        .plaintext;
+        let service = fixtures::create_key(&ctx.db, tenant.workspace_id, None)
+            .await
+            .unwrap()
+            .plaintext;
         let denied = call(
             &request,
             &session,

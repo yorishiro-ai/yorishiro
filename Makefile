@@ -57,8 +57,12 @@ test-postgres: patch-check
 	fi
 	QUEUE_URL='$(DATABASE_URL)' cargo test --locked --workspace $(TEST_FEATURES)
 
+# SQLite runs the store, worker and task layers plus a few request smoke tests.
+# HTTP and MCP behaviour does not depend on the backend, so `make test-postgres` is the full suite.
+SQLITE_TEST_FILTERS = models:: db:: data:: services:: workers:: tasks:: initializers:: integration:: error:: app:: controllers::entities controllers::search controllers::auth controllers::schemas
+
 test-sqlite: patch-check
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' cargo test --locked --workspace $(TEST_FEATURES)
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' cargo test --locked --workspace $(TEST_FEATURES) -- $(SQLITE_TEST_FILTERS)
 
 # Verify that a signed `YORISHIRO_LICENSE_KEY` activates the enterprise edition at boot.
 test-licence: patch-check

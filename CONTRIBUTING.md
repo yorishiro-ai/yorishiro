@@ -45,7 +45,7 @@ Run the local development stack with `docker compose -f docker-compose.dev.yaml 
 The Makefile starts only test dependencies from `docker-compose.test.yaml` when using the default local URLs.
 The separate `docker-compose.yaml` deploys published images and requires a release `TAG` and a production `DATABASE_URL`.
 
-Use `make test-sqlite` or `make test-postgres` locally; `EDITION=ce` selects the community edition.
+Use `make test-postgres` for the full suite and `make test-sqlite` for the SQLite subset locally; `EDITION=ce` selects the community edition.
 The backend comes from `DATABASE_URL` and the edition from the feature set; there is no other test selector.
 `RUST_TEST_THREADS` controls test parallelism; CI limits the unlicensed EE PostgreSQL job to two threads.
 

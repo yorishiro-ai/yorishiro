@@ -7,20 +7,6 @@ use super::{
 };
 
 impl Entity {
-    /// Issues an unnamed key for the tenant that owns `workspace_id`; the key itself is not bound to the workspace.
-    ///
-    /// # Errors
-    /// Returns an error if the workspace does not exist or the key cannot be stored.
-    pub async fn create_access_key(
-        db: &DatabaseConnection,
-        workspace_id: Uuid,
-        user_id: Option<Uuid>,
-    ) -> Result<CreatedTenantAccessKey, YorishiroError> {
-        let tenant_id =
-            crate::models::workspace_workspaces::get_workspace_tenant(db, workspace_id).await?;
-        Self::create_tenant_access_key(db, tenant_id, user_id, "unnamed").await
-    }
-
     /// Issues a key for a tenant, optionally attributed to one of its users.
     ///
     /// # Errors

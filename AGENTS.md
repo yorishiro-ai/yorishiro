@@ -148,7 +148,8 @@ SQLite has the fork integrity triggers and the FTS5 table.
 - `tests/` is a plain Loco integration-test crate (one binary, no `#[path]` includes).
 - `tests/requests/mod.rs` owns `close_app_pools`.
 - Request tests boot through `boot_request`: SQLite gets its own file and PostgreSQL its own throwaway database per test.
-- `make test-sqlite` and `make test-postgres` run the whole suite (`EDITION=ce|ee`); there is no per-test assignment or registration.
+- `make test-postgres` runs the whole suite (`EDITION=ce|ee`).
+- `make test-sqlite` runs only the module prefixes in `SQLITE_TEST_FILTERS` (store, worker and task layers plus request smoke tests); there is no per-test registration.
 - Licensed tests install a test licence when `YORISHIRO_LICENSE_KEY` is unset, and the E5 model tests skip without the model files.
 - Tests need PostgreSQL with `vector` and `pg_trgm` in `template1` (not just the deployment database). Loco's harness creates each test database via `CREATE DATABASE`, which copies `template1`.
 - Tests need a non-superuser role (superuser bypasses RLS regardless of `FORCE`).

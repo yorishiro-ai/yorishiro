@@ -140,13 +140,9 @@ async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity
                 .iter()
                 .all(|workspace| workspace["tenant_id"] == tenant.tenant_id.to_string())
         );
-        let service = yorishiro::models::access_keys::Entity::create_access_key(
-            &ctx.db,
-            tenant.workspace_id,
-            None,
-        )
-        .await
-        .unwrap();
+        let service = crate::requests::fixtures::create_key(&ctx.db, tenant.workspace_id, None)
+            .await
+            .unwrap();
         let response = mcp_call(
             &request,
             &session,

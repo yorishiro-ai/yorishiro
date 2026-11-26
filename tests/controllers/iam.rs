@@ -209,7 +209,6 @@ async fn schema_ids_resolve_the_workspace_and_creation_refuses_ambiguity() {
     reason = "one account history compares root sessions with restricted and delegated credentials over REST and MCP"
 )]
 async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
-    use yorishiro::models::access_keys::Entity;
     boot_request_with::<App, _, _>(&[], |request, ctx| async move {
         let tenant = crate::requests::fixtures::TestTenant::create(
             &request,
@@ -217,7 +216,7 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
             crate::requests::fixtures::TenantArgs::default(),
         )
         .await;
-        let key = Entity::create_access_key(
+        let key = crate::requests::fixtures::create_key(
             &ctx.db,
             tenant.workspace_id,
             Some(tenant.owner_id),
