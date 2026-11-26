@@ -1,4 +1,4 @@
-//! MCP tools for workspaces and their members.
+//! MCP tools for workspaces.
 
 use crate::controllers::mcp::{render, verified};
 use axum::http::request::Parts;
@@ -58,7 +58,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Get workspace details, counts and effective entity cap with workspace_get IAM permission; cannot retarget a selected or credential-bound workspace"
+        description = "Get workspace details, counts and effective entity cap (requires the workspace:GetWorkspace action)"
     )]
     pub(crate) async fn get_workspace(
         &self,
@@ -73,7 +73,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Create a workspace in the current tenant without changing the credential's workspace selection."
+        description = "Create a workspace in the current tenant (requires the workspace:CreateWorkspace action)."
     )]
     pub(crate) async fn create_workspace(
         &self,
@@ -96,7 +96,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Update a workspace name with workspace_update IAM permission; replacing or clearing its manual entity cap also requires tenant_update and a tenant-scoped credential; schema binding is immutable here"
+        description = "Update a workspace name (requires the workspace:UpdateWorkspace action); replacing or clearing its manual entity cap also requires permission to update the tenant; schema binding is immutable here"
     )]
     pub(crate) async fn update_workspace(
         &self,

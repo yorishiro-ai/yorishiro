@@ -4,7 +4,7 @@ use crate::error::{ValidationDetail, ValidationErrorCode, YorishiroError};
 
 use super::types::{ArrayItemType, FieldDef, FieldTypeName, MetaSchemaDefinition};
 
-/// Maximum nesting depth for object-type fields, to prevent unbounded recursion from malformed or adversarial schema definitions.
+/// Maximum nesting depth for object-type fields, which bounds recursion on adversarial definitions.
 #[doc(hidden)]
 pub const MAX_OBJECT_DEPTH: usize = 5;
 
@@ -16,7 +16,7 @@ pub const MAX_OBJECT_DEPTH: usize = 5;
 /// - format is only valid for string fields; minimum/maximum are only valid for number/integer fields and require minimum <= maximum
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns a validation error listing every inconsistency in the definition.
 pub fn validate_definition(def: &MetaSchemaDefinition) -> Result<(), YorishiroError> {
     let mut details = Vec::new();
 

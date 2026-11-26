@@ -1,14 +1,12 @@
 //! Per-workspace partial HNSW indexes on the `entity_embeddings` partitions.
 //!
-//! Every workspace at or above the promotion threshold gets one partial HNSW index on the
-//! partition that holds its vectors, rebuilt when the workspace's stamped width changes.
-//! Up to pgvector's full-precision limit the index expression is the original vector;
-//! above it a normalized `halfvec`; above the half-precision limit the first 4,000 dimensions.
-//! The index selects candidates; every search reranks them in original full-precision coordinates.
+//! Every workspace at or above the promotion threshold gets one partial HNSW index on the partition that holds its vectors, rebuilt when the workspace's stamped width changes.
+//! Up to pgvector's full-precision limit the index expression is the original vector.
+//! Above it the expression is a normalized `halfvec`, and above the half-precision limit the first 4,000 dimensions.
+//! The index selects candidates, and every search reranks them in original full-precision coordinates.
 //!
-//! Maintenance is opportunistic and idempotent: a second concurrent invocation skips on the
-//! session advisory lock, and workspaces mid-reindex keep their current valid indexes until
-//! atomic vector publication finishes.
+//! Maintenance is idempotent: a concurrent invocation skips on the session advisory lock.
+//! Workspaces mid-reindex keep their valid indexes until vector publication finishes.
 
 use std::collections::HashSet;
 

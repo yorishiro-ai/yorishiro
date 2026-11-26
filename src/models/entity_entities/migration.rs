@@ -177,8 +177,7 @@ fn missing_fields_in_value(
 /// For each entity behind the active version:
 /// 1. Takes a snapshot (so the batch can be undone via `undo_job`).
 /// 2. Reads the entity's current data and the active version's field definitions.
-/// 3. For every required field the active version defines but the entity lacks, fills it with the
-///    field's `default` value, or a type-appropriate empty value if no default is set.
+/// 3. For every required field the active version defines but the entity lacks, fills it with the field's `default` value, or a type-appropriate empty value if no default is set.
 /// 4. Writes the updated data back.
 ///
 /// Returns a report counting entities updated and total fields filled.
@@ -196,7 +195,6 @@ pub(crate) async fn fill_defaults(
     let active =
         crate::models::schema_schemas::get_active_schema(conn, workspace_id, schema_name).await?;
 
-    // Fetch all entities behind the active version.
     let rows: Vec<EntityRecord> = Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .join(
@@ -225,13 +223,11 @@ pub(crate) async fn fill_defaults(
     for record in rows {
         let entity_type = &record.entity_type;
 
-        // Find the active version's entity type definition.
         let Some(active_entity) = active.definition.entity_types.get(entity_type.as_str()) else {
-            // Entity type dropped in active version; nothing to fill.
+            // The active version dropped this entity type.
             continue;
         };
 
-        // Take a snapshot before modifying.
         if let Err(error) = super::snapshots::snapshot(conn, workspace_id, record.id, job_id).await
         {
             if matches!(error, YorishiroError::NotFound { .. }) {
@@ -283,14 +279,12 @@ fn fill_fields_in_value(
 
     for (name, prop_def) in fields {
         if obj.contains_key(name) {
-            // Field exists; recurse into nested objects.
             if let Some(child) = obj.get_mut(name)
                 && let Some(ref_properties) = &prop_def.properties
             {
                 count += fill_fields_in_value(child, ref_properties);
             }
         } else if prop_def.required {
-            // Missing required field — fill it.
             if let Some(ref_val) = &prop_def.default {
                 obj.insert(name.clone(), ref_val.clone());
             } else {

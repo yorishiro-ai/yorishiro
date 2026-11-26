@@ -1,9 +1,9 @@
 //! The template marketplace: `template_templates`, `template_versions` and `template_reviews`.
 //!
-//! All three are created by the one schema migration in the root `migration` crate; this crate has never had a migration crate of its own, and the tables are base-owned even though only `ee/` reads them.
+//! The tables belong to the community schema migration even though only `ee/` reads them.
 //!
-//! Record shapes, input DTOs, and the reads live here.
-//! Write decisions live in the private `write` implementation module.
+//! Record shapes, input DTOs and reads live here.
+//! Write decisions live in the private `write` module.
 
 mod write;
 
@@ -404,13 +404,9 @@ impl TryFrom<ForkSourceDbRecord> for ForkSource {
 
 /// Lists community-visible templates across every tenant, ordered by name then id, one page at a time.
 ///
-/// A template appears only once it has a non-draft version: `visibility = 'community'` says its owner is willing to share it, but with nothing published there is nothing to install, and a listing whose every entry 404s on install is worse than a shorter one.
+/// A template appears only once it has a non-draft version, because with nothing published there is nothing to install.
 ///
-/// The three aggregates (latest stable version, review count, average rating) are correlated
-/// subqueries rather than a `JOIN` + `GROUP BY`: `limit` bounds the page to 200 rows, so their cost
-/// is bounded too, and nothing has measured the rewrite as faster.
-///
-/// `SeaQuery` builds the correlated aggregates inside the same paginated entity projection.
+/// The three aggregates (latest stable version, review count, average rating) are correlated subqueries, and the page limit bounds their cost.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -525,7 +521,7 @@ async fn marketplace_listings(
 /// Versions of a template that `tenant_id` is allowed to see.
 ///
 /// **Drafts are the caller's own only.**
-/// The database does not enforce this: `template_versions` carries no RLS, matching `template_templates`, so this WHERE clause is the enforcement, and dropping it publishes every tenant's unfinished work.
+/// `template_versions` carries no RLS, so this WHERE clause is the only enforcement.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -592,10 +588,10 @@ async fn visible_versions(
 
 /// Inserts the next version of a template, the number assigned as `max(version) + 1` inside the same statement.
 ///
-/// Called inside the transaction that holds `template-version:{template_id}`'s advisory lock (`models::marketplace::publish_version`): at READ COMMITTED, Postgres locks no range for rows that do not exist yet, so two concurrent inserts would otherwise read the same maximum and collide on the `template_id, version` unique index.
+/// Call it inside a transaction holding the `template-version:{template_id}` advisory lock.
+/// At READ COMMITTED, PostgreSQL locks no range for rows that do not exist yet, so concurrent inserts would otherwise read the same maximum.
 ///
-/// `SeaQuery` builds one `INSERT ... SELECT` so the version is computed in the inserting statement.
-/// Splitting this into a separate `SELECT max(version)` plus an `ActiveModel` insert would reopen exactly the race the advisory lock and single-statement `COALESCE` together close.
+/// One `INSERT ... SELECT` computes the version in the inserting statement, so do not split it into a separate `SELECT max(version)`.
 pub(crate) async fn insert_next_version(
     conn: &impl ConnectionTrait,
     template_id: Uuid,
@@ -696,7 +692,7 @@ pub async fn list_reviews(
         .collect()
 }
 
-/// Whether a template visible to `tenant_id` exists, for `models::marketplace::submit_review`'s "reviewing a template nobody can see is meaningless" guard.
+/// Whether a template visible to `tenant_id` exists.
 pub(crate) async fn is_visible(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -846,7 +842,7 @@ pub(crate) enum InsertForkOutcome {
 }
 
 /// Inserts the caller's own private copy of a forked template.
-/// The forked copy starts `visibility = 'tenant'`: publishing someone else's work into the marketplace under your name is a decision, not a default.
+/// The copy starts tenant-private, whatever the source's visibility.
 pub(crate) async fn insert_fork(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -857,7 +853,6 @@ pub(crate) async fn insert_fork(
 ) -> Result<InsertForkOutcome, YorishiroError> {
     use crate::models::_entities::template_templates::ActiveModel;
 
-    // Forks always start tenant-private, regardless of source visibility.
     let active = ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant_id),
         name: sea_orm::ActiveValue::Set(source.name.clone()),
@@ -885,7 +880,7 @@ pub(crate) async fn insert_fork(
     }
 }
 
-/// Whether a template exists and belongs to `tenant_id`, for `models::marketplace::require_ownership`.
+/// Whether a template exists and belongs to `tenant_id`.
 pub(crate) async fn is_owned_by(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -902,8 +897,7 @@ pub(crate) async fn is_owned_by(
         .internal()
 }
 
-/// Sets a template's marketplace visibility.
-/// `models::marketplace::set_visibility` has already checked ownership; this is the write alone.
+/// Writes a template's marketplace visibility; the caller has already checked ownership.
 pub(crate) async fn update_visibility(
     conn: &impl ConnectionTrait,
     template_id: Uuid,

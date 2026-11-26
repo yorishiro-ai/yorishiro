@@ -1,7 +1,7 @@
 //! Billing state stored in this crate's own `tenant_billing` table.
 //!
-//! `models::tenant_tenants` knows nothing about subscriptions or payment processors, so the plan and the Stripe customer id live here instead, keyed by tenant id.
-//! A tenant with no row is unbilled (the state every self-hosted deployment is permanently in), which is why every read returns an `Option` rather than treating a missing row as an error.
+//! The plan and the Stripe customer id live here, keyed by tenant id, because `models::tenant_tenants` knows nothing about billing.
+//! A tenant with no row is unbilled, so reads return an `Option` rather than an error.
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::tenant_billing::{ActiveModel, Column, Entity};
@@ -29,7 +29,7 @@ impl From<crate::models::_entities::tenant_billing::Model> for TenantBillingReco
 }
 
 /// Reads a tenant's billing state.
-/// `None` means the tenant is unbilled, not that it is missing: the caller decides what an unbilled tenant looks like (the dashboard renders it as no plan and no cap).
+/// `None` means the tenant is unbilled, not that it is missing.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -45,8 +45,7 @@ pub async fn get_billing(
         .map(|row| row.map(TenantBillingRecord::from))
 }
 
-/// Resolves the tenant a Stripe webhook is about.
-/// Subscription updated/deleted events carry only the Stripe customer id, so this is the inbound lookup path.
+/// Resolves the tenant a Stripe webhook is about, since subscription events carry only the customer id.
 pub(crate) async fn get_by_stripe_customer(
     conn: &impl ConnectionTrait,
     stripe_customer_id: &str,
@@ -59,9 +58,8 @@ pub(crate) async fn get_by_stripe_customer(
         .map(|row| row.map(TenantBillingRecord::from))
 }
 
-/// Records the Stripe customer id created for a tenant at checkout, so later webhook events can be routed back to it via `get_by_stripe_customer`.
-///
-/// Upserts, because checkout can be completed for a tenant that already has a billing row (a resubscribe after cancellation).
+/// Records the Stripe customer id created for a tenant at checkout.
+/// Upserts, because a resubscribe reaches checkout with an existing row.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -76,11 +74,7 @@ pub async fn link_stripe_customer(
         updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
-    // updated_at is set explicitly here rather than left to ActiveModelBehavior::before_save:
-    // Entity::insert(...).on_conflict(...) builds and executes a raw INSERT ... ON CONFLICT
-    // statement directly, bypassing before_save entirely (it only runs on the
-    // ActiveModelTrait::insert/update/save path), for both the insert and the conflict-update
-    // branch.
+    // `Entity::insert(..).on_conflict(..)` skips `before_save`, so the hook runs by hand to stamp timestamps.
     let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
         .await
         .internal()?;
@@ -97,10 +91,8 @@ pub async fn link_stripe_customer(
 }
 
 /// Sets a tenant's plan.
-/// Upserts for the same reason as [`link_stripe_customer`]: a plan can be assigned before or after the customer id is linked, depending on which webhook lands first.
-///
-/// The workspace cap that comes with the plan is not written here: it lives on `tenant_tenants.max_workspaces`, which base owns and enforces at workspace-creation time.
-/// The caller applies both.
+/// Upserts because the plan can land before or after the customer id is linked.
+/// The workspace cap lives on `tenant_tenants.max_workspaces`, so the caller applies it separately.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

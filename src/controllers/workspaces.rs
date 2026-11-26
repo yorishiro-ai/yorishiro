@@ -30,9 +30,6 @@ pub(crate) async fn list_workspaces(
     Ok(Json(records))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn create_workspace(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -49,9 +46,6 @@ async fn create_workspace(
     Ok(Created(WorkspaceRecord::try_from(workspace)?))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn get_workspace(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,

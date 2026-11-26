@@ -65,7 +65,7 @@ impl Default for RecallQuery {
 }
 
 /// Reduces `entity.data` down to only the fields marked `x-embed` in its `entity_type` definition.
-/// Falls back to an empty body if the entity's schema version no longer defines that `entity_type` at all, rather than failing the whole recall for one neighbor.
+/// The body is empty when the entity's schema version does not define that `entity_type`, so one neighbor cannot fail the whole recall.
 fn shallow_copy(schema: &SchemaRecord, mut entity: EntityRecord) -> EntityRecord {
     let fields = schema
         .definition
@@ -87,7 +87,7 @@ fn shallow_copy(schema: &SchemaRecord, mut entity: EntityRecord) -> EntityRecord
     entity
 }
 
-/// Fetches an entity's full body together with its relations and connected neighbors in one call, so a caller doesn't need `entity_get` + `list_relations` + `entity_get` per neighbor round trips.
+/// Fetches an entity's full body together with its relations and connected neighbors in one call.
 ///
 /// `query.depth` controls how many hops are traversed outward from `entity_id`, breadth-first.
 /// An entity reachable by more than one path is only reported once, tagged with the shortest `hop_distance`, and never re-expanded once visited (so cycles terminate).

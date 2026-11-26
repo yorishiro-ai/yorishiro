@@ -17,10 +17,9 @@ pub(crate) struct OAuthUser {
     pub(crate) id: Uuid,
 }
 
-/// Looks up a user previously provisioned through this exact provider + subject id pair.
-/// Keyed on the pair (not email alone) because the subject id is what the provider actually guarantees stable and unique: an email can be reassigned or changed at the provider, but `sub` never changes for the same account.
-/// Returns `None` on first login for a given identity, whether or not a different (e.g. password-based) account already exists under the same email.
-/// Callers decide how to reconcile that (see `models::user_users::find_or_create`).
+/// Looks up a user previously provisioned through this exact provider and subject id pair.
+/// The pair is the key, not the email, because a provider can reassign an email but never changes `sub`.
+/// Returns `None` on the first login of an identity, even when another account already holds the same email.
 pub(crate) async fn find_by_oauth_identity(
     conn: &impl ConnectionTrait,
     provider: &str,
@@ -39,14 +38,14 @@ pub(crate) async fn find_by_oauth_identity(
 
 pub(crate) enum CreateOauthUserError {
     /// Some unique constraint on `user_users` rejected the insert.
-    /// This can only be the `email` column's own constraint (a genuinely different account already holds this email): `find_or_create` holds `pg_advisory_xact_lock` for this exact `(provider, subject_id)` for the whole first-login path, including a re-check via `find_by_oauth_identity` immediately before this insert, so no other caller can be concurrently inserting the same identity.
-    /// `users_oauth_identity_idx` cannot be the constraint that fired here.
+    /// This can only be the `email` constraint: a different account already holds the email.
+    /// The first-login path holds an advisory lock on the identity and re-checks it before the insert, so the identity index cannot be the one that fired.
     UniqueViolation,
     Other(YorishiroError),
 }
 
 /// Creates a new OAuth-provisioned user row (`password_hash` left `NULL`, per `users_auth_method_check`).
-/// Does not touch tenancy: see `models::user_users::find_or_create` for the caller that wires a freshly created user into a tenant, workspace and membership.
+/// Does not touch tenancy: the caller wires the new user into a tenant and membership.
 ///
 /// Takes `&impl ConnectionTrait` so user creation and membership creation can run in one transaction.
 /// Without that transaction, a crash can leave a user with no membership and prevent later sign-ins.

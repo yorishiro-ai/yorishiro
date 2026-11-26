@@ -65,7 +65,7 @@ pub struct ArrayItems {
 }
 
 /// Field definition using standard JSON Schema keywords.
-/// Unknown `x-` attributes are preserved via `extra` (flattened) so that older clients don't drop fields they don't recognize yet.
+/// Unknown attributes are preserved in `extra`.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FieldDef {
     pub r#type: FieldTypeName,

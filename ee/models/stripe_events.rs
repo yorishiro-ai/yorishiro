@@ -1,7 +1,7 @@
 //! The webhook's replay and ordering guards, over this crate's own `stripe_events` table.
 //!
-//! Stripe retries a delivery on a slow or failed response and does not guarantee ordering, so the same event can arrive twice and an older one can arrive after a newer one.
-//! These three functions are what makes applying an event idempotent and monotonic; the controller decides what an event means, and asks here whether it should be applied at all.
+//! Stripe retries deliveries and does not guarantee ordering, so the same event can arrive twice and an older one can arrive after a newer one.
+//! These functions make applying an event idempotent and monotonic, and the controller asks here whether an event should be applied at all.
 
 use sea_orm::SelectExt;
 
@@ -12,7 +12,7 @@ use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilte
 
 /// Whether `event_id` has already been applied.
 ///
-/// Stripe retries a webhook delivery on a slow or failed response, so the same event can arrive more than once; `event_id` is the primary key of `stripe_events`, so this is a plain existence check.
+/// `event_id` is the primary key of `stripe_events`, so this is a plain existence check.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -29,7 +29,7 @@ pub async fn is_event_processed(
 
 /// Whether `created` is older than the most recently applied event's `created` for the same `customer_id`.
 ///
-/// Stripe does not guarantee delivery order, so a delayed/retried delivery of a stale event must not be allowed to undo a newer one that already landed for that customer.
+/// A delayed delivery of a stale event must not undo a newer one that already landed for that customer.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -47,12 +47,11 @@ pub async fn is_stale_for_customer(
     Ok(latest.is_some_and(|row| created < row.stripe_created))
 }
 
-/// Records that `event_id` has been applied, so a later retry or reorder of the same or an older event for `customer_id` is rejected by [`is_event_processed`]/[`is_stale_for_customer`].
+/// Records that `event_id` has been applied, so a later retry or older event for `customer_id` is rejected by [`is_event_processed`] and [`is_stale_for_customer`].
 ///
-/// `ON CONFLICT (event_id) DO NOTHING` tolerates duplicate inserts; event application owns the surrounding transaction and subscription customer lock.
+/// `ON CONFLICT (event_id) DO NOTHING` tolerates duplicate inserts, and event application owns the surrounding transaction and customer lock.
 ///
-/// `event_type` is written but never read back by any query here, which makes it look removable.
-/// It isn't: this table is the billing audit trail, and dropping the column would leave an investigator able to see that an event was applied but not what it did.
+/// `event_type` is never read back here, but it stays because this table is the billing audit trail.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -70,6 +69,7 @@ pub async fn record_processed_event(
         stripe_created: ActiveValue::Set(created.into()),
         ..Default::default()
     };
+    // `Entity::insert` skips model hooks, so run `before_save` for the timestamp.
     let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
         .await
         .internal()?;

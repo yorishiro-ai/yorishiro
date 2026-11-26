@@ -67,13 +67,12 @@ pub(crate) async fn add_member_in_transaction(
     }
     guard_tenant_bound_user(conn, tenant_id, user_id).await?;
 
-    // `Entity::insert(...).on_conflict(...).exec(...)` builds its query eagerly from `active` and never calls `ActiveModelBehavior::before_save`, unlike plain `ActiveModel::insert()`: this is the one insert path in this file that needs `generated_id` called directly rather than relying on the hook.
     let active = ActiveModel {
-        id: crate::db::generated_id(ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
         user_id: ActiveValue::Set(user_id),
         ..Default::default()
     };
+    // `Entity::insert(..).on_conflict(..)` skips `before_save`, so the hook runs by hand to assign the id and timestamp.
     let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
         .await
         .internal()?;
@@ -130,8 +129,7 @@ pub async fn create_tenant_user_member(
     Ok(user)
 }
 
-/// Removes membership; subsequent authentication rejects all attributed keys in this tenant.
-/// Revokes attributed keys atomically so restoring membership cannot resurrect old credentials.
+/// Removes membership and revokes the user's keys in this tenant in one transaction, so restoring membership cannot resurrect old credentials.
 ///
 /// # Errors
 /// Rejects removing the tenant root or persistence failures.

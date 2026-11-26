@@ -1,7 +1,6 @@
 //! Vector similarity search over `entity_entities`.
 //!
-//! Embeddings live in the separate `entity_embeddings` table, so every query here
-//! joins `entity_entities e` to that table when searching by vector.
+//! Embeddings live in the separate `entity_embeddings` table, so vector queries join `entity_entities e` to it.
 //!
 //! PostgreSQL fuses vector and selective literal-text ranks using gated RRF.
 //! PostgreSQL uses NFKC-normalized ILIKE with a trigram expression index.
@@ -9,9 +8,8 @@
 //! SQLite keeps vector-first results and fills remaining slots from unembedded text matches.
 //!
 //! Every promoted workspace has one partial HNSW index on its `entity_embeddings` partition.
-//! Up to pgvector's full-precision limit the index expression is the original vector; above it a
-//! normalized `halfvec`; above the half-precision limit the first 4,000 dimensions.
-//! The index selects candidates; the final rank always uses the original full-precision coordinates.
+//! The index expression follows the dimension bands described in `entity_embeddings::indexes`.
+//! The index selects candidates, and the final rank always uses the original full-precision coordinates.
 //!
 //! Embedding generation follows two paths.
 //! Document embedding is asynchronous: the embedding sync worker (`workers::embedding_sync`) generates and stores vectors after entity writes.
@@ -54,8 +52,8 @@ const RRF_TEXT_GATE_LIMIT: i64 = 20;
 
 /// Transaction-local GUCs every PostgreSQL search runs under.
 ///
-/// `force_custom_plan` keeps the candidate CTE out of the plan cache; `iterative_scan`
-/// lets the HNSW scan keep yielding closer rows until the candidate limit is satisfied.
+/// `force_custom_plan` keeps the candidate CTE out of the plan cache.
+/// `iterative_scan` lets the HNSW scan keep yielding rows until the candidate limit is satisfied.
 const SEARCH_GUCS_SQL: &str = "SELECT set_config('plan_cache_mode', 'force_custom_plan', true), set_config('hnsw.ef_search', $1, true), set_config('hnsw.iterative_scan', 'relaxed_order', true)";
 
 #[derive(Clone)]
@@ -186,8 +184,7 @@ pub struct SearchHit {
     pub entity: EntityRecord,
     /// Cosine distance (PostgreSQL `<=>` or sqlite-vec cosine distance).
     /// Closer to 0 means more similar.
-    /// `None` when the entity has no embedding and was only surfaced through the
-    /// `pg_trgm` / FTS fallback on `query_text`.
+    /// `None` when the entity has no embedding and matched only through text search.
     pub distance: Option<f64>,
 }
 
@@ -444,9 +441,8 @@ fn original_distance(embedding: Expr, dimensions: usize, query: Expr) -> Expr {
 /// The expression a workspace HNSW index ranks by, for the query's dimension band.
 ///
 /// Up to pgvector's full-precision limit this is the original vector.
-/// Above it a normalized `halfvec`: normalizing keeps every value inside the half-float range,
-/// and cosine ranking is invariant under it. Above the half-precision limit, the first
-/// 4,000 dimensions carry the index and the search reranks in original coordinates.
+/// Above it a normalized `halfvec`: normalizing keeps every value inside the half-float range, and cosine ranking is invariant under it.
+/// Above the half-precision limit, the first 4,000 dimensions carry the index and the search reranks in original coordinates.
 fn hnsw_distance(embedding: Expr, query: Expr, dimensions: usize) -> Expr {
     let Some(index_dims) = hnsw_halfvec_dimensions(dimensions) else {
         return original_distance(embedding, dimensions, query);
@@ -575,9 +571,7 @@ pub fn postgres_rrf_query(
         Expr::val(sea_orm::entity::prelude::PgVector::from(vector)),
     );
     vectors.expr_as(distance, "distance");
-    // Every band up to the application maximum has a partial HNSW index, so the candidate
-    // set is always the index output: materialize it, then rerank by original coordinates
-    // (relaxed HNSW can emit closer rows after the initial result batch).
+    // Materialize the index output, then rerank by original coordinates, because relaxed HNSW can emit closer rows after the first batch.
     vectors.limit(ANN_CANDIDATE_LIMIT as u64);
     let ann_candidates = vectors;
     let vectors = Query::select()
@@ -670,8 +664,7 @@ pub fn vector_candidates_query(
             Expr::val(sea_orm::entity::prelude::PgVector::from(vector.clone())),
         )
     };
-    // The order expression is the index expression: HNSW selects the candidates,
-    // while the distance column keeps original coordinates for the final ranking.
+    // The order expression is the index expression, while the distance column keeps original coordinates.
     let order = if sqlite {
         distance.clone()
     } else {
@@ -696,6 +689,6 @@ pub fn vector_candidates_query(
         .and_where(embedding.is_not_null())
         .order_by_expr(order, Order::Asc)
         .limit(limit.cast_unsigned());
-    // Unpromoted workspaces fall back to exact search over the (below-threshold) workspace rows.
+    // Workspaces without an index get an exact scan over their rows.
     Ok(knn)
 }

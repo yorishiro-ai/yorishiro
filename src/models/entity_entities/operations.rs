@@ -148,7 +148,7 @@ pub async fn get(
 
 /// Fully replaces an existing entity's `data`.
 ///
-/// Validation is done against the schema version the entity was actually created with (the row's `schema_id`), so existing entities don't silently break compatibility even if the active version has since moved on.
+/// Validation runs against the schema version the entity was created with (the row's `schema_id`), even if the active version has moved on.
 /// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation access key.
 ///
 /// # Errors
@@ -190,13 +190,13 @@ pub async fn update(
         ..Default::default()
     };
     if input.expected_updated_at.is_some() {
-        // Bulk updates do not run model hooks, so retain the normal timestamp hook explicitly.
+        // `update_many` skips model hooks, so run `before_save` explicitly for the timestamp, sync token and content revision.
         let active = active.before_save(conn, false).await.internal()?;
         let mut rows = Entity::update_many()
             .set(active)
             .filter(Column::WorkspaceId.eq(workspace_id))
             .filter(Column::Id.eq(input.id))
-            // Compare the same snapshot atomically without SQLite timestamp text-format differences.
+            // The sync token compares exactly where timestamp text formats differ across backends.
             .filter(Column::EmbeddingSyncToken.eq(current_token))
             .exec_with_returning(conn)
             .await

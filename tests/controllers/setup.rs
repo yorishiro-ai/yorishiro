@@ -149,7 +149,7 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
         let workspace = created.json::<serde_json::Value>();
         let workspace_id = workspace["id"].as_str().unwrap();
 
-        // Tenant-scoped keys select an explicitly created workspace through the header.
+        // The workspace is selected per request through the header.
         let caller_identity = request
             .get("/api/caller-identity")
             .add_header("Authorization", &auth)

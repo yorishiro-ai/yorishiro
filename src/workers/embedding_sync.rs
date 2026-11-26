@@ -90,12 +90,7 @@ async fn perform_embedding_sync(
         ));
     }
 
-    // Uses `ctx.db` (the identity pool) rather than `TenantDb::begin_for_workspace()`:
-    // `entity_entities`, `entity_embeddings_*`, and `schema_schemas` have no row-level
-    // security policies; every query scopes by `workspace_id` in its own WHERE clause,
-    // which enforces the boundary regardless of the connection pool used. Switching to
-    // `TenantDb` here would require resolving `tenant_id` from `workspace_id` first and
-    // adds transaction-scoping overhead for zero additional isolation.
+    // Uses `ctx.db` (the identity pool): the worker has no tenant context, and every query scopes by `workspace_id` in its own WHERE clause.
     let record = match entity_entities::get_with_token(&ctx.db, args.workspace_id, args.entity_id)
         .await
     {

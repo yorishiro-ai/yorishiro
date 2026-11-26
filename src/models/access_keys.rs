@@ -18,7 +18,7 @@ const LOGIN_SESSION_HOURS: i64 = 12;
 // Ordinary key prefixes contain only random alphanumerics after `ysr_`.
 const LOGIN_KEY_PREFIX: &str = "ysr_login-";
 
-/// The request header that names which workspace a tenant-scoped key acts on.
+/// The request header that names the workspace a request acts on.
 pub const WORKSPACE_HEADER: &str = "x-workspace-id";
 
 /// Secret-free grant metadata for credential administration.
@@ -157,6 +157,24 @@ pub struct AuthContext {
 }
 
 impl AuthContext {
+    /// The YRN of the access key, which every log line about the caller carries.
+    #[must_use]
+    pub fn yrn(&self) -> String {
+        crate::models::iam::names::access_key_yrn(self.tenant_id, self.access_key_id)
+    }
+
+    /// The YRN of the selected workspace, if one is selected.
+    #[must_use]
+    pub fn workspace_yrn(&self) -> Option<String> {
+        self.workspace_id.map(|workspace_id| {
+            crate::models::iam::policy::Resource::Workspace {
+                tenant_id: self.tenant_id,
+                workspace_id,
+            }
+            .yrn()
+        })
+    }
+
     /// Requests already authenticated may finish; later authentications read the committed membership.
     pub(crate) async fn with_current_membership(
         mut self,
@@ -238,7 +256,7 @@ pub struct CreatedAccessKey {
     pub plaintext: String,
 }
 
-/// A freshly issued tenant-scoped key.
+/// A freshly issued key for a tenant.
 /// The plaintext exists only here: only its hash is stored.
 pub struct CreatedTenantAccessKey {
     pub id: Uuid,

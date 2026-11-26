@@ -44,7 +44,16 @@ impl fmt::Debug for Model {
 }
 
 #[loco_rs::prelude::async_trait]
-impl ActiveModelBehavior for outbox::ActiveModel {}
+impl ActiveModelBehavior for outbox::ActiveModel {
+    async fn before_save<C>(self, _db: &C, _insert: bool) -> Result<Self, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        let mut this = self;
+        this.id = crate::db::generated_id(this.id);
+        Ok(this)
+    }
+}
 
 #[derive(Clone)]
 pub struct PendingDispatch {
@@ -207,6 +216,10 @@ pub async fn record_lifecycle_payload(
             Expr::value(LifecycleStatus::Queued.as_db_str()),
         )
         .col_expr(lifecycle::Column::Attempt, Expr::value(0))
+        .col_expr(
+            lifecycle::Column::UpdatedAt,
+            Expr::value(crate::data::time::now()),
+        )
         .filter(lifecycle::Column::Id.eq(lifecycle_id))
         .filter(lifecycle::Column::Status.is_in([
             LifecycleStatus::Retrying.as_db_str(),
@@ -382,7 +395,7 @@ pub async fn acknowledge_dispatch(
         .one(&txn)
         .await?
         .and_then(|row| row.lifecycle_id);
-    // Retry writers lock lifecycle before outbox; acknowledgement must use the same order.
+    // Retry writers lock the lifecycle before the outbox row, so acknowledgement does too.
     let lifecycle = if let Some(lifecycle_id) = lifecycle_id {
         lifecycle::Entity::find_by_id(lifecycle_id)
             .lock_exclusive()

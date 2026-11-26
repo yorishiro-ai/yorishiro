@@ -87,7 +87,7 @@ async fn authorize(State(ctx): State<AppContext>) -> Result<Response, ApiError> 
 
 /// `GET /auth/oauth/callback`: the identity provider's redirect target.
 /// Verifies the OAuth identity and finds or provisions the Yorishiro user and tenant.
-/// Issues a tenant-scoped access key like `POST /auth/root/login` and returns it in a URL fragment to keep it out of access logs and `Referer` headers.
+/// Issues an access key like `POST /auth/root/login` and returns it in a URL fragment to keep it out of access logs and `Referer` headers.
 async fn callback(
     State(ctx): State<AppContext>,
     headers: HeaderMap,

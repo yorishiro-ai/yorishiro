@@ -80,6 +80,8 @@ async fn log_request(request: Request, next: Next) -> Response {
         "http.user_agent" = tracing::field::display(&user_agent),
         "environment" = tracing::field::display(&environment),
         request_id = tracing::field::display(&request_id),
+        caller = tracing::field::Empty,
+        workspace = tracing::field::Empty,
     );
     let response = next.run(request).instrument(span).await;
     tracing::info!(

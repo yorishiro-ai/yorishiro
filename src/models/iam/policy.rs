@@ -510,7 +510,7 @@ fn invalid(message: &'static str) -> YorishiroError {
     YorishiroError::ValidationFailed {
         message: message.into(),
         details: vec![],
-        hint: "Provide a valid tenant-scoped policy document".into(),
+        hint: "Provide a valid policy document for this tenant".into(),
     }
 }
 

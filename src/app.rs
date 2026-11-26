@@ -165,10 +165,7 @@ impl RouteMounts {
 /// Rate limiting and the maintenance guard are layered here because `/mcp` is mounted here: `Hooks::routes` layers would not cover it.
 /// The `server.middlewares:` config block is used only for Loco's built-in middleware (`request_id`, `logger`, and shared REST/MCP CORS).
 ///
-/// `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not
-/// something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted here
-/// instead: this hook runs after Loco's own routes are built, which is where
-/// Loco itself says custom Axum logic belongs.
+/// `rmcp`'s `StreamableHttpService` is a plain `tower::Service` that `Hooks::routes()` cannot carry, so it is mounted in this hook, which runs after Loco's own routes are built.
 pub(crate) fn after_routes(
     router: axum::Router,
     ctx: &AppContext,

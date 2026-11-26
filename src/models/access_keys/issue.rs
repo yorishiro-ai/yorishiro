@@ -1,4 +1,4 @@
-//! Issuing direct keys, login keys and delegated keys.
+//! Issuing tenant keys, login keys and delegated keys.
 
 use super::{
     ActiveModel, ActiveModelTrait, ActiveValue, AuthContext, CreatedAccessKey,
@@ -7,7 +7,7 @@ use super::{
 };
 
 impl Entity {
-    /// Issues a key for the tenant that owns `workspace_id`, which only names the tenant.
+    /// Issues an unnamed key for the tenant that owns `workspace_id`; the key itself is not bound to the workspace.
     ///
     /// # Errors
     /// Returns an error if the workspace does not exist or the key cannot be stored.
@@ -21,10 +21,10 @@ impl Entity {
         Self::create_tenant_access_key(db, tenant_id, user_id, "unnamed").await
     }
 
-    /// Issues a key that acts on the tenant and names its workspace per request.
+    /// Issues a key for a tenant, optionally attributed to one of its users.
     ///
     /// # Errors
-    /// Returns an error if the operation cannot be completed.
+    /// Returns an error if the tenant does not exist, the name is invalid or the user is not a member.
     pub async fn create_tenant_access_key(
         db: &DatabaseConnection,
         tenant_id: Uuid,

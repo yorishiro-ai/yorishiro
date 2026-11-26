@@ -1,6 +1,6 @@
 //! Provisions an OAuth user and tenant together on first login without creating a workspace.
 //!
-//! The two queries this needs (looking a user up by `(provider, subject_id)`, inserting a fresh OAuth-provisioned row) live in `ee::models::user_users` rather than beside the base model, since `user_users` knows nothing about the OAuth-specific lookups over `oauth_provider`/`oauth_subject_id`.
+//! The OAuth-specific lookup and insert live in `ee::models::user_users`, since the base model knows nothing about `oauth_provider` and `oauth_subject_id`.
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::tenant_memberships;
@@ -12,7 +12,7 @@ use super::{CreateOauthUserError, create_oauth_user, find_by_oauth_identity};
 
 /// Finds the user for `(provider, subject_id)` or creates a new tenant with that user as its root.
 ///
-/// `email` is required (the design's whole point is looking users up by the ID token's `email` claim); a provider that omits it fails with `ValidationFailed` rather than silently provisioning an unusable account.
+/// `email` is required: a provider that omits it fails with `ValidationFailed`.
 ///
 /// The new tenant is named after the email's local part.
 /// The identity lock serializes concurrent first logins, and the transaction keeps account creation and membership atomic.

@@ -235,7 +235,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
         assert!(record["workspace_id"].is_null(), "response: {record:?}");
         assert_eq!(record["tenant_id"], tenant.tenant_id.to_string());
 
-        // A non-admin member cannot issue tenant-scoped keys.
+        // A non-admin member cannot issue keys.
         let txn = ctx.db.begin().await.unwrap();
         let member = tenancy::register_member(
             &txn,

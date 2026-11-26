@@ -115,10 +115,8 @@ pub fn gated_routes() -> Routes {
 
 /// `GET /api/inference-jobs/{inference_job_id}`
 ///
-/// Poll for the result of an infer-fill job. Follows the same pattern as
-/// `migration_routes()` (`api/migration-jobs/{migration_job_id}:undo`): a dedicated prefix for
-/// async-job polling, under the licence gate because results include workspace
-/// activity counts that reveal whether a workspace has data to infer.
+/// Polls for the result of an infer-fill job.
+/// It sits under the licence gate because results include counts that reveal whether a workspace has data to infer.
 pub fn inference_job_status_routes() -> Routes {
     Routes::new()
         .tag("enterprise")

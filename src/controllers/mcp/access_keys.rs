@@ -41,7 +41,7 @@ pub(crate) struct UpdateAccessKeyArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_access_keys)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Issue an access key and return its secret once. The key acts on the tenant and selects its workspace per request. Requires iam:CreateAccessKey. The new key cannot exceed the issuer's effective scope. An expiring issuer must supply expires_at no later than its own expiration, except for a root sign-in session."
+        description = "Issue an access key and return its secret once. The key acts for the issuing user. Requires iam:CreateAccessKey. The new key cannot exceed the issuer's effective scope. An expiring issuer must supply expires_at no later than its own expiration, except for a root sign-in session."
     )]
     pub(crate) async fn create_access_key(
         &self,
@@ -70,7 +70,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "List current-tenant access key history including revoked and expired grants without secrets (requires the iam:ListAccessKeys action with a tenant-scoped credential)"
+        description = "List current-tenant access key history including revoked and expired grants without secrets (requires the iam:ListAccessKeys action)"
     )]
     pub(crate) async fn list_access_keys(
         &self,
@@ -91,7 +91,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Change a current-tenant access key's name, expiry or enabled flag; a disabled key no longer authenticates (requires the iam:UpdateAccessKey action with a tenant-scoped credential). Set replace_expires_at to apply expires_at, and omit expires_at to clear the expiry"
+        description = "Change a current-tenant access key's name, expiry or enabled flag; a disabled key no longer authenticates (requires the iam:UpdateAccessKey action). Set replace_expires_at to apply expires_at, and omit expires_at to clear the expiry"
     )]
     pub(crate) async fn update_access_key(
         &self,
@@ -114,7 +114,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Delete a current-tenant access key so it can no longer authenticate, while retaining secret-free history (requires the iam:DeleteAccessKey action with a tenant-scoped credential)"
+        description = "Delete a current-tenant access key so it can no longer authenticate, while retaining secret-free history (requires the iam:DeleteAccessKey action)"
     )]
     pub(crate) async fn delete_access_key(
         &self,

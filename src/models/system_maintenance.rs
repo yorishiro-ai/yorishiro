@@ -1,7 +1,7 @@
 //! Deployment-wide maintenance state.
 //!
 //! One row, read on every request that could be refused and written only by an operator.
-//! The request role has SELECT only on this table (`migration/src/m20260829_000000_initial_schema.rs`), so `set` runs on `ctx.db` (the migration-role connection), never the RLS-scoped tenant transaction.
+//! The request role has SELECT only on this table, so `set` runs on `ctx.db` (the migration-role connection), never the RLS-scoped tenant transaction.
 
 pub use crate::models::_entities::system_maintenance::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
@@ -82,12 +82,10 @@ impl MaintenanceState {
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 pub async fn get(conn: &impl ConnectionTrait) -> Result<MaintenanceState, YorishiroError> {
-    // Primary key is a boolean singleton (CHECK constraint enforces exactly TRUE).
+    // The primary key is a boolean singleton.
     let row = Entity::find_by_id(true).one(conn).await.internal()?;
 
-    // A missing row means off, advertised with the built-in retry hint because no settings reach this reader.
-    // A missing row means off.
-    // Not expected once the migration's seed row exists, but a missing row should be a survivable "off", not a panic.
+    // A missing row means off, with the built-in retry hint because no settings reach this reader.
     let Some(row) = row else {
         return Ok(MaintenanceState {
             mode: MaintenanceMode::Off,

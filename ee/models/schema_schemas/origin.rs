@@ -1,18 +1,19 @@
 //! Following an origin template: what has changed upstream, what merging would do, and doing it.
 //!
-//! Creating a schema from a template is not part of this: base owns `template_id` on `POST /api/schemas` and the `origin_*` columns.
-//! This module owns the machinery that flows a template's edits into copies afterwards.
+//! Creating a schema from a template belongs to the community schema model.
+//! This module flows a template's later edits into the copies.
 //!
-//! These functions take both a schema connection and `ctx`, and the split is not incidental: the schema is workspace content, read over the RLS-scoped connection (the one an `Authorized` extractor's transaction holds), while `template_templates` is control-plane data the request role holds no grant on and can only be reached through `ctx.db`.
-//! Passing `ctx.db` for the schema side would bypass RLS; passing the RLS-scoped connection for the template side would fail with a permission error.
+//! The functions take both a schema connection and `ctx`.
+//! The schema is workspace content, read over the RLS-scoped connection.
+//! `template_templates` is control-plane data the request role holds no grant on, so it is read through `ctx.db`.
+//! Passing `ctx.db` for the schema side would bypass RLS, and passing the scoped connection for the template side would fail with a permission error.
 
-use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::schema_schemas::{Column, Entity};
+use crate::error::{OptionExt, ResultExt, YorishiroError};
 use crate::models::schema_schemas::metaschema::{MetaSchemaDefinition, VersioningDiff};
 use crate::models::schema_schemas::{self, SchemaRecord};
 use crate::models::template_templates;
 use loco_rs::app::AppContext;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, sea_query::Expr};
+use sea_orm::ConnectionTrait;
 use uuid::Uuid;
 
 use super::merge::{self, MergePlan};
@@ -22,8 +23,7 @@ use super::merge::{self, MergePlan};
 /// Reads the three definitions (the snapshot taken when the copy was made, the template as it stands now, and this schema) and classifies every field that differs.
 /// Nothing is written.
 ///
-/// Refuses rather than guesses when a piece is missing: a schema with no origin has nothing to follow, and one copied before snapshots were recorded has no ancestor.
-/// Substituting the current template for the missing base would read every local addition as a conflict, which is worse than saying so.
+/// Refuses when a piece is missing: a schema with no origin has nothing to follow.
 pub(crate) async fn merge_preview(
     schema_conn: &impl ConnectionTrait,
     ctx: &AppContext,
@@ -39,7 +39,7 @@ pub(crate) async fn merge_preview(
     ))
 }
 
-/// The three definitions a merge compares, resolved together because preview and apply need exactly the same set and must refuse on exactly the same grounds.
+/// The three definitions a merge compares, resolved together so preview and apply refuse on the same grounds.
 struct MergeSides {
     base: MetaSchemaDefinition,
     upstream: MetaSchemaDefinition,
@@ -56,9 +56,7 @@ async fn merge_sides(
 ) -> Result<MergeSides, YorishiroError> {
     let schema = schema_schemas::get_by_id(schema_conn, workspace_id, schema_id).await?;
 
-    // `get_by_id` fetches any version, archived ones included: it is how a caller reads an old definition.
-    // Merging into one is a different matter: `create_schema` archives whatever is currently active and installs the result as the new active version, so merging an archived version would resurrect an abandoned definition as the live one, and entities written against the current active version would find their schema replaced by an older lineage.
-    // Refuse instead, and name the schema so the caller can look up the active version.
+    // `create_schema` installs the merge result as the new active version, so merging an archived version would resurrect an abandoned definition.
     if schema.status != schema_schemas::SchemaStatus::Active {
         return Err(YorishiroError::ValidationFailed {
             message: format!(
@@ -83,21 +81,16 @@ async fn merge_sides(
         });
     };
 
-    // The publisher takes this same transaction-scoped lock before changing the template and marking subscribers pending.
-    // Holding it until the schema transaction commits prevents acknowledgement of a revision newer than the one read here.
+    // The publisher takes this lock before changing the template and marking subscribers pending.
+    // Holding it until commit prevents acknowledging a revision newer than the one read here.
     crate::db::lock_for_update(schema_conn, &format!("template-origin:{template_id}"))
         .await
         .internal()?;
 
-    let Some(base) = schema.origin_snapshot.clone() else {
-        return Err(YorishiroError::ValidationFailed {
-            message: format!("schema '{schema_id}' was copied before its merge base was recorded"),
-            details: vec![],
-            hint: "re-apply the template to this workspace to establish a base, or edit the \
-                   schema directly"
-                .to_string(),
-        });
-    };
+    let base = schema
+        .origin_snapshot
+        .clone()
+        .or_internal("linked schema has no merge base")?;
 
     let template = template_templates::get_template(&ctx.db, tenant_id, template_id).await?;
 
@@ -111,13 +104,12 @@ async fn merge_sides(
 
 /// Follows the origin template: writes the merged definition as the schema's next version.
 ///
-/// Refuses a merge with conflicts, for the reason [`merge::apply_plan`] gives: a partially applied merge is a definition neither side asked for.
+/// Refuses a merge with conflicts, for the reason [`merge::apply_plan`] gives.
 ///
-/// The result is a new version rather than an edit of the current one.
-/// Every schema write goes through the same path, and taking upstream's changes is a schema change: entities written against the previous definition keep validating against the definition they were written against, which is what makes following a template safe to do on a workspace with data in it.
+/// The result is a new version rather than an edit of the current one, so entities written against the previous definition keep validating against it.
 ///
-/// The new version's merge base is what upstream says *now*, not the merged result.
-/// That is the point the next merge compares from.
+/// The new version's merge base is the template as it stands now, not the merged result.
+/// The next merge compares from there.
 pub(crate) async fn merge_apply(
     schema_conn: &impl ConnectionTrait,
     ctx: &AppContext,
@@ -147,15 +139,6 @@ pub(crate) async fn merge_apply(
     )
     .await?;
 
-    // Clear the origin_updated_at flag on the new active version so the next
-    // upstream-changes poll will not re-report this one until the template moves again.
-    Entity::update_many()
-        .col_expr(Column::OriginUpdatedAt, Expr::val(crate::data::time::now()))
-        .filter(Column::Id.eq(schema.id))
-        .exec(schema_conn)
-        .await
-        .internal()?;
-
     Ok((schema, diff, plan.summary))
 }
 
@@ -174,7 +157,7 @@ pub(crate) async fn merge_preview_for_actor(
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
         crate::models::iam::policy::Action::PreviewSchemaMerge,
         async |session| {
-            // Workspace content uses the scoped transaction; templates require the identity pool.
+            // The schema is read on the scoped transaction, the template through `ctx.db`.
             merge_preview(
                 session.txn(),
                 ctx,

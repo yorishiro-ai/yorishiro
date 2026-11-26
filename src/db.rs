@@ -131,10 +131,6 @@ pub fn register_sqlite_extensions() {
     // A direct dependency on SQLx's SQLite library keeps extension registration on the same engine as application connections.
     use libsqlite3_sys::sqlite3_auto_extension;
 
-    // The target type is `sqlite3_auto_extension_callback` — a C function pointer
-    // that clippy's transmute-checker wants spelled out literally; it is a foreign
-    // type with opaque internals so we suppress the lint instead of duplicating
-    // libsqlite3-sys's bindgen output.
     static REGISTER: std::sync::Once = std::sync::Once::new();
     #[expect(
         clippy::missing_transmute_annotations,
@@ -142,10 +138,6 @@ pub fn register_sqlite_extensions() {
     )]
     // SAFETY: sqlite-vec exports the SQLite extension entry-point ABI, and Once registers it before any application connection opens.
     REGISTER.call_once(|| unsafe {
-        // `sqlite3_vec_init` is declared in `sqlite-vec` as a bare C function
-        // pointer; `sqlite3_auto_extension` expects a function pointer matching
-        // `void(*)(sqlite3*, char**, const sqlite3_api_routines*)`, which is the
-        // same signature (cast to *const () is safe because both are FFI-safe).
         sqlite3_auto_extension(Some(transmute::<*const (), _>(
             sqlite3_vec_init as *const (),
         )));
@@ -440,16 +432,9 @@ pub fn stamped_updated_at_optional(
 
 /// Rejects boot outright when `database.max_connections` is below 2, on SQLite only.
 ///
-/// An `Authorized<R>` request needs two connections at once: one held by its
-/// transaction for the request's lifetime, and a second for `touch_last_used_at`, which cannot share
-/// the transaction because a read-only handler drops it uncommitted and the update would roll back
-/// with it.
-///
-/// At `max_connections: 1` the second acquire waits for the first to free, which happens only when
-/// the request ends, so it always times out. Reads still answer `200` (that failure is logged and
-/// swallowed), but any handler needing a real second connection fails with `500` after
-/// `connect_timeout`: an intermittent failure under load with nothing pointing at the cause.
-/// Rejecting boot is what turns that into a legible startup error.
+/// An `Authorized<R>` request holds one connection on its transaction and needs a second for the `last_used_at` update, which cannot share the transaction because a read-only handler drops it uncommitted.
+/// With one connection the second acquire waits until the request ends and times out, so a handler needing a second connection fails with `500` after `connect_timeout`.
+/// Rejecting boot turns that intermittent failure into a legible startup error.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -472,9 +457,8 @@ pub fn require_min_sqlite_connections(max_connections: u32) -> Result<(), String
 ///
 /// A no-op on SQLite, which has no named-lock primitive to substitute: it excludes nothing there, so a caller that needs mutual exclusion on SQLite must get it from a conditional write of its own.
 ///
-/// That is sound rather than merely convenient, because every caller here locks, reads a count or existence check, then writes within the same transaction gated on that read.
-/// SQLite allows one write transaction at a time, so a transaction committing after another has written gets `SQLITE_BUSY` and fails whole; the TOCTOU this lock closes on Postgres surfaces as a retryable error rather than a silently-accepted inconsistent write.
-/// A caller holding the lock for some other reason would need its own justification, and none does.
+/// That is sound because every caller locks, reads a count or existence check, then writes in the same transaction.
+/// SQLite allows one write transaction at a time, so a transaction committing after another has written gets `SQLITE_BUSY` and fails whole, which surfaces as a retryable error rather than an inconsistent write.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

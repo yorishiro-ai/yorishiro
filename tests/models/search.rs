@@ -1384,9 +1384,8 @@ async fn reindex_overwrites_existing_entity_embeddings() {
             );
         }
 
-        // Stamp the workspace with the old model so reindex considers it "in sync" — but
-        // reindex's entire purpose is to re-embed regardless, so this stamp is only there
-        // to make the test realistic.
+        // Stamp the workspace with the old model so it looks in sync.
+        // Reindex re-embeds regardless.
         let (stamp_provider, _stamp_server) = model_provider("old-model-a").await;
         entity_embeddings::reindex_workspace(&ctx.db, workspace_id, &stamp_provider)
             .await

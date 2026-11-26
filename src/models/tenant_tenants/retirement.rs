@@ -1,13 +1,7 @@
 //! Tenant retirement inventory and fenced lifecycle operations.
 
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use uuid::Uuid;
-
-const DISABLED_REASON: &str = "tenant disabled";
-
-const DELETE_GRACE_PERIOD: chrono::Duration = chrono::Duration::days(7);
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{
@@ -15,6 +9,10 @@ use crate::models::_entities::{
     queue_job_lifecycles, schema_schemas, template_templates, tenant_memberships,
     workspace_schema_forks, workspace_workspaces,
 };
+
+const DISABLED_REASON: &str = "tenant disabled";
+
+const DELETE_GRACE_PERIOD: chrono::Duration = chrono::Duration::days(7);
 
 /// A secret-free snapshot, not approval for a later destructive operation.
 #[derive(serde::Serialize, schemars::JsonSchema)]
@@ -25,7 +23,6 @@ pub struct RetirementInventory {
     pub delete_scheduled_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub workspace_ids: Vec<Uuid>,
     pub memberships: u64,
-    pub shared_user_accounts: u64,
     /// External forks must be resolved explicitly before irreversible cleanup.
     pub external_workspace_forks: u64,
     pub access_keys: u64,
@@ -178,7 +175,7 @@ pub async fn delete_by_operator(
         });
     }
     let txn = crate::db::begin_write(db).await.internal()?;
-    // Serialize quota release with tenant creation and cleanup with membership/publication writes.
+    // Serializes quota release with tenant creation, and cleanup with membership and publication writes.
     crate::db::lock_for_update(&txn, "create_tenant")
         .await
         .internal()?;
@@ -508,32 +505,6 @@ pub async fn cancel_work(
     Ok(())
 }
 
-async fn shared_user_account_count(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-) -> Result<u64, YorishiroError> {
-    let user_ids = tenant_memberships::Entity::find()
-        .select_only()
-        .column(tenant_memberships::Column::UserId)
-        .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
-        .into_tuple::<Uuid>()
-        .all(conn)
-        .await
-        .internal()?;
-    let count = tenant_memberships::Entity::find()
-        .select_only()
-        .column(tenant_memberships::Column::UserId)
-        .filter(tenant_memberships::Column::UserId.is_in(user_ids))
-        .filter(tenant_memberships::Column::TenantId.ne(tenant_id))
-        .distinct()
-        .into_tuple::<Uuid>()
-        .all(conn)
-        .await
-        .internal()?
-        .len() as u64;
-    Ok(count)
-}
-
 /// Inventories one tenant without changing credentials, memberships, jobs or data.
 /// This operator entry point requires a trusted identity connection, not a tenant-scoped pool.
 ///
@@ -565,7 +536,6 @@ pub async fn inventory(
         .count(conn)
         .await
         .internal()?;
-    let shared_user_accounts = shared_user_account_count(conn, tenant_id).await?;
     let external_workspace_forks = workspace_schema_forks::Entity::find()
         .filter(workspace_schema_forks::Column::SourceWorkspaceId.is_in(workspace_ids.clone()))
         .filter(workspace_schema_forks::Column::TenantId.ne(tenant_id))
@@ -622,7 +592,6 @@ pub async fn inventory(
         delete_scheduled_at: tenant.delete_scheduled_at,
         workspace_ids,
         memberships,
-        shared_user_accounts,
         external_workspace_forks,
         access_keys,
         jobs,

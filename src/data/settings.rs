@@ -69,7 +69,7 @@ impl Default for Dispatch {
 }
 
 /// Operator-tunable deployment limits.
-/// Every field has a default so a configuration file written before this section existed keeps loading.
+/// Every field has a default.
 #[derive(Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Limits {
@@ -139,7 +139,7 @@ pub(crate) struct Mcp {
 /// How the API and MCP server waits for a worker to embed a search query.
 ///
 /// The server holds no embedding model: it enqueues a request and polls for the result, so these three values bound that wait.
-/// The section is optional so a configuration file written before it existed keeps loading with the defaults.
+/// The section is optional and falls back to the defaults.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct QueryEmbedding {

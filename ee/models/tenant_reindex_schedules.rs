@@ -1,18 +1,9 @@
 //! Per-tenant reindex scheduling configuration.
 //!
-//! Reads and writes go through `ctx.db` (the migration-role connection),
-//! not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this table,
-//! matching `workspace_embedding_keys` and `workspace_llm_keys`.
+//! Reads and writes go through `ctx.db` (the migration-role connection), not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this table, matching `workspace_embedding_keys` and `workspace_llm_keys`.
 //!
-//! A scheduler row tells the deployment-wide Loco scheduled task
-//! to enqueue a reindex for every workspace under this tenant on each tick.
+//! A schedule row makes the deployment-wide `TenantReindexScheduler` task enqueue a reindex for every workspace of the tenant when the row is due.
 //! A tenant with no row is not scheduled.
-//!
-//! # Task
-//!
-//! `TenantReindexScheduler` is a loco task that runs on a cron schedule (configured via
-//! `config/*.yaml` scheduler section). On each invocation it scans all scheduled tenants,
-//! enqueues a reindex for every workspace under each tenant that needs one.
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::tenant_reindex_schedules::{ActiveModel, Column, Entity};
@@ -21,12 +12,12 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 use uuid::Uuid;
 
-/// The shortest interval a schedule may name, so a typo cannot make every workspace of a tenant reindex every few seconds.
+/// The shortest interval a schedule may name, so a typo cannot reindex every workspace every few seconds.
 const MIN_INTERVAL_SECONDS: i64 = 5 * 60;
 
 /// Reads an ISO 8601 duration made of weeks, days, hours, minutes and seconds, such as `P1D`, `P1W` or `PT6H`.
 ///
-/// Years and months are refused: they have no fixed length, and a schedule that drifts with the calendar is not what an interval promises.
+/// Years and months are refused because they have no fixed length.
 fn parse_interval(value: &str) -> Option<chrono::Duration> {
     const DATE_UNITS: [(char, i64); 2] = [('W', 604_800), ('D', 86_400)];
     const TIME_UNITS: [(char, i64); 3] = [('H', 3_600), ('M', 60), ('S', 1)];
@@ -64,10 +55,7 @@ fn parse_interval(value: &str) -> Option<chrono::Duration> {
 /// Stores or replaces a tenant's reindex schedule.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
-///
-/// # Panics
-/// Panics if an internal invariant required by this operation is violated.
+/// Returns an error if the interval or timezone is invalid or the write fails.
 pub async fn set(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -289,7 +277,6 @@ pub(crate) async fn tick(
             )));
         };
 
-        // Fetch all workspaces under this tenant.
         let workspaces: Vec<_> = match WorkspaceEntity::Entity::find()
             .filter(WorkspaceEntity::Column::TenantId.eq(schedule.tenant_id))
             .all(&txn)

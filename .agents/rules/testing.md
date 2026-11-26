@@ -70,7 +70,6 @@ A test changes the booted app's configuration by passing overrides to `boot_requ
 
 CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus `make test-licence`, which verifies a signed key with the repository secret.
 Each job runs every test; nothing is assigned or inventoried per test, so a new test needs no registration.
-Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
 The package and Docker installability checks run in `packaging.yml`, selected by its path filters on pull requests and on pushes to `develop`.
 
 The integration tests are one binary rooted at `tests/mod.rs`.
@@ -88,7 +87,7 @@ A test file sits at the same path as the source file it covers; not every source
 - `tests/integration/`: real child processes
 - `tests/ee/`: mirrors `ee/`, including REST and MCP tests under `ee/controllers/`; compiled only with the `enterprise` feature
 
-There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
+There is no `tests/lib.rs` and no `tests/test_helpers.rs`, and no Python test suite: Python only runs the repository checks under `scripts/`.
 
 ## Where tests live
 
@@ -123,8 +122,8 @@ if !require_sqlite_backend() { return; }
 ```
 
 Files that need a specific backend guard with it:
-- `tests/models/content_entities_sqlite.rs`: entity CRUD seeded via raw SQL
-- `tests/models/tenancy_sqlite.rs`: the SQLite tenancy cap
+- `tests/models/entity_entities/sqlite.rs`: entity CRUD and FTS on SQLite
+- `tests/models/tenancy/sqlite.rs`: the SQLite tenancy cap
 - `tests/models/search.rs`: PostgreSQL-only query shapes, guarded the other way
 
 
@@ -161,7 +160,9 @@ Teardown drains workers and closes queue and application pools before removing t
 
 ## Gate testing
 
-**A gate is not a gate until a deliberate violation makes it fire.** Race-safety claims (quota locks, version-serialization locks, foreign-key-violation branches) need racing calls behind a barrier, not a sequential replay-rejection test.
+**A gate is not a gate until a deliberate violation makes it fire.**
+A test that claims a lock or constraint holds must trigger the violation, not only replay the accepted path.
+There are no barrier-based race tests: assert the observable end state of the guarded operation instead.
 
 ## MCP tools
 

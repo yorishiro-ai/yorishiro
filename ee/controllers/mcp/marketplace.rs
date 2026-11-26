@@ -122,7 +122,7 @@ impl YorishiroMcpServer {
         )
     }
     #[tool(
-        description = "List community-visible marketplace templates (requires an active licence, PostgreSQL, marketplace_list IAM permission with a tenant-scoped credential)"
+        description = "List community-visible marketplace templates (requires an active licence, PostgreSQL, the marketplace:ListMarketplaceTemplates action)"
     )]
     pub(crate) async fn list_marketplace_templates(
         &self,
@@ -141,7 +141,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "List published template versions and the current tenant's own drafts (requires an active licence, PostgreSQL, marketplace_version_list IAM permission with a tenant-scoped credential)"
+        description = "List published template versions and the current tenant's own drafts (requires an active licence, PostgreSQL, the marketplace:ListMarketplaceVersions action)"
     )]
     pub(crate) async fn list_marketplace_versions(
         &self,
@@ -161,7 +161,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Publish a version of a current-tenant template (requires an active licence, marketplace_publish IAM permission with a tenant-scoped credential)"
+        description = "Publish a version of a current-tenant template (requires an active licence, the marketplace:PublishMarketplaceVersion action)"
     )]
     pub(crate) async fn publish_marketplace_version(
         &self,
@@ -188,7 +188,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "List a marketplace template's reviews (requires an active licence, PostgreSQL, marketplace_review_list IAM permission with a tenant-scoped credential)"
+        description = "List a marketplace template's reviews (requires an active licence, PostgreSQL, the marketplace:ListMarketplaceReviews action)"
     )]
     pub(crate) async fn list_marketplace_reviews(
         &self,
@@ -208,7 +208,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Create or replace the current tenant's template review (requires an active licence, marketplace_review_submit IAM permission with a tenant-scoped credential)"
+        description = "Create or replace the current tenant's template review (requires an active licence, the marketplace:CreateMarketplaceReview action)"
     )]
     pub(crate) async fn create_marketplace_review(
         &self,
@@ -231,7 +231,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Fork a published marketplace version into the current tenant's library (requires an active licence, marketplace_fork IAM permission with a tenant-scoped credential)"
+        description = "Fork a published marketplace version into the current tenant's library (requires an active licence, the marketplace:ForkMarketplaceTemplate action)"
     )]
     pub(crate) async fn fork_marketplace_template(
         &self,
@@ -253,7 +253,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Change a current-tenant template's marketplace visibility (requires an active licence, marketplace_visibility_update IAM permission with a tenant-scoped credential)"
+        description = "Change a current-tenant template's marketplace visibility (requires an active licence, the marketplace:UpdateMarketplaceVisibility action)"
     )]
     pub(crate) async fn update_marketplace_visibility(
         &self,

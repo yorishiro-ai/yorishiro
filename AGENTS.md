@@ -101,28 +101,35 @@ Each tool authenticates, parses its arguments, calls a model operation, and rend
 ## SQLite
 
 - Single-tenant only. No RLS.
-- `src/db.rs::require_min_sqlite_connections(2)` — minimum 2 connections.
-- Vector search via sqlite-vec (BLOB storage).
-- ID generation: `before_save` hook calls `db::sqlite_generated_id()`.
-- Embedding column lives in `entity_embeddings` on both backends, with a `(workspace_id, entity_id)` primary key.
+- `src/db.rs::require_min_sqlite_connections(2)` requires at least 2 connections.
+- Vector search uses sqlite-vec (BLOB storage).
+- Models create ids and timestamps on both backends through `db::generated_id` and `db::stamped_*`; no database default or trigger supplies them.
+- The embedding sync token, the SQLite FTS5 index and the template origin detach are application code, not triggers.
+- The embedding column lives in `entity_embeddings` on both backends, with a `(workspace_id, entity_id)` primary key.
 - PostgreSQL uses 64 workspace hash partitions, tenant RLS, and scheduled workspace-specific HNSW promotion starting at 2,000 vectors.
 - Each promoted workspace has one partial pgvector HNSW index: up to 2,000 dimensions on `embedding::vector(N)`, 2,001 through 4,000 on the normalized `halfvec(N)`, and 4,001 through 4,096 on the normalized first 4,000 dimensions as `halfvec(4000)`.
 - Every search takes at most 1,000 index candidates and reranks them in original full-precision coordinates; the `embedding_index_maintenance` scheduler job builds and retires the indexes.
-- FTS5 with `tokenize='trigram'` for fuzzy text search (pg_trgm equivalent on PostgreSQL).
+- FTS5 with `tokenize='trigram'` provides fuzzy text search on SQLite (the counterpart of `pg_trgm`).
+
+### SQL-side behaviour that remains
+
+PostgreSQL still owns RLS policies, per-table GRANTs, the `authenticate_access_key` SECURITY DEFINER function, partitions, and the fork integrity triggers and fork read functions.
+SQLite has the fork integrity triggers and the FTS5 table.
 
 ### Migration helpers (`migration/src/helpers.rs`)
 
-- `use_transaction()` — forces transaction on every backend.
-- `uuidv7_pk(manager)` — `UUID PRIMARY KEY DEFAULT uuidv7()` on PG, `BLOB PRIMARY KEY` on SQLite.
-- `uuid_col(manager, name)` — `UUID` on PG, `BLOB` on SQLite.
-- `json_col(manager, name)` — `JSONB` on PG, `TEXT` on SQLite (sqlite-vec lacks `jsonb_text` type).
-- `ts_tz_col(manager, name)` — `TIMESTAMPTZ` on PG, `TEXT` on SQLite.
-- `timestamps(manager)` — returns `[created_at, updated_at]` column defs.
-- `create_table_with_checks()` — creates table + CHECK constraints, backend-bridged.
-- `enable_rls_with_policy()` — raw SQL for RLS. No-op on SQLite.
-- `grant()` — per-table GRANT to `yorishiro_app`. No-op on SQLite.
-- `pg_only(sql)` — PostgreSQL-only raw SQL. No-op on SQLite.
-- `sqlite_only(sql)` — SQLite-only raw SQL. No-op on PostgreSQL.
+- `use_transaction()` forces a transaction on every backend.
+- `uuidv7_pk(manager)` is the `id` column: `UUID PRIMARY KEY` on PG, `BLOB PRIMARY KEY` on SQLite, with no default.
+- `uuid_col(manager, name)` is `UUID` on PG, `BLOB` on SQLite.
+- `json_col(manager, name)` is `JSONB` on PG, `TEXT` on SQLite.
+- `ts_tz_col(manager, name)` is `TIMESTAMPTZ` on PG, `TEXT` on SQLite.
+- `created_at(manager)` and `timestamps(manager)` build the application-stamped timestamp columns, without defaults.
+- `create_table_with_checks()` creates a table with CHECK constraints on both backends.
+- `enable_rls_with_policy()` enables RLS with a strict or lenient policy. No-op on SQLite.
+- `grant()` is a per-table GRANT to `yorishiro_app`. No-op on SQLite.
+- `pg_only(sql)` runs PostgreSQL-only raw SQL.
+- `sqlite_only(sql)` runs SQLite-only raw SQL.
+- `by_backend(manager, postgres, sqlite)` picks a value per backend.
 
 ## Error handling
 

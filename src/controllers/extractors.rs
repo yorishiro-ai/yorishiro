@@ -98,7 +98,7 @@ where
         let app_ctx = AppContext::from_ref(state);
 
         let ctx = auth::RequestAuth::new(&app_ctx)
-            .verify(presented_key, &headers)
+            .authenticate(presented_key, &headers)
             .await
             .inspect_err(|err| log_auth_rejection(parts, err))?;
 

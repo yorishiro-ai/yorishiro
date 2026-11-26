@@ -1,9 +1,8 @@
-//! Records of authorization-gated operations: who did it, when, against which workspace, and what.
+//! Records of workspace operations an operator needs an after-the-fact record of: who did it, when, against which workspace, and what.
 //!
-//! Starts with the migration operations (`entity_entities::undo_job`, `system_maintenance::set`), not every write in the system: those are exactly the ones an operator most needs an after-the-fact record of, since they can rewrite stored data or take the whole deployment down for other callers.
-//! A new audited operation is added by extending [`AuditAction`], not by writing ad hoc `INSERT`s elsewhere: `action`'s CHECK constraint (`migration/src/m20260829_000000_initial_schema.rs`) only allows what this enum's `as_db_str()` can produce, so the two always match by construction.
+//! A new audited operation extends [`AuditAction`], whose values the `action` CHECK constraint must also allow.
 //!
-//! Append-only by construction, not just convention: `yorishiro_app` holds `SELECT, INSERT` on this table and nothing else (see the migration's own comment), so there is no code path, correct or buggy, that can update or delete a row once written.
+//! The table is append-only: `yorishiro_app` holds `SELECT, INSERT` on it and nothing else.
 
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, QueryOrder, QuerySelect};
@@ -70,7 +69,7 @@ pub(crate) async fn job_result(
 
 db_enum! {
     /// The closed set of operations this table records.
-    /// Matches `action`'s CHECK constraint string-for-string; a variant added here without a matching value in the constraint fails every insert at the database, not silently.
+    /// It matches the `action` CHECK constraint string for string.
     #[derive(Clone, Copy, PartialEq, Eq)]
     pub enum AuditAction {
         /// `entity_entities::undo_job`: a batch undo, restoring every entity a job's snapshots cover.
@@ -87,7 +86,6 @@ db_enum! {
 }
 
 /// The acting key, for [`record`]: what an audited operation attributes itself to.
-/// A thin, owned copy of the fields of `access_keys::AuthContext`/`access_keys::CreatedAccessKey` that `record` actually needs, so this module doesn't have to depend on the guard for a handful of UUIDs.
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[expect(
     clippy::struct_field_names,
@@ -102,22 +100,26 @@ pub(crate) struct AuditActor {
 
 /// Appends one row.
 ///
-/// `conn` is generic over `ConnectionTrait` because callers need different connections:
-/// `undo_migration_job` records on the same RLS-scoped transaction its effect lands on, so a
-/// rollback loses both together, while `set_maintenance` records on `ctx.db`, the migration-role
-/// connection its own write already uses.
+/// Record on the transaction the operation's effect lands on, so a rollback loses both together.
 ///
-/// This table's RLS policy is `USING`-only, which PostgreSQL also applies as the implicit
-/// `WITH CHECK` on an insert, so a `conn` that has not set `app.current_workspace` to
-/// `actor.workspace_id` (and is not the migration role, which the policy does not apply to) fails
-/// the insert with a policy violation. An `Authorized<R>` handler gets the right scoping for free
-/// from `TenantDb::begin_for_workspace`.
+/// The RLS policy is `USING`-only, which PostgreSQL also applies as the implicit `WITH CHECK` on an insert.
+/// A `conn` must therefore have set `app.current_workspace` to `actor.workspace_id`, unless it is the migration role.
 pub(crate) async fn record(
     conn: &impl ConnectionTrait,
     actor: AuditActor,
     action: AuditAction,
     detail: serde_json::Value,
 ) -> Result<(), YorishiroError> {
+    tracing::info!(
+        caller = %crate::models::iam::names::access_key_yrn(actor.tenant_id, actor.access_key_id),
+        workspace = %crate::models::iam::policy::Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id: actor.workspace_id,
+        }
+        .yrn(),
+        action = action.as_db_str(),
+        "audited operation",
+    );
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(actor.workspace_id),
         tenant_id: ActiveValue::Set(actor.tenant_id),
@@ -131,12 +133,10 @@ pub(crate) async fn record(
     Ok(())
 }
 
-/// The workspace's audit trail, most recent first, for an `audit`-permission key to review.
-///
-/// Same 200-row page cap `entity_entities::list`/`entity_relations::list` use, for the same reason: an unbounded read against a table that only grows is a query nobody meant to run.
+/// The workspace's audit trail, most recent first, capped by the page limit.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error if the query fails.
 pub async fn list_for_workspace(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

@@ -13,9 +13,7 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::schema_schemas;
-use crate::models::schema_schemas::metaschema::{
-    MetaSchemaDefinition, VersioningDiff, validate_definition,
-};
+use crate::models::schema_schemas::metaschema::{MetaSchemaDefinition, validate_definition};
 
 use crate::models::_entities::schema_schemas::Column as SchemaColumn;
 use crate::models::_entities::workspace_schema_fork_heads as fork_heads;
@@ -288,22 +286,18 @@ async fn insert_fork_head<C: ConnectionTrait>(
     tenant_id: Uuid,
     workspace_id: Uuid,
     definition: &MetaSchemaDefinition,
-) -> Result<(schema_schemas::Model, VersioningDiff), YorishiroError> {
+) -> Result<schema_schemas::Model, YorishiroError> {
     validate_definition(definition)?;
     let name = definition.name.clone();
     schema_schemas::lock_version(conn, workspace_id, &name).await?;
     let version = next_version(conn, workspace_id, &name).await?;
-    let diff = VersioningDiff {
-        is_breaking: false,
-        reasons: Vec::new(),
-    };
-    let row = schema_schemas::ActiveModel {
+    schema_schemas::ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(workspace_id),
         name: ActiveValue::Set(name),
         version: ActiveValue::Set(version),
         definition: ActiveValue::Set(serde_json::to_value(definition).internal()?),
-        status: ActiveValue::Set("archived".into()),
+        status: ActiveValue::Set(schema_schemas::SchemaStatus::Archived.as_db_str().into()),
         origin_template_id: ActiveValue::Set(None),
         origin_status: ActiveValue::Set(
             schema_schemas::SchemaOriginStatus::Detached
@@ -316,8 +310,7 @@ async fn insert_fork_head<C: ConnectionTrait>(
     }
     .insert(conn)
     .await
-    .internal()?;
-    Ok((row, diff))
+    .internal()
 }
 
 async fn to_record<C: ConnectionTrait>(conn: &C, row: Model) -> Result<ForkRecord, YorishiroError> {
@@ -352,28 +345,6 @@ async fn to_record<C: ConnectionTrait>(conn: &C, row: Model) -> Result<ForkRecor
         created_at: row.created_at.into(),
         updated_at: row.updated_at.into(),
     })
-}
-
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn list<C: ConnectionTrait>(
-    conn: &C,
-    tenant_id: Uuid,
-    workspace_id: Uuid,
-) -> Result<Vec<ForkRecord>, YorishiroError> {
-    let rows = Entity::find()
-        .filter(Column::TenantId.eq(tenant_id))
-        .filter(Column::WorkspaceId.eq(workspace_id))
-        .order_by_asc(Column::CreatedAt)
-        .all(conn)
-        .await
-        .internal()?;
-    let mut records = Vec::with_capacity(rows.len());
-    for row in rows {
-        records.push(to_record(conn, row).await?);
-    }
-    Ok(records)
 }
 
 ///
@@ -443,8 +414,7 @@ pub async fn create<C: ConnectionTrait>(
         workspace_id,
         &parse_definition(source.definition.clone())?,
     )
-    .await?
-    .0;
+    .await?;
     let row = ActiveModel {
         id: crate::db::generated_id(ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
@@ -545,9 +515,7 @@ pub async fn update<C: ConnectionTrait>(
         (parse_definition(source.definition.clone())?, Some(source))
     };
     let previous_head_id = fork.fork_schema_id;
-    let head = insert_fork_head(conn, tenant_id, workspace_id, &definition)
-        .await?
-        .0;
+    let head = insert_fork_head(conn, tenant_id, workspace_id, &definition).await?;
     let mut active: ActiveModel = fork.into();
     active.fork_schema_id = ActiveValue::Set(head.id);
     active.customized = ActiveValue::Set(source_update.is_none());

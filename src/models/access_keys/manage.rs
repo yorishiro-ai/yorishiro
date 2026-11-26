@@ -48,7 +48,7 @@ impl Entity {
     /// Revokes an access key immediately while retaining its non-secret grant history.
     ///
     /// # Errors
-    /// Returns an error if the operation cannot be completed.
+    /// Returns an error if the key does not exist or the revocation cannot be stored.
     pub async fn revoke(
         db: &DatabaseConnection,
         access_key_id: Uuid,

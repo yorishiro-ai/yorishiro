@@ -7,17 +7,15 @@ use super::{
 };
 
 impl Entity {
-    /// Verifies a presented raw access key and resolves the workspace and tenant it belongs to.
+    /// Verifies a presented raw access key and resolves the tenant it belongs to and the workspace it acts on.
     ///
-    /// At this point neither the workspace nor the tenant is known yet, so RLS's `app.current_workspace`/`app.current_tenant` can't be set, which is why this takes the whole [`DbHandle`] rather than a scoped connection.
+    /// The tenant is not known yet, so the RLS session variables cannot be set, which is why this takes the whole [`DbHandle`] rather than a scoped connection.
+    /// The `authenticate_access_key` SECURITY DEFINER function reads through RLS and returns only `id`, `tenant_id` and `user_id`, never `key_hash`.
     ///
-    /// `SeaQuery` calls the `authenticate_access_key` SECURITY DEFINER function to read through RLS and projects only `id/workspace_id/tenant_id/user_id/audit`, never `key_hash` itself.
-    ///
-    /// Non-root workspace-scoped keys resolve to their recorded workspace.
-    /// A tenant-scoped key resolves `requested_workspace` when present, otherwise it has no workspace.
+    /// The workspace is `requested_workspace` when present, otherwise the tenant's only workspace, otherwise none.
     ///
     /// # Errors
-    /// Returns an error if the operation cannot be completed.
+    /// Returns `Unauthenticated` for an unknown, inactive or stale credential and `AccessDenied` for a workspace of another tenant.
     pub async fn authenticate(
         db: &DbHandle,
         presented_key: &str,
@@ -62,7 +60,7 @@ impl Entity {
         .await
     }
 
-    /// Chooses which workspace a verified credential acts on: the requested one, when it belongs to the credential's tenant.
+    /// The requested workspace, when it belongs to the credential's tenant.
     ///
     /// # Errors
     /// Rejects a workspace of another tenant.
@@ -75,7 +73,15 @@ impl Entity {
             let tenant =
                 crate::models::workspace_workspaces::get_workspace_tenant(conn, requested).await?;
             if tenant != tenant_id {
-                // The key simply cannot act on another tenant's workspace; report it as a scope denial so a well-formed request is not logged as a validation failure.
+                tracing::warn!(
+                    tenant = %crate::models::iam::policy::Resource::Tenant { tenant_id }.yrn(),
+                    requested = %crate::models::iam::policy::Resource::Workspace {
+                        tenant_id: tenant,
+                        workspace_id: requested,
+                    }
+                    .yrn(),
+                    "request names a workspace of another tenant",
+                );
                 return Err(YorishiroError::AccessDenied {
                     message: format!("{WORKSPACE_HEADER} names a workspace this key cannot act on"),
                     hint: "the named workspace belongs to another tenant; send a workspace this \
@@ -88,15 +94,12 @@ impl Entity {
         Ok(None)
     }
 
-    /// SQLite equivalent of [`Self::authenticate`], for a deployment with no `DbHandle` (see `Hooks::after_context`).
+    /// SQLite equivalent of [`Self::authenticate`], for a deployment with no `DbHandle`.
     ///
-    /// The Postgres path goes through the SECURITY DEFINER function specifically to read rows RLS would otherwise hide from an unauthenticated caller; SQLite has no RLS at all, so there is nothing to bypass, and this queries the tables directly with the `SeaORM` entity API.
-    /// Workspace resolution follows the same rules as the Postgres path.
-    ///
-    /// The default authenticator selects this implementation for SQLite.
+    /// SQLite has no RLS, so this queries the tables directly instead of calling the SECURITY DEFINER function.
     ///
     /// # Errors
-    /// Returns an error if the operation cannot be completed.
+    /// Same as [`Self::authenticate`].
     pub async fn authenticate_sqlite(
         conn: &impl ConnectionTrait,
         presented_key: &str,
@@ -141,23 +144,20 @@ impl Entity {
                 if let Err(error) =
                     Self::touch_last_used_on_connection(conn.as_mut(), auth.access_key_id).await
                 {
-                    tracing::warn!(%error, "failed to update access key last_used_at");
+                    tracing::warn!(caller = %auth.yrn(), %error, "failed to update access key last_used_at");
                 }
             }
             Err(error) => {
-                tracing::warn!(%error, "failed to acquire connection to touch last_used_at");
+                tracing::warn!(caller = %auth.yrn(), %error, "failed to acquire connection to touch last_used_at");
             }
         }
         Ok(())
     }
 
     /// Records the key's last-used timestamp on a raw `sqlx` connection.
-    /// Best-effort: doesn't affect authentication outcomes, so callers don't need to fail the whole request if it errors.
+    /// Best effort: a failure does not affect the authentication outcome.
     ///
-    /// Deliberately not run on the request's `DatabaseTransaction`: a read-only handler drops that transaction without committing, which would silently roll this update back along with it.
-    /// Every caller uses a short-lived connection from `TenantDb::acquire_for_workspace` instead.
-    ///
-    /// This call receives a bare RLS-scoped `PgConnection`, not a `SeaORM` `ConnectionTrait`, so the write must use `sqlx` on that connection.
+    /// It does not run on the request's `DatabaseTransaction`, because a read-only handler drops that transaction without committing and the update would roll back with it.
     pub(crate) async fn touch_last_used_on_connection(
         conn: &mut sea_orm::sqlx::PgConnection,
         access_key_id: Uuid,

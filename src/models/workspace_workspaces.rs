@@ -163,7 +163,7 @@ pub(crate) async fn embedding_provider(
     }))
 }
 
-/// Resolves effective workspace/deployment embedding identity without constructing a provider.
+/// Resolves the effective workspace or deployment embedding identity without constructing a provider.
 pub(crate) async fn effective_embedding_metadata(
     ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
@@ -429,6 +429,9 @@ pub(crate) async fn update_as(
 ) -> Result<WorkspaceRecord, YorishiroError> {
     use sea_orm::ActiveValue::Set;
     let txn = crate::db::begin_write(db).await.internal()?;
+    if get_workspace_tenant(&txn, id).await? != actor.tenant_id {
+        return Err(YorishiroError::not_found("workspace not found"));
+    }
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
@@ -585,8 +588,6 @@ db_enum! {
 }
 
 /// Whether the workspace is still waiting for its first schema.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
 pub(crate) async fn is_schema_pending(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -602,9 +603,8 @@ pub(crate) async fn is_schema_pending(
 
 /// Marks a workspace active and records its first schema, idempotently.
 ///
-/// One statement (`COALESCE(schema_id, $new)`), not a read-then-write: two concurrent schema creations must not both see `schema_id` as `NULL` and overwrite each other's write.
-///
-/// This single-statement write uses `COALESCE(...)` and touches exactly the two columns allowed by `yorishiro_app`'s column-level UPDATE grant; a read followed by `ActiveModel` would overwrite concurrent changes.
+/// One statement (`COALESCE(schema_id, $new)`), not a read-then-write: two concurrent schema creations must not both see `schema_id` as `NULL` and overwrite each other.
+/// It touches only the two columns `yorishiro_app`'s column-level UPDATE grant allows.
 pub(crate) async fn mark_active(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

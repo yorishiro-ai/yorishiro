@@ -1,13 +1,12 @@
 //! Explicit operations that compose more than one tenancy table.
 
-use crate::error::OptionExt;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait,
     PaginatorTrait, QueryFilter,
 };
 use uuid::Uuid;
 
-use crate::error::{ResultExt, YorishiroError};
+use crate::error::{OptionExt, ResultExt, YorishiroError};
 use crate::models::_entities::{tenant_memberships, workspace_workspaces};
 
 use crate::models::workspace_workspaces::{WorkspaceSummary, workspace_count_lock_key};
@@ -28,7 +27,7 @@ pub async fn assign_initial_root(
     crate::models::iam_tenant_roots::Model::create(txn, tenant_id, user_id).await
 }
 
-/// Issues a tenant-scoped login credential after rechecking the account and membership.
+/// Issues a login access key after rechecking the account and membership.
 ///
 /// # Errors
 /// Rejects missing, ambiguous or disabled memberships and changed credentials.
@@ -153,10 +152,9 @@ pub(crate) async fn setup_first_account(
     })
 }
 
-/// Used by sign-in to list explicit workspace choices.
+/// Lists the workspaces a user may choose at sign-in.
 ///
-/// Deliberately unpaginated: sign-in must show every reachable workspace.
-/// A default `LIMIT` here would silently hide a membership from a user who holds more workspaces than the page size, rather than list them.
+/// Deliberately unpaginated: a default `LIMIT` would silently hide workspaces from a user who holds more than one page.
 ///
 /// # Errors
 /// Returns an error if the database query fails.
@@ -164,7 +162,7 @@ pub async fn list_workspaces_for_user(
     conn: &impl ConnectionTrait,
     user_id: Uuid,
 ) -> Result<Vec<WorkspaceSummary>, YorishiroError> {
-    let (_, workspaces) = login_options(conn, user_id).await?;
+    let workspaces = login_options(conn, user_id).await?;
     Ok(workspaces
         .into_iter()
         .map(|workspace| WorkspaceSummary {
@@ -238,20 +236,16 @@ pub(crate) async fn discover_workspaces(
     Ok(candidates)
 }
 
-#[derive(serde::Serialize, schemars::JsonSchema)]
-pub struct LoginMembership {
-    pub tenant_id: Uuid,
-    pub tenant_name: String,
+struct LoginMembership {
+    tenant_id: Uuid,
+    tenant_name: String,
 }
 
-/// Discovers recovery options only after the caller has verified credentials.
-///
-/// # Errors
-/// Returns an error when membership or workspace discovery fails.
+/// Lists the workspaces a verified user may open, across the tenants they belong to.
 async fn login_options(
     conn: &impl ConnectionTrait,
     user_id: Uuid,
-) -> Result<(Vec<LoginMembership>, Vec<LoginWorkspace>), YorishiroError> {
+) -> Result<Vec<LoginWorkspace>, YorishiroError> {
     use crate::models::_entities::tenant_tenants;
     let rows = tenant_memberships::Entity::find()
         .filter(tenant_memberships::Column::UserId.eq(user_id))
@@ -335,14 +329,13 @@ async fn login_options(
         }
     }
     candidates.sort_by_key(|candidate| (candidate.tenant_id, candidate.workspace_id));
-    Ok((memberships, candidates))
+    Ok(candidates)
 }
-/// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap.
-/// `None` means unlimited.
+
+/// Creates a workspace under `tenant_id`, enforcing the tenant's `max_workspaces` cap (`None` means unlimited).
 ///
-/// `conn` is a `&DatabaseTransaction` rather than a `&impl ConnectionTrait` because this takes `db::lock_for_update` before counting, and `pg_advisory_xact_lock` is transaction-scoped: handed a pool the lock would be released by the end of its own implicit transaction, before the count and insert it is meant to guard.
-/// Taking the transaction in the signature makes passing a pool a compile error instead of a lock that silently does nothing.
-/// It shares `delete_workspace`'s per-tenant lock key, so a create and a delete racing on the same tenant serialize against each other rather than each counting a total the other is about to change.
+/// `conn` is a transaction because the advisory lock taken before counting is transaction-scoped, and a pool would release it before the insert.
+/// The lock key is shared with `delete_workspace`, so a racing create and delete serialize.
 ///
 /// # Errors
 /// Returns an error if the tenant is missing, its workspace limit is reached, or a database operation fails.
@@ -425,6 +418,12 @@ pub(crate) async fn create_workspace_in_context(
     max_entities: Option<i32>,
     schema_id: Option<Uuid>,
 ) -> Result<workspace_workspaces::Model, YorishiroError> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 100 {
+        return Err(YorishiroError::Conflict {
+            message: "workspace name must contain 1-100 characters".into(),
+        });
+    }
     let txn = crate::db::begin_write(&ctx.db).await.internal()?;
     crate::models::iam::access::require_iam_action(
         &txn,

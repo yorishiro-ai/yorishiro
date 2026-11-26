@@ -15,7 +15,7 @@ use crate::models::tenant_tenants::retirement;
 #[tool_router(vis = "pub(crate)", router = tool_router_tenants)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Read the current tenant's basic metadata and stored manual workspace cap (requires IAM permission)"
+        description = "Read the current tenant's basic metadata and stored manual workspace cap (requires the tenant:GetTenant action)"
     )]
     pub(crate) async fn get_tenant(
         &self,
@@ -32,7 +32,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Update current tenant name or explicitly replace/clear its manual workspace cap without altering plan quotas (requires IAM permission)"
+        description = "Update current tenant name or explicitly replace or clear its manual workspace cap (requires the tenant:UpdateTenant action)"
     )]
     pub(crate) async fn update_tenant(
         &self,

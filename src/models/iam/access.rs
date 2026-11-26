@@ -196,12 +196,16 @@ pub(crate) async fn require_administrator(
     txn: &DatabaseTransaction,
     actor: &AuthContext,
 ) -> Result<(), YorishiroError> {
-    if IamEvaluation::load(txn, actor)
-        .await?
-        .holds_administrator_access()
-    {
+    let evaluation = IamEvaluation::load(txn, actor).await?;
+    if evaluation.holds_administrator_access() {
         Ok(())
     } else {
+        let principal = evaluation.principal_yrn().await;
+        tracing::warn!(
+            caller = %evaluation.current.yrn(),
+            principal = %principal,
+            "granting AdministratorAccess denied",
+        );
         Err(YorishiroError::AccessDenied {
             message: "granting AdministratorAccess requires holding AdministratorAccess".into(),
             hint: "ask a tenant administrator to make this change".into(),
@@ -404,7 +408,19 @@ impl<'a> IamEvaluation<'a> {
         action: crate::models::iam::policy::Action,
         target: crate::models::iam::policy::Resource,
     ) -> Result<(), YorishiroError> {
-        self.require_with_owner(action, target, false).await
+        let result = self.require_with_owner(action, target, false).await;
+        if let Err(YorishiroError::AccessDenied { message, .. }) = &result {
+            let principal = self.principal_yrn().await;
+            tracing::warn!(
+                caller = %self.current.yrn(),
+                principal = %principal,
+                action = %action.qualified(),
+                target = %target.yrn(),
+                reason = %message,
+                "IAM denied the request",
+            );
+        }
+        result
     }
 
     async fn require_with_owner(
@@ -489,6 +505,20 @@ impl<'a> IamEvaluation<'a> {
             hint: hint.into(),
         })
     }
+
+    /// The YRN of the user behind the credential, or of the access key when it has none.
+    /// Only denials need it, so the lookup is best effort and never fails a request.
+    async fn principal_yrn(&self) -> String {
+        use sea_orm::EntityTrait;
+        if let Some(user_id) = self.current.user_id
+            && let Ok(Some(user)) = crate::models::user_users::Entity::find_by_id(user_id)
+                .one(self.txn)
+                .await
+        {
+            return user.yrn(self.current.tenant_id);
+        }
+        self.current.yrn()
+    }
 }
 
 /// Persisted, secret-free identity and target information shared by transports.
@@ -537,10 +567,7 @@ pub async fn identity(
             .ok_or(YorishiroError::Unauthenticated)?
             .yrn(current.tenant_id)
     } else {
-        format!(
-            "yrn:iam:{}:access-key/{}",
-            current.tenant_id, current.access_key_id
-        )
+        current.yrn()
     };
     Ok(AccessIdentity {
         current,

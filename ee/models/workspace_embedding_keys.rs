@@ -40,7 +40,7 @@ pub(crate) async fn configure(
             && old.document_prefix == request.document_prefix
     });
     if query_only {
-        // SQLite fires BEFORE INSERT even for an upsert conflict; avoid document invalidation.
+        // A query-only change keeps stored document vectors valid, so it skips the revision bump and the reindex.
         Entity::update_many()
             .col_expr(
                 Column::QueryInstruction,
@@ -89,7 +89,7 @@ pub(crate) async fn resolve(
 
 /// What a workspace has configured, without the key itself.
 ///
-/// `api_key` is deliberately absent rather than masked, matching `workspace_llm_keys::LlmKeyDescription`: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
+/// `api_key` is absent rather than masked, as in `workspace_llm_keys::LlmKeyDescription`.
 #[derive(Clone, Serialize, sea_orm::FromQueryResult, schemars::JsonSchema)]
 #[schemars(rename = "EmbeddingKeyResponse")]
 pub(crate) struct EmbeddingKeyDescription {

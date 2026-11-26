@@ -18,7 +18,7 @@ use crate::edition::ee::services::inference::InferenceConfig;
 
 /// What a workspace has configured, without the key itself.
 ///
-/// `api_key` is deliberately absent rather than masked: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
+/// `api_key` is absent rather than masked: a masked value still travels through logs and proxies.
 #[derive(Clone, Serialize, sea_orm::FromQueryResult, schemars::JsonSchema)]
 #[schemars(rename = "LlmKeyResponse")]
 pub(crate) struct LlmKeyDescription {
@@ -132,7 +132,7 @@ async fn describe(
 /// The credentials themselves, for making a call.
 ///
 /// `None` means the workspace has configured none.
-/// Callers turn that into a refusal rather than a fallback: inferring nothing and filling defaults instead would look, to the caller, like inference that produced default-shaped answers.
+/// Callers refuse the request instead of falling back, so missing credentials never pass for inference.
 pub(crate) async fn get(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

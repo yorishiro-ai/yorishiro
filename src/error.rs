@@ -164,9 +164,7 @@ pub(crate) fn mcp_internal(error: impl Into<BoxError>) -> rmcp::ErrorData {
 
 /// Machine-readable error code for every `YorishiroError` variant.
 ///
-/// This is the **single source of truth**: the code, HTTP status, and
-/// description are all defined on this enum.  Looking up the code tells you
-/// everything about the error — status code, meaning, and typical response.
+/// This is the **single source of truth**: the code, HTTP status and description are all defined on this enum.
 ///
 /// ## Code reference table
 ///
@@ -184,35 +182,34 @@ pub(crate) fn mcp_internal(error: impl Into<BoxError>) -> rmcp::ErrorData {
 /// | `backend_unsupported` | 501 | Feature not supported on this backend |
 /// | `backend_unavailable` | 503 | Required backend not configured |
 ///
-/// Internal errors have no code (they are not listed here) — callers must
-/// handle `YorishiroError::Internal` separately and log the real error.
+/// Internal errors have no code, so callers handle `YorishiroError::Internal` separately and log the real error.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum YorishiroErrorCode {
-    /// 422 Unprocessable Entity — the request body does not conform to the expected schema.
+    /// 422 Unprocessable Entity: the request body does not conform to the expected schema.
     ValidationFailed,
     WorkspaceSelectionRequired,
     AccessDenied,
-    /// 404 Not Found — the requested resource does not exist.
+    /// 404 Not Found: the requested resource does not exist.
     NotFound,
-    /// 403 Forbidden — the authenticated principal lacks the required scope or role.
-    /// 409 Conflict — the request would create a duplicate or contradict an existing resource.
+    /// 403 Forbidden: the authenticated principal lacks the required scope or role.
+    /// 409 Conflict: the request would create a duplicate or contradict an existing resource.
     Conflict,
-    /// 422 Unprocessable Entity — the relation type does not match the expected category.
+    /// 422 Unprocessable Entity: the relation type does not match the expected category.
     RelationTypeMismatch,
-    /// 401 Unauthorized — no valid authentication credentials were provided.
+    /// 401 Unauthorized: no valid authentication credentials were provided.
     Unauthenticated,
-    /// 423 Locked — the deployment is in read-only maintenance mode.
+    /// 423 Locked: the deployment is in read-only maintenance mode.
     MaintenanceReadOnly,
-    /// 503 Service Unavailable — the deployment is fully locked for maintenance.
+    /// 503 Service Unavailable: the deployment is fully locked for maintenance.
     MaintenanceFullLock,
-    /// 503 Service Unavailable — the backend provider is temporarily busy.
+    /// 503 Service Unavailable: the backend provider is temporarily busy.
     ProviderBusy,
-    /// 502 Bad Gateway — the embedding provider is unreachable.
+    /// 502 Bad Gateway: the embedding provider is unreachable.
     ProviderUnreachable,
-    /// 501 Not Implemented — the requested feature is not supported on this backend.
+    /// 501 Not Implemented: the requested feature is not supported on this backend.
     BackendUnsupported,
-    /// 503 Service Unavailable — a required backend component is not configured.
+    /// 503 Service Unavailable: a required backend component is not configured.
     BackendUnavailable,
 }
 

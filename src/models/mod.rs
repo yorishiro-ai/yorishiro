@@ -27,7 +27,7 @@ pub mod workspace_llm_keys;
 pub mod workspace_worker_classes;
 pub mod workspace_workspaces;
 
-// access keys.
+// Access keys.
 pub mod access_key_audit_log;
 pub mod access_keys;
 

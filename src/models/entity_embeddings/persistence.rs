@@ -16,9 +16,8 @@ use crate::models::_entities::workspace_workspaces::{
 pub(super) struct VectorWriteInput {
     pub(super) workspace_id: Uuid,
     pub(super) entity_id: Uuid,
-    /// Monotonic token captured at the time the embedding vector was produced.
-    /// `embed_and_write` only writes if the entity's current token equals this value,
-    /// rejecting any write against an entity that was modified between capture and persist.
+    /// The entity's sync token when the vector was produced.
+    /// `embed_and_write` writes only while the entity still carries this token.
     pub(super) embedding_sync_token: String,
     pub(super) vector: Vec<f32>,
 }
@@ -27,9 +26,8 @@ pub(super) struct VectorWriteInput {
 ///
 /// Both insert and conflict-update branches check the current entity token in one `SeaQuery` statement.
 ///
-/// Returns `Ok(true)` when the write landed, `Ok(false)` when the entity was deleted,
-/// and `Err(ConcurrentModification)` when the entity's token has changed since the
-/// snapshot (meaning the embedding is stale and must be recomputed).
+/// Returns `Ok(true)` when the write landed and `Ok(false)` when the entity was deleted.
+/// Returns `Conflict` when the entity's token has changed since the snapshot, so the embedding is stale and must be recomputed.
 pub(super) async fn embed_and_write(
     conn: &impl ConnectionTrait,
     input: VectorWriteInput,
@@ -87,9 +85,7 @@ pub(super) async fn embed_and_write(
         .internal()?;
 
     if rows_affected.rows_affected() == 0 {
-        // The upsert found no matching entity row with the expected token.
-        // Distinguish: was the entity deleted, or just token-mismatched?
-
+        // No entity row carried the expected token: it was either deleted or modified.
         let entity_exists = Entity::find_by_id(input.entity_id)
             .filter(Column::WorkspaceId.eq(input.workspace_id))
             .exists(conn)

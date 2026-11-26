@@ -12,8 +12,10 @@ use crate::models::_entities::entity_entities::Column;
 use crate::models::entity_entities::{Entity, EntityRecord};
 
 /// Updates an entity only when it still has the timestamp read by the caller.
-/// PostgreSQL callers also lock the row before reading it, while SQLite's transaction-level
-/// single-writer rule protects this transaction-scoped confirmation path.
+/// PostgreSQL callers lock the row before reading it, and the timestamp filter guards the write.
+/// SQLite's single writer protects the confirmation transaction instead.
+///
+/// `update_many` skips model hooks, so this sets the timestamp, sync token, content revision and full-text row itself.
 pub(crate) async fn update_if_unchanged(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

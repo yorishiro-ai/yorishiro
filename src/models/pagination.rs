@@ -1,17 +1,15 @@
 //! The `limit`/`offset` pair every `list` function takes, and the clamp it's checked against.
 //!
-//! One definition for every table, rather than a `DEFAULT_LIST_LIMIT` and a `.clamp(1, 200)` per table's own module: pagination is not a concept any single table owns, and a caller in one module reaching into another's copy is what that shape produces.
+//! One definition serves every table, because no single table owns pagination.
 
-/// Applies to every paginated list, not `search.rs`'s `DEFAULT_SEARCH_LIMIT`: vector/trigram
-/// search is a different kind of query (ranked by relevance, not a page over a stable order) and
-/// keeps its own, deliberately smaller, default.
+/// Applies to every paginated list.
+/// Search ranks by relevance rather than paging over a stable order, so it keeps its own smaller default.
 pub(crate) const DEFAULT_LIST_LIMIT: i64 = 50;
 
 pub const MAX_LIST_LIMIT: i64 = 200;
 
 /// `limit`/`offset`, clamped to `[1, MAX_LIST_LIMIT]` and `[0, ∞)` respectively.
-/// A table's own `ListXQuery` embeds this alongside its own filters, rather than redeclaring
-/// `limit`/`offset` itself.
+/// A table's own `ListXQuery` embeds this alongside its own filters.
 #[derive(Clone, Copy)]
 pub struct ListParams {
     pub limit: i64,
@@ -28,8 +26,7 @@ impl Default for ListParams {
 }
 
 impl ListParams {
-    /// Builds directly from a caller's optional `limit`/`offset` (e.g. an Axum `Query` extractor),
-    /// applying `Default`'s values where the caller passed neither.
+    /// Builds from a caller's optional `limit` and `offset`, using the defaults where absent.
     #[must_use]
     pub fn new(limit: Option<i64>, offset: Option<i64>) -> Self {
         Self {
@@ -50,10 +47,8 @@ impl ListParams {
         self.offset.max(0).cast_unsigned()
     }
 
-    /// Builds from Loco's `PaginationQuery` (1-based page + `page_size`), converting
-    /// to the internal 0-based offset/limit representation.
-    ///
-    /// `page` is clamped to `>= 1` (no page 0), and `page_size` to `[1, MAX_LIST_LIMIT]`.
+    /// Builds from Loco's 1-based `PaginationQuery`.
+    /// `page` is clamped to at least 1, and `page_size` to `[1, MAX_LIST_LIMIT]`.
     pub(crate) fn from_pagination_query(
         page: u64,
         page_size: u64,

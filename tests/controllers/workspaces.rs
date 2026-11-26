@@ -364,7 +364,7 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
             ..
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
-        // Tenant A's key must not be able to see or delete tenant B's workspace by guessing its id: workspace_workspaces has no RLS of its own, so get_workspace_in_tenant's explicit tenant_id check is the only thing enforcing this boundary.
+        // Tenant A's key must not be able to see or delete tenant B's workspace by guessing its id: workspace_workspaces has no RLS, so the explicit tenant_id check is the only guard.
         let response = request
             .get(&format!("/api/workspaces/{workspace_b}"))
             .add_header("Authorization", format!("Bearer {owner_a_key}"))

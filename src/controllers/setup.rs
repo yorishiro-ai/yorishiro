@@ -1,6 +1,6 @@
 //! `POST /setup` and `GET /setup/status`: first-run bootstrap, reachable without a bearer token by design, same as `/auth/signup` and `/auth/root/login`.
 //!
-//! Creates the deployment's first tenant and admin account, then issues a tenant-scoped admin key.
+//! Creates the deployment's first tenant and admin account, then issues an admin access key.
 //! The admin creates and selects workspaces explicitly.
 //! The resolved edition tenant cap controls whether first-run setup is available.
 //! An unlimited cap disables the wizard; the source default is one tenant.
@@ -24,9 +24,6 @@ fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
         .or_internal("tenant cap policy missing")
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusResponse>, ApiError> {
     let setup_required = if max_tenants(&ctx)?.is_some() {
         tenant_tenants::count_tenants(&ctx.db).await? == 0
@@ -36,9 +33,6 @@ async fn status(State(ctx): State<AppContext>) -> Result<Json<SetupStatusRespons
     Ok(Json(SetupStatusResponse { setup_required }))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn setup(
     State(ctx): State<AppContext>,
     Json(body): Json<SetupRequest>,

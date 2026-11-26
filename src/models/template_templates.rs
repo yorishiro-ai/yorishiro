@@ -1,7 +1,7 @@
 //! CRUD for `template_templates`, the user-contributed schema template library.
 //!
-//! Distinct from `crate::data::templates` (the built-in templates shipped with the binary and served from memory): these are tenant-scoped, DB-backed templates that a tenant's members create and manage.
-//! Runs on `ctx.db` (the migration-role connection): `template_templates` has no RLS of its own, so every function here takes a `tenant_id` and filters/checks visibility explicitly.
+//! These are tenant-scoped, DB-backed templates, unlike the built-ins in `crate::data::templates`.
+//! They run on `ctx.db`, and `template_templates` has no RLS, so every function takes a `tenant_id` and checks visibility explicitly.
 
 use crate::error::OptionExt;
 pub use crate::models::_entities::template_templates::{ActiveModel, Column, Entity, Model};
@@ -162,10 +162,9 @@ pub async fn get_template(
 
 /// Resolves a `template_id` as either a library template or a built-in, and says which.
 ///
-/// A UUID can only mean the library; anything else can only mean a built-in.
-/// Parsing decides which, so neither lookup runs against an id that could not name it, and a library miss reports the library's own not-found rather than the built-in one.
+/// A UUID names a library template and anything else names a built-in.
 ///
-/// The returned id is the origin to record: `Some` for a library template, whose later edits the schema can then be told about, and `None` for a built-in, which has no row to point at.
+/// The returned id is the origin to record: `Some` for a library template, and `None` for a built-in, which has no row to point at.
 pub(crate) async fn resolve_template_definition(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -418,7 +417,6 @@ pub async fn update_template(
             YorishiroError::not_found(format!("template '{template_id}' was not found"))
         })?;
 
-    // Track whether definition changed before the update moves input.definition.
     let definition_changed = input.definition.is_some();
 
     let mut active: ActiveModel = existing.into();
@@ -440,8 +438,7 @@ pub async fn update_template(
 
     let record = active.update(conn).await.internal()?.try_into()?;
 
-    // If the definition changed, stamp origin_updated_at=NULL on every linked schema
-    // following this template so the workspace knows there is an upstream update available.
+    // Following schemas learn of the upstream edit through a pending origin mark.
     if definition_changed {
         schema_schemas::notify_upstream_change(conn, template_id).await?;
     }

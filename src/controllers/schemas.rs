@@ -48,9 +48,6 @@ pub(crate) async fn list_schemas(
     Ok(Json(summaries))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn create_schema(
     State(ctx): State<AppContext>,
     verified: Verified,
@@ -61,9 +58,6 @@ async fn create_schema(
     ))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn get_active_schema(
     State(ctx): State<AppContext>,
     verified: Verified,
@@ -101,9 +95,6 @@ pub(crate) async fn list_templates(
     Ok(Json(templates::list_templates()))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn get_template(
     State(ctx): State<AppContext>,
     verified: Verified,

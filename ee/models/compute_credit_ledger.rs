@@ -1,13 +1,9 @@
 //! Compute credit ledger for a workspace.
 //!
-//! Append-only ledger tracking earn and spend events.
-//! Balances are derived from `SUM(amount)` filtered by `transaction_type`
-//! rather than mutated in place, so lost or reordered rows always produce
-//! the correct total.
+//! Append-only ledger of earn and spend events.
+//! The balance is `SUM(amount)` over the rows, never a mutated counter.
 //!
-//! Reads and writes go through `ctx.db` (the migration-role connection),
-//! not the RLS-scoped tenant pool: `yorishiro_app` has no GRANT on this
-//! table, matching `workspace_llm_keys` / `workspace_embedding_keys`.
+//! Reads and writes go through `ctx.db` (the migration-role connection), not the RLS-scoped tenant pool, because `yorishiro_app` has no GRANT on this table.
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::compute_credit_ledger::{ActiveModel, Column, Entity};
@@ -60,9 +56,7 @@ pub async fn earn(
 
 /// Records a spend event for the workspace.
 ///
-/// `amount` is the positive quantity to deduct; it is stored as a negative
-/// value in the ledger so that `SUM(amount)` across all rows yields the
-/// correct balance.
+/// `amount` is the positive quantity to deduct, and it is stored as a negative value.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -84,8 +78,7 @@ pub async fn spend(
 /// Inserts a row into the ledger.
 ///
 /// The sign of `amount` encodes direction: positive for earn, negative for spend.
-/// This function does not enforce that — callers `earn`/`spend` handle sign
-/// logic so the database value always matches intent.
+/// `earn` and `spend` own the sign, and this function does not check it.
 async fn insert_row(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -93,13 +86,15 @@ async fn insert_row(
     transaction_type: TransactionType,
 ) -> Result<(), YorishiroError> {
     let active = ActiveModel {
-        id: crate::db::generated_id(ActiveValue::NotSet),
         workspace_id: ActiveValue::Set(workspace_id),
         amount: ActiveValue::Set(amount),
         transaction_type: ActiveValue::Set(transaction_type.as_db_str().to_string()),
-        created_at: ActiveValue::Set(crate::data::time::now().into()),
-        updated_at: ActiveValue::Set(crate::data::time::now().into()),
+        ..Default::default()
     };
+    // `Entity::insert` skips model hooks, so run `before_save` for the id and timestamps.
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     Entity::insert(active).exec(conn).await.internal()?;
     Ok(())
 }
@@ -136,9 +131,6 @@ pub async fn debit_actual(
 }
 
 /// Returns the workspace's current balance: `SUM(amount)` across all rows.
-///
-/// Because earn rows are positive and spend rows are stored as negative,
-/// the raw sum is the running balance in credit units.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

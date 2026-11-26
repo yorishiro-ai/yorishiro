@@ -8,7 +8,7 @@ use yorishiro::db::DbHandle;
 use yorishiro::edition::ee::controllers::middleware::auth::WORKSPACE_HEADER;
 use yorishiro::edition::ee::models::access_keys::create_tenant_access_key;
 
-/// Enterprise edition composition must not break a workspace-scoped key on a route base itself defines.
+/// Enterprise edition composition must not break authentication on a route base itself defines.
 #[tokio::test]
 async fn a_workspace_scoped_key_still_works_on_a_base_route() {
     if !crate::require_postgres_backend() {
@@ -50,7 +50,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user_id = crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await;
 
-        // create_tenant_access_key reads tenant_tenants and tenant_memberships, neither granted to yorishiro_app (see tenant_tenants's migration doc comment), so it runs on the identity pool (the migration/admin role), not the RLS-scoped tenant pool.
+        // create_tenant_access_key reads tables that yorishiro_app cannot read, so it runs on the identity pool.
         let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let identity = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.identity.clone());
         let tenant_key = create_tenant_access_key(&identity, tenant_id, Some(user_id))
@@ -291,7 +291,7 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
     }).await;
 }
 
-/// A tenant-scoped key cannot retarget another tenant's workspace through the header, even though the key itself is valid.
+/// A key cannot select another tenant's workspace through the header, even though the key itself is valid.
 #[tokio::test]
 async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
     if !crate::require_postgres_backend() {

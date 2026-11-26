@@ -32,7 +32,7 @@ pub(crate) async fn detail_as(
     Ok(tenant)
 }
 
-/// Updates current-tenant metadata under the membership fence without changing plan quotas.
+/// Updates the current tenant's name and manual workspace cap.
 ///
 /// # Errors
 /// Rejects unauthorized credentials, invalid names or caps and propagates persistence errors.

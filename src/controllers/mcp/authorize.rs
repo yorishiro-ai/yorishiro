@@ -11,7 +11,7 @@ pub(crate) enum VerifyOutcome {
     Denied(CallToolResult),
 }
 
-/// Copies the request's headers into the shape `auth::Authenticator` takes: the same thing the REST adapter does, so a replaced authenticator sees an MCP call exactly as it sees a REST one.
+/// Requires a nonempty bearer credential on the request.
 pub(super) fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
     auth::extract_bearer_key(&parts.headers).ok_or_else(|| {
         ErrorData::invalid_request("missing or malformed Authorization header", None)
@@ -35,7 +35,9 @@ pub(crate) async fn verify(ctx: &AppContext, parts: &Parts) -> Result<VerifyOutc
     match auth::RequestAuth::new(ctx)
         .resolve(presented_key, &headers)
         .await
-    {
+        .inspect_err(|error| {
+            tracing::warn!(%error, "MCP request rejected during authentication");
+        }) {
         Ok(current) => {
             crate::models::access_keys::Entity::touch_authenticated(ctx, &current)
                 .await

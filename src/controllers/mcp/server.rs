@@ -164,11 +164,10 @@ impl ServerHandler for YorishiroMcpServer {
             "Yorishiro is a multi-tenant knowledge store with user-defined schemas. \
              Every tool call requires authentication via an `Authorization: Bearer <access-key>` \
              header, and IAM policies decide which operations a key's user may perform. \
-              Select a workspace with the `workspace_id` tool argument or `x-workspace-id` header. \
-              A workspace-bound key is not required to select a workspace. \
-             Without selection, lists and search span permitted workspaces, resource IDs resolve their workspace, \
+             Select a workspace with the `workspace_id` tool argument or `x-workspace-id` header. \
+             Without selection, a tenant with one workspace acts on it, lists and search span permitted workspaces, resource IDs resolve their workspace, \
              and destination operations select a workspace only when exactly one is permitted. \
-             Tenant root sign-in sessions have full tenant access; issued keys retain their grants and bindings.",
+             Tenant root sign-in sessions have full tenant access; issued keys keep the grants of their user.",
         )
     }
 }

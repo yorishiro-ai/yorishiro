@@ -152,8 +152,6 @@ pub async fn sync_embedding_for_record(
     record: &EntityRecord,
     provider: &dyn EmbeddingProvider,
 ) -> Result<(), YorishiroError> {
-    // Re-read the full snapshot with the current token: the caller has an EntityRecord
-    // without token info, so we need the latest token from the DB to guard embed_and_write.
     let snapshot = entity_entities::get_with_token(conn, workspace_id, record.id)
         .await
         .map_err(|error| match error {
@@ -170,9 +168,8 @@ pub async fn sync_embedding_for_record(
 
 /// Resolves the schema definition for an entity snapshot and synchronizes its embedding.
 ///
-/// This is the private entry point used by the embedding sync worker and `resync_embeddings`
-/// task after their own atomic snapshot read (which already includes the concurrency token).
-/// The public `sync_embedding_for_record` wraps this after re-reading the snapshot.
+/// The embedding sync worker and the `resync_embeddings` task call this after their own snapshot read, which already carries the concurrency token.
+/// `sync_embedding_for_record` wraps it after re-reading the snapshot.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

@@ -1,6 +1,6 @@
 //! The authentication guard every entry point (REST, MCP) resolves a request through.
 //!
-//! Persistence of keys lives on `models::access_keys`; this module turns a presented credential into an authorized, tenant-scoped transaction.
+//! Persistence of keys lives on `models::access_keys`; this module turns a presented credential into an [`AuthContext`] for one tenant and, when selected, one workspace.
 //! [`Authenticator`] is the seam an edition replaces, so a new authenticated entry point must go through it rather than calling `Entity::authenticate` directly.
 
 use crate::error::OptionExt;
@@ -55,14 +55,14 @@ pub fn bearer_credential(header_value: Option<&str>) -> Option<&str> {
 
 /// Resolves a presented access key into an [`AuthContext`].
 ///
-/// A seam: a deployment can replace this rule (a key that names its workspace per request, a key issued by an external identity system) without touching the routes that call it.
+/// A seam: a deployment can replace this rule (a key issued by an external identity system, for example) without touching the routes that call it.
 /// `DefaultAuthenticator` is the behaviour of every deployment that does not replace it.
 ///
 /// # Contract
 ///
 /// - **must** reject a key it cannot verify, by returning [`YorishiroError::Unauthenticated`].
-/// - **must** return a context whose `tenant_id` owns its `workspace_id`.
-///   The RLS session variables are set from both, so a mismatched pair silently produces a session that can see one tenant's workspace under another tenant's policies.
+/// - **must** return a context whose `tenant_id` owns its `workspace_id`, when it has one.
+///   The RLS session variables are set from both, so a mismatched pair would let a session see one tenant's workspace under another tenant's policies.
 /// - **may** read `headers` for anything the key itself does not carry.
 #[async_trait]
 pub trait Authenticator: Send + Sync {
@@ -78,8 +78,8 @@ pub trait Authenticator: Send + Sync {
 /// When neither applies, each operation decides whether to span workspaces or ask for a selection.
 pub(crate) struct DefaultAuthenticator;
 
-/// Reads the workspace a request asks a tenant-scoped key to act on.
-/// A present-but-unparseable value is a validation error, never "not sent": treating it as absent would send a request meant for one workspace to whichever one the key happens to resolve to.
+/// Reads the workspace a request asks to act on.
+/// A present but unparseable value is a validation error, never "not sent": treating it as absent would send a request meant for one workspace to another.
 fn requested_workspace(headers: &[(String, String)]) -> Result<Option<Uuid>, YorishiroError> {
     let mut requested = None;
     for (_, value) in headers.iter().filter(|(name, _)| name == WORKSPACE_HEADER) {
@@ -157,20 +157,15 @@ impl<'a> RequestAuth<'a> {
                 return Err(YorishiroError::Unauthenticated);
             }
         }
+        let span = tracing::Span::current();
+        span.record("caller", ctx.yrn().as_str());
+        if let Some(workspace) = ctx.workspace_yrn() {
+            span.record("workspace", workspace.as_str());
+        }
         Ok(ctx)
     }
 
     pub(crate) async fn authenticate(
-        &self,
-        key: &str,
-        headers: &[(String, String)],
-    ) -> Result<AuthContext, YorishiroError> {
-        let ctx = self.resolve(key, headers).await?;
-        Entity::touch_authenticated(self.app, &ctx).await?;
-        Ok(ctx)
-    }
-
-    pub(crate) async fn verify(
         &self,
         key: &str,
         headers: &[(String, String)],

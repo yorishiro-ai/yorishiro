@@ -1,18 +1,18 @@
-//! Enterprise access-key persistence for keys that act on a tenant.
+//! Enterprise access-key persistence.
 
 use uuid::Uuid;
 
 use crate::YorishiroError;
 
-/// A freshly issued tenant-scoped key.
+/// A freshly issued key.
 pub use crate::models::access_keys::CreatedTenantAccessKey;
 
-/// Issues a tenant-scoped key through the base persistence path.
+/// Issues a key through the base persistence path.
 ///
 /// **`conn` must be the identity pool (`DbHandle::identity`, wrapped as a `sea_orm::DatabaseConnection`), not the tenant pool.** The insert path reads `tenant_tenants`, which is not granted to `yorishiro_app` (the tenant pool's role).
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error if the tenant does not exist or the user is not a member.
 pub async fn create_tenant_access_key(
     conn: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,

@@ -9,7 +9,7 @@ use crate::dtos::caller_identity::CallerIdentityResponse;
 /// Returns the current credential's identity and selected target.
 ///
 /// # Errors
-/// Rejects stale credentials or invalid target bindings and propagates lookup failures.
+/// Rejects stale credentials and propagates lookup failures.
 async fn get_caller_identity(
     State(app): State<AppContext>,
     AuthContext(ctx): AuthContext,

@@ -1,4 +1,4 @@
-//! Names and YRNs of users, groups and policies.
+//! Names and YRNs of users, groups and access keys.
 
 use uuid::Uuid;
 
@@ -43,6 +43,11 @@ pub(crate) fn user_yrn(tenant_id: Uuid, user_name: &str) -> String {
 /// The YRN of a tenant's root user, which has no name.
 pub(crate) fn root_yrn(tenant_id: Uuid) -> String {
     format!("yrn:iam:{tenant_id}:root")
+}
+
+/// The YRN of an access key, which names a caller that has no user.
+pub(crate) fn access_key_yrn(tenant_id: Uuid, access_key_id: Uuid) -> String {
+    format!("yrn:iam:{tenant_id}:access-key/{access_key_id}")
 }
 
 pub(crate) fn group_yrn(tenant_id: Uuid, name: &str) -> String {

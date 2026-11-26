@@ -117,7 +117,7 @@ pub(crate) async fn delete(
 
     let schema = get_by_id(conn, workspace_id, schema_id).await?;
     lock_version(conn, workspace_id, &schema.name).await?;
-    // A row lock also fences reference writers that rely on the foreign key rather than the version lock.
+    // The row lock also fences reference writers that rely on the foreign key rather than the version lock.
     let row = Entity::find_by_id(schema_id)
         .filter(crate::models::_entities::schema_schemas::Column::WorkspaceId.eq(workspace_id))
         .lock_exclusive()
@@ -134,7 +134,7 @@ pub(crate) async fn delete(
             ),
         });
     }
-    // References to a version are retained history, so deletion refuses them with their name instead of cascading.
+    // References are retained history, so deletion refuses and names them instead of cascading.
     let blockers = deletion_blockers(conn, schema_id).await?;
     if !blockers.is_empty() {
         return Err(YorishiroError::Conflict {
@@ -254,8 +254,6 @@ async fn deletion_blockers(
 }
 
 /// One version of a workspace's schema.
-//
-// `definition` is JSONB in the DB, but the application layer always treats it as a parsed `MetaSchemaDefinition`.
 #[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SchemaRecord {
     pub id: Uuid,
@@ -307,9 +305,7 @@ impl TryFrom<Model> for SchemaRecord {
     }
 }
 
-/// Fetches the currently active schema (the latest version with status='active') for the given workspace and name.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
+/// Fetches the active schema (the latest active version) for the given workspace and name.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -318,8 +314,6 @@ pub async fn get_active_schema(
     workspace_id: Uuid,
     name: &str,
 ) -> Result<SchemaRecord, YorishiroError> {
-    // SQLite serializes UUIDs as binary in SeaORM queries, but the migration stores them as
-    // hex strings in TEXT columns. Convert to hex for the filter so the comparison works.
     use crate::models::_entities::schema_schemas::Column;
 
     let row = Entity::find()
@@ -335,8 +329,7 @@ pub async fn get_active_schema(
         .try_into()
 }
 
-/// Counts a workspace's currently *active* schemas: one row per distinct name, since `create_schema` archives the previous version before activating a new one.
-/// For workspace-detail summaries, this is a more meaningful "how many schemas does this workspace define" figure than counting every archived version too.
+/// Counts a workspace's active schemas, which is one per name.
 pub(crate) async fn count_active(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -352,9 +345,7 @@ pub(crate) async fn count_active(
         .and_then(|count| i64::try_from(count).internal())
 }
 
-/// Fetches a specific schema version by id (used to resolve the version an entity references).
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
+/// Fetches a specific schema version by id.
 pub(crate) async fn get_by_id(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -375,10 +366,7 @@ pub(crate) async fn get_by_id(
 
 /// A schema whose origin template has been edited since the copy was taken.
 ///
-/// The signal only (what changed and where), with no diff and no application.
-/// Whether to follow the upstream edit is the workspace's call, since applying it could invalidate entities already stored against the current definition.
-///
-/// Lives here because it names `schema_schemas` fields (`schema_id`, `version`) this module already owns.
+/// The signal only: whether to follow the upstream edit is the workspace's call, since applying it could invalidate stored entities.
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 pub struct UpstreamChange {
     pub workspace_id: Uuid,
@@ -485,7 +473,7 @@ pub(crate) async fn list_for_actor(
 /// Marks every schema that follows `template_id` as having a pending upstream notification.
 ///
 /// Sets `origin_updated_at` to `NULL` for all linked schemas referencing the template.
-/// The merge endpoint clears it back to `Some(NOW())` after applying the upstream change.
+/// A merge sets it back to the current time.
 pub(crate) async fn notify_upstream_change(
     conn: &impl ConnectionTrait,
     template_id: Uuid,
@@ -506,7 +494,7 @@ pub(crate) async fn notify_upstream_change(
 
 /// Detaches every linked schema whose origin template matches `origin`.
 ///
-/// Call it before deleting those templates: a deleted template can no longer be followed.
+/// Call it before deleting those templates.
 /// It runs on a connection that is not scoped to one workspace, because the schemas live in other workspaces and tenants.
 pub(crate) async fn detach_origins(
     conn: &impl ConnectionTrait,
@@ -532,9 +520,10 @@ pub(crate) async fn detach_origins(
     Ok(())
 }
 
+/// Creates the next version of a schema and archives the previous active one.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error if the definition is invalid, the version number is taken or persistence fails.
 pub async fn create_schema(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -561,9 +550,8 @@ pub async fn create_schema(
         .map(SchemaRecord::try_from)
         .transpose()?;
 
-    // Only the first version of a name mints an origin from what the caller passed.
-    // Every later one inherits the complete origin state from its predecessor, including a pending notification.
-    // Replacing a pending active version must not acknowledge the update merely because a local version was created.
+    // A later version without an explicit origin inherits its predecessor's origin state, including a pending notification.
+    // Creating a local version must not acknowledge an upstream update.
     let (origin_template_id, origin_snapshot, origin_updated_at) = match &previous {
         Some(previous) if origin_template_id.is_none() => (
             previous.origin_template_id,
@@ -600,7 +588,7 @@ pub async fn create_schema(
     );
 
     if previous.is_some() {
-        // `update_many` is a builder call and never runs `ActiveModelBehavior::before_save`, so `updated_at` is set explicitly here or archiving a schema version would leave its timestamp stale.
+        // `update_many` skips `before_save`, so `updated_at` is set explicitly.
         Entity::update_many()
             .col_expr(
                 Column::Status,
@@ -646,8 +634,7 @@ pub async fn create_schema(
         )
     })?;
 
-    // Inside the transaction: a workspace must not be left active by a schema insert that then rolls back.
-    // Unconditional and idempotent: every version after the first finds it active already, and checking first would only add a round trip.
+    // Inside the transaction, so a rolled-back insert leaves the workspace unchanged.
     crate::models::workspace_workspaces::mark_active(conn, workspace_id, row.id).await?;
 
     Ok((row.try_into()?, diff))
@@ -712,11 +699,7 @@ pub(crate) async fn create_for_actor(
         Some(crate::models::iam::policy::Action::CreateSchema),
         async |session| {
             let tenant_id = session.ctx.tenant_id;
-            // Carried alongside the definition so the schema can record which library template it came from.
-            // A built-in has no row to point at, so it stays None.
             let mut origin_template_id = None;
-            // What the template said, kept as the merge base.
-            // Only a template body has one: a definition posted inline is not a copy of anything, even when a template of the same name exists.
             let mut origin_snapshot = None;
             let definition = match source {
                 CreateSchemaSource::Definition(definition) => definition,

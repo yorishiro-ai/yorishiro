@@ -182,8 +182,7 @@ pub async fn create(
                 err.sql_err(),
                 Some(SqlErr::ForeignKeyConstraintViolation(_))
             ) {
-                // A TOCTOU window between checking source/target existence and the INSERT, during which another transaction could delete the entity.
-                // Treated as NotFound, same as the upfront check.
+                // Another transaction deleted an endpoint between the existence check and the insert.
                 YorishiroError::not_found(format!(
                     "source '{}' or target '{}' no longer exists",
                     input.source_id, input.target_id
@@ -229,8 +228,7 @@ pub(crate) async fn set_status(
         status: ActiveValue::Set(input.status.as_db_str().to_string()),
         ..Default::default()
     };
-    // A concurrent delete between `get` above and this update surfaces as `DbErr::RecordNotUpdated`, not a row.
-    // Map it to the same 404 the upfront `get` would have returned had it lost the race instead, rather than letting `.internal()` turn it into a 500.
+    // A delete between `get` and this update surfaces as `RecordNotUpdated`, which maps to the same 404 as `get`.
     active
         .update(conn)
         .await

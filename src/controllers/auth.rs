@@ -16,12 +16,7 @@ use crate::dtos::auth::{
 use crate::error::YorishiroError;
 use crate::models::{tenancy, user_users};
 
-/// Creates a brand-new tenant whose root is the caller; there is no workspace yet.
-///
-/// The new tenant can be managed using a tenant-scoped login key.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Creates a new tenant whose root is the caller, with no workspace yet.
 async fn signup(
     State(ctx): State<AppContext>,
     Json(body): Json<SignupRequest>,

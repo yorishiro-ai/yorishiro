@@ -236,7 +236,6 @@ async fn retirement_inventory_does_not_expose_accounts() {
             let inventory = retirement::inventory(&ctx.db, tenant.tenant_id)
                 .await
                 .unwrap();
-            assert_eq!(inventory.shared_user_accounts, 0);
             assert_eq!(inventory.external_workspace_forks, 0);
             let body = serde_json::to_value(inventory).unwrap();
             assert!(!body.to_string().contains(&first.owner_id.to_string()));

@@ -1,7 +1,6 @@
 //! Which columns the Entities table shows, per workspace and entity type.
 //!
 //! Scoped to the workspace rather than the user, so everyone looking at a workspace sees the same table.
-//! A per-user override belongs in this table as a second nullable column, not in a second table.
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::entity_column_preferences::{ActiveModel, Column, Entity};
@@ -15,7 +14,7 @@ use uuid::Uuid;
 
 /// How many columns a workspace may turn on at once.
 ///
-/// Not a storage limit: a table wide enough to scroll horizontally stops being a table, and a schema with sixty fields would otherwise let one click produce one.
+/// This is a display limit, not a storage limit.
 pub const MAX_VISIBLE_COLUMNS: usize = 12;
 
 /// The visible columns for one entity type, in display order.
@@ -24,7 +23,7 @@ pub(crate) struct ColumnPreference {
     pub(crate) workspace_id: Uuid,
     pub(crate) entity_type: String,
     /// Field names from the schema, in the order they are displayed.
-    /// A name the schema no longer defines stays here and is skipped when rendering, so a schema change does not have to know about display settings.
+    /// A name the schema no longer defines stays here and is skipped when rendering.
     pub(crate) columns: Vec<String>,
 }
 
@@ -86,7 +85,7 @@ pub(crate) async fn list_for_actor(
 
 /// Stores the choice, replacing whatever was there.
 ///
-/// `ON CONFLICT` rather than a read-then-write: two tabs saving at once would otherwise both see no row and both insert, and the unique constraint would turn the loser into a 500.
+/// It upserts with `ON CONFLICT`, so two concurrent saves cannot both insert and fail on the unique constraint.
 pub(crate) async fn set(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -104,7 +103,6 @@ pub(crate) async fn set(
         });
     }
 
-    // A duplicate would render the same field twice and make a drag-to-reorder UI ambiguous.
     let mut seen = std::collections::HashSet::new();
     if let Some(dup) = columns.iter().find(|c| !seen.insert(*c)) {
         return Err(YorishiroError::ValidationFailed {
@@ -117,13 +115,12 @@ pub(crate) async fn set(
     let encoded = serde_json::to_value(columns).internal()?;
 
     let active = ActiveModel {
-        id: crate::db::generated_id(ActiveValue::NotSet),
         workspace_id: ActiveValue::Set(workspace_id),
         entity_type: ActiveValue::Set(entity_type.to_string()),
         columns: ActiveValue::Set(encoded),
-        updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    // `Entity::insert` skips model hooks, so run `before_save` for the id and timestamps.
     let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
         .await
         .internal()?;
@@ -146,7 +143,7 @@ pub(crate) async fn set(
 
 /// Drops the choice, so the table goes back to the schema-derived default.
 ///
-/// Deleting the row rather than storing an empty list: an empty list is itself a choice, "show no columns", and a reset has to be distinguishable from it.
+/// The row is deleted rather than stored as an empty list, because an empty list means "show no columns".
 pub(crate) async fn clear(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

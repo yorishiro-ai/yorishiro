@@ -134,7 +134,7 @@ impl YorishiroMcpServer {
 
     #[tool(
         description = "Set a relation's status to active, deprecated or archived \
-                           (requires relation_update IAM permission). Retiring a relation this way keeps the record \
+                           (requires the entity:UpdateRelation action). Retiring a relation this way keeps the record \
                            that it existed, which delete_relation does not; graph traversal \
                            follows active relations only."
     )]

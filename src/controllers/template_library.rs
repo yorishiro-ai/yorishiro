@@ -15,9 +15,6 @@ use crate::dtos::template_library::{
 };
 use crate::models::template_templates::{self, TemplateRecord};
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn list_templates(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -27,9 +24,6 @@ async fn list_templates(
     Ok(Json(templates))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn get_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -39,9 +33,6 @@ async fn get_template(
     Ok(Json(template))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn create_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -51,9 +42,6 @@ async fn create_template(
     Ok(Created(template))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn update_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -73,9 +61,6 @@ pub(crate) async fn delete_template(
     Ok(axum::response::NoContent)
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn fork_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,

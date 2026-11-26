@@ -10,9 +10,9 @@ pub(crate) struct CreateSchemaResponse {
 
 /// Either an inline schema definition, or a reference to a template.
 ///
-/// `template_id` accepts both kinds of template, because a caller holding an id should not have to know which kind it is: a built-in id (`"task-management"`, see `GET /api/templates`) served from the binary, or a UUID from the tenant's template library (`GET /api/template-library`).
+/// `template_id` is either a built-in id (`"task-management"`, see `GET /api/templates`) or a UUID from the tenant's template library (`GET /api/template-library`).
 ///
-/// Untagged so existing clients posting a flat `MetaSchemaDefinition` body keep working unchanged.
+/// A flat `MetaSchemaDefinition` body is the inline form, so the enum is untagged.
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub(crate) enum CreateSchemaRequest {

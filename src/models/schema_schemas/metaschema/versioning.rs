@@ -7,8 +7,6 @@ use serde::Serialize;
 use super::types::{FieldDef, MetaSchemaDefinition};
 
 /// Whether a schema change is backward compatible, and if not, why.
-//
-// When `is_breaking = true`, the caller must INSERT a new version row.
 #[derive(Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct VersioningDiff {
     pub is_breaking: bool,
@@ -59,20 +57,16 @@ pub fn diff(old: &MetaSchemaDefinition, new: &MetaSchemaDefinition) -> Versionin
 
 /// Whether an upper bound got stricter: a lower ceiling, or a ceiling where there was none.
 ///
-/// Comparing the two `Option`s directly does not express this, and gets both directions backwards.
-/// `Option`'s ordering places `None` below every `Some`: `Some(10) < None` is false, so adding a ceiling where there was none would read as compatible, while `None < Some(10)` is true, so *removing* one would read as breaking.
+/// Comparing the two `Option`s directly gets both directions backwards, because `None` sorts below every `Some`.
 fn lowered_ceiling<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
     match (old, new) {
-        // A ceiling where there was none: anything above it was valid a moment ago.
         (None, Some(_)) => true,
-        // Dropping the ceiling only ever admits more data.
         (_, None) => false,
         (Some(old), Some(new)) => new < old,
     }
 }
 
 /// The floor-side mirror of [`lowered_ceiling`].
-/// A bare `new > old` happens to give these two cases the right answer, but only by luck of which way `None` sorts: spelling it out keeps the two sides symmetric and makes the ordering clear to anyone reading it.
 fn raised_floor<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
     match (old, new) {
         (None, Some(_)) => true,
@@ -81,7 +75,7 @@ fn raised_floor<T: PartialOrd>(old: Option<T>, new: Option<T>) -> bool {
     }
 }
 
-/// Compares two field maps under a common `path` prefix (e.g. `"task"` at the top level, `"task.address"` when recursing into a nested object), pushing human-readable breaking-change reasons into `reasons`.
+/// Compares two field maps under a common `path` prefix and pushes the breaking-change reasons into `reasons`.
 fn diff_fields(
     path: &str,
     old_fields: &BTreeMap<String, FieldDef>,
@@ -134,8 +128,7 @@ fn diff_fields(
             );
         }
 
-        // Removing the enum constraint entirely (Some -> None) is treated as a non-breaking widening.
-        // Only the case where the constraint remains but an existing value is no longer allowed is breaking.
+        // Dropping the enum constraint widens the field, so only a removed value is breaking.
         if let Some(old_enum) = &old_field.enum_values
             && let Some(new_enum) = &new_field.enum_values
         {
@@ -148,7 +141,7 @@ fn diff_fields(
             }
         }
 
-        // Narrowing a constraint (adding a new one, or making an existing one stricter) can invalidate data that was valid under the old schema → breaking.
+        // Narrowing a constraint can invalidate data that was valid before.
         let fp = |attr: &str| format!("field '{path}.{field_name}' {attr}");
 
         if old_field.format.is_none() && new_field.format.is_some() {

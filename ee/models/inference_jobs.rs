@@ -109,6 +109,7 @@ impl TryFrom<Model> for InferenceJobRecord {
     }
 }
 
+/// Inserts a `queued` job for `schema_name`.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -133,6 +134,7 @@ pub async fn create(
     Ok(())
 }
 
+/// Reads one job by id.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -194,8 +196,7 @@ pub(crate) async fn claim_attempt(
         return Ok(true);
     }
 
-    // A no-op claim may be a missing or stale job, but an invalid persisted status must still
-    // follow the model boundary's internal-error path.
+    // A no-op claim may be a missing or stale job, but an invalid stored status is still an internal error.
     if let Some(row) = Entity::find_by_id(id).one(conn).await.internal()? {
         InferenceJobRecord::try_from(row)?;
     }
@@ -302,6 +303,7 @@ pub async fn complete_proposals_attempt(
     Ok(result.rows_affected == 1)
 }
 
+/// Marks the running attempt `failed` with `message`.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

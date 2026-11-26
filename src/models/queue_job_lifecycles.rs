@@ -116,6 +116,7 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Entity {
+    /// Inserts a `queued` lifecycle row for a new job.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -161,6 +162,7 @@ impl Entity {
                 Column::ProviderJobId,
                 Expr::value(Some(provider_job_id.to_owned())),
             )
+            .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
             .filter(Column::Id.eq(id))
             .exec(db)
             .await?;
@@ -194,6 +196,7 @@ impl Entity {
             > 0)
     }
 
+    /// Puts a queued, retrying or running attempt back to `retrying`, due now.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -210,6 +213,7 @@ impl Entity {
                 Expr::value(LifecycleStatus::Retrying.as_db_str()),
             )
             .col_expr(Column::RetryAt, Expr::value(now))
+            .col_expr(Column::UpdatedAt, Expr::value(now))
             .col_expr(Column::ProviderJobId, Expr::value(None::<String>))
             .col_expr(
                 Column::LeaseUntil,
@@ -239,6 +243,7 @@ impl Entity {
         Ok(())
     }
 
+    /// Defers a running attempt whose lease has lapsed at `now`.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -255,6 +260,7 @@ impl Entity {
                 Expr::value(LifecycleStatus::Retrying.as_db_str()),
             )
             .col_expr(Column::RetryAt, Expr::value(now))
+            .col_expr(Column::UpdatedAt, Expr::value(now))
             .col_expr(
                 Column::LeaseUntil,
                 Expr::value(Option::<DateTimeWithTimeZone>::None),
@@ -277,6 +283,7 @@ impl Entity {
         Ok(())
     }
 
+    /// Extends the lease of a running attempt and returns whether the attempt still held it.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -288,6 +295,7 @@ impl Entity {
     ) -> Result<bool, DbErr> {
         let result = Self::update_many()
             .col_expr(Column::LeaseUntil, Expr::value(now + lease_duration()))
+            .col_expr(Column::UpdatedAt, Expr::value(now))
             .filter(Column::Id.eq(id))
             .filter(Column::Attempt.eq(attempt))
             .filter(Column::Status.eq(LifecycleStatus::Running.as_db_str()))
@@ -331,6 +339,7 @@ impl Entity {
         .await
     }
 
+    /// Admits one delivery of a lifecycle at `now`, committing only when it starts or recovers an attempt.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -341,7 +350,6 @@ impl Entity {
     ) -> Result<Admission, DbErr> {
         let txn = crate::db::begin_write(db).await?;
         let admission = admit(&txn, id, now).await?;
-        // Only an admission wrote anything; every other outcome leaves the row as it found it.
         match admission {
             Admission::Started { .. } | Admission::Recovered { .. } => txn.commit().await?,
             _ => txn.rollback().await?,
@@ -349,6 +357,7 @@ impl Entity {
         Ok(admission)
     }
 
+    /// Moves a lifecycle to `status`, stamping the matching timestamp and clearing the lease.
     ///
     /// # Errors
     /// Returns an error if the operation cannot be completed.
@@ -362,6 +371,7 @@ impl Entity {
         let now = crate::data::time::now();
         let mut update = Self::update_many()
             .col_expr(Column::Status, Expr::value(status.as_db_str()))
+            .col_expr(Column::UpdatedAt, Expr::value(now))
             .col_expr(
                 Column::LeaseUntil,
                 Expr::value(Option::<DateTimeWithTimeZone>::None),
@@ -508,6 +518,7 @@ async fn claim(
             Expr::value(LifecycleStatus::Running.as_db_str()),
         )
         .col_expr(Column::ClaimAt, Expr::value(now))
+        .col_expr(Column::UpdatedAt, Expr::value(now))
         .col_expr(Column::StartAt, Expr::value(now))
         .col_expr(Column::AdmittedAt, Expr::value(now))
         .col_expr(
@@ -529,7 +540,7 @@ async fn claim(
 
 /// Keeps one running attempt's lease alive until it is dropped.
 ///
-/// Stopping on drop, not only on an explicit call, means a cancelled or panicking worker cannot leave a renewal task extending the lease of a job nobody is running.
+/// Dropping it stops the renewal task, so a cancelled or panicking worker cannot keep extending the lease of a job nobody runs.
 pub(crate) struct Heartbeat(JoinHandle<()>);
 
 impl Heartbeat {

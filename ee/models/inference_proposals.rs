@@ -149,7 +149,6 @@ pub async fn record_batch_attempt(
     let mut inserted = 0;
     for (entity_id, source_field, proposed) in fields {
         let result = ActiveModel {
-            id: Set(Uuid::now_v7()),
             job_id: Set(job_id),
             workspace_id: Set(workspace_id),
             entity_id: Set(entity_id),
@@ -171,6 +170,7 @@ pub async fn record_batch_attempt(
     Ok(inserted)
 }
 
+/// Lists a job's proposals ordered by entity and field.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -242,6 +242,7 @@ async fn transition_pending(
     i64::try_from(result.rows_affected).internal()
 }
 
+/// Discards every pending proposal of a completed job.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -258,6 +259,7 @@ pub async fn discard(
     })
 }
 
+/// Applies a completed job's pending proposals to their entities, marking each entity's proposals confirmed, stale or invalid.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

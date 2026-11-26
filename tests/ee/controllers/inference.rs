@@ -812,9 +812,8 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
             create_entity.text()
         );
 
-        // POST to infer-fill — the model will reject this (no real LLM), but the handler
-        // returns a job_id even when the queue is busy or the model is unreachable; we only
-        // need a real job_id to prove the status route is on a different path.
+        // The handler returns a job_id even when no LLM is reachable.
+        // A real job_id is enough to show the status route is on a different path.
         let infer = request
             .post("/api/schemas/active/article/infer-fill")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
@@ -846,10 +845,8 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
         let status_body: serde_json::Value = status.json();
         assert_eq!(status_body["inference_job_id"].as_str().unwrap(), job_id);
 
-        // Verify the POST and GET handlers are distinct: a GET on the infer-fill path
-        // should not be handled by infer_job_status (it should be a 405 Method Not Allowed
-        // or a 404, depending on how axum resolves it — the point is it's not the job
-        // status handler).
+        // A GET on the infer-fill path must not reach infer_job_status.
+        // Axum answers 405 or 404 depending on how it resolves the route.
         let get_on_infer_fill = request
             .get("/api/schemas/active/test/infer-fill")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))

@@ -95,8 +95,7 @@ pub async fn undo_job(
     let snapshots: Vec<EntitySnapshot> = entity_snapshots::Entity::find()
         .filter(entity_snapshots::Column::WorkspaceId.eq(workspace_id))
         .filter(entity_snapshots::Column::JobId.eq(job_id))
-        // `id` as a tiebreaker: `created_at` alone is ambiguous when two snapshots land in the same tick.
-        // Both are uuidv7 / time-ordered, so this is a second sort key.
+        // `id` breaks ties between snapshots created in the same tick.
         .order_by_asc(entity_snapshots::Column::CreatedAt)
         .order_by_asc(entity_snapshots::Column::Id)
         .into_model::<EntitySnapshot>()
@@ -122,10 +121,7 @@ pub async fn undo_job(
             schema_version: ActiveValue::Set(snap.schema_version),
             ..Default::default()
         };
-        // `update_without_returning` rather than `active.update`: it still calls
-        // `before_save` (unlike the raw `Entity::update(...)` builder) and raises
-        // `DbErr::RecordNotUpdated` on no match, but decodes no `Model` on return
-        // — the `Ok`/`RecordNotUpdated` outcome is all the caller needs.
+        // `update_without_returning` still runs `before_save` and reports a missing row as `RecordNotUpdated`.
         let result = active.update_without_returning(conn).await.map(|_| ());
         match result {
             Ok(()) => restored += 1,
