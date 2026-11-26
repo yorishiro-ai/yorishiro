@@ -1,6 +1,5 @@
 //! Request and response transport types for the enterprise REST endpoints.
 
-pub(crate) mod dashboard;
 pub(crate) mod embedding;
 pub(crate) mod entity_columns;
 pub(crate) mod inference;

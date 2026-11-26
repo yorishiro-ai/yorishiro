@@ -15,13 +15,14 @@ use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, db: &C, insert: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
         let mut this = self;
-        this.id = crate::db::sqlite_generated_id(db, this.id);
-        this.updated_at = crate::db::stamped_updated_at(insert, this.updated_at);
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        this.updated_at = crate::db::stamped_updated_at(this.updated_at);
         Ok(this)
     }
 }
@@ -235,16 +236,33 @@ pub(crate) async fn create_template(
     row.try_into()
 }
 
+pub(crate) async fn authorize_builtin(
+    db: &DatabaseConnection,
+    actor: &crate::models::access_keys::AuthContext,
+    action: crate::models::iam::policy::Action,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::iam::access::require_iam_action(
+        &txn,
+        actor,
+        action,
+        crate::models::iam::policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await
+}
+
 pub(crate) async fn list_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<TemplateRecord>, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryList,
+        crate::models::iam::policy::Action::ListTemplateLibraryItems,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -255,14 +273,14 @@ pub(crate) async fn list_as(
 
 pub(crate) async fn get_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryGet,
+        crate::models::iam::policy::Action::GetTemplateLibraryItem,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -273,14 +291,14 @@ pub(crate) async fn get_as(
 
 pub(crate) async fn create_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     input: CreateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryCreate,
+        crate::models::iam::policy::Action::CreateTemplateLibraryItem,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -295,7 +313,7 @@ pub(crate) async fn create_as(
 /// Rejects stale or unauthorized credentials and propagates validation and persistence errors.
 pub async fn update_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     template_id: Uuid,
     input: UpdateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
@@ -303,7 +321,7 @@ pub async fn update_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryUpdate,
+        crate::models::iam::policy::Action::UpdateTemplateLibraryItem,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -316,14 +334,14 @@ pub async fn update_as(
 
 pub(crate) async fn delete_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     template_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryDelete,
+        crate::models::iam::policy::Action::DeleteTemplateLibraryItem,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -335,7 +353,7 @@ pub(crate) async fn delete_as(
 
 pub(crate) async fn fork_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     source_template_id: Uuid,
     name: String,
 ) -> Result<TemplateRecord, YorishiroError> {
@@ -343,7 +361,7 @@ pub(crate) async fn fork_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryFork,
+        crate::models::iam::policy::Action::ForkTemplateLibraryItem,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -437,6 +455,20 @@ pub(crate) async fn delete_template(
     tenant_id: Uuid,
     template_id: Uuid,
 ) -> Result<(), YorishiroError> {
+    let owned = Entity::find()
+        .filter(Column::Id.eq(template_id))
+        .filter(Column::TenantId.eq(tenant_id))
+        .count(conn)
+        .await
+        .internal()?
+        > 0;
+    if owned {
+        schema_schemas::detach_origins(
+            conn,
+            crate::models::_entities::schema_schemas::Column::OriginTemplateId.eq(template_id),
+        )
+        .await?;
+    }
     let result = Entity::delete_many()
         .filter(Column::Id.eq(template_id))
         .filter(Column::TenantId.eq(tenant_id))

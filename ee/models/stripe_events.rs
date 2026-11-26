@@ -70,6 +70,9 @@ pub async fn record_processed_event(
         stripe_created: ActiveValue::Set(created.into()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     Entity::insert(active)
         .on_conflict_do_nothing()
         .exec(conn)

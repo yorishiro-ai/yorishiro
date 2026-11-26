@@ -20,7 +20,7 @@ use crate::models::schema_schemas::CreateSchemaSource;
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct GetActiveSchemaArgs {
-    pub name: String,
+    pub schema_name: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -58,7 +58,8 @@ pub(crate) struct CreateSchemaArgs {
     /// Mutually exclusive with `template_id`; exactly one of the two must be set.
     pub definition: Option<Value>,
     /// ID of a template to use as the definition instead of supplying one inline.
-    /// A UUID names one from the tenant's own library (see `list_template_library`); anything else names a built-in (see `list_templates`).
+    /// A UUID names a template library item (see `list_template_library_items`).
+    /// Other identifiers name built-in templates (see `list_builtin_templates`).
     /// Mutually exclusive with `definition`; exactly one of the two must be set.
     pub template_id: Option<String>,
 }
@@ -93,7 +94,7 @@ impl TryFrom<CreateSchemaArgs> for CreateSchemaSource {
 #[tool_router(vis = "pub(crate)", router = tool_router_schemas)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Archive a schema version in the selected workspace without deleting entities, version history or fork references; no older version is reactivated and future same-name creation advances the version (requires schema_archive IAM permission)"
+        description = "Archive a schema version without deleting entities, history or fork references. This does not reactivate an older version."
     )]
     pub(crate) async fn archive_schema(
         &self,
@@ -104,7 +105,7 @@ impl YorishiroMcpServer {
         render(schema_schemas::archive_for_actor(self.app_context(), actor, args.schema_id).await)
     }
     #[tool(
-        description = "Delete an archived schema version that nothing references (no entities, snapshots, inference proposals, workspaces or forks); an active version or any remaining reference is refused with the blockers named (requires schema_delete IAM permission)"
+        description = "Delete an archived schema version that nothing references. The error names any remaining references."
     )]
     pub(crate) async fn delete_schema(
         &self,
@@ -118,7 +119,7 @@ impl YorishiroMcpServer {
         ok_json(serde_json::json!({ "deleted": true }))
     }
     #[tool(
-        description = "List schema summaries across permitted workspaces, or narrow to a selected workspace. Includes archived versions and each row's workspace ID (requires schema_list IAM permission)"
+        description = "List schema summaries, including archived versions and each result's workspace ID."
     )]
     pub(crate) async fn list_schemas(
         &self,
@@ -132,22 +133,21 @@ impl YorishiroMcpServer {
         ok_json(summaries)
     }
 
-    #[tool(
-        description = "Get the currently active schema definition by name (requires schema_get IAM permission)"
-    )]
+    #[tool(description = "Get the active schema definition by name.")]
     pub async fn get_active_schema(
         &self,
         Parameters(args): Parameters<GetActiveSchemaArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts);
-        render(schema_schemas::get_active_for_actor(self.app_context(), actor, &args.name).await)
+        render(
+            schema_schemas::get_active_for_actor(self.app_context(), actor, &args.schema_name)
+                .await,
+        )
     }
 
-    #[tool(
-        description = "Get a specific version of a schema definition by ID (requires schema_get IAM permission)"
-    )]
-    pub(crate) async fn get_schema_by_id(
+    #[tool(description = "Get a schema version by ID.")]
+    pub(crate) async fn get_schema(
         &self,
         Parameters(args): Parameters<GetSchemaByIdArgs>,
         Extension(parts): Extension<Parts>,
@@ -156,10 +156,7 @@ impl YorishiroMcpServer {
         render(schema_schemas::get_by_id_for_actor(self.app_context(), actor, args.schema_id).await)
     }
 
-    #[tool(
-        description = "Register a new schema, or add a new version to an existing schema \
-                           (requires schema_create IAM permission)"
-    )]
+    #[tool(description = "Register a schema or add a version to an existing schema.")]
     pub async fn create_schema(
         &self,
         Parameters(args): Parameters<CreateSchemaArgs>,
@@ -174,29 +171,46 @@ impl YorishiroMcpServer {
         description = "List built-in schema templates that can be used as a starting point for \
                            create_schema instead of writing a definition from scratch"
     )]
-    pub async fn list_templates(
+    pub async fn list_builtin_templates(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let _authorized = verified!(self, parts);
-
+        let auth = verified!(self, parts);
+        if let Err(error) = crate::models::template_templates::authorize_builtin(
+            &self.app_context().db,
+            &auth,
+            crate::models::iam::policy::Action::ListBuiltinTemplates,
+        )
+        .await
+        {
+            return render(Err::<(), _>(error));
+        }
         ok_json(crate::data::templates::list_templates())
     }
 
     #[tool(description = "Get a built-in schema template definition by ID")]
-    pub(crate) async fn get_template(
+    pub(crate) async fn get_builtin_template(
         &self,
         Parameters(args): Parameters<GetTemplateArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let _authorized = verified!(self, parts);
-        render(crate::data::templates::get_template(&args.template_id))
+        let auth = verified!(self, parts);
+        render(
+            async {
+                crate::models::template_templates::authorize_builtin(
+                    &self.app_context().db,
+                    &auth,
+                    crate::models::iam::policy::Action::GetBuiltinTemplate,
+                )
+                .await?;
+                crate::data::templates::get_template(&args.template_id)
+            }
+            .await,
+        )
     }
 
     #[tool(
-        description = "Get a specific entity_type within the active schema as a JSON Schema \
-                           (requires schema_get IAM permission). Use this to let an agent learn field types, \
-                           required fields, enums, etc. ahead of time."
+        description = "Get the JSON Schema for an entity type in the active schema, including field types, required fields and enums."
     )]
     pub(crate) async fn get_entity_type_json_schema(
         &self,

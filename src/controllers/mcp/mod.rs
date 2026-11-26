@@ -1,14 +1,16 @@
 //! The community MCP server: tool router composition, result rendering and the `/mcp` transport mount.
 //! Each submodule defines the tools of one feature, and the overlay adds its own through `McpToolSet`.
 
-mod api_keys;
+mod access_keys;
 mod audit_log;
 pub(crate) mod authorize;
+mod caller_identity;
 pub mod entities;
 mod export;
+mod groups;
 mod iam;
 mod import;
-mod members;
+mod policies;
 pub(crate) mod policy;
 mod recall;
 pub mod relations;
@@ -18,7 +20,6 @@ mod server;
 mod template_library;
 mod tenants;
 mod users;
-mod whoami;
 mod workspaces;
 
 use std::collections::HashSet;
@@ -41,10 +42,9 @@ use rmcp::{ServerHandler, tool_handler};
 
 use crate::controllers::middleware::auth;
 use crate::error::YorishiroError;
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 
 pub(crate) use authorize::{VerifyOutcome, verify};
-use authorize::{extract_bearer_key, header_error};
 pub use policy::{McpToolPolicy, McpToolSet};
 pub use server::YorishiroMcpServer;
 
@@ -55,7 +55,8 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_entities(),
         YorishiroMcpServer::tool_router_export(),
         YorishiroMcpServer::tool_router_import(),
-        YorishiroMcpServer::tool_router_members(),
+        YorishiroMcpServer::tool_router_groups(),
+        YorishiroMcpServer::tool_router_policies(),
         YorishiroMcpServer::tool_router_recall(),
         YorishiroMcpServer::tool_router_relations(),
         YorishiroMcpServer::tool_router_schemas(),
@@ -63,9 +64,9 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_template_library(),
         YorishiroMcpServer::tool_router_tenants(),
         YorishiroMcpServer::tool_router_iam(),
-        YorishiroMcpServer::tool_router_whoami(),
+        YorishiroMcpServer::tool_router_caller_identity(),
         YorishiroMcpServer::tool_router_workspaces(),
-        YorishiroMcpServer::tool_router_api_keys(),
+        YorishiroMcpServer::tool_router_access_keys(),
         YorishiroMcpServer::tool_router_audit_log(),
         YorishiroMcpServer::tool_router_users(),
     ])

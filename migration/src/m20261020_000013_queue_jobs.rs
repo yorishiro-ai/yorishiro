@@ -31,7 +31,6 @@ async fn up_queue_job_lifecycles(manager: &SchemaManager<'_>) -> Result<(), DbEr
             .create_table(
                 Table::create()
                     .table(Alias::new("queue_job_lifecycles"))
-                    .if_not_exists()
                     .col(helpers::uuidv7_pk(manager))
                     .col(ColumnDef::new(Alias::new("provider_job_id")).string().unique_key())
                     .col(ColumnDef::new(Alias::new("job_name")).string().not_null())
@@ -186,7 +185,6 @@ async fn up_query_embedding_requests(manager: &SchemaManager<'_>) -> Result<(), 
     let [created_at, updated_at] = helpers::timestamps(manager);
     let table = Table::create()
         .table(Alias::new(REQUESTS))
-        .if_not_exists()
         .col(helpers::uuidv7_pk(manager))
         .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
         .col(ColumnDef::new(Alias::new("query_text")).text().not_null())

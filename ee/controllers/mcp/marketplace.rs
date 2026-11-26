@@ -17,13 +17,15 @@ use uuid::Uuid;
 use crate::edition::ee::models::marketplace;
 
 pub(super) const TOOL_NAMES: &[&str] = &[
-    "list_marketplace",
+    "list_marketplace_templates",
+    "get_marketplace_template",
+    "get_marketplace_version",
     "list_marketplace_versions",
     "publish_marketplace_version",
     "list_marketplace_reviews",
-    "submit_marketplace_review",
+    "create_marketplace_review",
     "fork_marketplace_template",
-    "set_marketplace_visibility",
+    "update_marketplace_visibility",
 ];
 
 #[derive(Deserialize, JsonSchema)]
@@ -43,11 +45,25 @@ pub(crate) struct TemplatePage {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct MarketplaceTemplateArgs {
+    template_id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MarketplaceVersionArgs {
+    template_id: Uuid,
+    version_id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PublishArgs {
     template_id: Uuid,
     definition: serde_json::Value,
     changelog: Option<String>,
     /// One of draft, pre or stable. Defaults to draft.
+    #[schemars(with = "Option<marketplace::TemplateVersionStatus>")]
     status: Option<String>,
 }
 
@@ -70,15 +86,45 @@ pub(crate) struct ForkArgs {
 #[serde(deny_unknown_fields)]
 pub(crate) struct VisibilityArgs {
     template_id: Uuid,
+    #[schemars(with = "crate::models::template_templates::TemplateVisibility")]
     visibility: String,
 }
 
 #[tool_router(vis = "pub(crate)", router = tool_router_marketplace)]
 impl YorishiroMcpServer {
+    #[tool(description = "Read one listed marketplace template")]
+    pub(crate) async fn get_marketplace_template(
+        &self,
+        Parameters(input): Parameters<MarketplaceTemplateArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = verified!(self, parts);
+        render(
+            marketplace::get_template_as(&self.app_context().db, &actor, input.template_id).await,
+        )
+    }
+
+    #[tool(description = "Read one visible marketplace template version")]
+    pub(crate) async fn get_marketplace_version(
+        &self,
+        Parameters(input): Parameters<MarketplaceVersionArgs>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = verified!(self, parts);
+        render(
+            marketplace::get_version_as(
+                &self.app_context().db,
+                &actor,
+                input.template_id,
+                input.version_id,
+            )
+            .await,
+        )
+    }
     #[tool(
         description = "List community-visible marketplace templates (requires an active licence, PostgreSQL, marketplace_list IAM permission with a tenant-scoped credential)"
     )]
-    pub(crate) async fn list_marketplace(
+    pub(crate) async fn list_marketplace_templates(
         &self,
         Parameters(input): Parameters<MarketplacePage>,
         Extension(parts): Extension<Parts>,
@@ -164,7 +210,7 @@ impl YorishiroMcpServer {
     #[tool(
         description = "Create or replace the current tenant's template review (requires an active licence, marketplace_review_submit IAM permission with a tenant-scoped credential)"
     )]
-    pub(crate) async fn submit_marketplace_review(
+    pub(crate) async fn create_marketplace_review(
         &self,
         Parameters(input): Parameters<ReviewArgs>,
         Extension(parts): Extension<Parts>,
@@ -209,7 +255,7 @@ impl YorishiroMcpServer {
     #[tool(
         description = "Change a current-tenant template's marketplace visibility (requires an active licence, marketplace_visibility_update IAM permission with a tenant-scoped credential)"
     )]
-    pub(crate) async fn set_marketplace_visibility(
+    pub(crate) async fn update_marketplace_visibility(
         &self,
         Parameters(input): Parameters<VisibilityArgs>,
         Extension(parts): Extension<Parts>,

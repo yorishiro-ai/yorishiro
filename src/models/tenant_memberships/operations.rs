@@ -1,4 +1,4 @@
-//! Tenant membership operations: adding and removing members, creating tenant-bound users, and previewing the effect of a removal.
+//! Tenant membership operations: adding and removing members, creating tenant-bound users and listing them.
 
 use sea_orm::{
     ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter,
@@ -8,11 +8,10 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{tenant_memberships::Column, user_users};
-use crate::models::iam::policy::{Action, Resource};
 
 use super::{ActiveModel, Entity, MembershipRecord};
 
-async fn protect_root(
+pub(crate) async fn protect_root(
     txn: &DatabaseTransaction,
     tenant_id: Uuid,
     user_id: Uuid,
@@ -26,66 +25,6 @@ async fn protect_root(
         });
     }
     Ok(())
-}
-
-/// Reports membership removal effects without changing membership or credentials.
-///
-/// # Errors
-/// Rejects stale credentials, removing the tenant root, or persistence failures.
-pub async fn preview_removal(
-    db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
-    user_id: Uuid,
-) -> Result<super::MembershipRemovalPreview, YorishiroError> {
-    use crate::models::_entities::{api_keys, workspace_workspaces};
-    let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::iam::access::require_iam_action(
-        &txn,
-        actor,
-        Action::TenantUserDelete,
-        Resource::Tenant {
-            tenant_id: actor.tenant_id,
-        },
-    )
-    .await?;
-    let member = is_member(&txn, actor.tenant_id, user_id).await?;
-    protect_root(&txn, actor.tenant_id, user_id).await?;
-    let revoked_api_key_ids = api_keys::Entity::find()
-        .filter(api_keys::Column::TenantId.eq(actor.tenant_id))
-        .filter(api_keys::Column::UserId.eq(user_id))
-        .filter(api_keys::Column::RevokedAt.is_null())
-        .select_only()
-        .column(api_keys::Column::Id)
-        .order_by_asc(api_keys::Column::Id)
-        .into_tuple::<Uuid>()
-        .all(&txn)
-        .await
-        .internal()?;
-    let lost_workspace_ids = if member {
-        let candidates = crate::models::tenancy::list_workspaces_for_user(&txn, user_id).await?;
-        workspace_workspaces::Entity::find()
-            .filter(workspace_workspaces::Column::TenantId.eq(actor.tenant_id))
-            .filter(
-                workspace_workspaces::Column::Id
-                    .is_in(candidates.into_iter().map(|workspace| workspace.id)),
-            )
-            .select_only()
-            .column(workspace_workspaces::Column::Id)
-            .order_by_asc(workspace_workspaces::Column::Id)
-            .into_tuple::<Uuid>()
-            .all(&txn)
-            .await
-            .internal()?
-    } else {
-        Vec::new()
-    };
-    txn.rollback().await.internal()?;
-    Ok(super::MembershipRemovalPreview {
-        user_id,
-        member,
-        revoked_api_key_ids,
-        lost_workspace_ids,
-    })
 }
 
 /// # Errors
@@ -128,13 +67,16 @@ pub(crate) async fn add_member_in_transaction(
     }
     guard_tenant_bound_user(conn, tenant_id, user_id).await?;
 
-    // `Entity::insert(...).on_conflict(...).exec(...)` builds its query eagerly from `active` and never calls `ActiveModelBehavior::before_save`, unlike plain `ActiveModel::insert()`: this is the one insert path in this file that needs `sqlite_generated_id` called directly rather than relying on the hook.
+    // `Entity::insert(...).on_conflict(...).exec(...)` builds its query eagerly from `active` and never calls `ActiveModelBehavior::before_save`, unlike plain `ActiveModel::insert()`: this is the one insert path in this file that needs `generated_id` called directly rather than relying on the hook.
     let active = ActiveModel {
-        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
+        id: crate::db::generated_id(ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
         user_id: ActiveValue::Set(user_id),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     Entity::insert(active)
         .on_conflict(OnConflict::column(Column::UserId).do_nothing().to_owned())
         .exec_without_returning(conn)
@@ -188,69 +130,6 @@ pub async fn create_tenant_user_member(
     Ok(user)
 }
 
-/// # Errors
-/// Rejects unauthorized credentials, invalid credentials and duplicate names.
-pub(crate) async fn create_tenant_user_as(
-    db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
-    input: &crate::dtos::members::CreateTenantUserRequest,
-) -> Result<MembershipRecord, YorishiroError> {
-    let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::iam::access::require_iam_action(
-        &txn,
-        actor,
-        Action::TenantUserCreate,
-        Resource::Tenant {
-            tenant_id: actor.tenant_id,
-        },
-    )
-    .await?;
-    let user = create_tenant_user_member(
-        &txn,
-        actor.tenant_id,
-        &input.user_name,
-        &input.password,
-        input.display_name.as_deref(),
-    )
-    .await?;
-    txn.commit().await.internal()?;
-    Ok(MembershipRecord {
-        user_id: user.id,
-        email: None,
-        user_name: user.user_name,
-        display_name: user.display_name,
-    })
-}
-
-/// # Errors
-/// Rejects unauthorized credentials, root recovery and users outside the tenant.
-pub async fn reset_tenant_user_password(
-    db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
-    user_id: Uuid,
-    password: &str,
-) -> Result<(), YorishiroError> {
-    let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::iam::access::require_iam_action(
-        &txn,
-        actor,
-        Action::TenantUserPasswordReset,
-        Resource::Tenant {
-            tenant_id: actor.tenant_id,
-        },
-    )
-    .await?;
-    if crate::models::iam_tenant_roots::Model::contains(&txn, actor.tenant_id, user_id).await? {
-        return Err(YorishiroError::Conflict {
-            message: "tenant root password recovery requires the administrator CLI".into(),
-        });
-    }
-    crate::models::user_users::reset_tenant_password(&txn, actor.tenant_id, user_id, password)
-        .await?;
-    txn.commit().await.internal()?;
-    Ok(())
-}
-
 /// Removes membership; subsequent authentication rejects all attributed keys in this tenant.
 /// Revokes attributed keys atomically so restoring membership cannot resurrect old credentials.
 ///
@@ -267,34 +146,12 @@ pub async fn remove_member(
     Ok(())
 }
 
-/// # Errors
-/// Rejects revoked credentials, unauthorized callers, removing the tenant root and persistence failures.
-pub async fn remove_member_as(
-    db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
-    user_id: Uuid,
-) -> Result<(), YorishiroError> {
-    let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::iam::access::require_iam_action(
-        &txn,
-        actor,
-        Action::TenantUserDelete,
-        Resource::Tenant {
-            tenant_id: actor.tenant_id,
-        },
-    )
-    .await?;
-    remove_member_in_transaction(&txn, actor.tenant_id, user_id).await?;
-    txn.commit().await.internal()?;
-    Ok(())
-}
-
-async fn remove_member_in_transaction(
+pub(crate) async fn remove_member_in_transaction(
     txn: &DatabaseTransaction,
     tenant_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    use crate::models::_entities::api_keys;
+    use crate::models::_entities::access_keys;
     protect_root(txn, tenant_id, user_id).await?;
     Entity::delete_many()
         .filter(Column::TenantId.eq(tenant_id))
@@ -302,11 +159,11 @@ async fn remove_member_in_transaction(
         .exec(txn)
         .await
         .internal()?;
-    api_keys::Entity::revoke_matching(
+    access_keys::Entity::revoke_matching(
         txn,
         sea_orm::Condition::all()
-            .add(api_keys::Column::TenantId.eq(tenant_id))
-            .add(api_keys::Column::UserId.eq(user_id)),
+            .add(access_keys::Column::TenantId.eq(tenant_id))
+            .add(access_keys::Column::UserId.eq(user_id)),
     )
     .await?;
     // A tenant-bound user has no life outside its tenant: removing the membership removes the account.
@@ -319,24 +176,6 @@ async fn remove_member_in_transaction(
     Ok(())
 }
 
-pub(crate) async fn list_members_as(
-    db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
-    page: crate::models::pagination::ListParams,
-) -> Result<Vec<MembershipRecord>, YorishiroError> {
-    let txn = crate::db::begin_write(db).await.internal()?;
-    crate::models::iam::access::require_iam_action(
-        &txn,
-        actor,
-        Action::TenantUserList,
-        Resource::Tenant {
-            tenant_id: actor.tenant_id,
-        },
-    )
-    .await?;
-    list_members(&txn, actor.tenant_id, page).await
-}
-
 /// Lists a tenant's members, excluding its root, one page at a time.
 ///
 /// # Errors
@@ -346,6 +185,27 @@ pub async fn list_members(
     tenant_id: Uuid,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<MembershipRecord>, YorishiroError> {
+    Ok(list_member_users(conn, tenant_id, page)
+        .await?
+        .into_iter()
+        .map(|user| MembershipRecord {
+            user_id: user.id,
+            email: user.email,
+            user_name: user.user_name,
+            display_name: user.display_name,
+        })
+        .collect())
+}
+
+/// Lists the users of a tenant, excluding its root, one page at a time.
+///
+/// # Errors
+/// Returns an error if the query fails.
+pub(crate) async fn list_member_users(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    page: crate::models::pagination::ListParams,
+) -> Result<Vec<user_users::Model>, YorishiroError> {
     let mut query = Entity::find().filter(Column::TenantId.eq(tenant_id));
     if let Some(root) = crate::models::iam_tenant_roots::Entity::find_by_id(tenant_id)
         .one(conn)
@@ -363,18 +223,9 @@ pub async fn list_members(
         .all(conn)
         .await
         .internal()?;
-
     Ok(memberships
         .into_iter()
-        .filter_map(|(_, user)| {
-            let user = user?;
-            Some(MembershipRecord {
-                user_id: user.id,
-                email: user.email,
-                user_name: user.user_name,
-                display_name: user.display_name,
-            })
-        })
+        .filter_map(|(_, user)| user)
         .collect())
 }
 

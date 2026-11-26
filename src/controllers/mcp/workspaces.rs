@@ -33,9 +33,7 @@ pub(crate) struct UpdateWorkspaceArgs {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_workspaces)]
 impl YorishiroMcpServer {
-    #[tool(
-        description = "List current-tenant workspaces allowed by workspace_get IAM permission (requires workspace_list IAM permission and a tenant-scoped credential)"
-    )]
+    #[tool(description = "List workspaces in the current tenant that the caller can read.")]
     pub(crate) async fn list_workspaces(
         &self,
         Extension(parts): Extension<Parts>,
@@ -75,7 +73,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Create a workspace in the current tenant without retargeting the current credential (requires a tenant-scoped credential and workspace_create IAM permission)"
+        description = "Create a workspace in the current tenant without changing the credential's workspace selection."
     )]
     pub(crate) async fn create_workspace(
         &self,
@@ -122,7 +120,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Permanently delete a current-tenant workspace and its data; the last workspace is protected (requires workspace_delete IAM permission within the credential workspace binding)"
+        description = "Permanently delete a workspace and its data. The tenant's last workspace cannot be deleted."
     )]
     pub(crate) async fn delete_workspace(
         &self,

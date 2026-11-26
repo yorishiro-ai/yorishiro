@@ -1,6 +1,6 @@
 //! Background worker for async infer-fill operations.
 //!
-//! `POST /api/schemas/active/{name}/infer-fill` enqueues this worker via Loco's queue.
+//! `POST /api/schemas/active/{schema_name}/infer-fill` enqueues this worker via Loco's queue.
 //! The worker processes entities one-by-one, calling the LLM to propose missing field
 //! values and storing them as reviewable proposals.
 //!
@@ -24,7 +24,7 @@ use crate::models::schema_schemas;
 /// Arguments for an infer-fill worker job.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InferFillArgs {
-    actor: crate::models::api_key_audit_log::AuditActor,
+    actor: crate::models::access_key_audit_log::AuditActor,
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,
     pub job_id: Uuid,
@@ -167,7 +167,7 @@ async fn perform_infer_fill(
             &proposal_txn,
             &ctx.db,
             &args.actor,
-            crate::models::iam::policy::Action::InferenceCreate,
+            crate::models::iam::policy::Action::CreateInferenceJob,
         )
         .await
         .map_err(Error::wrap)?;
@@ -393,7 +393,7 @@ impl InferFillWorker {
             if matches!(
                 check_actor(&self.ctx, args).await,
                 Err(crate::YorishiroError::Unauthenticated
-                    | crate::YorishiroError::ScopeInsufficient { .. })
+                    | crate::YorishiroError::AccessDenied { .. })
             ) {
                 inference_jobs::fail_attempt(
                     &self.ctx.db,
@@ -495,7 +495,7 @@ async fn defer_and_enqueue(
 /// Rejects unavailable queues, insufficient IAM permission or failed job registration.
 pub async fn enqueue_infer_fill(
     ctx: &AppContext,
-    auth: &crate::models::api_keys::AuthContext,
+    auth: &crate::models::access_keys::AuthContext,
     schema_name: String,
 ) -> Result<String, crate::YorishiroError> {
     let workspace_id = auth.require_workspace()?;
@@ -517,15 +517,16 @@ pub async fn enqueue_infer_fill(
     let authorization = crate::ee::models::iam::access::authorize_job_actor(
         &txn,
         &ctx.db,
-        &crate::models::api_key_audit_log::AuditActor {
+        &crate::models::access_key_audit_log::AuditActor {
             tenant_id: auth.tenant_id,
             workspace_id,
-            api_key_id: auth.api_key_id,
+            access_key_id: auth.access_key_id,
             user_id: auth.user_id,
         },
-        crate::models::iam::policy::Action::InferenceCreate,
+        crate::models::iam::policy::Action::CreateInferenceJob,
     )
     .await?;
+    schema_schemas::get_active_schema(&txn, workspace_id, &schema_name).await?;
     if workspace_llm_keys::get(authorization.as_ref().unwrap_or(&txn), workspace_id)
         .await
         .internal()?
@@ -537,17 +538,16 @@ pub async fn enqueue_infer_fill(
             hint: "configure the workspace LLM provider before requesting inference".into(),
         });
     }
-    schema_schemas::get_active_schema(&txn, workspace_id, &schema_name).await?;
     inference_jobs::create(&txn, job_id, workspace_id, &schema_name)
         .await
         .internal()?;
     crate::edition::ee::workers::dispatch::dispatch_infer_fill(
         ctx,
         InferFillArgs {
-            actor: crate::models::api_key_audit_log::AuditActor {
+            actor: crate::models::access_key_audit_log::AuditActor {
                 tenant_id: auth.tenant_id,
                 workspace_id,
-                api_key_id: auth.api_key_id,
+                access_key_id: auth.access_key_id,
                 user_id: auth.user_id,
             },
             lifecycle_id: None,
@@ -576,7 +576,7 @@ async fn check_actor(ctx: &AppContext, args: &InferFillArgs) -> Result<(), crate
         &txn,
         &ctx.db,
         &args.actor,
-        crate::models::iam::policy::Action::InferenceCreate,
+        crate::models::iam::policy::Action::CreateInferenceJob,
     )
     .await?;
     txn.commit().await.internal()?;

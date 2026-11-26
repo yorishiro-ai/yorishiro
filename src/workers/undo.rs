@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::{api_key_audit_log, api_keys::AuthContext, entity_entities};
+use crate::models::{access_key_audit_log, access_keys::AuthContext, entity_entities};
 use crate::workers::{
     dispatch::{JobSpec, dispatch_job},
     embedding_sync::WorkerClass,
@@ -17,7 +17,7 @@ pub(crate) struct UndoArgs {
     lifecycle_id: Option<Uuid>,
     tenant_id: Uuid,
     workspace_id: Uuid,
-    api_key_id: Uuid,
+    access_key_id: Uuid,
     user_id: Option<Uuid>,
     snapshot_job_id: Uuid,
     worker_class: WorkerClass,
@@ -61,11 +61,11 @@ impl UndoWorker {
         crate::db::lock_for_update(&txn, &format!("undo:{id}"))
             .await
             .internal()?;
-        if api_key_audit_log::job_completed(
+        if access_key_audit_log::job_completed(
             &txn,
             args.workspace_id,
             id,
-            api_key_audit_log::AuditAction::UndoMigrationJob,
+            access_key_audit_log::AuditAction::UndoMigrationJob,
         )
         .await?
         {
@@ -77,11 +77,10 @@ impl UndoWorker {
             &AuthContext {
                 tenant_id: args.tenant_id,
                 workspace_id: Some(args.workspace_id),
-                api_key_id: args.api_key_id,
+                access_key_id: args.access_key_id,
                 user_id: args.user_id,
-                audit: false,
             },
-            crate::models::iam::policy::Action::MigrationUndo,
+            crate::models::iam::policy::Action::UndoMigrationJob,
             crate::models::iam::policy::Resource::Workspace {
                 tenant_id: args.tenant_id,
                 workspace_id: args.workspace_id,
@@ -90,15 +89,15 @@ impl UndoWorker {
         .await?;
         let report =
             entity_entities::undo_job(&txn, args.workspace_id, args.snapshot_job_id).await?;
-        api_key_audit_log::record(
+        access_key_audit_log::record(
             &txn,
-            api_key_audit_log::AuditActor {
+            access_key_audit_log::AuditActor {
                 tenant_id: args.tenant_id,
                 workspace_id: args.workspace_id,
-                api_key_id: args.api_key_id,
+                access_key_id: args.access_key_id,
                 user_id: args.user_id,
             },
-            api_key_audit_log::AuditAction::UndoMigrationJob,
+            access_key_audit_log::AuditAction::UndoMigrationJob,
             serde_json::json!({"job_id": id, "snapshot_job_id": args.snapshot_job_id,
                 "restored": report.restored, "missing": report.missing}),
         )
@@ -140,7 +139,7 @@ pub(crate) async fn enqueue(
     crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         auth,
-        crate::models::iam::policy::Action::MigrationUndo,
+        crate::models::iam::policy::Action::UndoMigrationJob,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: auth.tenant_id,
             workspace_id: auth.require_workspace()?,
@@ -154,7 +153,7 @@ pub(crate) async fn enqueue(
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
         workspace_id: auth.require_workspace()?,
-        api_key_id: auth.api_key_id,
+        access_key_id: auth.access_key_id,
         user_id: auth.user_id,
         snapshot_job_id,
         worker_class,

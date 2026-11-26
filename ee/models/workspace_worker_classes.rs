@@ -6,7 +6,7 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_worker_classes::{ActiveModel, Column, Entity};
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 use crate::models::iam::policy::Action;
 use crate::workers::embedding_sync::WorkerClass;
 use crate::workers::target::WorkerTarget;
@@ -40,8 +40,12 @@ pub(crate) async fn set_as(
     actor: &AuthContext,
     worker_class: WorkerClass,
 ) -> Result<(), YorishiroError> {
-    let txn = super::iam::access::workspace_transaction(&ctx.db, actor, Action::WorkerClassUpdate)
-        .await?;
+    let txn = super::iam::access::workspace_transaction(
+        &ctx.db,
+        actor,
+        Action::UpdateWorkspaceWorkerClass,
+    )
+    .await?;
     set_on(&txn, ctx, actor.require_workspace()?, worker_class).await?;
     txn.commit().await.internal()
 }
@@ -73,6 +77,9 @@ async fn set_on(
         updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     Entity::insert(active)
         .on_conflict(
             OnConflict::column(Column::WorkspaceId)
@@ -90,7 +97,8 @@ pub(crate) async fn clear_as(
     actor: &AuthContext,
 ) -> Result<(), YorishiroError> {
     let txn =
-        super::iam::access::workspace_transaction(db, actor, Action::WorkerClassDelete).await?;
+        super::iam::access::workspace_transaction(db, actor, Action::DeleteWorkspaceWorkerClass)
+            .await?;
     clear(&txn, actor.require_workspace()?).await?;
     txn.commit().await.internal()
 }
@@ -99,7 +107,8 @@ pub(crate) async fn describe_as(
     db: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
 ) -> Result<Option<WorkerClassAssignment>, YorishiroError> {
-    let txn = super::iam::access::workspace_transaction(db, actor, Action::WorkerClassGet).await?;
+    let txn = super::iam::access::workspace_transaction(db, actor, Action::GetWorkspaceWorkerClass)
+        .await?;
     describe(&txn, actor.require_workspace()?).await
 }
 

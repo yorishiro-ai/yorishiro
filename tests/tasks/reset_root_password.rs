@@ -1,7 +1,7 @@
 use loco_rs::task::Vars;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter};
 use yorishiro::App;
-use yorishiro::models::{api_keys, tenant_memberships, tenant_tenants, user_users};
+use yorishiro::models::{access_keys, tenant_memberships, tenant_tenants, user_users};
 
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
@@ -27,15 +27,14 @@ async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
         .await
         .unwrap()
         .0;
-        let attributed = api_keys::Entity::create_api_key(
+        let attributed = access_keys::Entity::create_access_key(
             &ctx.db,
             tenant.workspace_id,
             Some(tenant.owner_id),
-            false,
         )
         .await
         .unwrap();
-        let service = api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, None, false)
+        let service = access_keys::Entity::create_access_key(&ctx.db, tenant.workspace_id, None)
             .await
             .unwrap();
         user_users::reset_root_password_by_operator(
@@ -70,7 +69,7 @@ async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
             .unwrap();
         for id in [login.id, attributed.id] {
             assert!(
-                api_keys::Entity::find_by_id(id)
+                access_keys::Entity::find_by_id(id)
                     .one(&ctx.db)
                     .await
                     .unwrap()
@@ -80,7 +79,7 @@ async fn root_reset_revokes_attributed_keys_and_fences_verified_old_password() {
             );
         }
         assert!(
-            api_keys::Entity::find_by_id(service.id)
+            access_keys::Entity::find_by_id(service.id)
                 .one(&ctx.db)
                 .await
                 .unwrap()
@@ -182,11 +181,10 @@ async fn root_reset_rejects_unsafe_targets_without_changing_credentials() {
             .await
             .unwrap()
             .unwrap();
-        let key = api_keys::Entity::create_api_key(
+        let key = access_keys::Entity::create_access_key(
             &ctx.db,
             tenant.workspace_id,
             Some(tenant.owner_id),
-            false,
         )
         .await
         .unwrap();
@@ -299,7 +297,7 @@ async fn root_reset_rejects_unsafe_targets_without_changing_credentials() {
             original.password_hash
         );
         assert!(
-            api_keys::Entity::find_by_id(key.id)
+            access_keys::Entity::find_by_id(key.id)
                 .one(&ctx.db)
                 .await
                 .unwrap()
@@ -353,15 +351,15 @@ async fn root_reset_rolls_back_password_when_key_revocation_fails() {
         use sea_orm::ConnectionTrait;
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let before = user_users::Entity::find_by_id(tenant.owner_id).one(&ctx.db).await.unwrap().unwrap();
-        let key = api_keys::Entity::create_api_key(
-            &ctx.db, tenant.workspace_id, Some(tenant.owner_id), false,
+        let key = access_keys::Entity::create_access_key(
+            &ctx.db, tenant.workspace_id, Some(tenant.owner_id),
         ).await.unwrap();
         // Direct write (c): deterministic fault injection failing key revocation.
         ctx.db.execute_unprepared(
-            "CREATE TRIGGER fail_reset_revocation BEFORE UPDATE OF revoked_at ON api_keys BEGIN SELECT RAISE(ABORT, 'injected revocation failure'); END",
+            "CREATE TRIGGER fail_reset_revocation BEFORE UPDATE OF revoked_at ON access_keys BEGIN SELECT RAISE(ABORT, 'injected revocation failure'); END",
         ).await.unwrap();
         assert!(user_users::reset_root_password_by_operator(&ctx.db, tenant.owner_id, tenant.owner_id, NEW_PASSWORD).await.is_err());
         assert_eq!(user_users::Entity::find_by_id(tenant.owner_id).one(&ctx.db).await.unwrap().unwrap().password_hash, before.password_hash);
-        assert!(api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().unwrap().revoked_at.is_none());
+        assert!(access_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().unwrap().revoked_at.is_none());
     }).await;
 }

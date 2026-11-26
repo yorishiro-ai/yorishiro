@@ -1,4 +1,4 @@
-//! Public account registration and credential-based API key issuance.
+//! Public account registration and credential-based access key issuance.
 //!
 //! Both run on `ctx.db` (Loco's own connection, migration role, no RLS scope), same as the admin CLI tasks: no tenant/workspace context exists yet for RLS to scope by.
 
@@ -80,8 +80,8 @@ async fn finish_login(
     let (created, tenant_id) =
         tenancy::issue_login_key(&ctx.db, user.id, Some(hash), expected_tenant).await?;
     Ok(Json(LoginResponse {
-        api_key: created.plaintext,
-        api_key_id: created.id,
+        access_key: created.plaintext,
+        access_key_id: created.id,
         tenant_id,
         user_id: user.id,
     }))

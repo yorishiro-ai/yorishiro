@@ -22,15 +22,11 @@ pub mod implementation {
         };
         for (path, method, operation) in operations_mut(&mut api) {
             let workspace_operation = operation
-                .extensions
-                .get("x-yorishiro-required-actions")
-                .unwrap_or(&serde_json::Value::Null)
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|value| serde_json::from_value::<Action>(value.clone()).ok())
-                .any(|action| action.applies_to(workspace));
-            let key_creation = path == "/api/api-keys" && method == "post";
+                .operation_id
+                .as_deref()
+                .and_then(Action::from_name)
+                .is_some_and(|action| action.applies_to(workspace));
+            let key_creation = path == "/api/access-keys" && method == "post";
             if workspace_operation || key_creation {
                 let description = if key_creation {
                     "Workspace binding for the new key. Do not send this header with tenant_scoped: true."
@@ -38,13 +34,13 @@ pub mod implementation {
                     "Explicit workspace selection. When omitted, operations that require one workspace may return 422 (`workspace_selection_required`) if several workspaces qualify."
                 };
                 operation.parameters.push(aide::openapi::ReferenceOr::Item(
-                    serde_json::from_value(serde_json::json!({"name": "X-Workspace-Id", "in": "header", "required": false, "description": description, "schema": {"type": "string", "format": "uuid"}})).expect("workspace header"),
+                    serde_json::from_value(serde_json::json!({"name": "x-workspace-id", "in": "header", "required": false, "description": description, "schema": {"type": "string", "format": "uuid"}})).expect("workspace header"),
                 ));
             }
         }
         components.security_schemes.insert(
             "bearer_auth".into(),
-            serde_json::from_value(serde_json::json!({"type": "http", "scheme": "bearer", "bearerFormat": "yorishiro-api-key"}))
+            serde_json::from_value(serde_json::json!({"type": "http", "scheme": "bearer", "bearerFormat": "yorishiro-access-key"}))
                 .expect("bearer security scheme must deserialize"),
         );
         OpenApi {

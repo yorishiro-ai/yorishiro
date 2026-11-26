@@ -90,13 +90,28 @@ pub struct GroupIdUserIdPath<T0, T1> {
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
-pub struct IdPath<T0> {
-    pub id: T0,
+pub struct EntityIdPath<T> {
+    pub entity_id: T,
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 pub struct PolicyIdPath<T> {
     pub policy_id: T,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct RelationIdPath<T> {
+    pub relation_id: T,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct TemplateIdPath<T> {
+    pub template_id: T,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct WorkspaceIdPath<T> {
+    pub workspace_id: T,
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -106,19 +121,34 @@ pub struct IdUserIdPath<T0, T1> {
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
-pub struct JobIdPath<T0> {
-    pub job_id: T0,
+pub struct InferenceJobIdPath {
+    pub inference_job_id: String,
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
-pub struct NameEntityTypePath<T0, T1> {
-    pub name: T0,
-    pub entity_type: T1,
+pub struct ConfirmationJobIdPath {
+    pub confirmation_job_id: uuid::Uuid,
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
-pub struct NamePath<T0> {
-    pub name: T0,
+pub struct ImportJobIdPath {
+    pub import_job_id: uuid::Uuid,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct MigrationJobIdPath<T = uuid::Uuid> {
+    pub migration_job_id: T,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct SchemaNameEntityTypePath {
+    pub schema_name: String,
+    pub entity_type: String,
+}
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub struct SchemaNamePath {
+    pub schema_name: String,
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]

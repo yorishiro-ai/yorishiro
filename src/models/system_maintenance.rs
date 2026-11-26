@@ -12,13 +12,12 @@ use crate::models::db_enum::db_enum;
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    /// Stamps `updated_at` on every update whose caller didn't already set it explicitly.
-    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, _insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
         let mut this = self;
-        this.updated_at = crate::db::stamped_updated_at(insert, this.updated_at);
+        this.updated_at = crate::db::stamped_updated_at(this.updated_at);
         Ok(this)
     }
 }
@@ -166,7 +165,7 @@ pub async fn set_if_current(
             Expr::value(i32::try_from(retry_after.max(1)).unwrap_or(i32::MAX)),
         )
         .col_expr(Column::Reason, Expr::value(reason))
-        .col_expr(Column::UpdatedAt, Expr::current_timestamp())
+        .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
         .filter(Column::Id.eq(true))
         .filter(Column::Mode.eq(expected.mode.as_db_str()))
         .filter(Column::RetryAfter.eq(i32::try_from(expected.retry_after).unwrap_or(i32::MAX)));

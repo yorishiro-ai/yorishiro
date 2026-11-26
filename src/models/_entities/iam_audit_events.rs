@@ -10,7 +10,7 @@ pub struct Model {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub user_id: Option<Uuid>,
-    pub api_key_id: Uuid,
+    pub access_key_id: Uuid,
     #[sea_orm(column_type = "Text")]
     pub action: String,
     #[sea_orm(column_type = "JsonBinary")]

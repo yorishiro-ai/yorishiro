@@ -179,7 +179,7 @@ pub async fn recall_context(
 /// Returns the session, authorization or recall error.
 pub(crate) async fn recall_context_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     entity_id: Uuid,
     query: RecallQuery,
 ) -> Result<RecallContext, YorishiroError> {
@@ -190,7 +190,7 @@ pub(crate) async fn recall_context_for_actor(
         ctx,
         actor,
         target,
-        crate::models::iam::policy::Action::Recall,
+        crate::models::iam::policy::Action::RecallEntityContext,
         async |session| {
             recall_context(session.txn(), session.workspace_id()?, entity_id, query).await
         },

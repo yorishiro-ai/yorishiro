@@ -125,6 +125,9 @@ pub async fn set(
         updated_at: Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    let active = ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     Entity::insert(active)
         .on_conflict(
             OnConflict::column(Column::TenantId)

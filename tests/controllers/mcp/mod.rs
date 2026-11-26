@@ -1,18 +1,17 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-mod api_keys;
+mod access_keys;
 mod audit_log;
 mod authorize;
+mod caller_identity;
 mod entities;
 mod export;
+mod iam;
 mod import;
-mod members;
 mod schemas;
 mod search;
 mod template_library;
-mod users;
-mod whoami;
 
 #[cfg(feature = "enterprise")]
 use crate::requests::{
@@ -45,23 +44,22 @@ pub(crate) async fn provider_tools_keep_secrets_private_and_match_rest(
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let session = initialize(&request).await;
-        let tool = |action: &str| format!("{action}_{kind}_provider");
+        let tool = |action: &str| format!("{action}_workspace_{kind}_provider");
         let saved = mcp_call(
             &request,
             &session,
             &tenant.api_key,
             2,
             "tools/call",
-            json!({"name":tool("set"),"arguments":input}),
+            json!({"name":tool("update"),"arguments":input}),
         )
         .await;
         assert_eq!(tool_result_json(&saved)["saved"], true);
         assert!(!saved.to_string().contains(secret));
-        let read_key = yorishiro::models::api_keys::Entity::create_api_key(
+        let read_key = yorishiro::models::access_keys::Entity::create_access_key(
             &ctx.db,
             tenant.workspace_id,
             Some(crate::requests::fixtures::create_iam_reader(&ctx, tenant.tenant_id).await),
-            false,
         )
         .await
         .unwrap()
@@ -86,8 +84,8 @@ pub(crate) async fn provider_tools_keep_secrets_private_and_match_rest(
         http_response.assert_status_ok();
         assert_eq!(metadata, http_response.json::<Value>());
         for (id, name, arguments) in [
-            (4, tool("set"), input.clone()),
-            (5, tool("reset"), json!({})),
+            (4, tool("update"), input.clone()),
+            (5, tool("delete"), json!({})),
         ] {
             let denied = mcp_call(
                 &request,
@@ -108,7 +106,7 @@ pub(crate) async fn provider_tools_keep_secrets_private_and_match_rest(
             &tenant.api_key,
             6,
             "tools/call",
-            json!({"name":tool("set"),"arguments":bad}),
+            json!({"name":tool("update"),"arguments":bad}),
         )
         .await;
         assert_eq!(rejected["result"]["isError"], true);
@@ -128,7 +126,7 @@ pub(crate) async fn provider_tools_keep_secrets_private_and_match_rest(
             &tenant.api_key,
             8,
             "tools/call",
-            json!({"name":tool("reset"),"arguments":{}}),
+            json!({"name":tool("delete"),"arguments":{}}),
         )
         .await;
         assert_eq!(tool_result_json(&reset)["reset"], true);

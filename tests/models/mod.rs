@@ -3,7 +3,7 @@ mod queue_job_dispatch_outbox;
 mod queue_job_lifecycles;
 mod workspace_workspaces;
 
-mod api_keys;
+mod access_keys;
 #[cfg(feature = "enterprise")]
 mod compute_credit_ledger;
 mod db_enum;

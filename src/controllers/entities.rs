@@ -31,16 +31,20 @@ pub(crate) async fn create_entity(
 async fn get_entity(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(crate::dtos::common::EntityIdPath { entity_id }): Path<
+        crate::dtos::common::EntityIdPath<Uuid>,
+    >,
 ) -> Result<Json<EntityRecord>, ApiError> {
-    let record = entity_entities::get_for_actor(&ctx, &actor, id).await?;
+    let record = entity_entities::get_for_actor(&ctx, &actor, entity_id).await?;
     Ok(Json(record))
 }
 
 pub(crate) async fn update_entity(
     State(ctx): State<AppContext>,
     verified: Verified,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(crate::dtos::common::EntityIdPath { entity_id }): Path<
+        crate::dtos::common::EntityIdPath<Uuid>,
+    >,
     Json(body): Json<UpdateEntityRequest>,
 ) -> Result<Json<EntityRecord>, ApiError> {
     let actor = verified.ctx;
@@ -48,7 +52,7 @@ pub(crate) async fn update_entity(
         &ctx,
         &actor,
         entity_entities::UpdateEntityInput {
-            id,
+            id: entity_id,
             data: body.data,
             updated_by: actor.user_id,
             expected_updated_at: body.expected_updated_at,
@@ -61,9 +65,11 @@ pub(crate) async fn update_entity(
 pub(crate) async fn delete_entity(
     State(ctx): State<AppContext>,
     verified: Verified,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(crate::dtos::common::EntityIdPath { entity_id }): Path<
+        crate::dtos::common::EntityIdPath<Uuid>,
+    >,
 ) -> Result<axum::response::NoContent, ApiError> {
-    entity_entities::delete_for_actor(&ctx, &verified.ctx, id).await?;
+    entity_entities::delete_for_actor(&ctx, &verified.ctx, entity_id).await?;
     Ok(axum::response::NoContent)
 }
 
@@ -87,28 +93,35 @@ async fn list_entities(
 pub(crate) async fn undo_migration_job(
     State(ctx): State<AppContext>,
     verified: Verified,
-    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<Uuid>>,
+    Path(crate::dtos::common::MigrationJobIdPath { migration_job_id }): Path<
+        crate::dtos::common::MigrationJobIdPath<String>,
+    >,
 ) -> Result<Accepted<UndoResponse>, ApiError> {
-    let queued_id = crate::workers::undo::enqueue_for_actor(&ctx, verified.ctx, job_id).await?;
+    let migration_job_id = super::action_resource_id(&migration_job_id, ":undo")?;
+    let queued_id =
+        crate::workers::undo::enqueue_for_actor(&ctx, verified.ctx, migration_job_id).await?;
     Ok(Accepted(UndoResponse {
-        job_id: queued_id,
-        snapshot_job_id: job_id,
+        migration_job_id: queued_id,
+        snapshot_job_id: migration_job_id,
     }))
 }
 
 pub(crate) async fn migration_job_status(
     State(ctx): State<AppContext>,
     verified: Verified,
-    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<Uuid>>,
-) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
-    Ok(Json(
-        crate::models::queue_job_lifecycles::migration_job_status_for_actor(
+    Path(crate::dtos::common::MigrationJobIdPath { migration_job_id }): Path<
+        crate::dtos::common::MigrationJobIdPath,
+    >,
+) -> Result<Json<crate::dtos::jobs::MigrationJobStatus>, ApiError> {
+    Ok(Json(crate::dtos::jobs::MigrationJobStatus {
+        migration_job_id,
+        status: crate::models::queue_job_lifecycles::migration_job_status_for_actor(
             &ctx,
             verified.ctx,
-            job_id,
+            migration_job_id,
         )
         .await?,
-    ))
+    }))
 }
 
 /// Enqueues a reindex job for this workspace.
@@ -129,7 +142,9 @@ pub(crate) async fn reindex_workspace(
     verified: Verified,
 ) -> Result<Json<ReindexResponse>, ApiError> {
     let job_id = reindex::enqueue_requested_for_actor(&ctx, verified.ctx).await?;
-    Ok(Json(ReindexResponse { job_id }))
+    Ok(Json(ReindexResponse {
+        migration_job_id: job_id,
+    }))
 }
 
 /// Fills absent required fields in entities that fall behind the active schema version.
@@ -149,7 +164,7 @@ pub(crate) async fn fill_defaults(
     .await?;
     Ok(Accepted(FillDefaultsResponse {
         schema_name: body.schema_name,
-        job_id,
+        migration_job_id: job_id,
     }))
 }
 
@@ -159,48 +174,23 @@ pub fn routes() -> Routes {
         .prefix("api/entities")
         .add(
             "/",
-            aide::axum::routing::post_with(create_entity, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["entity_create"]),
-                ))
-            }),
+            aide::axum::routing::post_with(create_entity, |op| op.id("CreateEntity")),
         )
         .add(
             "/",
-            aide::axum::routing::get_with(list_entities, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["entity_list"]),
-                ))
-            }),
+            aide::axum::routing::get_with(list_entities, |op| op.id("ListEntities")),
         )
         .add(
-            "/{id}",
-            aide::axum::routing::get_with(get_entity, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["entity_get"]),
-                ))
-            }),
+            "/{entity_id}",
+            aide::axum::routing::get_with(get_entity, |op| op.id("GetEntity")),
         )
         .add(
-            "/{id}",
-            aide::axum::routing::put_with(update_entity, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["entity_update"]),
-                ))
-            }),
+            "/{entity_id}",
+            aide::axum::routing::put_with(update_entity, |op| op.id("UpdateEntity")),
         )
         .add(
-            "/{id}",
-            aide::axum::routing::delete_with(delete_entity, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["entity_delete"]),
-                ))
-            }),
+            "/{entity_id}",
+            aide::axum::routing::delete_with(delete_entity, |op| op.id("DeleteEntity")),
         )
 }
 
@@ -209,39 +199,20 @@ pub fn migration_routes() -> Routes {
         .tag("community")
         .prefix("api/migration-jobs")
         .add(
-            "/{job_id}",
-            aide::axum::routing::get_with(migration_job_status, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["migration_job_get"]),
-                ))
-            }),
+            "/{migration_job_id}",
+            aide::axum::routing::get_with(migration_job_status, |op| op.id("GetMigrationJob")),
         )
-        .add(
-            "/{job_id}/undo",
-            aide::axum::routing::post_with(undo_migration_job, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["migration_undo"]),
-                ))
-            }),
+        .add_action(
+            "/{migration_job_id}",
+            ":undo",
+            aide::axum::routing::post_with(undo_migration_job, |op| op.id("UndoMigrationJob")),
         )
         .add(
             "/reindex",
-            aide::axum::routing::post_with(reindex_workspace, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["workspace_reindex"]),
-                ))
-            }),
+            aide::axum::routing::post_with(reindex_workspace, |op| op.id("ReindexWorkspace")),
         )
         .add(
             "/fill-defaults",
-            aide::axum::routing::post_with(fill_defaults, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["migration_fill_defaults"]),
-                ))
-            }),
+            aide::axum::routing::post_with(fill_defaults, |op| op.id("FillEntityDefaults")),
         )
 }

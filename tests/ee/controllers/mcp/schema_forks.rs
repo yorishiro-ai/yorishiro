@@ -4,7 +4,7 @@ use uuid::Uuid;
 use yorishiro::App;
 
 use crate::requests::boot_request;
-use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
+use crate::requests::fixtures::{TenantArgs, TestTenant, issue_access_key};
 
 use super::*;
 
@@ -21,8 +21,8 @@ async fn schema_fork_tools_match_rest_and_enforce_workspace_scope() {
         target.assert_status(StatusCode::CREATED);
         let target: Value = target.json();
         let workspace_id = target["id"].as_str().unwrap().parse().unwrap();
-        let key = issue_api_key(&ctx, workspace_id, tenant.owner_id, false).await;
-        let read_key = issue_api_key(&ctx, workspace_id, crate::requests::fixtures::create_iam_reader(&ctx, tenant.tenant_id).await, false).await;
+        let key = issue_access_key(&ctx, workspace_id, tenant.owner_id).await;
+        let read_key = issue_access_key(&ctx, workspace_id, crate::requests::fixtures::create_iam_reader(&ctx, tenant.tenant_id).await).await;
         let input = json!({"source_workspace_id":tenant.workspace_id,"source_schema_id":source["schema"]["id"]});
         let denied = mcp_call(&request, &session, &read_key, 2, "tools/call", json!({"name":"create_schema_fork","arguments":input})).await;
         assert_eq!(denied["result"]["isError"], true);

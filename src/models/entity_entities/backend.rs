@@ -23,6 +23,7 @@ pub(super) async fn insert_snapshot(
             entity_entities::Column::SchemaVersion,
             entity_entities::Column::Data,
         ])
+        .expr(Expr::val(crate::data::time::now()))
         .from(Alias::new("entity_entities"))
         .and_where(Expr::col(entity_entities::Column::WorkspaceId).eq(workspace_id))
         .and_where(Expr::col(entity_entities::Column::Id).eq(entity_id))
@@ -37,6 +38,7 @@ pub(super) async fn insert_snapshot(
             entity_snapshots::Column::SchemaId,
             entity_snapshots::Column::SchemaVersion,
             entity_snapshots::Column::Data,
+            entity_snapshots::Column::CreatedAt,
         ])
         .select_from(source)
         .map_err(|error| DbErr::Custom(error.to_string()))?

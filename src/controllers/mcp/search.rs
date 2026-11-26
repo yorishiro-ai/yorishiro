@@ -31,7 +31,7 @@ pub(crate) struct SearchEntitiesArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_search)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Search entities by vector similarity and selective literal text; PostgreSQL uses gated rank fusion, SQLite uses text fallback (requires search IAM permission)"
+        description = "Search entities by vector similarity and literal text. PostgreSQL combines rankings, and SQLite falls back to text."
     )]
     pub(crate) async fn search_entities(
         &self,

@@ -71,7 +71,7 @@ impl Task for ResetRootPassword {
             &password,
         )
         .await?;
-        println!("root password reset; all attributed API keys revoked");
+        println!("root password reset; all attributed access keys revoked");
         Ok(())
     }
 }

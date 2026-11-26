@@ -316,7 +316,7 @@ pub async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, Yori
                         .add(outbox::Column::WorkerName.eq("QueryEmbeddingWorker"))
                         .add(
                             Expr::col((outbox::Entity, outbox::Column::DeadlineAt))
-                                .gt(Expr::current_timestamp()),
+                                .gt(Expr::val(crate::data::time::now())),
                         ),
                 ),
         )
@@ -346,7 +346,10 @@ pub async fn claim_dispatch(
 ) -> Result<bool, DbErr> {
     let lease_until = crate::data::time::now() + chrono::Duration::seconds(lease_seconds);
     let result = outbox::Entity::update_many()
-        .col_expr(outbox::Column::LastAttemptAt, Expr::current_timestamp())
+        .col_expr(
+            outbox::Column::LastAttemptAt,
+            Expr::val(crate::data::time::now()),
+        )
         .col_expr(
             outbox::Column::ClaimToken,
             Expr::val(claim_token.to_string()),
@@ -357,7 +360,7 @@ pub async fn claim_dispatch(
         .filter(
             outbox::Column::ClaimUntil
                 .is_null()
-                .or(Expr::col(outbox::Column::ClaimUntil).lte(Expr::current_timestamp())),
+                .or(Expr::col(outbox::Column::ClaimUntil).lte(Expr::val(crate::data::time::now()))),
         )
         .exec(db)
         .await?;
@@ -389,7 +392,10 @@ pub async fn acknowledge_dispatch(
         None
     };
     let result = outbox::Entity::update_many()
-        .col_expr(outbox::Column::PublishedAt, Expr::current_timestamp())
+        .col_expr(
+            outbox::Column::PublishedAt,
+            Expr::val(crate::data::time::now()),
+        )
         .col_expr(outbox::Column::ClaimToken, Expr::val(None::<String>))
         .col_expr(
             outbox::Column::ClaimUntil,
@@ -397,7 +403,7 @@ pub async fn acknowledge_dispatch(
         )
         .filter(outbox::Column::Id.eq(id))
         .filter(outbox::Column::ClaimToken.eq(claim_token.to_string()))
-        .filter(Expr::col(outbox::Column::ClaimUntil).gt(Expr::current_timestamp()))
+        .filter(Expr::col(outbox::Column::ClaimUntil).gt(Expr::val(crate::data::time::now())))
         .filter(outbox::Column::PublishedAt.is_null())
         .exec(&txn)
         .await?;

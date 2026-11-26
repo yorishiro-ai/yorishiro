@@ -60,28 +60,15 @@ pub fn routes() -> Routes {
         .add(
             "/upstream-changes",
             aide::axum::routing::get_with(list_upstream_changes, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_upstream_list"]),
-                ))
+                op.id("ListSchemaUpstreamChanges")
             }),
         )
         .add(
             "/{schema_id}/merge-preview",
-            aide::axum::routing::get_with(merge_preview, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_merge_preview"]),
-                ))
-            }),
+            aide::axum::routing::get_with(merge_preview, |op| op.id("PreviewSchemaMerge")),
         )
         .add(
             "/{schema_id}/merge",
-            aide::axum::routing::post_with(merge_apply, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_merge_apply"]),
-                ))
-            }),
+            aide::axum::routing::post_with(merge_apply, |op| op.id("ApplySchemaMerge")),
         )
 }

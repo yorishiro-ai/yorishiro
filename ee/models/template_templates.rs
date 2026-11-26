@@ -123,6 +123,9 @@ pub(crate) async fn ensure_official_tenant(
         name: ActiveValue::Set(OFFICIAL_TENANT_NAME.to_string()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     tenant_tenants::Entity::insert(active)
         .on_conflict(
             OnConflict::column(tenant_tenants::Column::Id)
@@ -159,6 +162,9 @@ async fn upsert_template(
         updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     let row = Entity::insert(active)
         .on_conflict(
             OnConflict::columns([Column::TenantId, Column::Name])

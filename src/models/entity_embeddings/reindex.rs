@@ -72,13 +72,13 @@ pub async fn reindex_workspace(
 async fn authorize_reindex(
     txn: &sea_orm::DatabaseTransaction,
     workspace_id: Uuid,
-    actor: Option<&crate::models::api_keys::AuthContext>,
+    actor: Option<&crate::models::access_keys::AuthContext>,
 ) -> Result<(), YorishiroError> {
     if let Some(actor) = actor {
         crate::models::iam::access::require_iam_action(
             txn,
             actor,
-            crate::models::iam::policy::Action::WorkspaceReindex,
+            crate::models::iam::policy::Action::ReindexWorkspace,
             crate::models::iam::policy::Resource::Workspace {
                 tenant_id: actor.tenant_id,
                 workspace_id,
@@ -93,7 +93,7 @@ async fn begin_reindex(
     conn: &DatabaseConnection,
     workspace_id: Uuid,
     provider: &dyn EmbeddingProvider,
-    actor: Option<&crate::models::api_keys::AuthContext>,
+    actor: Option<&crate::models::access_keys::AuthContext>,
     startup: bool,
 ) -> Result<Option<(i64, i64)>, YorishiroError> {
     use crate::models::_entities::workspace_workspaces::Column;
@@ -155,7 +155,7 @@ pub(crate) async fn reindex_workspace_as(
     conn: &DatabaseConnection,
     workspace_id: Uuid,
     provider: &dyn EmbeddingProvider,
-    actor: Option<&crate::models::api_keys::AuthContext>,
+    actor: Option<&crate::models::access_keys::AuthContext>,
     startup: bool,
 ) -> Result<ReindexOutcome, YorishiroError> {
     use crate::models::workspace_workspaces;

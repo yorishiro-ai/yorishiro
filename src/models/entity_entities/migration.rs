@@ -183,7 +183,7 @@ fn missing_fields_in_value(
 ///
 /// Returns a report counting entities updated and total fields filled.
 ///
-/// `updated_by` is the acting user's ID, or `None` for an unattributed API key.
+/// `updated_by` is the acting user's ID, or `None` for an unattributed access key.
 pub(crate) async fn fill_defaults(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -323,7 +323,7 @@ fn empty_value_for_type(type_name: metaschema::FieldTypeName) -> Value {
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn drift_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<EntityDrift, YorishiroError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
@@ -333,7 +333,7 @@ pub(crate) async fn drift_for_actor(
         ctx,
         actor,
         target,
-        crate::models::iam::policy::Action::EntityDriftGet,
+        crate::models::iam::policy::Action::GetEntityDrift,
         async |session| drift(session.txn(), session.workspace_id()?, id).await,
     )
     .await
@@ -345,16 +345,16 @@ pub(crate) async fn drift_for_actor(
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn migration_dry_run_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     name: &str,
 ) -> Result<MigrationDryRun, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::MigrationDryRun,
+            crate::models::iam::policy::Action::PreviewMigration,
         ),
-        crate::models::iam::policy::Action::MigrationDryRun,
+        crate::models::iam::policy::Action::PreviewMigration,
         async |session| migration_dry_run(session.txn(), session.workspace_id()?, name).await,
     )
     .await

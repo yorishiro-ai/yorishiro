@@ -31,7 +31,6 @@ async fn up_schemas(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .create_table(
             Table::create()
                 .table(Alias::new("schema_schemas"))
-                .if_not_exists()
                 .col(helpers::uuidv7_pk(manager))
                 .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
                 .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
@@ -59,11 +58,7 @@ async fn up_schemas(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                 .col(helpers::json_col(manager, Alias::new("origin_snapshot")))
                 .col(helpers::ts_tz_col(manager, Alias::new("origin_updated_at")))
                 .col(helpers::created_at(manager))
-                .col(
-                    helpers::ts_tz_col(manager, Alias::new("updated_at"))
-                        .null()
-                        .default(Expr::current_timestamp()),
-                )
+                .col(helpers::ts_tz_col(manager, Alias::new("updated_at")).null())
                 .check(Expr::cust("status IN ('active', 'archived')"))
                 .check(Expr::cust("origin_status IN ('linked', 'detached')"))
                 .foreign_key(
@@ -150,42 +145,6 @@ async fn up_schemas(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         )
         .await?;
 
-    helpers::pg_only(
-            manager,
-            &format!(
-                "CREATE FUNCTION detach_orphaned_schema_origin() RETURNS TRIGGER AS $$
-                     BEGIN
-                       {}
-                       RETURN OLD;
-                     END;
-                     $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp;",
-                detach_body("now()")
-            ),
-        )
-        .await?;
-
-    helpers::pg_only(
-        manager,
-        "CREATE TRIGGER template_templates_detach_schema_origins
-                 BEFORE DELETE ON template_templates
-                 FOR EACH ROW EXECUTE FUNCTION detach_orphaned_schema_origin();",
-    )
-    .await?;
-
-    helpers::sqlite_only(
-        manager,
-        &format!(
-            "CREATE TRIGGER template_templates_detach_schema_origins
-                     BEFORE DELETE ON template_templates
-                     FOR EACH ROW
-                     BEGIN
-                       {}
-                     END;",
-            detach_body("CURRENT_TIMESTAMP")
-        ),
-    )
-    .await?;
-
     helpers::enable_rls_with_policy(
         manager,
         "schema_schemas",
@@ -224,25 +183,10 @@ async fn down_schemas(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
             )
             .await?;
     }
-    helpers::pg_only(manager, "DROP TRIGGER template_templates_detach_schema_origins ON template_templates; DROP FUNCTION detach_orphaned_schema_origin();").await?;
-    helpers::sqlite_only(
-        manager,
-        "DROP TRIGGER template_templates_detach_schema_origins;",
-    )
-    .await?;
 
     manager
         .drop_table(Table::drop().table(Alias::new("schema_schemas")).to_owned())
         .await?;
 
     Ok(())
-}
-
-fn detach_body(now: &str) -> String {
-    format!(
-        "UPDATE schema_schemas \
-            SET origin_status = 'detached', updated_at = {now} \
-          WHERE origin_template_id = OLD.id \
-            AND origin_status = 'linked';"
-    )
 }

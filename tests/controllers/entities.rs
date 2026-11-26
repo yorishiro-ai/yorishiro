@@ -25,7 +25,10 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
         entity_entities::Entity::insert_many((0..500).map(|index| entity_entities::ActiveModel {
             id: Set(Uuid::now_v7()), workspace_id: Set(tenant.workspace_id), schema_id: Set(schema.id),
             schema_version: Set(schema.version), entity_type: Set("note".into()),
-            data: Set(serde_json::json!({"title":format!("seed-{index}")})), ..Default::default()
+            data: Set(serde_json::json!({"title":format!("seed-{index}")})),
+            embedding_sync_token: Set(Uuid::now_v7().to_string()),
+            created_at: Set(chrono::Utc::now().into()), updated_at: Set(chrono::Utc::now().into()),
+            ..Default::default()
         })).exec(&ctx.db).await.unwrap();
         let licence = |exp| ctx.shared_store.insert(Arc::new(LicenceState::licensed(LicenceClaims {
             sub:"entity-quota".into(), plan:"free".into(), exp,
@@ -38,10 +41,10 @@ async fn entity_plan_quota_expires_but_manual_limit_remains() {
             .filter(yorishiro::models::_entities::entity_entities::Column::WorkspaceId.eq(tenant.workspace_id))
             .one(&ctx.db).await.unwrap().unwrap();
         let jsonl = serde_json::to_string(&serde_json::json!({"kind":"entity", "record":entity_entities::EntityRecord::from(seed)})).unwrap();
-        let import = request.post("/api/import.jsonl").add_header("Authorization", format!("Bearer {}",tenant.api_key))
+        let import = request.post("/api/import-jobs").add_header("Authorization", format!("Bearer {}",tenant.api_key))
             .text(jsonl).await;
         import.assert_status(StatusCode::ACCEPTED);
-        let id: Uuid = import.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        let id: Uuid = import.json::<serde_json::Value>()["import_job_id"].as_str().unwrap().parse().unwrap();
         crate::requests::jobs::fail_via_api(&request, &ctx, id, &tenant.api_key, &format!("/api/import-jobs/{id}")).await;
         assert_eq!(entity_entities::count(&ctx.db, tenant.workspace_id).await.unwrap(), 500);
         licence(chrono::Utc::now().timestamp() - 1);
@@ -138,7 +141,7 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
             .expect("delete doomed");
 
         let response = request
-            .post(&format!("/api/migration-jobs/{job_id}/undo"))
+            .post(&format!("/api/migration-jobs/{job_id}:undo"))
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
@@ -149,7 +152,10 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
         );
         let body: serde_json::Value = response.json();
         assert_eq!(body["snapshot_job_id"], job_id.to_string());
-        let status_path = format!("/api/migration-jobs/{}", body["job_id"].as_str().unwrap());
+        let status_path = format!(
+            "/api/migration-jobs/{}",
+            body["migration_job_id"].as_str().unwrap()
+        );
         let pending = request
             .get(&status_path)
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
@@ -164,7 +170,7 @@ async fn undo_restores_snapshotted_entities_and_counts_a_deleted_one() {
         crate::requests::jobs::finish_via_api(
             &request,
             &ctx,
-            body["job_id"].as_str().unwrap().parse().unwrap(),
+            body["migration_job_id"].as_str().unwrap().parse().unwrap(),
             &setup.api_key,
             &status_path,
         )
@@ -195,7 +201,7 @@ async fn undo_an_unknown_job_is_refused() {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         let response = request
-            .post(&format!("/api/migration-jobs/{}/undo", Uuid::new_v4()))
+            .post(&format!("/api/migration-jobs/{}:undo", Uuid::new_v4()))
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(

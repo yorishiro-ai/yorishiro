@@ -31,7 +31,6 @@ async fn up_workspace_credentials(manager: &SchemaManager<'_>) -> Result<(), DbE
         .create_table(
             Table::create()
                 .table(Alias::new("workspace_llm_keys"))
-                .if_not_exists()
                 .col(
                     helpers::uuid_col(manager, Alias::new("workspace_id"))
                         .not_null()
@@ -58,7 +57,6 @@ async fn up_workspace_credentials(manager: &SchemaManager<'_>) -> Result<(), DbE
         .create_table(
             Table::create()
                 .table(Alias::new("workspace_embedding_keys"))
-                .if_not_exists()
                 .col(
                     ColumnDef::new(Alias::new("query_instruction"))
                         .text()
@@ -112,7 +110,6 @@ async fn up_workspace_credentials(manager: &SchemaManager<'_>) -> Result<(), DbE
         .create_table(
             Table::create()
                 .table(Alias::new("workspace_worker_classes"))
-                .if_not_exists()
                 .col(
                     helpers::uuid_col(manager, Alias::new("workspace_id"))
                         .not_null()

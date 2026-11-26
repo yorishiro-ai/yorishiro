@@ -14,7 +14,7 @@ async fn mcp_authentication_database_failure_is_redacted() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let session = initialize(&request).await;
         // Direct write (c): fault injection breaking the authentication lookup in this isolated test database.
-        crate::requests::fixtures::rename_table(&ctx.db, "api_keys", "private_auth_diagnostic")
+        crate::requests::fixtures::rename_table(&ctx.db, "access_keys", "private_auth_diagnostic")
             .await;
         let response = mcp_call(
             &request,
@@ -26,7 +26,7 @@ async fn mcp_authentication_database_failure_is_redacted() {
         )
         .await;
         assert_eq!(response["error"]["message"], "internal server error");
-        assert!(!response.to_string().contains("api_keys"));
+        assert!(!response.to_string().contains("access_keys"));
         assert!(!response.to_string().contains("private_auth_diagnostic"));
     })
     .await;
@@ -45,8 +45,9 @@ async fn mcp_authenticator_permission_denials_are_structured_not_internal_errors
             _app: &loco_rs::app::AppContext,
             _key: &str,
             _headers: &[(String, String)],
-        ) -> Result<yorishiro::models::api_keys::AuthContext, yorishiro::YorishiroError> {
-            Err(yorishiro::YorishiroError::ScopeInsufficient {
+        ) -> Result<yorishiro::models::access_keys::AuthContext, yorishiro::YorishiroError>
+        {
+            Err(yorishiro::YorishiroError::AccessDenied {
                 message: "workspace access denied".into(),
                 hint: "request a workspace grant".into(),
             })
@@ -56,7 +57,7 @@ async fn mcp_authenticator_permission_denials_are_structured_not_internal_errors
         let session = initialize(&request).await;
         ctx.shared_store
             .insert(Arc::new(PermissionDenied) as Arc<dyn Authenticator>);
-        for (id, name) in [(2, "list_entities"), (3, "whoami")] {
+        for (id, name) in [(2, "list_entities"), (3, "get_caller_identity")] {
             let result = mcp_call(
                 &request,
                 &session,
@@ -68,7 +69,7 @@ async fn mcp_authenticator_permission_denials_are_structured_not_internal_errors
             .await;
             assert_eq!(result["result"]["isError"], true, "{result}");
             let error = &result["result"]["structuredContent"]["error"];
-            assert_eq!(error["code"], "scope_insufficient");
+            assert_eq!(error["code"], "access_denied");
             assert_eq!(error["message"], "workspace access denied");
             assert_eq!(error["hint"], "request a workspace grant");
             assert!(error.get("required_scope").is_none());

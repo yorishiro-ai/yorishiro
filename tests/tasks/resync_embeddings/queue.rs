@@ -139,7 +139,7 @@ async fn reindex_queues_one_job_for_the_workspace() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let workspace = tenant.workspace_id;
         let key =
-            crate::requests::fixtures::issue_api_key(&ctx, workspace, tenant.owner_id, false).await;
+            crate::requests::fixtures::issue_access_key(&ctx, workspace, tenant.owner_id).await;
         request
             .post("/api/migration-jobs/reindex")
             .add_header("Authorization", format!("Bearer {key}"))

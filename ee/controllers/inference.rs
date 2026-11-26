@@ -20,29 +20,32 @@ use crate::edition::ee::models::inference_jobs::InferenceJobStatus;
 use crate::edition::ee::models::inference_proposals;
 use crate::edition::ee::models::workspace_llm_keys;
 
-/// `POST /api/schemas/active/{name}/infer-fill`
+/// `POST /api/schemas/active/{schema_name}/infer-fill`
 ///
 /// Enqueues an async infer-fill job whose answers are stored as reviewable proposals.
 /// Requires `inference_create` on the selected workspace.
 /// The worker rechecks the credential and IAM policy before inference and proposal storage.
 ///
-/// Poll for completion via `GET /api/inference-jobs/{job_id}`.
+/// Poll `GET /api/inference-jobs/{inference_job_id}` for completion.
 async fn infer_fill(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
-    Path(crate::dtos::common::NamePath { name }): Path<crate::dtos::common::NamePath<String>>,
+    Path(crate::dtos::common::SchemaNamePath { schema_name }): Path<
+        crate::dtos::common::SchemaNamePath,
+    >,
 ) -> Result<Json<InferFillResponse>, ApiError> {
     // Gate before authentication so unlicensed requests all receive the same 404.
     let job_id =
-        crate::edition::ee::workers::infer_fill::enqueue_infer_fill(&ctx, &auth_ctx, name).await?;
+        crate::edition::ee::workers::infer_fill::enqueue_infer_fill(&ctx, &auth_ctx, schema_name)
+            .await?;
 
     Ok(Json(InferFillResponse {
-        job_id,
+        inference_job_id: job_id,
         status: InferFillStatus::Queued,
     }))
 }
 
-/// `GET /api/inference-jobs/{job_id}`
+/// `GET /api/inference-jobs/{inference_job_id}`
 ///
 /// Poll for the durable result of an infer-fill job.
 ///
@@ -51,7 +54,9 @@ async fn infer_fill(
 async fn infer_job_status(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
-    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<String>>,
+    Path(crate::dtos::common::InferenceJobIdPath {
+        inference_job_id: job_id,
+    }): Path<crate::dtos::common::InferenceJobIdPath>,
 ) -> Result<Json<InferJobStatusResponse>, ApiError> {
     let parsed_job_id = uuid::Uuid::parse_str(&job_id)
         .map_err(|_| YorishiroError::not_found("infer-fill job not found"))?;
@@ -60,7 +65,7 @@ async fn infer_job_status(
     let status = result.status;
     let completed = status == InferenceJobStatus::Completed;
     Ok(Json(InferJobStatusResponse {
-        job_id,
+        inference_job_id: job_id,
         status,
         applied: completed.then_some(result.applied),
         proposed: completed.then_some(result.proposed),
@@ -83,30 +88,17 @@ pub fn routes() -> Routes {
         .tag("enterprise")
         .prefix("api/workspace")
         .add(
-            "/llm-key",
-            aide::axum::routing::put_with(set_llm_key, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["llm_provider_update"]),
-                ))
-            }),
+            "/llm-provider",
+            aide::axum::routing::put_with(set_llm_key, |op| op.id("UpdateWorkspaceLlmProvider")),
         )
         .add(
-            "/llm-key",
-            aide::axum::routing::get_with(get_llm_key, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["llm_provider_get"]),
-                ))
-            }),
+            "/llm-provider",
+            aide::axum::routing::get_with(get_llm_key, |op| op.id("GetWorkspaceLlmProvider")),
         )
         .add(
-            "/llm-key",
+            "/llm-provider",
             aide::axum::routing::delete_with(delete_llm_key, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["llm_provider_delete"]),
-                ))
+                op.id("DeleteWorkspaceLlmProvider")
             }),
         )
 }
@@ -115,20 +107,15 @@ pub fn routes() -> Routes {
 /// it an enterprise feature. See [`routes`] for why the two groups are separate.
 pub fn gated_routes() -> Routes {
     Routes::new().tag("enterprise").prefix("api/schemas").add(
-        "/active/{name}/infer-fill",
-        aide::axum::routing::post_with(infer_fill, |op| {
-            op.with(crate::controllers::openapi::extension(
-                "x-yorishiro-required-actions",
-                serde_json::json!(["inference_create"]),
-            ))
-        }),
+        "/active/{schema_name}/infer-fill",
+        aide::axum::routing::post_with(infer_fill, |op| op.id("CreateInferenceJob")),
     )
 }
 
-/// `GET /api/inference-jobs/{job_id}`
+/// `GET /api/inference-jobs/{inference_job_id}`
 ///
 /// Poll for the result of an infer-fill job. Follows the same pattern as
-/// `migration_routes()` (`api/migration-jobs/{job_id}/undo`): a dedicated prefix for
+/// `migration_routes()` (`api/migration-jobs/{migration_job_id}:undo`): a dedicated prefix for
 /// async-job polling, under the licence gate because results include workspace
 /// activity counts that reveal whether a workspace has data to infer.
 pub fn inference_job_status_routes() -> Routes {
@@ -136,57 +123,35 @@ pub fn inference_job_status_routes() -> Routes {
         .tag("enterprise")
         .prefix("api/inference-jobs")
         .add(
-            "/{job_id}",
-            aide::axum::routing::get_with(infer_job_status, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["inference_job_get"]),
-                ))
-            }),
+            "/{inference_job_id}",
+            aide::axum::routing::get_with(infer_job_status, |op| op.id("GetInferenceJob")),
         )
         .add(
-            "/{job_id}/proposals",
-            aide::axum::routing::get_with(list_proposals, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["inference_proposal_list"]),
-                ))
-            }),
+            "/{inference_job_id}/proposals",
+            aide::axum::routing::get_with(list_proposals, |op| op.id("ListInferenceProposals")),
         )
         .add(
-            "/{job_id}/confirm",
+            "/{inference_job_id}/confirm",
             aide::axum::routing::post_with(confirm_proposals, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["inference_confirm"]),
-                ))
+                op.id("ConfirmInferenceProposals")
             }),
         )
         .add(
-            "/{job_id}/reject",
+            "/{inference_job_id}/reject",
             aide::axum::routing::post_with(reject_proposals, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["inference_reject"]),
-                ))
+                op.id("RejectInferenceProposals")
             }),
         )
         .add(
-            "/{job_id}/discard",
+            "/{inference_job_id}/discard",
             aide::axum::routing::post_with(discard_proposals, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["inference_discard"]),
-                ))
+                op.id("DiscardInferenceProposals")
             }),
         )
         .add(
-            "/confirmations/{job_id}",
+            "/confirmations/{confirmation_job_id}",
             aide::axum::routing::get_with(confirmation_status, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["inference_confirmation_get"]),
-                ))
+                op.id("GetInferenceConfirmation")
             }),
         )
 }
@@ -194,12 +159,16 @@ pub fn inference_job_status_routes() -> Routes {
 async fn confirmation_status(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth): WorkspaceAuthenticated,
-    Path(crate::dtos::common::JobIdPath { job_id }): Path<
-        crate::dtos::common::JobIdPath<uuid::Uuid>,
-    >,
-) -> Result<Json<crate::models::queue_job_lifecycles::BulkJobStatus>, ApiError> {
+    Path(crate::dtos::common::ConfirmationJobIdPath {
+        confirmation_job_id,
+    }): Path<crate::dtos::common::ConfirmationJobIdPath>,
+) -> Result<Json<crate::edition::ee::dtos::inference::ConfirmationJobStatus>, ApiError> {
     Ok(Json(
-        inference_jobs::confirmation_status_as(&ctx.db, &auth, job_id).await?,
+        crate::edition::ee::dtos::inference::ConfirmationJobStatus {
+            confirmation_job_id,
+            status: inference_jobs::confirmation_status_as(&ctx.db, &auth, confirmation_job_id)
+                .await?,
+        },
     ))
 }
 
@@ -207,11 +176,13 @@ fn parse_job_id(job_id: &str) -> Result<uuid::Uuid, YorishiroError> {
     uuid::Uuid::parse_str(job_id).map_err(|_| YorishiroError::not_found("infer-fill job not found"))
 }
 
-/// `GET /api/inference-jobs/{job_id}/proposals`
+/// `GET /api/inference-jobs/{inference_job_id}/proposals`
 async fn list_proposals(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth): WorkspaceAuthenticated,
-    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<String>>,
+    Path(crate::dtos::common::InferenceJobIdPath {
+        inference_job_id: job_id,
+    }): Path<crate::dtos::common::InferenceJobIdPath>,
 ) -> Result<Json<Vec<inference_proposals::ProposalRecord>>, ApiError> {
     Ok(Json(
         inference_proposals::for_job_as(&ctx.db, &auth, parse_job_id(&job_id)?).await?,
@@ -221,7 +192,9 @@ async fn list_proposals(
 async fn reject_proposals(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth): WorkspaceAuthenticated,
-    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<String>>,
+    Path(crate::dtos::common::InferenceJobIdPath {
+        inference_job_id: job_id,
+    }): Path<crate::dtos::common::InferenceJobIdPath>,
 ) -> Result<Json<inference_proposals::ProposalActionReport>, ApiError> {
     Ok(Json(
         inference_proposals::reject_as(&ctx.db, &auth, parse_job_id(&job_id)?).await?,
@@ -231,7 +204,9 @@ async fn reject_proposals(
 async fn discard_proposals(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth): WorkspaceAuthenticated,
-    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<String>>,
+    Path(crate::dtos::common::InferenceJobIdPath {
+        inference_job_id: job_id,
+    }): Path<crate::dtos::common::InferenceJobIdPath>,
 ) -> Result<Json<inference_proposals::ProposalActionReport>, ApiError> {
     Ok(Json(
         inference_proposals::discard_as(&ctx.db, &auth, parse_job_id(&job_id)?).await?,
@@ -243,15 +218,21 @@ async fn discard_proposals(
 async fn confirm_proposals(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
-    Path(crate::dtos::common::JobIdPath { job_id }): Path<crate::dtos::common::JobIdPath<String>>,
-) -> Result<Accepted<crate::dtos::jobs::QueuedJobResponse>, ApiError> {
+    Path(crate::dtos::common::InferenceJobIdPath {
+        inference_job_id: job_id,
+    }): Path<crate::dtos::common::InferenceJobIdPath>,
+) -> Result<Accepted<crate::edition::ee::dtos::inference::ConfirmationJobAccepted>, ApiError> {
     let job_id = parse_job_id(&job_id)?;
     let job_id =
         crate::edition::ee::workers::confirm_proposals::enqueue(&ctx, &auth_ctx, job_id).await?;
-    Ok(Accepted(crate::dtos::jobs::QueuedJobResponse { job_id }))
+    Ok(Accepted(
+        crate::edition::ee::dtos::inference::ConfirmationJobAccepted {
+            confirmation_job_id: job_id,
+        },
+    ))
 }
 
-/// `PUT /api/workspace/llm-key`
+/// `PUT /api/workspace/llm-provider`
 async fn set_llm_key(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
@@ -268,7 +249,7 @@ async fn set_llm_key(
     Ok(axum::response::NoContent)
 }
 
-/// `GET /api/workspace/llm-key`
+/// `GET /api/workspace/llm-provider`
 async fn get_llm_key(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
@@ -279,7 +260,7 @@ async fn get_llm_key(
     Ok(Json(described))
 }
 
-/// `DELETE /api/workspace/llm-key`
+/// `DELETE /api/workspace/llm-provider`
 async fn delete_llm_key(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,

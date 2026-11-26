@@ -28,7 +28,6 @@ impl MigrationTrait for Migration {
 async fn up_workspace_schema_fork_heads(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let history = Table::create()
         .table(Alias::new("workspace_schema_fork_heads"))
-        .if_not_exists()
         .col(helpers::uuidv7_pk(manager))
         .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
         .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())

@@ -12,9 +12,17 @@ pub(crate) fn validate_credentials<'a>(
         });
     }
     let base_url = base_url.trim().trim_end_matches('/');
-    if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+    if !(base_url.starts_with("http://") || base_url.starts_with("https://"))
+        || !reqwest::Url::parse(base_url).is_ok_and(|url| {
+            url.host().is_some()
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.query().is_none()
+                && url.fragment().is_none()
+        })
+    {
         return Err(YorishiroError::ValidationFailed {
-            message: "base_url must start with http:// or https://".into(),
+            message: "base_url must be an HTTP or HTTPS URL with a host and no credentials, query, or fragment".into(),
             details: vec![],
             hint: "for example https://api.openai.com/v1".into(),
         });

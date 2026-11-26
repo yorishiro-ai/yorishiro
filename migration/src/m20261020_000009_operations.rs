@@ -1,5 +1,6 @@
 use super::helpers;
 use sea_orm_migration::prelude::*;
+use sea_orm_migration::sea_orm::prelude::DateTimeUtc;
 
 #[derive(DeriveMigrationName)]
 pub(crate) struct Migration;
@@ -28,7 +29,6 @@ impl MigrationTrait for Migration {
 async fn up_maintenance(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let table = Table::create()
         .table(Alias::new("system_maintenance"))
-        .if_not_exists()
         .col(
             ColumnDef::new(Alias::new("id"))
                 .boolean()
@@ -49,11 +49,7 @@ async fn up_maintenance(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                 .default(300),
         )
         .col(ColumnDef::new(Alias::new("reason")).text())
-        .col(
-            helpers::ts_tz_col(manager, Alias::new("updated_at"))
-                .not_null()
-                .default(Expr::current_timestamp()),
-        )
+        .col(helpers::ts_tz_col(manager, Alias::new("updated_at")).not_null())
         .to_owned();
 
     helpers::create_table_with_checks(
@@ -76,8 +72,13 @@ async fn up_maintenance(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .execute(
             &Query::insert()
                 .into_table(Alias::new("system_maintenance"))
-                .columns([Alias::new("id")])
-                .values_panic([true.into()])
+                .columns([Alias::new("id"), Alias::new("updated_at")])
+                .values_panic([
+                    true.into(),
+                    DateTimeUtc::from(std::time::SystemTime::now())
+                        .fixed_offset()
+                        .into(),
+                ])
                 .to_owned(),
         )
         .await?;
@@ -106,7 +107,6 @@ async fn up_reindex_schedules(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
         .create_table(
             Table::create()
                 .table(Alias::new("tenant_reindex_schedules"))
-                .if_not_exists()
                 .col(
                     helpers::uuid_col(manager, Alias::new("tenant_id"))
                         .not_null()

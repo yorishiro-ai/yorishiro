@@ -1,12 +1,11 @@
-//! `GET /api/audit-log`: the workspace's audit trail, for a key holding the independent `audit` grant.
-//!
-//! Gated on the `audit` grant: a key without it cannot reach this route, whatever IAM permits its user (see `models::api_keys::AuthContext::audit`).
+//! `GET /api/audit-log`: the workspaces' audit trail, subject to IAM authorization.
 
 use axum::Json;
-use axum::extract::Query;
+use axum::extract::{Query, State};
+use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
-use crate::controllers::extractors::AuditAuthorized;
+use crate::controllers::extractors::Verified;
 use crate::controllers::openapi::Routes;
 
 #[derive(serde::Serialize, schemars::JsonSchema)]
@@ -15,25 +14,31 @@ pub struct AuditLogRecord {
     pub workspace_id: uuid::Uuid,
     pub tenant_id: uuid::Uuid,
 
-    pub api_key_id: Option<uuid::Uuid>,
+    pub access_key_id: Option<uuid::Uuid>,
 
     pub user_id: Option<uuid::Uuid>,
-    pub action: crate::models::api_key_audit_log::AuditAction,
+    pub action: crate::models::access_key_audit_log::AuditAction,
     pub detail: serde_json::Value,
     #[schemars(with = "chrono::DateTime<chrono::Utc>")]
     pub created_at: String,
 }
 
 pub(crate) async fn list_audit_log(
-    authorized: AuditAuthorized,
+    State(ctx): State<AppContext>,
+    verified: Verified,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<AuditLogRecord>>, ApiError> {
-    let records = authorized.records(page.try_into()?).await?;
-    Ok(Json(render_records(records, authorized.timezone())?))
+    let records =
+        crate::models::access_key_audit_log::list_for_actor(&ctx, &verified.ctx, page.try_into()?)
+            .await?;
+    Ok(Json(render_records(
+        records,
+        crate::data::time::configured(&ctx),
+    )?))
 }
 
 pub(crate) fn render_records(
-    records: Vec<crate::models::_entities::api_key_audit_log::Model>,
+    records: Vec<crate::models::_entities::access_key_audit_log::Model>,
     timezone: chrono_tz::Tz,
 ) -> Result<Vec<AuditLogRecord>, crate::YorishiroError> {
     records
@@ -48,7 +53,7 @@ pub(crate) fn render_records(
                 id: record.id,
                 workspace_id: record.workspace_id,
                 tenant_id: record.tenant_id,
-                api_key_id: record.api_key_id,
+                access_key_id: record.access_key_id,
                 user_id: record.user_id,
                 action,
                 detail: record.detail,
@@ -62,15 +67,6 @@ pub(crate) fn render_records(
 pub fn routes() -> Routes {
     Routes::new().tag("community").prefix("api/audit-log").add(
         "/",
-        aide::axum::routing::get_with(list_audit_log, |op| {
-            op.with(crate::controllers::openapi::extension(
-                "x-yorishiro-required-grants",
-                serde_json::json!(["audit"]),
-            ))
-            .with(crate::controllers::openapi::extension(
-                "x-yorishiro-required-actions",
-                serde_json::json!(["audit_log_list"]),
-            ))
-        }),
+        aide::axum::routing::get_with(list_audit_log, |op| op.id("ListWorkspaceAuditEvents")),
     )
 }

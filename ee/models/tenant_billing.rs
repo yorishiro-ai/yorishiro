@@ -81,6 +81,9 @@ pub async fn link_stripe_customer(
     // statement directly, bypassing before_save entirely (it only runs on the
     // ActiveModelTrait::insert/update/save path), for both the insert and the conflict-update
     // branch.
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     Entity::insert(active)
         .on_conflict(
             OnConflict::column(Column::TenantId)
@@ -112,6 +115,9 @@ pub async fn set_plan(
         updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     Entity::insert(active)
         .on_conflict(
             OnConflict::column(Column::TenantId)

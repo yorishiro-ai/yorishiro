@@ -1,7 +1,7 @@
 use sea_orm::{DatabaseConnection, DatabaseTransaction};
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 
 pub(crate) async fn workspace_transaction(
     db: &DatabaseConnection,
@@ -28,15 +28,14 @@ pub(crate) async fn workspace_transaction(
 pub(crate) async fn authorize_job_actor(
     txn: &DatabaseTransaction,
     identity: &DatabaseConnection,
-    actor: &crate::models::api_key_audit_log::AuditActor,
+    actor: &crate::models::access_key_audit_log::AuditActor,
     action: crate::models::iam::policy::Action,
 ) -> Result<Option<DatabaseTransaction>, YorishiroError> {
     let presented = AuthContext {
-        api_key_id: actor.api_key_id,
+        access_key_id: actor.access_key_id,
         tenant_id: actor.tenant_id,
         workspace_id: Some(actor.workspace_id),
         user_id: actor.user_id,
-        audit: false,
     };
     crate::models::iam::access::authorize_workspace_action(txn, identity, &presented, action).await
 }

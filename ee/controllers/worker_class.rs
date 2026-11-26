@@ -55,28 +55,17 @@ pub fn routes() -> Routes {
         .add(
             "/worker-class",
             aide::axum::routing::put_with(set_worker_class, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["worker_class_update"]),
-                ))
+                op.id("UpdateWorkspaceWorkerClass")
             }),
         )
         .add(
             "/worker-class",
-            aide::axum::routing::get_with(get_worker_class, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["worker_class_get"]),
-                ))
-            }),
+            aide::axum::routing::get_with(get_worker_class, |op| op.id("GetWorkspaceWorkerClass")),
         )
         .add(
             "/worker-class",
             aide::axum::routing::delete_with(delete_worker_class, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["worker_class_delete"]),
-                ))
+                op.id("DeleteWorkspaceWorkerClass")
             }),
         )
 }

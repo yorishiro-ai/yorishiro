@@ -5,7 +5,7 @@
 use crate::db;
 use crate::edition::ee::models::marketplace;
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 use crate::models::iam::policy::Action;
 use loco_rs::app::AppContext;
 use sea_orm::ConnectionTrait;
@@ -26,7 +26,8 @@ pub(crate) async fn publish_version(
     template_id: Uuid,
     request: PublishVersionRequest,
 ) -> Result<TemplateVersionRecord, YorishiroError> {
-    let txn = super::authorized_transaction(&ctx.db, actor, Action::MarketplacePublish).await?;
+    let txn =
+        super::authorized_transaction(&ctx.db, actor, Action::PublishMarketplaceVersion).await?;
     let tenant_id = actor.tenant_id;
     let user_id = actor.user_id;
     require_ownership(&txn, tenant_id, template_id).await?;
@@ -55,7 +56,7 @@ pub(crate) async fn submit_review(
     request: SubmitReviewRequest,
 ) -> Result<TemplateReviewRecord, YorishiroError> {
     let txn =
-        super::authorized_transaction(&ctx.db, actor, Action::MarketplaceReviewSubmit).await?;
+        super::authorized_transaction(&ctx.db, actor, Action::CreateMarketplaceReview).await?;
     let tenant_id = actor.tenant_id;
     let user_id = actor.user_id;
     if !(1..=5).contains(&request.rating) {
@@ -88,7 +89,8 @@ pub(crate) async fn fork_template(
     template_id: Uuid,
     version: Option<i32>,
 ) -> Result<Uuid, YorishiroError> {
-    let txn = super::authorized_transaction(&ctx.db, actor, Action::MarketplaceFork).await?;
+    let txn =
+        super::authorized_transaction(&ctx.db, actor, Action::ForkMarketplaceTemplate).await?;
     let tenant_id = actor.tenant_id;
     let user_id = actor.user_id;
     let Some(source) = marketplace::find_fork_source(&txn, tenant_id, template_id).await? else {
@@ -129,7 +131,7 @@ pub(crate) async fn set_visibility(
     visibility: TemplateVisibility,
 ) -> Result<(), YorishiroError> {
     let txn =
-        super::authorized_transaction(&ctx.db, actor, Action::MarketplaceVisibilityUpdate).await?;
+        super::authorized_transaction(&ctx.db, actor, Action::UpdateMarketplaceVisibility).await?;
     let tenant_id = actor.tenant_id;
     require_ownership(&txn, tenant_id, template_id).await?;
 

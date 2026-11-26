@@ -1,232 +1,157 @@
-//! The built-in tenant policies (Administrator, Writer, Reader) and the groups that carry them, bootstrapped per tenant.
+//! The managed policies every tenant can attach: `AdministratorAccess`, `PowerUserAccess` and `ReadOnlyAccess`.
+//!
+//! The product defines their documents in code, so a release that adds an action updates them everywhere at once.
+//! A managed policy has no row: it has a fixed id and one virtual version generated from the code, and evaluation uses that version.
+//! A managed policy cannot be created, versioned or deleted by a tenant.
 
-use sea_orm::{
-    ActiveModelTrait, ActiveValue, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait,
-    QueryFilter,
-};
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::{iam_group_policy_attachments, iam_groups, iam_policies};
-use crate::models::iam::policy::{Action, Policy};
+use crate::models::iam::policy::{AccessLevel, Action, Policy, Service, VERSION};
 
-pub(crate) const ADMINISTRATOR_POLICY_NAME: &str = "Tenant Administrator";
-pub(crate) const WRITER_POLICY_NAME: &str = "Tenant Writer";
-pub(crate) const READER_POLICY_NAME: &str = "Tenant Reader";
+pub(crate) const ADMINISTRATOR_ACCESS: &str = "AdministratorAccess";
+pub(crate) const POWER_USER_ACCESS: &str = "PowerUserAccess";
+pub(crate) const READ_ONLY_ACCESS: &str = "ReadOnlyAccess";
+pub(crate) const WORKSPACE_VIEWER_ACCESS: &str = "WorkspaceViewerAccess";
+pub(crate) const WORKSPACE_CONTRIBUTOR_ACCESS: &str = "WorkspaceContributorAccess";
 
-pub(crate) fn is_builtin_policy_name(name: &str) -> bool {
-    matches!(
-        name,
-        ADMINISTRATOR_POLICY_NAME | WRITER_POLICY_NAME | READER_POLICY_NAME
-    )
-}
+pub(crate) const MANAGED_POLICY_NAMES: [&str; 5] = [
+    ADMINISTRATOR_ACCESS,
+    POWER_USER_ACCESS,
+    READ_ONLY_ACCESS,
+    WORKSPACE_VIEWER_ACCESS,
+    WORKSPACE_CONTRIBUTOR_ACCESS,
+];
 
-fn is_read_action(action: Action) -> bool {
-    let value =
-        serde_json::to_value(action).expect("actions serialize to their snake_case wire name");
-    let name = value.as_str().expect("the action name is a string");
-    name.ends_with("_get")
-        || name.ends_with("_list")
-        || name.ends_with("_preview")
-        || matches!(name, "search" | "recall" | "export" | "migration_dry_run")
-}
+/// The fixed id of each managed policy, the same in every tenant.
+const MANAGED_POLICY_IDS: [(&str, Uuid); 5] = [
+    (
+        ADMINISTRATOR_ACCESS,
+        Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0001),
+    ),
+    (
+        POWER_USER_ACCESS,
+        Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0002),
+    ),
+    (
+        READ_ONLY_ACCESS,
+        Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0003),
+    ),
+    (
+        WORKSPACE_VIEWER_ACCESS,
+        Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0004),
+    ),
+    (
+        WORKSPACE_CONTRIBUTOR_ACCESS,
+        Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0005),
+    ),
+];
 
-const fn is_admin_only_action(action: Action) -> bool {
-    matches!(
-        action,
-        Action::TenantUpdate
-            | Action::CredentialList
-            | Action::CredentialCreate
-            | Action::CredentialRotate
-            | Action::CredentialRevoke
-            | Action::TenantUserList
-            | Action::TenantUserCreate
-            | Action::TenantUserUpdate
-            | Action::TenantUserDelete
-            | Action::TenantUserPasswordReset
-            | Action::GroupList
-            | Action::GroupGet
-            | Action::GroupCreate
-            | Action::GroupUpdate
-            | Action::GroupDelete
-            | Action::GroupMemberList
-            | Action::GroupMemberAdd
-            | Action::GroupMemberRemove
-            | Action::PolicyList
-            | Action::PolicyGet
-            | Action::PolicyCreate
-            | Action::PolicyUpdate
-            | Action::PolicyDelete
-            | Action::UserPolicyList
-            | Action::GroupPolicyList
-            | Action::UserPolicyAttach
-            | Action::UserPolicyDetach
-            | Action::GroupPolicyAttach
-            | Action::GroupPolicyDetach
-            | Action::IamAuditList
-    )
-}
-
-fn action_values(actions: impl IntoIterator<Item = Action>) -> Vec<serde_json::Value> {
-    actions
-        .into_iter()
-        .map(|action| serde_json::to_value(action).expect("actions serialize to strings"))
-        .collect()
-}
-
-fn statements(
-    effect: &str,
-    actions: &[serde_json::Value],
-    resources: &serde_json::Value,
-) -> Vec<serde_json::Value> {
-    actions
-        .chunks(crate::models::iam::policy::MAX_ACTIONS)
-        .map(|chunk| json!({"effect": effect, "actions": chunk, "resources": resources.clone()}))
-        .collect()
-}
-
-pub(crate) fn policy_documents(tenant_id: Uuid) -> Vec<(String, serde_json::Value)> {
-    let tenant = json!({"type": "tenant", "tenant_id": tenant_id});
-    let all_workspaces = json!({"type": "all_workspaces", "tenant_id": tenant_id});
-    let tenant_resources = json!([tenant]);
-    let both_resources = json!([tenant, all_workspaces]);
-    let wildcard = json!([json!("*")]);
-
-    let reads = Action::ALL
+/// The id a managed policy is attached and referred to by.
+#[must_use]
+pub fn managed_policy_id(name: &str) -> Option<Uuid> {
+    MANAGED_POLICY_IDS
         .iter()
-        .copied()
-        .filter(|action| is_read_action(*action))
-        .collect::<Vec<_>>();
-    let tenant_reads = reads
-        .iter()
-        .filter(|action| {
-            action.applies_to(crate::models::iam::policy::Resource::Tenant { tenant_id })
-        })
-        .copied()
-        .collect::<Vec<Action>>();
-    let workspace_reads = reads
-        .iter()
-        .filter(|action| {
-            action.applies_to(crate::models::iam::policy::Resource::AllWorkspaces { tenant_id })
-        })
-        .copied()
-        .collect::<Vec<Action>>();
-    let admin_only = Action::ALL
-        .iter()
-        .copied()
-        .filter(|action| is_admin_only_action(*action))
-        .collect::<Vec<_>>();
-
-    let writer_statements = std::iter::once(json!(
-        {"effect": "allow", "actions": wildcard, "resources": both_resources}
-    ))
-    .chain(statements(
-        "deny",
-        &action_values(admin_only),
-        &tenant_resources,
-    ))
-    .collect::<Vec<_>>();
-    let reader_statements = statements("allow", &action_values(tenant_reads), &tenant_resources)
-        .into_iter()
-        .chain(statements(
-            "allow",
-            &action_values(workspace_reads),
-            &json!([all_workspaces]),
-        ))
-        .collect::<Vec<_>>();
-
-    vec![
-        (
-            ADMINISTRATOR_POLICY_NAME.to_owned(),
-            json!({"statements": [json!(
-                {"effect": "allow", "actions": wildcard, "resources": both_resources}
-            )]}),
-        ),
-        (
-            WRITER_POLICY_NAME.to_owned(),
-            json!({"statements": writer_statements}),
-        ),
-        (
-            READER_POLICY_NAME.to_owned(),
-            json!({"statements": reader_statements}),
-        ),
-    ]
+        .find(|(managed, _)| *managed == name)
+        .map(|(_, id)| *id)
 }
 
-async fn find_policy(
-    txn: &DatabaseTransaction,
-    tenant_id: Uuid,
-    name: &str,
-) -> Result<Option<iam_policies::Model>, YorishiroError> {
-    iam_policies::Entity::find()
-        .filter(iam_policies::Column::TenantId.eq(tenant_id))
-        .filter(iam_policies::Column::Name.eq(name))
-        .one(txn)
-        .await
-        .internal()
+/// The name of the managed policy with this id.
+pub(crate) fn managed_policy_name(id: Uuid) -> Option<&'static str> {
+    MANAGED_POLICY_IDS
+        .iter()
+        .find(|(_, managed)| *managed == id)
+        .map(|(name, _)| *name)
 }
 
+/// The services that act on the data of a workspace.
+///
+/// A managed policy applies to every workspace; to limit a user to one, create a policy with the same actions and the workspace YRN as its resource.
+const WORKSPACE_DATA_SERVICES: [Service; 4] = [
+    Service::Workspace,
+    Service::Schema,
+    Service::Entity,
+    Service::Migration,
+];
+
+pub(crate) fn is_managed_policy_name(name: &str) -> bool {
+    MANAGED_POLICY_NAMES.contains(&name)
+}
+
+/// The YRN a policy is attached and referred to by; a managed policy has an empty tenant field.
+pub(crate) fn policy_yrn(tenant_id: Uuid, name: &str) -> String {
+    if is_managed_policy_name(name) {
+        format!("yrn:iam::policy/{name}")
+    } else {
+        format!("yrn:iam:{tenant_id}:policy/{name}")
+    }
+}
+
+/// The document of a managed policy, or `None` when `name` is not one.
+pub(crate) fn managed_document(name: &str) -> Option<serde_json::Value> {
+    let statement = match name {
+        ADMINISTRATOR_ACCESS => {
+            json!({"Effect": "Allow", "Action": "*", "Resource": "*"})
+        }
+        POWER_USER_ACCESS => json!({
+            "Effect": "Allow",
+            "NotAction": [
+                format!("{}:*", Service::Iam.prefix()),
+                format!("{}:*", Service::Tenant.prefix()),
+            ],
+            "Resource": "*",
+        }),
+        READ_ONLY_ACCESS => {
+            let reads: Vec<String> = Action::ALL
+                .iter()
+                .filter(|action| {
+                    matches!(action.access_level(), AccessLevel::List | AccessLevel::Read)
+                })
+                .map(|action| action.qualified())
+                .collect();
+            json!({"Effect": "Allow", "Action": reads, "Resource": "*"})
+        }
+        WORKSPACE_VIEWER_ACCESS => {
+            let reads: Vec<String> = Action::ALL
+                .iter()
+                .filter(|action| {
+                    WORKSPACE_DATA_SERVICES.contains(&action.service())
+                        && matches!(action.access_level(), AccessLevel::List | AccessLevel::Read)
+                })
+                .map(|action| action.qualified())
+                .collect();
+            json!({"Effect": "Allow", "Action": reads, "Resource": "*"})
+        }
+        WORKSPACE_CONTRIBUTOR_ACCESS => {
+            let work: Vec<String> = Action::ALL
+                .iter()
+                .filter(|action| match action.service() {
+                    Service::Workspace => {
+                        matches!(action.access_level(), AccessLevel::List | AccessLevel::Read)
+                    }
+                    service => WORKSPACE_DATA_SERVICES.contains(&service),
+                })
+                .map(|action| action.qualified())
+                .collect();
+            json!({"Effect": "Allow", "Action": work, "Resource": "*"})
+        }
+        _ => return None,
+    };
+    Some(json!({"Version": VERSION, "Statement": [statement]}))
+}
+
+/// The parsed policy of a managed name, or `None` when `name` is not one.
+///
 /// # Errors
-/// Returns a validation error when a generated document does not parse, or a persistence failure.
-pub(crate) async fn bootstrap(
-    txn: &DatabaseTransaction,
+/// Returns a validation error when the generated document does not parse, which is a defect.
+pub(crate) fn managed_policy(
+    name: &str,
     tenant_id: Uuid,
-) -> Result<(), YorishiroError> {
-    crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
-        .await
-        .internal()?;
-    for (name, document) in policy_documents(tenant_id) {
-        let rendered = serde_json::to_string(&document).internal()?;
-        Policy::parse(&rendered, tenant_id, |tenant, _| tenant == tenant_id)?;
-        if find_policy(txn, tenant_id, &name).await?.is_some() {
-            continue;
-        }
-        iam_policies::ActiveModel {
-            id: crate::db::sqlite_generated_id(txn, ActiveValue::NotSet),
-            tenant_id: Set(tenant_id),
-            name: Set(name),
-            document: Set(document),
-            ..Default::default()
-        }
-        .insert(txn)
-        .await
-        .internal()?;
-    }
-    for name in [
-        ADMINISTRATOR_POLICY_NAME,
-        WRITER_POLICY_NAME,
-        READER_POLICY_NAME,
-    ] {
-        let policy = find_policy(txn, tenant_id, name)
-            .await?
-            .ok_or_else(|| YorishiroError::not_found("managed IAM policy was not found"))?;
-        let group = iam_groups::Entity::find()
-            .filter(iam_groups::Column::TenantId.eq(tenant_id))
-            .filter(iam_groups::Column::Name.eq(name))
-            .one(txn)
-            .await
-            .internal()?;
-        if group.is_some() {
-            continue;
-        }
-        let group = iam_groups::ActiveModel {
-            tenant_id: Set(tenant_id),
-            name: Set(name.to_owned()),
-            ..Default::default()
-        }
-        .insert(txn)
-        .await
-        .internal()?;
-        iam_group_policy_attachments::ActiveModel {
-            tenant_id: Set(tenant_id),
-            group_id: Set(group.id),
-            policy_id: Set(policy.id),
-            ..Default::default()
-        }
-        .insert(txn)
-        .await
-        .internal()?;
-    }
-    Ok(())
+) -> Result<Option<Policy>, YorishiroError> {
+    let Some(document) = managed_document(name) else {
+        return Ok(None);
+    };
+    let rendered = serde_json::to_string(&document).internal()?;
+    Policy::parse_generated(&rendered, tenant_id).map(Some)
 }

@@ -89,7 +89,7 @@ pub(crate) async fn ensure_available(
 
 async fn search_text(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     text: &str,
     query: SearchQuery,
     deployment_vector: &mut Option<Vec<f32>>,
@@ -122,7 +122,7 @@ async fn search_text(
         &txn,
         &ctx.db,
         actor,
-        super::iam::policy::Action::Search,
+        super::iam::policy::Action::SearchEntities,
     )
     .await?;
     search_by_vector(&txn, workspace_id, vector, text, query).await
@@ -130,14 +130,17 @@ async fn search_text(
 
 pub(crate) async fn search_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     text: &str,
     query: SearchQuery,
     limiter: &crate::controllers::middleware::rate_limit::RateLimiter,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
-    let workspaces =
-        super::iam::access::read_workspaces(&ctx.db, actor, super::iam::policy::Action::Search)
-            .await?;
+    let workspaces = super::iam::access::read_workspaces(
+        &ctx.db,
+        actor,
+        super::iam::policy::Action::SearchEntities,
+    )
+    .await?;
     if workspaces.len() > MAX_SEARCH_WORKSPACES {
         return Err(YorishiroError::ValidationFailed {
             message: format!(

@@ -29,11 +29,23 @@ pub(crate) async fn update_if_unchanged(
         .col_expr(Column::SchemaVersion, Expr::value(schema_version))
         .col_expr(Column::UpdatedBy, Expr::value(updated_by))
         .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
+        .col_expr(
+            Column::EmbeddingSyncToken,
+            Expr::value(crate::models::entity_entities::new_sync_token()),
+        )
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::Id.eq(existing.id));
     if crate::db::is_postgres(conn) {
         update = update.filter(Column::UpdatedAt.eq(existing.updated_at));
     }
     let result = update.exec(conn).await.internal()?;
+    if result.rows_affected == 1 {
+        crate::models::entity_entities::touch_content_revision(conn, workspace_id)
+            .await
+            .internal()?;
+        crate::models::entity_entities::resync_full_text(conn, existing.id)
+            .await
+            .internal()?;
+    }
     Ok(result.rows_affected == 1)
 }

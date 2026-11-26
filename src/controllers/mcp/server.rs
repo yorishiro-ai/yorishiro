@@ -32,10 +32,9 @@ impl YorishiroMcpServer {
             .entry("properties")
             .or_insert_with(|| serde_json::json!({}));
         if let Some(properties) = properties.as_object_mut() {
-            properties.entry("workspace_id").or_insert_with(|| serde_json::json!({
-                "type":"string", "format":"uuid",
-                "description":"Workspace to operate on for this call. No workspace-bound key is required."
-            }));
+            properties
+                .entry("workspace_id")
+                .or_insert_with(|| serde_json::json!({"type":"string", "format":"uuid"}));
         }
         tool
     }
@@ -62,28 +61,6 @@ impl YorishiroMcpServer {
         parts: &axum::http::request::Parts,
     ) -> Result<super::VerifyOutcome, ErrorData> {
         super::authorize::verify(self.app_context(), parts).await
-    }
-
-    pub(crate) fn tool_capabilities(
-        &self,
-        audit: bool,
-    ) -> Result<Vec<serde_json::Value>, ErrorData> {
-        self.tool_router
-            .list_all()
-            .into_iter()
-            .filter(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()))
-            .map(|tool| {
-                let grants = tool.meta.as_ref()
-                    .and_then(|meta| meta.0.get("yorishiro/required_grants"))
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!([]));
-                Ok(serde_json::json!({
-                    "name": tool.name,
-                    "required_grants": grants,
-                    "grants_satisfied": grants.as_array().is_some_and(|grants| grants.iter().all(|grant| grant == "audit" && audit)),
-                }))
-            })
-            .collect()
     }
 }
 
@@ -115,7 +92,7 @@ impl ServerHandler for YorishiroMcpServer {
                     .map_err(crate::error::mcp_internal)?;
                 if parts
                     .headers
-                    .get_all(crate::models::api_keys::WORKSPACE_HEADER)
+                    .get_all(crate::models::access_keys::WORKSPACE_HEADER)
                     .iter()
                     .any(|header| {
                         header
@@ -132,7 +109,7 @@ impl ServerHandler for YorishiroMcpServer {
                 }
                 parts
                     .headers
-                    .insert(crate::models::api_keys::WORKSPACE_HEADER, value);
+                    .insert(crate::models::access_keys::WORKSPACE_HEADER, value);
             }
         }
         let maintenance = match crate::models::system_maintenance::get(&self.ctx.db).await {
@@ -185,9 +162,10 @@ impl ServerHandler for YorishiroMcpServer {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Yorishiro is a multi-tenant knowledge store with user-defined schemas. \
-             Every tool call requires authentication via an `Authorization: Bearer <api-key>` \
+             Every tool call requires authentication via an `Authorization: Bearer <access-key>` \
              header, and IAM policies decide which operations a key's user may perform. \
-             Select a workspace with the `workspace_id` tool argument or `X-Workspace-Id` header. \
+              Select a workspace with the `workspace_id` tool argument or `x-workspace-id` header. \
+              A workspace-bound key is not required to select a workspace. \
              Without selection, lists and search span permitted workspaces, resource IDs resolve their workspace, \
              and destination operations select a workspace only when exactly one is permitted. \
              Tenant root sign-in sessions have full tenant access; issued keys retain their grants and bindings.",

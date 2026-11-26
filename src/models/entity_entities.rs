@@ -51,7 +51,7 @@ pub(crate) use operations::{delete_for_actor, update_for_actor};
 
 pub(crate) async fn workspace_for_actor(
     conn: &impl ConnectionTrait,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
     if let Some(workspace_id) = actor.workspace_id {
@@ -167,19 +167,131 @@ pub(crate) async fn missing_embeddings(
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
+    /// Assigns the id, timestamps and a new sync token, and fences embedding publication when the embedded content changes.
     async fn before_save<C>(self, db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
         let mut this = self;
-        this.id = crate::db::sqlite_generated_id(db, this.id);
-        this.updated_at = crate::db::stamped_updated_at(insert, this.updated_at);
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        this.updated_at = crate::db::stamped_updated_at(this.updated_at);
+        if !this.embedding_sync_token.is_set() {
+            this.embedding_sync_token = sea_orm::ActiveValue::Set(new_sync_token());
+        }
+        let content_changed = insert
+            || this.data.is_set()
+            || this.schema_id.is_set()
+            || this.entity_type.is_set()
+            || this.workspace_id.is_set();
+        if content_changed {
+            let new_workspace = this.workspace_id.try_as_ref().copied();
+            let old_workspace = match (insert, this.id.try_as_ref()) {
+                (false, Some(id)) => workspace_of(db, *id).await?,
+                _ => None,
+            };
+            for workspace in old_workspace
+                .into_iter()
+                .chain(new_workspace.filter(|new| Some(*new) != old_workspace))
+            {
+                touch_content_revision(db, workspace).await?;
+            }
+        }
         Ok(this)
+    }
+
+    /// Keeps the SQLite full-text row of the entity current.
+    async fn after_save<C>(model: Model, db: &C, _insert: bool) -> Result<Model, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        resync_full_text(db, model.id).await?;
+        Ok(model)
     }
 }
 
+/// A token that changes with every write, so a reader can tell whether the entity moved since it read it.
+pub(crate) fn new_sync_token() -> String {
+    Uuid::now_v7().to_string()
+}
+
+async fn workspace_of(db: &impl ConnectionTrait, id: Uuid) -> Result<Option<Uuid>, DbErr> {
+    Entity::find_by_id(id)
+        .select_only()
+        .column(Column::WorkspaceId)
+        .into_tuple::<Uuid>()
+        .one(db)
+        .await
+}
+
+/// Marks the embedded content of a workspace as changed, which makes in-flight embedding publication stale.
+pub(crate) async fn touch_content_revision(
+    db: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<(), DbErr> {
+    use crate::models::_entities::workspace_workspaces::{
+        Column as Workspace, Entity as Workspaces,
+    };
+    Workspaces::update_many()
+        .col_expr(
+            Workspace::EmbeddingContentRevision,
+            Expr::col(Workspace::EmbeddingContentRevision).add(1),
+        )
+        .filter(Workspace::Id.eq(workspace_id))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+/// SQLite only: removes the full-text rows of the entities matching `condition`.
+///
+/// Call it before deleting entities in bulk, because the full-text table has no foreign key to cascade.
+pub(crate) async fn forget_full_text(
+    db: &impl ConnectionTrait,
+    condition: impl sea_orm::sea_query::IntoCondition,
+) -> Result<(), DbErr> {
+    use sea_orm::sea_query::{Alias, Query};
+    if db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite {
+        return Ok(());
+    }
+    let matching = Query::select()
+        .expr(Expr::col(Column::Id).cast_as(Alias::new("text")))
+        .from(Entity)
+        .cond_where(condition)
+        .to_owned();
+    let delete = Query::delete()
+        .from_table(Alias::new("entity_fts"))
+        .and_where(Expr::col(Alias::new("entity_id")).in_subquery(matching))
+        .to_owned();
+    db.execute(&delete).await?;
+    Ok(())
+}
+
+/// SQLite only: replaces the full-text row of one entity with its stored data.
+pub(crate) async fn resync_full_text(db: &impl ConnectionTrait, id: Uuid) -> Result<(), DbErr> {
+    use sea_orm::sea_query::{Alias, Query};
+    if db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite {
+        return Ok(());
+    }
+    forget_full_text(db, Column::Id.eq(id)).await?;
+    let source = Query::select()
+        .expr(Expr::col(Column::Id).cast_as(Alias::new("text")))
+        .column(Column::Data)
+        .from(Entity)
+        .and_where(Column::Id.eq(id))
+        .to_owned();
+    let mut insert = Query::insert();
+    insert
+        .into_table(Alias::new("entity_fts"))
+        .columns([Alias::new("entity_id"), Alias::new("data")])
+        .select_from(source)
+        .map_err(|error| DbErr::Custom(error.to_string()))?;
+    db.execute(&insert).await?;
+    Ok(())
+}
+
 /// A stored entity.
-/// `created_by`/`updated_by` are absent for entities touched by an unattributed API key.
+/// `created_by`/`updated_by` are absent for entities touched by an unattributed access key.
 //
 // Distinct from the generated `Model` because it excludes `embedding` (stored separately in `entity_embeddings`), so SQLite deserialization does not trip on the PgVector type.
 #[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult, schemars::JsonSchema)]

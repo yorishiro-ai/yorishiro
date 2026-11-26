@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 async fn authorized_transaction(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     action: crate::models::iam::policy::Action,
 ) -> Result<sea_orm::DatabaseTransaction, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
@@ -42,13 +42,13 @@ async fn authorized_transaction(
 
 pub(crate) async fn list_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     page: ListParams,
 ) -> Result<Vec<MarketplaceListing>, YorishiroError> {
     let txn = authorized_transaction(
         db,
         actor,
-        crate::models::iam::policy::Action::MarketplaceList,
+        crate::models::iam::policy::Action::ListMarketplaceTemplates,
     )
     .await?;
     list_marketplace(&txn, page).await
@@ -56,29 +56,71 @@ pub(crate) async fn list_as(
 
 pub(crate) async fn versions_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
     let txn = authorized_transaction(
         db,
         actor,
-        crate::models::iam::policy::Action::MarketplaceVersionList,
+        crate::models::iam::policy::Action::ListMarketplaceVersions,
     )
     .await?;
     list_versions(&txn, actor.tenant_id, template_id, page).await
 }
 
+pub(crate) async fn get_template_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::access_keys::AuthContext,
+    template_id: Uuid,
+) -> Result<MarketplaceListing, YorishiroError> {
+    let txn = authorized_transaction(
+        db,
+        actor,
+        crate::models::iam::policy::Action::GetMarketplaceTemplate,
+    )
+    .await?;
+    marketplace_listings(&txn, Some(template_id), ListParams::default())
+        .await?
+        .pop()
+        .ok_or_else(|| YorishiroError::not_found("marketplace template was not found"))
+}
+
+pub(crate) async fn get_version_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::access_keys::AuthContext,
+    template_id: Uuid,
+    version_id: Uuid,
+) -> Result<TemplateVersionRecord, YorishiroError> {
+    let txn = authorized_transaction(
+        db,
+        actor,
+        crate::models::iam::policy::Action::GetMarketplaceVersion,
+    )
+    .await?;
+    require_postgres(&txn, "reading a marketplace version")?;
+    visible_versions(
+        &txn,
+        actor.tenant_id,
+        template_id,
+        Some(version_id),
+        ListParams::default(),
+    )
+    .await?
+    .pop()
+    .ok_or_else(|| YorishiroError::not_found("marketplace version was not found"))
+}
+
 pub(crate) async fn reviews_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateReviewRecord>, YorishiroError> {
     let txn = authorized_transaction(
         db,
         actor,
-        crate::models::iam::policy::Action::MarketplaceReviewList,
+        crate::models::iam::policy::Action::ListMarketplaceReviews,
     )
     .await?;
     list_reviews(&txn, actor.tenant_id, template_id, page).await
@@ -375,11 +417,19 @@ pub async fn list_marketplace(
     conn: &impl ConnectionTrait,
     page: ListParams,
 ) -> Result<Vec<MarketplaceListing>, YorishiroError> {
+    marketplace_listings(conn, None, page).await
+}
+
+async fn marketplace_listings(
+    conn: &impl ConnectionTrait,
+    template_id: Option<Uuid>,
+    page: ListParams,
+) -> Result<Vec<MarketplaceListing>, YorishiroError> {
     use crate::models::_entities::{
         template_reviews as review, template_templates as template, template_versions as version,
     };
     use sea_orm::sea_query::{Alias, SimpleExpr};
-    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
+    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect, QueryTrait};
     require_postgres(conn, "listing the marketplace")?;
     let latest = Query::select()
         .expr(Expr::col((version::Entity, version::Column::Version)).max())
@@ -443,6 +493,9 @@ pub async fn list_marketplace(
         )
         .filter(template::Column::Visibility.eq(TemplateVisibility::Community.as_db_str()))
         .filter(Expr::exists(published))
+        .apply_if(template_id, |query, id| {
+            query.filter(template::Column::Id.eq(id))
+        })
         .order_by_asc(template::Column::Name)
         .order_by_asc(template::Column::Id)
         .limit(page.limit())
@@ -481,9 +534,21 @@ pub async fn list_versions(
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
+    visible_versions(conn, tenant_id, template_id, None, page).await
+}
+
+async fn visible_versions(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    template_id: Uuid,
+    version_id: Option<Uuid>,
+    page: ListParams,
+) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
     use crate::models::_entities::template_templates::Column as TemplateColumn;
     use crate::models::_entities::template_versions::{Column, Entity, Relation};
-    use sea_orm::{ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
+    use sea_orm::{
+        ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, QueryTrait, RelationTrait,
+    };
 
     let rows = Entity::find()
         .select_only()
@@ -496,6 +561,7 @@ pub async fn list_versions(
         .column(Column::CreatedAt)
         .column_as(TemplateColumn::Visibility, "template_visibility")
         .filter(Column::TemplateId.eq(template_id))
+        .apply_if(version_id, |query, id| query.filter(Column::Id.eq(id)))
         .join(
             sea_orm::JoinType::InnerJoin,
             Relation::TemplateTemplates.def(),
@@ -539,24 +605,28 @@ pub(crate) async fn insert_next_version(
 
     require_postgres(conn, "publishing a template version")?;
     let select = Query::select()
+        .expr(Expr::val(Uuid::now_v7()))
         .expr(Expr::val(template_id))
         .expr(Expr::col(Column::Version).max().if_null(0).add(1))
         .expr(Expr::val(request.definition.clone()))
         .expr(Expr::val(request.changelog.clone()))
         .expr(Expr::val(request.status.as_db_str()))
         .expr(Expr::val(user_id))
+        .expr(Expr::val(crate::data::time::now()))
         .from(Entity)
         .and_where(Expr::col(Column::TemplateId).eq(template_id))
         .to_owned();
     let statement = Query::insert()
         .into_table(Entity)
         .columns([
+            Column::Id,
             Column::TemplateId,
             Column::Version,
             Column::Definition,
             Column::Changelog,
             Column::Status,
             Column::CreatedBy,
+            Column::CreatedAt,
         ])
         .select_from(select)
         .internal()?
@@ -665,6 +735,9 @@ pub(crate) async fn upsert_review(
         updated_at: sea_orm::ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     let row = Entity::insert(active)
         .on_conflict(
             OnConflict::columns([Column::TemplateId, Column::TenantId])

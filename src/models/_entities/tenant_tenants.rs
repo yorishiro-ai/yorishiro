@@ -18,10 +18,10 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::api_key_audit_log::Entity")]
-    ApiKeyAuditLog,
-    #[sea_orm(has_many = "super::api_keys::Entity")]
-    ApiKeys,
+    #[sea_orm(has_many = "super::access_key_audit_log::Entity")]
+    AccessKeyAuditLog,
+    #[sea_orm(has_many = "super::access_keys::Entity")]
+    AccessKeys,
     #[sea_orm(has_many = "super::iam_audit_events::Entity")]
     IamAuditEvents,
     #[sea_orm(has_many = "super::iam_groups::Entity")]
@@ -48,15 +48,15 @@ pub enum Relation {
     WorkspaceWorkspaces,
 }
 
-impl Related<super::api_key_audit_log::Entity> for Entity {
+impl Related<super::access_key_audit_log::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::ApiKeyAuditLog.def()
+        Relation::AccessKeyAuditLog.def()
     }
 }
 
-impl Related<super::api_keys::Entity> for Entity {
+impl Related<super::access_keys::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::ApiKeys.def()
+        Relation::AccessKeys.def()
     }
 }
 

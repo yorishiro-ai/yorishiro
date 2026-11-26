@@ -11,9 +11,9 @@ const DELETE_GRACE_PERIOD: chrono::Duration = chrono::Duration::days(7);
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::{
-    api_keys, entity_entities, entity_relations, queue_job_dispatch_outbox, queue_job_lifecycles,
-    schema_schemas, template_templates, tenant_memberships, workspace_schema_forks,
-    workspace_workspaces,
+    access_keys, entity_entities, entity_relations, queue_job_dispatch_outbox,
+    queue_job_lifecycles, schema_schemas, template_templates, tenant_memberships,
+    workspace_schema_forks, workspace_workspaces,
 };
 
 /// A secret-free snapshot, not approval for a later destructive operation.
@@ -28,7 +28,7 @@ pub struct RetirementInventory {
     pub shared_user_accounts: u64,
     /// External forks must be resolved explicitly before irreversible cleanup.
     pub external_workspace_forks: u64,
-    pub api_keys: u64,
+    pub access_keys: u64,
     pub jobs: u64,
     pub active_jobs: u64,
     pub dispatches: u64,
@@ -44,13 +44,13 @@ pub struct RetirementInventory {
 /// Rejects unauthorized credentials and propagates inventory failures.
 pub async fn inventory_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
 ) -> Result<RetirementInventory, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TenantGet,
+        crate::models::iam::policy::Action::GetTenantRetirementInventory,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -68,7 +68,7 @@ pub async fn inventory_as(
 /// Database failures roll back disablement, key revocation, work cancellation and audit together.
 pub async fn disable_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     confirmed_tenant_id: Uuid,
 ) -> Result<(), YorishiroError> {
     if confirmed_tenant_id != actor.tenant_id
@@ -84,7 +84,7 @@ pub async fn disable_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TenantUpdate,
+        crate::models::iam::policy::Action::DisableTenant,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -137,9 +137,9 @@ async fn disable_in_transaction(
         .await
         .internal()?;
     }
-    api_keys::Entity::revoke_matching(
+    access_keys::Entity::revoke_matching(
         txn,
-        sea_orm::Condition::all().add(api_keys::Column::TenantId.eq(tenant_id)),
+        sea_orm::Condition::all().add(access_keys::Column::TenantId.eq(tenant_id)),
     )
     .await?;
     cancel_work(txn, tenant_id).await?;
@@ -330,8 +330,8 @@ async fn delete_disabled_in(
         });
     }
     cancel_work(txn, tenant_id).await?;
-    api_keys::Entity::delete_many()
-        .filter(api_keys::Column::TenantId.eq(tenant_id))
+    access_keys::Entity::delete_many()
+        .filter(access_keys::Column::TenantId.eq(tenant_id))
         .exec(txn)
         .await
         .internal()?;
@@ -355,6 +355,12 @@ async fn delete_disabled_in(
         .exec(txn)
         .await
         .internal()?;
+    crate::models::entity_entities::forget_full_text(
+        txn,
+        entity_entities::Column::WorkspaceId.is_in(snapshot.workspace_ids.clone()),
+    )
+    .await
+    .internal()?;
     entity_entities::Entity::delete_many()
         .filter(entity_entities::Column::WorkspaceId.is_in(snapshot.workspace_ids.clone()))
         .exec(txn)
@@ -365,6 +371,17 @@ async fn delete_disabled_in(
         .exec(txn)
         .await
         .internal()?;
+    crate::models::schema_schemas::detach_origins(
+        txn,
+        schema_schemas::Column::OriginTemplateId.in_subquery(
+            sea_orm::sea_query::Query::select()
+                .column(template_templates::Column::Id)
+                .from(template_templates::Entity)
+                .and_where(template_templates::Column::TenantId.eq(tenant_id))
+                .to_owned(),
+        ),
+    )
+    .await?;
     template_templates::Entity::delete_many()
         .filter(template_templates::Column::TenantId.eq(tenant_id))
         .exec(txn)
@@ -555,9 +572,9 @@ pub async fn inventory(
         .count(conn)
         .await
         .internal()?;
-    let api_keys = api_keys::Entity::find()
-        .filter(api_keys::Column::TenantId.eq(tenant_id))
-        .filter(api_keys::Column::RevokedAt.is_null())
+    let access_keys = access_keys::Entity::find()
+        .filter(access_keys::Column::TenantId.eq(tenant_id))
+        .filter(access_keys::Column::RevokedAt.is_null())
         .count(conn)
         .await
         .internal()?;
@@ -607,7 +624,7 @@ pub async fn inventory(
         memberships,
         shared_user_accounts,
         external_workspace_forks,
-        api_keys,
+        access_keys,
         jobs,
         active_jobs,
         dispatches,

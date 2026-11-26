@@ -40,7 +40,6 @@ async fn up_tenants(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .create_table(
             Table::create()
                 .table(Alias::new("tenant_tenants"))
-                .if_not_exists()
                 .col(helpers::uuidv7_pk(manager))
                 .col(ColumnDef::new(Alias::new("name")).text().not_null())
                 .col(ColumnDef::new(Alias::new("max_workspaces")).integer())
@@ -78,7 +77,6 @@ async fn down_tenants(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
 async fn up_users(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let table = Table::create()
         .table(Alias::new("user_users"))
-        .if_not_exists()
         .col(helpers::uuidv7_pk(manager))
         .col(ColumnDef::new(Alias::new("email")).text().unique_key())
         .col(ColumnDef::new(Alias::new("password_hash")).text())
@@ -87,6 +85,8 @@ async fn up_users(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .col(ColumnDef::new(Alias::new("oauth_subject_id")).text())
         .col(helpers::uuid_col(manager, Alias::new("tenant_id")))
         .col(ColumnDef::new(Alias::new("user_name")).text())
+        // The lowercase form of `user_name`, so names are unique per tenant regardless of case.
+        .col(ColumnDef::new(Alias::new("user_name_key")).text())
         .col(helpers::created_at(manager))
         .foreign_key(
             ForeignKey::create()
@@ -121,11 +121,11 @@ async fn up_users(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     manager
         .create_index(
             Index::create()
-                .name("uq_user_users_tenant_id_user_name")
+                .name("uq_user_users_tenant_id_user_name_key")
                 .unique()
                 .table(Alias::new("user_users"))
                 .col(Alias::new("tenant_id"))
-                .col(Alias::new("user_name"))
+                .col(Alias::new("user_name_key"))
                 .and_where(Expr::col(Alias::new("tenant_id")).is_not_null())
                 .to_owned(),
         )
@@ -158,7 +158,6 @@ async fn down_users(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
 async fn up_tenant_memberships(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let table = Table::create()
         .table(Alias::new("tenant_memberships"))
-        .if_not_exists()
         .col(helpers::uuidv7_pk(manager))
         .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
         .col(helpers::uuid_col(manager, Alias::new("user_id")).not_null())

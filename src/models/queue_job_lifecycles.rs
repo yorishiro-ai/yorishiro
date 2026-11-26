@@ -13,7 +13,6 @@ const LEASE_DURATION_MINUTES: i64 = 5;
 
 #[derive(serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct BulkJobStatus {
-    job_id: Uuid,
     job_name: String,
     status: LifecycleStatus,
     result: Option<serde_json::Value>,
@@ -33,14 +32,14 @@ pub(crate) async fn migration_job_status(
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn migration_job_status_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<BulkJobStatus, crate::YorishiroError> {
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Job(id),
-        crate::models::iam::policy::Action::MigrationJobGet,
+        crate::models::iam::policy::Action::GetMigrationJob,
         async |session| migration_job_status(session.txn(), session.workspace_id()?, id).await,
     )
     .await
@@ -53,7 +52,7 @@ pub(crate) async fn bulk_job_status(
     allowed_jobs: &[&str],
 ) -> Result<BulkJobStatus, crate::YorishiroError> {
     use crate::error::ResultExt;
-    use crate::models::api_key_audit_log::{self, AuditAction};
+    use crate::models::access_key_audit_log::{self, AuditAction};
     let row = Entity::find_by_id(id)
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::JobName.is_in(allowed_jobs.iter().copied()))
@@ -69,10 +68,9 @@ pub(crate) async fn bulk_job_status(
         AuditAction::BackgroundJobCompleted
     };
     Ok(BulkJobStatus {
-        job_id: id,
         job_name: row.job_name,
         status: LifecycleStatus::from_row(&row.status).internal()?,
-        result: api_key_audit_log::job_result(db, workspace_id, id, action).await?,
+        result: access_key_audit_log::job_result(db, workspace_id, id, action).await?,
     })
 }
 
@@ -109,7 +107,9 @@ impl ActiveModelBehavior for ActiveModel {
         C: ConnectionTrait,
     {
         let mut this = self;
-        this.updated_at = crate::db::stamped_updated_at(insert, this.updated_at);
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        this.updated_at = crate::db::stamped_updated_at(this.updated_at);
         Ok(this)
     }
 }
@@ -581,14 +581,14 @@ pub struct Enqueue<'a> {
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn import_job_status_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<BulkJobStatus, crate::YorishiroError> {
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Job(id),
-        crate::models::iam::policy::Action::ImportJobGet,
+        crate::models::iam::policy::Action::GetImportJob,
         async |session| {
             bulk_job_status(session.txn(), session.workspace_id()?, id, &["import"]).await
         },

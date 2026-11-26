@@ -48,7 +48,7 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
             .json(&json!({"name":format!("retirement-fork-{}", uuid::Uuid::new_v4())})).await;
         assert_eq!(workspace.status_code(), StatusCode::CREATED);
         let workspace_id = workspace.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
-        let fork_key = crate::requests::fixtures::issue_api_key(&ctx, workspace_id, target.owner_id, false).await;
+        let fork_key = crate::requests::fixtures::issue_access_key(&ctx, workspace_id, target.owner_id).await;
         let fork = request.post("/api/schema-forks").add_header("Authorization", format!("Bearer {fork_key}"))
             .json(&json!({"source_workspace_id":target.workspace_id,"source_schema_id":schemas[0]})).await;
         assert_eq!(fork.status_code(), StatusCode::CREATED, "{}", fork.text());
@@ -66,7 +66,7 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
         assert!(workspace_schema_forks::Entity::find_by_id(fork_id).one(&ctx.db).await.unwrap().is_none());
         assert!(workspace_schema_fork_heads::Entity::find().filter(workspace_schema_fork_heads::Column::ForkId.eq(fork_id)).one(&ctx.db).await.unwrap().is_none());
         assert!(schema_schemas::Entity::find_by_id(schemas[1]).one(&ctx.db).await.unwrap().is_some());
-        request.get("/api/whoami").add_header("Authorization", format!("Bearer {}", other.api_key))
+        request.get("/api/caller-identity").add_header("Authorization", format!("Bearer {}", other.api_key))
             .await.assert_status(StatusCode::OK);
     }).await;
 }
@@ -94,7 +94,7 @@ async fn deletion_audit_failure_preserves_disabled_tenant_and_allows_retry() {
             .all(&ctx.db).await.unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].action, "disabled");
-        request.get("/api/whoami").add_header("Authorization", format!("Bearer {}", target.api_key))
+        request.get("/api/caller-identity").add_header("Authorization", format!("Bearer {}", target.api_key))
             .await.assert_status(StatusCode::UNAUTHORIZED);
         ctx.db.execute_unprepared("ALTER TABLE tenant_retirement_events DROP CONSTRAINT reject_deleted_event")
             .await.unwrap();
@@ -183,7 +183,7 @@ async fn irreversible_cleanup_requires_disablement_and_preserves_root_identities
             1
         );
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", other.api_key))
             .await
             .assert_status(StatusCode::OK);
@@ -265,17 +265,17 @@ async fn operator_disablement_requires_confirmation_and_is_retry_safe() {
         let inventory = retirement::inventory(&ctx.db, target.tenant_id)
             .await
             .unwrap();
-        assert_eq!(inventory.api_keys, 0);
+        assert_eq!(inventory.access_keys, 0);
         assert_eq!(inventory.disabled_at, disabled_at);
         assert!(serde_json::to_value(&inventory).unwrap()["disabled_at"].is_string());
         assert!(inventory.workspace_ids.contains(&target.workspace_id));
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", target.api_key))
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", other.api_key))
             .await
             .assert_status(StatusCode::OK);
@@ -304,11 +304,11 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
         )
         .await;
         let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;
-        let created = request.post("/api/members/users")
+        let created = request.post("/api/users")
             .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"user_name":format!("retiring-user-{}", uuid::Uuid::new_v4()),"password":"tenant-user-password"})).await;
         created.assert_status(StatusCode::CREATED);
-        let tenant_user_id: uuid::Uuid = created.json::<Value>()["user_id"].as_str().unwrap().parse().unwrap();
+        let tenant_user_id: uuid::Uuid = created.json::<Value>()["id"].as_str().unwrap().parse().unwrap();
 
         retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
             .await

@@ -4,7 +4,7 @@ mod m20261020_000000_tenancy;
 mod m20261020_000001_workspaces;
 mod m20261020_000002_templates;
 mod m20261020_000003_schemas;
-mod m20261020_000004_api_keys;
+mod m20261020_000004_access_keys;
 mod m20261020_000005_entities;
 mod m20261020_000006_entity_extras;
 mod m20261020_000007_billing;
@@ -63,7 +63,7 @@ impl MigratorTrait for Migrations {
             Box::new(m20261020_000001_workspaces::Migration),
             Box::new(m20261020_000002_templates::Migration),
             Box::new(m20261020_000003_schemas::Migration),
-            Box::new(m20261020_000004_api_keys::Migration),
+            Box::new(m20261020_000004_access_keys::Migration),
             Box::new(m20261020_000005_entities::Migration),
             Box::new(m20261020_000006_entity_extras::Migration),
             Box::new(m20261020_000007_billing::Migration),

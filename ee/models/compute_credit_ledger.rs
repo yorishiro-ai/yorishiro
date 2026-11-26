@@ -93,7 +93,7 @@ async fn insert_row(
     transaction_type: TransactionType,
 ) -> Result<(), YorishiroError> {
     let active = ActiveModel {
-        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
+        id: crate::db::generated_id(ActiveValue::NotSet),
         workspace_id: ActiveValue::Set(workspace_id),
         amount: ActiveValue::Set(amount),
         transaction_type: ActiveValue::Set(transaction_type.as_db_str().to_string()),

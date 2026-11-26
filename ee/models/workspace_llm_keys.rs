@@ -7,7 +7,7 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_llm_keys::{ActiveModel, Column, Entity};
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 use crate::models::iam::policy::Action;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
@@ -37,7 +37,8 @@ pub(crate) async fn set_as(
     api_key: &str,
 ) -> Result<(), YorishiroError> {
     let txn =
-        super::iam::access::workspace_transaction(db, actor, Action::LlmProviderUpdate).await?;
+        super::iam::access::workspace_transaction(db, actor, Action::UpdateWorkspaceLlmProvider)
+            .await?;
     set(&txn, actor.require_workspace()?, base_url, model, api_key).await?;
     txn.commit().await.internal()
 }
@@ -47,7 +48,8 @@ pub(crate) async fn clear_as(
     actor: &AuthContext,
 ) -> Result<(), YorishiroError> {
     let txn =
-        super::iam::access::workspace_transaction(db, actor, Action::LlmProviderDelete).await?;
+        super::iam::access::workspace_transaction(db, actor, Action::DeleteWorkspaceLlmProvider)
+            .await?;
     clear(&txn, actor.require_workspace()?).await?;
     txn.commit().await.internal()
 }
@@ -56,7 +58,8 @@ pub(crate) async fn describe_as(
     db: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
 ) -> Result<Option<LlmKeyDescription>, YorishiroError> {
-    let txn = super::iam::access::workspace_transaction(db, actor, Action::LlmProviderGet).await?;
+    let txn = super::iam::access::workspace_transaction(db, actor, Action::GetWorkspaceLlmProvider)
+        .await?;
     describe(&txn, actor.require_workspace()?).await
 }
 
@@ -78,6 +81,9 @@ async fn set(
         updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     Entity::insert(active)
         .on_conflict(
             OnConflict::column(Column::WorkspaceId)

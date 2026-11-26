@@ -38,9 +38,9 @@ pub(crate) struct MergeApplyArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_origin)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "List schemas in this workspace whose origin template has changed since the schema was last copied (requires schema_upstream_list IAM permission). Use this to discover which schemas have pending upstream updates that have not yet been merged."
+        description = "List schemas in the selected workspace with pending updates from their origin templates."
     )]
-    pub(crate) async fn list_upstream_changes(
+    pub(crate) async fn list_schema_upstream_changes(
         &self,
         Parameters(args): Parameters<ListUpstreamChangesArgs>,
         Extension(parts): Extension<Parts>,
@@ -59,9 +59,9 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Preview what merging the origin template would do to a schema (requires schema_merge_preview IAM permission). Returns a list of fields that would be added, updated, kept, or conflicted. Does not write anything."
+        description = "Preview changes and conflicts without writing a schema version. The schema must originate from a template library item, not a built-in template."
     )]
-    pub(crate) async fn merge_preview(
+    pub(crate) async fn preview_schema_merge(
         &self,
         Parameters(args): Parameters<MergePreviewArgs>,
         Extension(parts): Extension<Parts>,
@@ -78,9 +78,9 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Merge the origin template into a schema, writing the merged definition as the schema's next version (requires schema_merge_apply IAM permission). Returns the new schema version and a diff describing whether the merge was breaking. Fails if there are merge conflicts."
+        description = "Merge changes from the originating template library item into a new schema version. Reports breaking changes and refuses conflicts. Built-in templates are not supported."
     )]
-    pub(crate) async fn merge_apply(
+    pub(crate) async fn apply_schema_merge(
         &self,
         Parameters(args): Parameters<MergeApplyArgs>,
         Extension(parts): Extension<Parts>,

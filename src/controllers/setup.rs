@@ -57,7 +57,7 @@ async fn setup(
         user_id: account.user_id,
         email: account.email,
         tenant_id: account.tenant_id,
-        api_key: created.plaintext,
+        access_key: created.plaintext,
     }))
 }
 

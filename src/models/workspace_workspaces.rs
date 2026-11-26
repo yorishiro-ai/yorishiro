@@ -199,13 +199,14 @@ pub struct WorkspaceSummary {
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(mut self, db: &C, _insert: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
-        self.id = crate::db::sqlite_generated_id(db, self.id);
-        Ok(self)
+        let mut this = self;
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        Ok(this)
     }
 }
 
@@ -353,14 +354,14 @@ fn startup_reindex_rows() -> Select<Entity> {
 
 pub(crate) async fn list_for_actor(
     conn: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
 ) -> Result<Vec<WorkspaceRecord>, YorishiroError> {
     use crate::models::iam::policy::{Action, Resource};
     let txn = crate::db::begin_write(conn).await.internal()?;
     let evaluation = crate::models::iam::access::IamEvaluation::load(&txn, actor).await?;
     evaluation
         .require(
-            Action::WorkspaceList,
+            Action::ListWorkspaces,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
@@ -377,7 +378,7 @@ pub(crate) async fn list_for_actor(
     for workspace in candidates {
         match evaluation
             .require(
-                Action::WorkspaceGet,
+                Action::GetWorkspace,
                 Resource::Workspace {
                     tenant_id: actor.tenant_id,
                     workspace_id: workspace.id,
@@ -386,7 +387,7 @@ pub(crate) async fn list_for_actor(
             .await
         {
             Ok(()) => records.push(WorkspaceRecord::try_from(workspace)?),
-            Err(YorishiroError::ScopeInsufficient { .. }) => {}
+            Err(YorishiroError::AccessDenied { .. }) => {}
             Err(error) => return Err(error),
         }
     }
@@ -396,7 +397,7 @@ pub(crate) async fn list_for_actor(
 
 pub(crate) async fn get_for_actor(
     conn: &sea_orm::DatabaseTransaction,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     workspace_id: Uuid,
 ) -> Result<Model, YorishiroError> {
     let workspace = get_workspace(conn, workspace_id).await?;
@@ -406,7 +407,7 @@ pub(crate) async fn get_for_actor(
     crate::models::iam::access::require_iam_action(
         conn,
         actor,
-        crate::models::iam::policy::Action::WorkspaceGet,
+        crate::models::iam::policy::Action::GetWorkspace,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id,
@@ -421,7 +422,7 @@ pub(crate) async fn get_for_actor(
 
 pub(crate) async fn update_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
     input: crate::dtos::workspaces::UpdateWorkspaceRequest,
 ) -> Result<WorkspaceRecord, YorishiroError> {
@@ -430,7 +431,7 @@ pub(crate) async fn update_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::WorkspaceUpdate,
+        crate::models::iam::policy::Action::UpdateWorkspace,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id: id,
@@ -463,7 +464,7 @@ pub(crate) async fn update_as(
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::iam::policy::Action::TenantUpdate,
+            crate::models::iam::policy::Action::UpdateTenant,
             crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
@@ -480,7 +481,7 @@ pub(crate) async fn update_as(
 
 pub(crate) async fn detail_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<crate::dtos::workspaces::WorkspaceDetail, YorishiroError> {
     let authorization = crate::db::begin_write(&ctx.db).await.internal()?;

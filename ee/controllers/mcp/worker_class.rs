@@ -15,7 +15,7 @@ impl YorishiroMcpServer {
     #[tool(
         description = "Read the selected workspace's explicit worker-class assignment (requires worker_class_get IAM permission); missing assignments use shared compute and return not found here"
     )]
-    pub(crate) async fn get_worker_class(
+    pub(crate) async fn get_workspace_worker_class(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -32,7 +32,7 @@ impl YorishiroMcpServer {
     #[tool(
         description = "Assign the selected workspace's worker class (requires worker_class_update IAM permission); the deployment must declare the destination worker target, which does not guarantee a worker is online"
     )]
-    pub(crate) async fn set_worker_class(
+    pub(crate) async fn update_workspace_worker_class(
         &self,
         Parameters(input): Parameters<SetWorkerClassRequest>,
         Extension(parts): Extension<Parts>,
@@ -48,7 +48,7 @@ impl YorishiroMcpServer {
     #[tool(
         description = "Remove the selected workspace's worker-class assignment and fall back to shared compute (requires worker_class_delete IAM permission); queued jobs retain their existing routing"
     )]
-    pub(crate) async fn reset_worker_class(
+    pub(crate) async fn delete_workspace_worker_class(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {

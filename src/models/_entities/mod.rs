@@ -2,8 +2,8 @@
 
 pub mod prelude;
 
-pub mod api_key_audit_log;
-pub mod api_keys;
+pub mod access_key_audit_log;
+pub mod access_keys;
 pub mod compute_credit_ledger;
 pub mod entity_column_preferences;
 pub mod entity_embeddings;
@@ -15,6 +15,7 @@ pub mod iam_group_memberships;
 pub mod iam_group_policy_attachments;
 pub mod iam_groups;
 pub mod iam_policies;
+pub mod iam_policy_versions;
 pub mod iam_tenant_roots;
 pub mod iam_user_policy_attachments;
 pub mod inference_jobs;

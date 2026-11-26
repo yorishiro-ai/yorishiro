@@ -59,11 +59,10 @@ async fn schema_deletion_refuses_active_versions_and_references() {
             .delete(&format!("/api/schemas/{v2_id}"))
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
-        let read_key = crate::requests::fixtures::issue_api_key(
+        let read_key = crate::requests::fixtures::issue_access_key(
             &ctx,
             workspace_id,
             crate::requests::fixtures::create_iam_reader(&ctx, tenant_id).await,
-            false,
         )
         .await;
         request
@@ -210,8 +209,16 @@ async fn create_schema_rejects_an_unknown_template_id() {
 #[tokio::test]
 async fn list_templates_and_get_template_over_rest() {
     boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant { api_key: key, .. } =
-            TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key =
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
+
+        request
+            .get("/api/templates")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
 
         let response = request
             .get("/api/templates")

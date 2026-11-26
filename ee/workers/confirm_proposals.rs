@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::{
-    api_key_audit_log::{self, AuditAction, AuditActor},
-    api_keys::AuthContext,
+    access_key_audit_log::{self, AuditAction, AuditActor},
+    access_keys::AuthContext,
 };
 use crate::workers::{
     dispatch::{JobSpec, dispatch_job},
@@ -19,7 +19,7 @@ pub(crate) struct ConfirmProposalsArgs {
     lifecycle_id: Option<Uuid>,
     tenant_id: Uuid,
     workspace_id: Uuid,
-    api_key_id: Uuid,
+    access_key_id: Uuid,
     user_id: Option<Uuid>,
     inference_job_id: Uuid,
     worker_class: WorkerClass,
@@ -59,7 +59,7 @@ impl ConfirmProposalsWorker {
             .await
             .internal()?;
         let mut authorization = None;
-        if !api_key_audit_log::job_completed(
+        if !access_key_audit_log::job_completed(
             &txn,
             args.workspace_id,
             id,
@@ -73,10 +73,10 @@ impl ConfirmProposalsWorker {
                 &AuditActor {
                     tenant_id: args.tenant_id,
                     workspace_id: args.workspace_id,
-                    api_key_id: args.api_key_id,
+                    access_key_id: args.access_key_id,
                     user_id: args.user_id,
                 },
-                crate::models::iam::policy::Action::InferenceConfirm,
+                crate::models::iam::policy::Action::ConfirmInferenceProposals,
             )
             .await?;
             let report = crate::edition::ee::models::inference_proposals::confirm(
@@ -86,9 +86,9 @@ impl ConfirmProposalsWorker {
                 args.user_id,
             )
             .await?;
-            api_key_audit_log::record(&txn, AuditActor {
+            access_key_audit_log::record(&txn, AuditActor {
                 tenant_id: args.tenant_id, workspace_id: args.workspace_id,
-                api_key_id: args.api_key_id, user_id: args.user_id,
+                access_key_id: args.access_key_id, user_id: args.user_id,
             }, AuditAction::BackgroundJobCompleted, serde_json::json!({"job_id": id, "inference_job_id": args.inference_job_id, "confirmed": report.confirmed, "stale": report.stale, "invalid": report.invalid})).await?;
         }
         txn.commit().await.internal()?;
@@ -112,10 +112,10 @@ pub(crate) async fn enqueue(
         &AuditActor {
             tenant_id: auth.tenant_id,
             workspace_id: auth.require_workspace()?,
-            api_key_id: auth.api_key_id,
+            access_key_id: auth.access_key_id,
             user_id: auth.user_id,
         },
-        crate::models::iam::policy::Action::InferenceConfirm,
+        crate::models::iam::policy::Action::ConfirmInferenceProposals,
     )
     .await?;
     crate::edition::ee::models::inference_jobs::workspace_job(
@@ -136,7 +136,7 @@ pub(crate) async fn enqueue(
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
         workspace_id: auth.require_workspace()?,
-        api_key_id: auth.api_key_id,
+        access_key_id: auth.access_key_id,
         user_id: auth.user_id,
         inference_job_id,
         worker_class,

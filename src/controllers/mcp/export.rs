@@ -12,9 +12,9 @@ use crate::models::transfer::export;
 #[tool_router(vis = "pub(crate)", router = tool_router_export)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Export schemas, entities, and relations in the selected workspace as newline-delimited JSON (requires export IAM permission); one {\"kind\":\"schema\"|\"entity\"|\"relation\",\"record\":{...}} object per line, the same format import_jsonl reads back. Limited to 8 MiB and 10,000 records; larger workspaces must use paginated list APIs."
+        description = "Export schemas, entities, and relations as newline-delimited JSON for create_import_job. Limited to 8 MiB and 10,000 records."
     )]
-    pub(crate) async fn export_jsonl(
+    pub(crate) async fn export_workspace(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {

@@ -4,7 +4,7 @@ use sea_orm::{DatabaseConnection, DatabaseTransaction};
 
 use crate::error::ResultExt;
 use crate::error::YorishiroError;
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 use crate::models::iam::access::{
     WorkspaceTarget, authorize_workspace_action, hide_inferred_resource,
 };
@@ -36,7 +36,7 @@ impl WorkspaceSession {
     ) -> Result<Self, YorishiroError> {
         let workspace_id = ctx.require_workspace()?;
         // Touch independently: read handlers roll their workspace transaction back on drop.
-        crate::models::api_keys::Entity::touch_authenticated(app, &ctx).await?;
+        crate::models::access_keys::Entity::touch_authenticated(app, &ctx).await?;
         let txn = if write {
             crate::db::begin_workspace_write(app, ctx.tenant_id, workspace_id).await?
         } else {

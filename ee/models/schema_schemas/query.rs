@@ -43,13 +43,13 @@ struct Row {
 /// Reads both definitions in one joined ORM query before computing the merge summary.
 pub(crate) async fn list_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     page: ListParams,
 ) -> Result<Vec<UpstreamChange>, YorishiroError> {
     use crate::models::_entities::{schema_schemas as schema, template_templates as template};
     use crate::models::iam::{access::read_workspaces, policy::Action};
     use std::collections::HashMap;
-    let workspaces = read_workspaces(&ctx.db, actor, Action::SchemaUpstreamList).await?;
+    let workspaces = read_workspaces(&ctx.db, actor, Action::ListSchemaUpstreamChanges).await?;
     let rows = schema::Entity::find()
         .select_only()
         .column(schema::Column::WorkspaceId)

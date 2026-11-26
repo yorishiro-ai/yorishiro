@@ -27,9 +27,9 @@ pub mod workspace_llm_keys;
 pub mod workspace_worker_classes;
 pub mod workspace_workspaces;
 
-// API keys.
-pub mod api_key_audit_log;
-pub mod api_keys;
+// access keys.
+pub mod access_key_audit_log;
+pub mod access_keys;
 
 // IAM: policies, groups, roles and the checks that evaluate them.
 pub mod iam;
@@ -38,6 +38,7 @@ pub mod iam_group_memberships;
 pub mod iam_group_policy_attachments;
 pub mod iam_groups;
 pub mod iam_policies;
+pub mod iam_policy_versions;
 pub mod iam_tenant_roots;
 pub mod iam_user_policy_attachments;
 

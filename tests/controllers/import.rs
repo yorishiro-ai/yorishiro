@@ -11,12 +11,12 @@ fn concurrent_import_workers_keep_each_apps_database() {
         boot_request::<App, _, _>(|request, ctx| async move {
             let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
             let accepted = request
-                .post("/api/import.jsonl")
+                .post("/api/import-jobs")
                 .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .text("")
                 .await;
             assert_eq!(accepted.status_code(), StatusCode::ACCEPTED);
-            let id = accepted.json::<serde_json::Value>()["job_id"]
+            let id = accepted.json::<serde_json::Value>()["import_job_id"]
                 .as_str()
                 .unwrap()
                 .parse()
@@ -63,11 +63,10 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
             api_key: key,
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let administrator = fixtures::create_iam_reader(&ctx, tenant_id).await;
-        let read_key = yorishiro::models::api_keys::Entity::create_api_key(
+        let read_key = yorishiro::models::access_keys::Entity::create_access_key(
             &ctx.db,
             workspace_id,
             Some(administrator),
-            false,
         )
         .await
         .unwrap();
@@ -82,14 +81,14 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
         .await
         .expect("create another workspace");
         txn.commit().await.unwrap();
-        let other_key = fixtures::issue_api_key(&ctx, other_workspace.id, user_id, false).await;
+        let other_key = fixtures::issue_access_key(&ctx, other_workspace.id, user_id).await;
         let accepted = request
-            .post("/api/import.jsonl")
+            .post("/api/import-jobs")
             .add_header("Authorization", format!("Bearer {key}"))
             .text("")
             .await;
         assert_eq!(accepted.status_code(), StatusCode::ACCEPTED);
-        let id = accepted.json::<serde_json::Value>()["job_id"]
+        let id = accepted.json::<serde_json::Value>()["import_job_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -196,7 +195,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
         let body = format!("{first}\n{second}\n");
 
         let import_response = request
-            .post("/api/import.jsonl")
+            .post("/api/import-jobs")
             .add_header("Authorization", auth.clone())
             .text(body)
             .await;
@@ -207,7 +206,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             import_response.text()
         );
         let accepted: serde_json::Value = import_response.json();
-        let id = accepted["job_id"].as_str().unwrap().parse().unwrap();
+        let id = accepted["import_job_id"].as_str().unwrap().parse().unwrap();
         let before = request
             .get("/api/entities?entity_type=project")
             .add_header("Authorization", auth.clone())

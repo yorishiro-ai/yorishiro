@@ -1,4 +1,4 @@
-use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
+use crate::requests::fixtures::{TenantArgs, TestTenant, issue_access_key};
 use crate::requests::{boot_request, boot_request_with_timezone};
 use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
@@ -15,7 +15,7 @@ async fn member_key(ctx: &loco_rs::app::AppContext, tenant_id: Uuid, workspace_i
     tenant_memberships::add_member(&ctx.db, tenant_id, member.id)
         .await
         .expect("add member");
-    issue_api_key(ctx, workspace_id, member.id, false).await
+    issue_access_key(ctx, workspace_id, member.id).await
 }
 
 #[tokio::test]
@@ -150,7 +150,7 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
             assert_eq!(created_at.offset().local_minus_utc(), expected_offset);
         }
 
-        let staging_key = issue_api_key(&ctx, staging_id.parse().unwrap(), owner_id, false).await;
+        let staging_key = issue_access_key(&ctx, staging_id.parse().unwrap(), owner_id).await;
         let response = request
             .get(&format!("/api/workspaces/{staging_id}"))
             .add_header("Authorization", format!("Bearer {staging_key}"))
@@ -188,7 +188,7 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
     use sea_orm::TransactionTrait;
     use std::sync::Arc;
     use yorishiro::controllers::middleware::auth::Authenticator;
-    use yorishiro::models::{api_keys, tenancy};
+    use yorishiro::models::{access_keys, tenancy};
 
     struct PausedAuthentication {
         inner: Arc<dyn Authenticator>,
@@ -203,7 +203,7 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             app: &loco_rs::app::AppContext,
             key: &str,
             headers: &[(String, String)],
-        ) -> Result<api_keys::AuthContext, yorishiro::YorishiroError> {
+        ) -> Result<access_keys::AuthContext, yorishiro::YorishiroError> {
             let actor = self.inner.authenticate(app, key, headers).await?;
             self.resolved.notify_one();
             self.resume.notified().await;
@@ -224,21 +224,19 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
         .await
         .unwrap();
         txn.commit().await.unwrap();
-        let key = api_keys::Entity::create_tenant_api_key(
+        let key = access_keys::Entity::create_tenant_access_key(
             &ctx.db,
             tenant.tenant_id,
             Some(admin.id),
-            false,
             "stale-admin",
         )
         .await
         .unwrap();
-        let actor = api_keys::AuthContext {
-            api_key_id: key.id,
+        let actor = access_keys::AuthContext {
+            access_key_id: key.id,
             workspace_id: None,
             tenant_id: tenant.tenant_id,
             user_id: Some(admin.id),
-            audit: false,
         };
         let resolved = Arc::new(tokio::sync::Notify::new());
         let resume = Arc::new(tokio::sync::Notify::new());
@@ -264,7 +262,7 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
         response.assert_status(StatusCode::FORBIDDEN);
         assert!(matches!(
             tenancy::delete_workspace_as(&ctx.db, &actor, tenant.workspace_id).await,
-            Err(yorishiro::YorishiroError::ScopeInsufficient { .. })
+            Err(yorishiro::YorishiroError::AccessDenied { .. })
         ));
         tenant_memberships::add_member(&ctx.db, tenant.tenant_id, admin.id)
             .await
@@ -277,7 +275,7 @@ async fn workspace_mutations_recheck_stale_administrator_contexts() {
             tokio::time::timeout(std::time::Duration::from_secs(10), resolved.notified())
                 .await
                 .expect("request must authenticate before revocation");
-            api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+            access_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
             resume.notify_one();
         };
         let (response, ()) = tokio::join!(async { create.await }, revoke_after_authentication);
@@ -468,6 +466,21 @@ async fn duplicate_workspace_names_conflict_instead_of_failing_internally() {
             duplicate
                 .text()
                 .contains("a workspace with this name already exists")
+        );
+        let session = super::mcp::initialize(&request).await;
+        let duplicate = super::mcp::call_tool(
+            &request,
+            &session,
+            &key,
+            "create_workspace",
+            serde_json::json!({"name":"demo"}),
+        )
+        .await;
+        let error = &duplicate["result"]["structuredContent"]["error"];
+        assert_eq!(error["code"], "conflict");
+        assert_eq!(
+            error["message"],
+            "a workspace with this name already exists"
         );
 
         let rename = request

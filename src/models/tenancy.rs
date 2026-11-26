@@ -36,7 +36,7 @@ pub async fn issue_login_key(
     user_id: Uuid,
     expected_password_hash: Option<&str>,
     expected_tenant: Option<Uuid>,
-) -> Result<(crate::models::api_keys::CreatedTenantApiKey, Uuid), YorishiroError> {
+) -> Result<(crate::models::access_keys::CreatedTenantAccessKey, Uuid), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     let memberships = tenant_memberships::Entity::find()
         .filter(tenant_memberships::Column::UserId.eq(user_id))
@@ -44,7 +44,7 @@ pub async fn issue_login_key(
         .await
         .internal()?;
     let [membership] = memberships.as_slice() else {
-        return Err(YorishiroError::ScopeInsufficient {
+        return Err(YorishiroError::AccessDenied {
             message: "this account must belong to exactly one tenant".into(),
             hint: "ask a tenant administrator to resolve the account membership".into(),
         });
@@ -80,7 +80,8 @@ pub async fn issue_login_key(
     if !crate::models::tenant_memberships::is_member(&txn, tenant_id, user_id).await? {
         return Err(YorishiroError::Unauthenticated);
     }
-    let key = crate::models::api_keys::Entity::create_login_key(&txn, tenant_id, user_id).await?;
+    let key =
+        crate::models::access_keys::Entity::create_login_key(&txn, tenant_id, user_id).await?;
     txn.commit().await.internal()?;
     Ok((key, tenant_id))
 }
@@ -113,7 +114,6 @@ pub(crate) async fn signup_account(
         max_tenants,
     )
     .await?;
-    crate::models::iam::builtin::bootstrap(&txn, tenant.id).await?;
     let user = register_member(&txn, tenant.id, email, password, display_name).await?;
     assign_initial_root(&txn, tenant.id, user.id).await?;
     txn.commit().await.internal()?;
@@ -142,7 +142,6 @@ pub(crate) async fn setup_first_account(
         });
     }
     let tenant = tenant_tenants::create_tenant(&txn, "default", max_tenants).await?;
-    crate::models::iam::builtin::bootstrap(&txn, tenant.id).await?;
     let user = register_member(&txn, tenant.id, email, password, display_name).await?;
     assign_initial_root(&txn, tenant.id, user.id).await?;
     txn.commit().await.internal()?;
@@ -186,50 +185,56 @@ pub struct LoginWorkspace {
 /// Discovers workspaces within the authenticated credential's tenant boundary.
 ///
 /// # Errors
-/// Rejects revoked credentials or membership and propagates discovery failures.
-pub async fn discover_workspaces(
-    conn: &impl ConnectionTrait,
-    actor: &crate::models::api_keys::AuthContext,
+/// Rejects callers without `workspace:DiscoverWorkspaces` and propagates discovery failures.
+pub(crate) async fn discover_workspaces(
+    conn: &sea_orm::DatabaseConnection,
+    actor: &crate::models::access_keys::AuthContext,
 ) -> Result<Vec<LoginWorkspace>, YorishiroError> {
-    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
-    let key = crate::models::api_keys::Entity::find_by_id(current.api_key_id)
-        .one(conn)
-        .await
-        .internal()?
-        .ok_or(YorishiroError::Unauthenticated)?;
-    if let Some(user_id) = current.user_id {
-        let root = crate::models::api_keys::Model::is_root_credential(conn, key.id).await?;
-        let (_, workspaces) = login_options(conn, user_id).await?;
-        return Ok(workspaces
-            .into_iter()
-            .filter(|workspace| {
-                workspace.tenant_id == current.tenant_id
-                    && (root
-                        || key
-                            .workspace_id
-                            .is_none_or(|id| id == workspace.workspace_id))
-            })
-            .collect());
-    }
+    use crate::models::iam::access::IamEvaluation;
+    use crate::models::iam::policy::{Action, Resource};
+    let txn = crate::db::begin_write(conn).await.internal()?;
+    let evaluation = IamEvaluation::load(&txn, actor).await?;
+    evaluation
+        .require(
+            Action::DiscoverWorkspaces,
+            Resource::Tenant {
+                tenant_id: actor.tenant_id,
+            },
+        )
+        .await?;
     let workspaces = workspace_workspaces::Entity::find()
-        .filter(workspace_workspaces::Column::TenantId.eq(current.tenant_id))
+        .filter(workspace_workspaces::Column::TenantId.eq(actor.tenant_id))
         .find_also_related(crate::models::_entities::tenant_tenants::Entity)
-        .all(conn)
+        .all(&txn)
         .await
         .internal()?;
-    workspaces
-        .into_iter()
-        .filter(|(workspace, _)| key.workspace_id.is_none_or(|id| id == workspace.id))
-        .map(|(workspace, tenant)| {
-            let tenant = tenant.ok_or(YorishiroError::Unauthenticated)?;
-            Ok(LoginWorkspace {
-                workspace_id: workspace.id,
-                workspace_name: workspace.name,
-                tenant_id: tenant.id,
-                tenant_name: tenant.name,
-            })
-        })
-        .collect()
+    let mut candidates = Vec::new();
+    for (workspace, tenant) in workspaces {
+        match evaluation
+            .require(
+                Action::GetWorkspace,
+                Resource::Workspace {
+                    tenant_id: actor.tenant_id,
+                    workspace_id: workspace.id,
+                },
+            )
+            .await
+        {
+            Ok(()) => {
+                let tenant = tenant.ok_or(YorishiroError::Unauthenticated)?;
+                candidates.push(LoginWorkspace {
+                    workspace_id: workspace.id,
+                    workspace_name: workspace.name,
+                    tenant_id: tenant.id,
+                    tenant_name: tenant.name,
+                });
+            }
+            Err(YorishiroError::AccessDenied { .. }) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    txn.commit().await.internal()?;
+    Ok(candidates)
 }
 
 #[derive(serde::Serialize, schemars::JsonSchema)]
@@ -290,18 +295,14 @@ async fn login_options(
             .await?;
             let mut policies = Vec::new();
             if !root {
-                for record in crate::models::iam_policies::Model::for_user(
+                for record in crate::models::iam_policies::Model::effective_for_user(
                     conn,
                     membership.tenant_id,
                     user_id,
                 )
                 .await?
                 {
-                    policies.push(crate::models::iam::policy::Policy::parse(
-                        &serde_json::to_string(&record.document).internal()?,
-                        membership.tenant_id,
-                        |tenant, _| tenant == membership.tenant_id,
-                    )?);
+                    policies.push(record.parse(membership.tenant_id)?);
                 }
             }
             permissions.insert(membership.tenant_id, (root, policies));
@@ -312,7 +313,7 @@ async fn login_options(
                 && !crate::models::iam::policy::Policy::allows(
                     policies,
                     workspace.tenant_id,
-                    crate::models::iam::policy::Action::WorkspaceGet,
+                    crate::models::iam::policy::Action::GetWorkspace,
                     crate::models::iam::policy::Resource::Workspace {
                         tenant_id: workspace.tenant_id,
                         workspace_id: workspace.id,
@@ -419,7 +420,7 @@ pub(crate) async fn create_workspace_with_quota(
 
 pub(crate) async fn create_workspace_in_context(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     name: &str,
     max_entities: Option<i32>,
     schema_id: Option<Uuid>,
@@ -428,7 +429,7 @@ pub(crate) async fn create_workspace_in_context(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::WorkspaceCreate,
+        crate::models::iam::policy::Action::CreateWorkspace,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -452,7 +453,7 @@ pub(crate) async fn create_workspace_in_context(
 /// Rejects revoked credentials, missing permission, foreign targets or the last workspace.
 pub async fn delete_workspace_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
@@ -464,7 +465,7 @@ pub async fn delete_workspace_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::WorkspaceDelete,
+        crate::models::iam::policy::Action::DeleteWorkspace,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id,

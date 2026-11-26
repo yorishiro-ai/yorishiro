@@ -54,20 +54,20 @@ impl TryFrom<Model> for RelationRecord {
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(self, db: &C, _insert: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
         let mut this = self;
-        this.id = crate::db::sqlite_generated_id(db, this.id);
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
         Ok(this)
     }
 }
 
 pub(crate) async fn workspace_for_actor(
     db: &impl ConnectionTrait,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
     let record = Entity::find_by_id(id)
@@ -271,11 +271,11 @@ pub async fn delete(
 
 pub(crate) async fn list_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     query: ListRelationsQuery,
 ) -> Result<Vec<RelationRecord>, YorishiroError> {
     use crate::models::iam::{access::read_workspaces, policy::Action};
-    let workspaces = read_workspaces(&ctx.db, actor, Action::RelationList).await?;
+    let workspaces = read_workspaces(&ctx.db, actor, Action::ListRelations).await?;
     let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
     let records = list_workspaces(&txn, &workspaces, actor.tenant_id, query).await?;
     txn.commit().await.internal()?;
@@ -570,7 +570,7 @@ async fn neighbor_rows(
 /// Returns the session, authorization or insert error.
 pub(crate) async fn create_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     input: CreateRelationInput,
 ) -> Result<RelationRecord, YorishiroError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
@@ -580,7 +580,7 @@ pub(crate) async fn create_for_actor(
         ctx,
         actor,
         target,
-        Some(crate::models::iam::policy::Action::RelationCreate),
+        Some(crate::models::iam::policy::Action::CreateRelation),
         async |session| create(session.txn(), session.workspace_id()?, input).await,
     )
     .await
@@ -592,14 +592,14 @@ pub(crate) async fn create_for_actor(
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn get_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<RelationRecord, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Relation(id),
-        crate::models::iam::policy::Action::RelationGet,
+        crate::models::iam::policy::Action::GetRelation,
         async |session| get(session.txn(), session.workspace_id()?, id).await,
     )
     .await
@@ -611,14 +611,14 @@ pub(crate) async fn get_for_actor(
 /// Returns the session, authorization or delete error.
 pub(crate) async fn delete_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<(), YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Relation(id),
-        Some(crate::models::iam::policy::Action::RelationDelete),
+        Some(crate::models::iam::policy::Action::DeleteRelation),
         async |session| delete(session.txn(), session.workspace_id()?, id).await,
     )
     .await
@@ -630,7 +630,7 @@ pub(crate) async fn delete_for_actor(
 /// Returns the session, authorization or update error.
 pub(crate) async fn set_status_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     input: SetRelationStatusInput,
 ) -> Result<RelationRecord, YorishiroError> {
     let id = input.id;
@@ -638,7 +638,7 @@ pub(crate) async fn set_status_for_actor(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Relation(id),
-        Some(crate::models::iam::policy::Action::RelationUpdate),
+        Some(crate::models::iam::policy::Action::UpdateRelation),
         async |session| set_status(session.txn(), session.workspace_id()?, input).await,
     )
     .await

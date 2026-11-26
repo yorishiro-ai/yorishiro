@@ -13,8 +13,10 @@ use axum::extract::{Path, Query, State};
 use loco_rs::app::AppContext;
 use uuid::Uuid;
 
+use crate::dtos::common::TemplateIdPath;
 use crate::edition::ee::dtos::marketplace::{
-    ForkParams, ForkResponse, PublishVersionRequest as PublishVersionInput, SetVisibilityRequest,
+    ForkParams, ForkResponse, MarketplaceVersionPath, PublishVersionRequest as PublishVersionInput,
+    SetVisibilityRequest,
 };
 use crate::edition::ee::models::marketplace;
 use crate::edition::ee::models::marketplace::{
@@ -33,11 +35,34 @@ async fn list_marketplace(
     Ok(Json(listings))
 }
 
-/// `GET /api/marketplace/{id}/versions`: published versions, plus the caller's own drafts when it owns the template.
+async fn get_marketplace_template(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    Path(TemplateIdPath { template_id }): Path<TemplateIdPath<Uuid>>,
+) -> Result<Json<MarketplaceListing>, ApiError> {
+    Ok(Json(
+        marketplace::get_template_as(&ctx.db, &actor, template_id).await?,
+    ))
+}
+
+async fn get_marketplace_version(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    Path(MarketplaceVersionPath {
+        template_id,
+        version_id,
+    }): Path<MarketplaceVersionPath>,
+) -> Result<Json<TemplateVersionRecord>, ApiError> {
+    Ok(Json(
+        marketplace::get_version_as(&ctx.db, &actor, template_id, version_id).await?,
+    ))
+}
+
+/// Lists published versions and includes drafts for the template owner.
 async fn list_versions(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(TemplateIdPath { template_id }): Path<TemplateIdPath<Uuid>>,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<TemplateVersionRecord>>, ApiError> {
     let versions =
@@ -45,11 +70,11 @@ async fn list_versions(
     Ok(Json(versions))
 }
 
-/// `POST /api/marketplace/{id}/versions`: publish the next version of your own template.
+/// Publishes the next version of a template the caller owns.
 async fn publish_version(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(TemplateIdPath { template_id }): Path<TemplateIdPath<Uuid>>,
     Json(body): Json<PublishVersionInput>,
 ) -> Result<Created<TemplateVersionRecord>, ApiError> {
     let request = PublishVersionRequest {
@@ -61,11 +86,11 @@ async fn publish_version(
     Ok(Created(record))
 }
 
-/// `GET /api/marketplace/{id}/reviews`
+/// Lists reviews for a marketplace template.
 async fn list_reviews(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(TemplateIdPath { template_id }): Path<TemplateIdPath<Uuid>>,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<TemplateReviewRecord>>, ApiError> {
     let reviews =
@@ -73,22 +98,22 @@ async fn list_reviews(
     Ok(Json(reviews))
 }
 
-/// `POST /api/marketplace/{id}/reviews`: leave or replace this tenant's review.
+/// Creates or replaces the current tenant's review.
 async fn submit_review(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(TemplateIdPath { template_id }): Path<TemplateIdPath<Uuid>>,
     Json(body): Json<SubmitReviewRequest>,
 ) -> Result<Json<TemplateReviewRecord>, ApiError> {
     let record = marketplace::submit_review(&ctx, &actor, template_id, body).await?;
     Ok(Json(record))
 }
 
-/// `POST /api/marketplace/{id}/fork`: copy a published version into your own library.
+/// Copies a published version into the current tenant's library.
 async fn fork_template(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(TemplateIdPath { template_id }): Path<TemplateIdPath<Uuid>>,
     Query(params): Query<ForkParams>,
 ) -> Result<Created<ForkResponse>, ApiError> {
     let forked = marketplace::fork_template(&ctx, &actor, template_id, params.version).await?;
@@ -97,11 +122,11 @@ async fn fork_template(
     }))
 }
 
-/// `PUT /api/marketplace/{id}/visibility`: list your own template, or take it back down.
+/// Changes whether a template the caller owns appears in the marketplace.
 async fn set_visibility(
     State(ctx): State<AppContext>,
     AuthContext(actor): AuthContext,
-    Path(crate::dtos::common::IdPath { id: template_id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(TemplateIdPath { template_id }): Path<TemplateIdPath<Uuid>>,
     Json(body): Json<SetVisibilityRequest>,
 ) -> Result<axum::response::NoContent, ApiError> {
     let visibility = TemplateVisibility::parse_input(&body.visibility)?;
@@ -115,65 +140,46 @@ pub fn routes() -> Routes {
         .prefix("api/marketplace")
         .add(
             "/",
-            aide::axum::routing::get_with(list_marketplace, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["marketplace_list"]),
-                ))
+            aide::axum::routing::get_with(list_marketplace, |op| op.id("ListMarketplaceTemplates")),
+        )
+        .add(
+            "/{template_id}",
+            aide::axum::routing::get_with(get_marketplace_template, |op| {
+                op.id("GetMarketplaceTemplate")
             }),
         )
         .add(
-            "/{id}/versions",
-            aide::axum::routing::get_with(list_versions, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["marketplace_version_list"]),
-                ))
+            "/{template_id}/versions/{version_id}",
+            aide::axum::routing::get_with(get_marketplace_version, |op| {
+                op.id("GetMarketplaceVersion")
             }),
         )
         .add(
-            "/{id}/versions",
+            "/{template_id}/versions",
+            aide::axum::routing::get_with(list_versions, |op| op.id("ListMarketplaceVersions")),
+        )
+        .add(
+            "/{template_id}/versions",
             aide::axum::routing::post_with(publish_version, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["marketplace_publish"]),
-                ))
+                op.id("PublishMarketplaceVersion")
             }),
         )
         .add(
-            "/{id}/reviews",
-            aide::axum::routing::get_with(list_reviews, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["marketplace_review_list"]),
-                ))
-            }),
+            "/{template_id}/reviews",
+            aide::axum::routing::get_with(list_reviews, |op| op.id("ListMarketplaceReviews")),
         )
         .add(
-            "/{id}/reviews",
-            aide::axum::routing::post_with(submit_review, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["marketplace_review_submit"]),
-                ))
-            }),
+            "/{template_id}/reviews",
+            aide::axum::routing::post_with(submit_review, |op| op.id("CreateMarketplaceReview")),
         )
         .add(
-            "/{id}/fork",
-            aide::axum::routing::post_with(fork_template, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["marketplace_fork"]),
-                ))
-            }),
+            "/{template_id}/fork",
+            aide::axum::routing::post_with(fork_template, |op| op.id("ForkMarketplaceTemplate")),
         )
         .add(
-            "/{id}/visibility",
+            "/{template_id}/visibility",
             aide::axum::routing::put_with(set_visibility, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["marketplace_visibility_update"]),
-                ))
+                op.id("UpdateMarketplaceVisibility")
             }),
         )
 }

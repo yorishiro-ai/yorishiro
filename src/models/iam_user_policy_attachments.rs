@@ -9,37 +9,52 @@ use crate::error::{ResultExt, YorishiroError};
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(mut self, db: &C, _: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
-        self.id = crate::db::sqlite_generated_id(db, self.id);
-        Ok(self)
+        let mut this = self;
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        Ok(this)
     }
 }
 
 impl Model {
+    pub(crate) async fn count_for_user(
+        conn: &impl ConnectionTrait,
+        tenant_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<u64, YorishiroError> {
+        Entity::find()
+            .filter(Column::TenantId.eq(tenant_id))
+            .filter(Column::UserId.eq(user_id))
+            .count(conn)
+            .await
+            .internal()
+    }
+
     pub(crate) async fn list_as(
         db: &DatabaseConnection,
-        actor: &crate::models::api_keys::AuthContext,
+        actor: &crate::models::access_keys::AuthContext,
         user_id: Uuid,
         params: crate::models::pagination::ListParams,
-    ) -> Result<Vec<Self>, YorishiroError> {
+    ) -> Result<Vec<crate::models::iam_policies::AttachedPolicy>, YorishiroError> {
         use crate::models::iam::policy::{Action, Resource};
         let txn = crate::db::begin_write(db).await.internal()?;
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            Action::UserPolicyList,
+            Action::ListAttachedUserPolicies,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
         )
         .await?;
         if !crate::models::tenant_memberships::is_member(&txn, actor.tenant_id, user_id).await? {
-            return Err(YorishiroError::not_found("tenant user was not found"));
+            return Err(YorishiroError::not_found("user was not found"));
         }
-        let rows = Entity::find()
+        let ids = Entity::find()
             .filter(Column::TenantId.eq(actor.tenant_id))
             .filter(Column::UserId.eq(user_id))
             .order_by_asc(Column::Id)
@@ -47,42 +62,53 @@ impl Model {
             .offset(params.offset())
             .all(&txn)
             .await
-            .internal()?;
+            .internal()?
+            .into_iter()
+            .map(|row| row.policy_id)
+            .collect();
+        let policies =
+            crate::models::iam_policies::Model::attached(&txn, actor.tenant_id, ids).await?;
         txn.commit().await.internal()?;
-        Ok(rows)
+        Ok(policies)
     }
 
     pub(crate) async fn add_as(
         db: &DatabaseConnection,
-        actor: &crate::models::api_keys::AuthContext,
+        actor: &crate::models::access_keys::AuthContext,
         user_id: Uuid,
         policy_id: Uuid,
-    ) -> Result<Self, YorishiroError> {
+    ) -> Result<(), YorishiroError> {
         let txn = crate::db::begin_write(db).await.internal()?;
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::iam::policy::Action::UserPolicyAttach,
+            crate::models::iam::policy::Action::AttachUserPolicy,
             crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
         )
         .await?;
-        let attachment = Self::add(&txn, actor.tenant_id, user_id, policy_id).await?;
+        let policy = crate::models::iam_policies::Model::find(&txn, actor.tenant_id, policy_id)
+            .await?
+            .ok_or_else(|| YorishiroError::not_found("user or IAM policy was not found"))?;
+        if policy.is_administrator_access() {
+            crate::models::iam::access::require_administrator(&txn, actor).await?;
+        }
+        Self::add(&txn, actor.tenant_id, user_id, policy_id).await?;
         crate::models::iam_audit_events::record(
             &txn,
             actor,
-            "user_policy_attach",
-            serde_json::json!({"user_id":user_id,"policy_id":policy_id}),
+            crate::models::iam::policy::Action::AttachUserPolicy,
+            serde_json::json!({"user_id": user_id, "policy_id": policy_id, "policy_name": policy.name}),
         )
         .await?;
         txn.commit().await.internal()?;
-        Ok(attachment)
+        Ok(())
     }
 
     pub(crate) async fn remove_as(
         db: &DatabaseConnection,
-        actor: &crate::models::api_keys::AuthContext,
+        actor: &crate::models::access_keys::AuthContext,
         user_id: Uuid,
         policy_id: Uuid,
     ) -> Result<(), YorishiroError> {
@@ -91,7 +117,7 @@ impl Model {
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            Action::UserPolicyDetach,
+            Action::DetachUserPolicy,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
@@ -105,8 +131,8 @@ impl Model {
         crate::models::iam_audit_events::record(
             &txn,
             actor,
-            "user_policy_detach",
-            serde_json::json!({"user_id":user_id,"policy_id":policy_id}),
+            Action::DetachUserPolicy,
+            serde_json::json!({"user_id": user_id, "policy_id": policy_id}),
         )
         .await?;
         txn.commit().await.internal()?;
@@ -144,7 +170,7 @@ impl Model {
                 .is_none()
         {
             return Err(YorishiroError::not_found(
-                "tenant user or IAM policy was not found",
+                "user or IAM policy was not found",
             ));
         }
         ActiveModel {

@@ -5,7 +5,7 @@ use loco_rs::{app::AppContext, bgworker::BackgroundWorker, prelude::async_trait}
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::models::{api_key_audit_log, entity_entities};
+use crate::models::{access_key_audit_log, entity_entities};
 use crate::workers::{
     dispatch::{JobSpec, dispatch_job},
     embedding_sync::WorkerClass,
@@ -16,7 +16,7 @@ pub struct FillDefaultsArgs {
     pub(crate) lifecycle_id: Option<Uuid>,
     pub(crate) tenant_id: Uuid,
     pub(crate) workspace_id: Uuid,
-    pub(crate) api_key_id: Uuid,
+    pub(crate) access_key_id: Uuid,
     pub(crate) user_id: Option<Uuid>,
     pub(crate) schema_name: String,
     pub(crate) worker_class: WorkerClass,
@@ -58,11 +58,11 @@ impl FillDefaultsWorker {
         crate::db::lock_for_update(&txn, &format!("fill-defaults:{job_id}"))
             .await
             .map_err(loco_rs::Error::wrap)?;
-        if api_key_audit_log::job_completed(
+        if access_key_audit_log::job_completed(
             &txn,
             args.workspace_id,
             job_id,
-            api_key_audit_log::AuditAction::FillDefaults,
+            access_key_audit_log::AuditAction::FillDefaults,
         )
         .await
         .map_err(loco_rs::Error::wrap)?
@@ -72,14 +72,13 @@ impl FillDefaultsWorker {
         }
         crate::models::iam::access::require_iam_action(
             authorization.as_ref().unwrap_or(&txn),
-            &crate::models::api_keys::AuthContext {
+            &crate::models::access_keys::AuthContext {
                 tenant_id: args.tenant_id,
                 workspace_id: Some(args.workspace_id),
-                api_key_id: args.api_key_id,
+                access_key_id: args.access_key_id,
                 user_id: args.user_id,
-                audit: false,
             },
-            crate::models::iam::policy::Action::MigrationFillDefaults,
+            crate::models::iam::policy::Action::FillEntityDefaults,
             crate::models::iam::policy::Resource::Workspace {
                 tenant_id: args.tenant_id,
                 workspace_id: args.workspace_id,
@@ -96,13 +95,13 @@ impl FillDefaultsWorker {
         )
         .await
         .map_err(loco_rs::Error::wrap)?;
-        api_key_audit_log::record(
+        access_key_audit_log::record(
             &txn,
-            api_key_audit_log::AuditActor {
+            access_key_audit_log::AuditActor {
                 tenant_id: args.tenant_id, workspace_id: args.workspace_id,
-                api_key_id: args.api_key_id, user_id: args.user_id,
+                access_key_id: args.access_key_id, user_id: args.user_id,
             },
-            api_key_audit_log::AuditAction::FillDefaults,
+            access_key_audit_log::AuditAction::FillDefaults,
             serde_json::json!({"schema_name": args.schema_name, "job_id": job_id,
                 "entities_updated": report.entities_updated, "fields_filled": report.fields_filled}),
         ).await.map_err(loco_rs::Error::wrap)?;
@@ -120,14 +119,14 @@ impl FillDefaultsWorker {
 /// Returns the session, authorization or enqueue error.
 pub(crate) async fn enqueue_for_actor(
     ctx: &AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     schema_name: String,
 ) -> Result<Uuid, crate::YorishiroError> {
     WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::MigrationFillDefaults,
+            crate::models::iam::policy::Action::FillEntityDefaults,
         ),
         None,
         async |session| enqueue(ctx, session.txn(), &session.ctx, schema_name).await,
@@ -138,7 +137,7 @@ pub(crate) async fn enqueue_for_actor(
 pub(crate) async fn enqueue(
     ctx: &AppContext,
     txn: &sea_orm::DatabaseTransaction,
-    auth: &crate::models::api_keys::AuthContext,
+    auth: &crate::models::access_keys::AuthContext,
     schema_name: String,
 ) -> Result<Uuid, crate::YorishiroError> {
     use crate::error::ResultExt;
@@ -146,7 +145,7 @@ pub(crate) async fn enqueue(
     crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         auth,
-        crate::models::iam::policy::Action::MigrationFillDefaults,
+        crate::models::iam::policy::Action::FillEntityDefaults,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: auth.tenant_id,
             workspace_id: auth.require_workspace()?,
@@ -162,7 +161,7 @@ pub(crate) async fn enqueue(
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
         workspace_id: auth.require_workspace()?,
-        api_key_id: auth.api_key_id,
+        access_key_id: auth.access_key_id,
         user_id: auth.user_id,
         schema_name,
         worker_class,

@@ -16,18 +16,14 @@ pub struct Model {
     pub tenant_id: Uuid,
     #[sea_orm(column_type = "Text", unique_key = "uq_iam_policies_tenant_id_name")]
     pub name: String,
-    #[sea_orm(column_type = "JsonBinary")]
-    pub document: Json,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::iam_group_policy_attachments::Entity")]
-    IamGroupPolicyAttachments,
-    #[sea_orm(has_many = "super::iam_user_policy_attachments::Entity")]
-    IamUserPolicyAttachments,
+    #[sea_orm(has_many = "super::iam_policy_versions::Entity")]
+    IamPolicyVersions,
     #[sea_orm(
         belongs_to = "super::tenant_tenants::Entity",
         from = "Column::TenantId",
@@ -38,15 +34,9 @@ pub enum Relation {
     TenantTenants,
 }
 
-impl Related<super::iam_group_policy_attachments::Entity> for Entity {
+impl Related<super::iam_policy_versions::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::IamGroupPolicyAttachments.def()
-    }
-}
-
-impl Related<super::iam_user_policy_attachments::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::IamUserPolicyAttachments.def()
+        Relation::IamPolicyVersions.def()
     }
 }
 

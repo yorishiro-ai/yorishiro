@@ -1,28 +1,14 @@
-//! Request and response types for the IAM endpoints, including conversions from the IAM models.
+//! Request and response types shared by the IAM endpoints: pagination, the audit log and policy simulation.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct UpdatePolicy {
-    pub policy_id: Uuid,
-    pub name: String,
-    pub document: serde_json::Value,
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct PolicyId {
-    pub policy_id: Uuid,
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct UserPolicy {
-    pub user_id: Uuid,
-    pub policy_id: Uuid,
+pub(crate) struct ListIam {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -32,12 +18,13 @@ pub(crate) struct ListAudit {
     pub offset: Option<i64>,
 }
 
-#[derive(Serialize, schemars::JsonSchema)]
+#[derive(Serialize, JsonSchema)]
 pub(crate) struct AuditRecord {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub user_id: Option<Uuid>,
-    pub api_key_id: Uuid,
+    pub access_key_id: Uuid,
+    /// The action name, such as `CreateGroup`.
     pub action: String,
     pub detail: serde_json::Value,
     pub created_at: chrono::DateTime<chrono::FixedOffset>,
@@ -49,7 +36,7 @@ impl From<crate::models::iam_audit_events::Model> for AuditRecord {
             id: event.id,
             tenant_id: event.tenant_id,
             user_id: event.user_id,
-            api_key_id: event.api_key_id,
+            access_key_id: event.access_key_id,
             action: event.action,
             detail: event.detail,
             created_at: event.created_at,
@@ -59,153 +46,44 @@ impl From<crate::models::iam_audit_events::Model> for AuditRecord {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct CreateGroup {
-    pub name: String,
+pub(crate) struct SimulatePrincipalPolicyRequest {
+    /// The user whose policies are evaluated; defaults to the caller.
+    pub user_id: Option<Uuid>,
+    /// The qualified action name, such as `iam:CreateGroup` or `entity:GetEntity`.
+    pub action: String,
+    /// The tenant YRN, a workspace YRN, or `*`.
+    /// Omitted or `*` means the tenant for a tenant action and every workspace for a workspace action.
+    pub resource: Option<String>,
 }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct RenameGroup {
-    pub group_id: Uuid,
-    pub name: String,
+impl SimulatePrincipalPolicyRequest {
+    pub(crate) fn action(
+        &self,
+    ) -> Result<crate::models::iam::policy::Action, crate::YorishiroError> {
+        crate::models::iam::policy::Action::parse(&self.action).ok_or_else(|| {
+            crate::YorishiroError::ValidationFailed {
+                message: "action is not a known qualified action name".into(),
+                details: vec![],
+                hint: "use a name such as iam:CreateGroup".into(),
+            }
+        })
+    }
 }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct GroupId {
-    pub group_id: Uuid,
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct SimulatePrincipalPolicyResponse {
+    pub decision: crate::models::iam::policy::Decision,
+    /// The names of the policies whose statements decided the request.
+    pub matched_policies: Vec<String>,
 }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct CreatePolicy {
-    pub name: String,
-    pub document: serde_json::Value,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-pub(crate) struct GroupRecord {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub name: String,
-}
-
-impl From<crate::models::iam_groups::Model> for GroupRecord {
-    fn from(group: crate::models::iam_groups::Model) -> Self {
+impl From<crate::models::iam::access::Simulation> for SimulatePrincipalPolicyResponse {
+    fn from(simulation: crate::models::iam::access::Simulation) -> Self {
         Self {
-            id: group.id,
-            tenant_id: group.tenant_id,
-            name: group.name,
+            decision: simulation.decision,
+            matched_policies: simulation.matched_policies,
         }
     }
 }
 
-#[derive(Serialize, schemars::JsonSchema)]
-pub(crate) struct PolicyRecord {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub name: String,
-    pub document: serde_json::Value,
-}
-
-impl From<crate::models::iam_policies::Model> for PolicyRecord {
-    fn from(policy: crate::models::iam_policies::Model) -> Self {
-        Self {
-            id: policy.id,
-            tenant_id: policy.tenant_id,
-            name: policy.name,
-            document: policy.document,
-        }
-    }
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct GroupMember {
-    pub group_id: Uuid,
-    pub user_id: Uuid,
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct GroupPolicy {
-    pub group_id: Uuid,
-    pub policy_id: Uuid,
-}
-
-#[derive(Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ListIam {
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ListGroupAssociations {
-    pub group_id: Uuid,
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ListUserPolicies {
-    pub user_id: Uuid,
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-pub(crate) struct GroupMemberRecord {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub group_id: Uuid,
-    pub user_id: Uuid,
-}
-impl From<crate::models::iam_group_memberships::Model> for GroupMemberRecord {
-    fn from(row: crate::models::iam_group_memberships::Model) -> Self {
-        Self {
-            id: row.id,
-            tenant_id: row.tenant_id,
-            group_id: row.group_id,
-            user_id: row.user_id,
-        }
-    }
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-pub(crate) struct UserPolicyRecord {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub user_id: Uuid,
-    pub policy_id: Uuid,
-}
-impl From<crate::models::iam_user_policy_attachments::Model> for UserPolicyRecord {
-    fn from(row: crate::models::iam_user_policy_attachments::Model) -> Self {
-        Self {
-            id: row.id,
-            tenant_id: row.tenant_id,
-            user_id: row.user_id,
-            policy_id: row.policy_id,
-        }
-    }
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-pub(crate) struct GroupPolicyRecord {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub group_id: Uuid,
-    pub policy_id: Uuid,
-}
-impl From<crate::models::iam_group_policy_attachments::Model> for GroupPolicyRecord {
-    fn from(row: crate::models::iam_group_policy_attachments::Model) -> Self {
-        Self {
-            id: row.id,
-            tenant_id: row.tenant_id,
-            group_id: row.group_id,
-            policy_id: row.policy_id,
-        }
-    }
-}
-
-crate::dtos::common::list_params_from!(ListAudit, ListIam, ListGroupAssociations, ListUserPolicies,);
+crate::dtos::common::list_params_from!(ListAudit, ListIam);

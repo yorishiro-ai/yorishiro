@@ -50,9 +50,9 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Inspect current-tenant retirement inventory and retention consequences without changing data (requires tenant_get IAM permission with a tenant-scoped credential)"
+        description = "Inspect the current tenant's retirement inventory and retention consequences without changing data"
     )]
-    pub(crate) async fn tenant_retirement_inventory(
+    pub(crate) async fn get_tenant_retirement_inventory(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -61,7 +61,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Disable the current tenant after confirming its UUID, revoking all its credentials and cancelling work; data and identities remain and quota stays occupied (requires tenant_update IAM permission with a tenant-scoped credential; physical deletion is operator-only)"
+        description = "Confirm the tenant UUID to disable it, revoke its credentials and cancel its work. Data, identities and quota usage remain."
     )]
     pub(crate) async fn disable_tenant(
         &self,

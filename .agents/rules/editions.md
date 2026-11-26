@@ -76,12 +76,11 @@ Gated (return 404 without licence key):
 - `inference::gated_routes` (`infer-fill` alone)
 
 Ungated (serve regardless):
-- `dashboard`
 - `embedding`
 - `entity_columns`
 - `origin`
 - `worker_class`
-- `inference`'s `/workspace/llm-key` routes
+- `inference`'s `/workspace/llm-provider` routes
 
 **`stripe` and `oauth` are gated because billing and SSO login are enterprise-edition features.** The webhook still verifies its Stripe signature; both do nothing until their own configuration is set. The consequences are meant: a deployment that has not bought a licence cannot receive Stripe webhooks, and cannot serve OAuth login either, so anyone who signs in that way needs a password credential for `POST /auth/login` instead.
 

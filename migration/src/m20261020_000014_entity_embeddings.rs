@@ -22,19 +22,16 @@ impl MigrationTrait for Migration {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "ordered migration DDL keeps table definitions, constraints, and grants together"
-)]
 async fn up_entity_embeddings(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     {
         let name = "entity_embeddings";
-        let mut embedding = ColumnDef::new(Alias::new("embedding"));
-        if manager.get_database_backend() == DbBackend::Postgres {
-            embedding.custom(Alias::new("vector"));
-        } else {
-            embedding.blob();
-        }
+        let embedding = helpers::by_backend(
+            manager,
+            ColumnDef::new(Alias::new("embedding"))
+                .vector(None)
+                .to_owned(),
+            ColumnDef::new(Alias::new("embedding")).blob().to_owned(),
+        );
         let mut table = Table::create()
             .table(Alias::new(name))
             .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
@@ -91,77 +88,10 @@ async fn up_entity_embeddings(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
         helpers::grant(manager, "SELECT", name).await?;
     }
 
-    // Fence entity and provider mutations against embedding publication, including raw SQL writers.
-    helpers::pg_only(manager, r"
-            CREATE FUNCTION touch_workspace_embedding_revision() RETURNS trigger
-            LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-            BEGIN
-                IF TG_TABLE_NAME = 'entity_entities' THEN
-                    IF TG_OP = 'UPDATE' AND OLD.workspace_id IS DISTINCT FROM NEW.workspace_id THEN
-                        UPDATE workspace_workspaces SET embedding_content_revision = embedding_content_revision + 1 WHERE id = OLD.workspace_id;
-                    END IF;
-                    IF TG_OP = 'DELETE' THEN
-                        UPDATE workspace_workspaces SET embedding_content_revision = embedding_content_revision + 1 WHERE id = OLD.workspace_id;
-                    ELSE
-                        UPDATE workspace_workspaces SET embedding_content_revision = embedding_content_revision + 1 WHERE id = NEW.workspace_id;
-                    END IF;
-                ELSE
-                    IF TG_OP = 'UPDATE' AND
-                        ROW(OLD.base_url, OLD.model, OLD.api_key, OLD.dimensions, OLD.send_dimensions_param, OLD.document_prefix)
-                        IS NOT DISTINCT FROM
-                        ROW(NEW.base_url, NEW.model, NEW.api_key, NEW.dimensions, NEW.send_dimensions_param, NEW.document_prefix)
-                    THEN RETURN NEW; END IF;
-                    IF TG_OP = 'DELETE' THEN
-                        UPDATE workspace_workspaces SET embedding_revision = embedding_revision + 1, embedding_reindexing = true WHERE id = OLD.workspace_id;
-                    ELSE
-                        UPDATE workspace_workspaces SET embedding_revision = embedding_revision + 1, embedding_reindexing = true WHERE id = NEW.workspace_id;
-                    END IF;
-                END IF;
-                IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
-                RETURN NEW;
-            END $$;
-            CREATE TRIGGER entity_embedding_revision BEFORE INSERT OR DELETE OR UPDATE OF data, schema_id, entity_type, workspace_id
-                ON entity_entities FOR EACH ROW EXECUTE FUNCTION touch_workspace_embedding_revision();
-            CREATE TRIGGER provider_embedding_revision BEFORE INSERT OR UPDATE OR DELETE
-                ON workspace_embedding_keys FOR EACH ROW EXECUTE FUNCTION touch_workspace_embedding_revision();
-        ").await?;
-    for table in ["entity_entities", "workspace_embedding_keys"] {
-        for (operation, row) in [("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")] {
-            let operation_sql = if table == "entity_entities" && operation == "UPDATE" {
-                "UPDATE OF data, schema_id, entity_type, workspace_id"
-            } else {
-                operation
-            };
-            let condition = if table == "workspace_embedding_keys" && operation == "UPDATE" {
-                "WHEN OLD.base_url IS NOT NEW.base_url OR OLD.model IS NOT NEW.model OR OLD.api_key IS NOT NEW.api_key OR OLD.dimensions IS NOT NEW.dimensions OR OLD.send_dimensions_param IS NOT NEW.send_dimensions_param OR OLD.document_prefix IS NOT NEW.document_prefix "
-            } else {
-                ""
-            };
-            helpers::sqlite_only(manager, &format!(
-                    "CREATE TRIGGER {table}_embedding_revision_{operation} BEFORE {operation_sql} ON {table} {condition}BEGIN \
-                     UPDATE workspace_workspaces SET {revision} = {revision} + 1{gate} WHERE id = {row}.workspace_id; END;",
-                     revision = if table == "entity_entities" { "embedding_content_revision" } else { "embedding_revision" },
-                     gate = if table == "entity_entities" { "" } else { ", embedding_reindexing = true" },
-                )).await?;
-        }
-    }
-    helpers::sqlite_only(manager, "CREATE TRIGGER entity_embedding_revision_move BEFORE UPDATE OF workspace_id ON entity_entities WHEN OLD.workspace_id != NEW.workspace_id BEGIN UPDATE workspace_workspaces SET embedding_content_revision = embedding_content_revision + 1 WHERE id = OLD.workspace_id; END;").await?;
-
     Ok(())
 }
 
 async fn down_entity_embeddings(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    helpers::sqlite_only(manager, "DROP TRIGGER entity_embedding_revision_move;").await?;
-    helpers::pg_only(manager, "DROP TRIGGER entity_embedding_revision ON entity_entities; DROP TRIGGER provider_embedding_revision ON workspace_embedding_keys; DROP FUNCTION touch_workspace_embedding_revision();").await?;
-    for table in ["entity_entities", "workspace_embedding_keys"] {
-        for operation in ["INSERT", "UPDATE", "DELETE"] {
-            helpers::sqlite_only(
-                manager,
-                &format!("DROP TRIGGER {table}_embedding_revision_{operation};"),
-            )
-            .await?;
-        }
-    }
     {
         let name = "entity_embeddings";
         manager

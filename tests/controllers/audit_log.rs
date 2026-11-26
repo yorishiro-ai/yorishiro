@@ -5,14 +5,13 @@ use sea_orm::{EntityTrait, TransactionTrait};
 use uuid::Uuid;
 use yorishiro::App;
 
-use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
+use crate::requests::fixtures::{TenantArgs, TestTenant, issue_access_key};
 
 struct Setup {
     owner_id: Uuid,
     tenant_id: Uuid,
     workspace_id: Uuid,
     migration_key: String,
-    /// `Read` scope, `audit: true`: the independent grant this suite exists to prove, paired with the lowest scope on purpose to show the grant works with any scope, not only a high one.
     audit_key: String,
 }
 
@@ -27,7 +26,7 @@ async fn setup(request: &loco_rs::TestServer, ctx: &loco_rs::app::AppContext) ->
         owner_id,
         api_key: migration_key,
     } = TestTenant::create(request, ctx, TenantArgs::default()).await;
-    let audit_key = issue_api_key(ctx, workspace_id, owner_id, true).await;
+    let audit_key = issue_access_key(ctx, workspace_id, owner_id).await;
 
     Setup {
         owner_id,
@@ -60,16 +59,16 @@ async fn audit_reads_require_iam_and_preserve_the_configured_timezone() {
             &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("audit-reader"),
             "audit-reader-password", None).await.unwrap();
         txn.commit().await.unwrap();
-        let delegated = issue_api_key(&ctx, setup.workspace_id, member.id, true).await;
+        let delegated = issue_access_key(&ctx, setup.workspace_id, member.id).await;
         let root_key = crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
-        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["audit_log_list"],
-            "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
-        let policy = request.post("/api/iam/policies")
+        let document = serde_json::json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["audit:ListWorkspaceAuditEvents"],
+            "Resource":[format!("yrn:workspace:{}:{}", setup.tenant_id, setup.workspace_id)]}]});
+        let policy = request.post("/api/policies")
             .add_header("Authorization", format!("Bearer {root_key}"))
             .json(&serde_json::json!({"name":"audit-reader","document":document})).await;
         policy.assert_status(StatusCode::CREATED);
         let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
-        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         request.get("/api/audit-log").add_header("Authorization", format!("Bearer {delegated}"))
             .await.assert_status(StatusCode::FORBIDDEN);
         request.put(&attachment).add_header("Authorization", format!("Bearer {root_key}"))
@@ -77,10 +76,8 @@ async fn audit_reads_require_iam_and_preserve_the_configured_timezone() {
         request.get("/api/audit-log").add_header("Authorization", format!("Bearer {delegated}"))
             .await.assert_status_ok();
         let mut denied = document.clone();
-        denied["statements"][0]["effect"] = serde_json::json!("deny");
-        request.put(&format!("/api/iam/policies/{policy_id}"))
-            .add_header("Authorization", format!("Bearer {root_key}"))
-            .json(&serde_json::json!({"name":"audit-reader","document":denied})).await.assert_status_ok();
+        denied["Statement"][0]["Effect"] = serde_json::json!("Deny");
+        crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {root_key}"), &policy_id, &denied).await;
         request.get("/api/audit-log").add_header("Authorization", format!("Bearer {delegated}"))
             .await.assert_status(StatusCode::FORBIDDEN);
 
@@ -178,7 +175,7 @@ async fn undo_migration_job_is_recorded() {
         .expect("overwrite entity");
 
         let undo = request
-            .post(&format!("/api/migration-jobs/{job_id}/undo"))
+            .post(&format!("/api/migration-jobs/{job_id}:undo"))
             .add_header("Authorization", format!("Bearer {}", setup.migration_key))
             .await;
         assert_eq!(
@@ -187,7 +184,7 @@ async fn undo_migration_job_is_recorded() {
             "response: {:?}",
             undo.text()
         );
-        let queued_id: Uuid = undo.json::<serde_json::Value>()["job_id"]
+        let queued_id: Uuid = undo.json::<serde_json::Value>()["migration_job_id"]
             .as_str()
             .unwrap()
             .parse()
@@ -232,7 +229,7 @@ async fn reindex_audit_detail_is_workspace_id_and_is_recorded_before_relay_publi
             "response: {:?}",
             response.text()
         );
-        let dispatch_id: Uuid = response.json::<serde_json::Value>()["job_id"]
+        let dispatch_id: Uuid = response.json::<serde_json::Value>()["migration_job_id"]
             .as_str()
             .expect("durable job ID")
             .parse()
@@ -249,7 +246,7 @@ async fn reindex_audit_detail_is_workspace_id_and_is_recorded_before_relay_publi
             .expect("outbox committed with audit row");
         assert_eq!(committed_outbox.lifecycle_id, Some(dispatch_id));
         assert!(committed_outbox.published_at.is_none());
-        let committed_audit = yorishiro::models::api_key_audit_log::list_for_workspace(
+        let committed_audit = yorishiro::models::access_key_audit_log::list_for_workspace(
             &ctx.db,
             setup.workspace_id,
             yorishiro::models::pagination::ListParams::default(),
@@ -273,31 +270,6 @@ async fn reindex_audit_detail_is_workspace_id_and_is_recorded_before_relay_publi
         assert_eq!(body[0]["action"], "reindex_embeddings");
         assert_eq!(body[0]["detail"], expected);
         assert!(body[0]["detail"].get("job_id").is_none());
-    })
-    .await;
-}
-
-/// The independent-grant design this whole feature exists for: a `Migration`-scoped key, the
-/// highest scope on the ordered ladder, still cannot read the audit log without the separate
-/// `audit` grant.
-/// If `audit` had been added as a fifth rung above `Migration` instead, this would 200.
-#[tokio::test]
-async fn a_migration_scoped_key_without_the_audit_grant_is_refused() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = setup(&request, &ctx).await;
-        let administrator =
-            crate::requests::fixtures::create_iam_administrator(&ctx, setup.tenant_id).await;
-        let key = issue_api_key(&ctx, setup.workspace_id, administrator, false).await;
-        let response = request
-            .get("/api/audit-log")
-            .add_header("Authorization", format!("Bearer {key}"))
-            .await;
-        assert_eq!(
-            response.status_code(),
-            403,
-            "a Migration-scoped key with no audit grant must be refused: {:?}",
-            response.text()
-        );
     })
     .await;
 }

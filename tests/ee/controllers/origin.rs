@@ -109,13 +109,9 @@ async fn concurrent_rest_merges_commit_for_separate_workspaces() {
             .await
             .unwrap();
             txn.commit().await.unwrap();
-            let key = crate::requests::fixtures::issue_api_key(
-                &ctx,
-                workspace.id,
-                tenant.owner_id,
-                false,
-            )
-            .await;
+            let key =
+                crate::requests::fixtures::issue_access_key(&ctx, workspace.id, tenant.owner_id)
+                    .await;
             let response = request
                 .post("/api/schemas")
                 .add_header("Authorization", format!("Bearer {key}"))

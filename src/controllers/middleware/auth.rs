@@ -1,6 +1,6 @@
 //! The authentication guard every entry point (REST, MCP) resolves a request through.
 //!
-//! Persistence of keys lives on `models::api_keys`; this module turns a presented credential into an authorized, tenant-scoped transaction.
+//! Persistence of keys lives on `models::access_keys`; this module turns a presented credential into an authorized, tenant-scoped transaction.
 //! [`Authenticator`] is the seam an edition replaces, so a new authenticated entry point must go through it rather than calling `Entity::authenticate` directly.
 
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use loco_rs::prelude::async_trait;
 
 use crate::db::{DbHandle, is_sqlite};
 use crate::error::YorishiroError;
-use crate::models::api_keys::{AuthContext, Entity, WORKSPACE_HEADER};
+use crate::models::access_keys::{AuthContext, Entity, WORKSPACE_HEADER};
 use uuid::Uuid;
 
 /// Copies readable request headers into the authenticator input shape.
@@ -42,7 +42,7 @@ pub(crate) fn extract_bearer_key(headers: &HeaderMap) -> Option<&str> {
     )
 }
 
-/// Extracts the API key from an `Authorization` header value, or `None` if the header is absent, is not a `Bearer` credential, or carries an empty one.
+/// Extracts the access key from an `Authorization` header value, or `None` if the header is absent, is not a `Bearer` credential, or carries an empty one.
 ///
 /// Every adapter that authenticates a request routes through here, so `Authorization: Bearer ` with nothing after it gets the same answer everywhere.
 #[must_use]
@@ -52,7 +52,7 @@ pub fn bearer_credential(header_value: Option<&str>) -> Option<&str> {
         .filter(|token| !token.is_empty())
 }
 
-/// Resolves a presented API key into an [`AuthContext`].
+/// Resolves a presented access key into an [`AuthContext`].
 ///
 /// A seam: a deployment can replace this rule (a key that names its workspace per request, a key issued by an external identity system) without touching the routes that call it.
 /// `DefaultAuthenticator` is the behaviour of every deployment that does not replace it.
@@ -124,8 +124,6 @@ pub fn default_authenticator() -> Arc<dyn Authenticator> {
     Arc::new(DefaultAuthenticator)
 }
 
-pub use crate::models::iam::access::require_audit;
-
 /// Request authentication shared by transport adapters through the installed policy.
 pub(crate) struct RequestAuth<'a> {
     app: &'a AppContext,
@@ -177,17 +175,6 @@ impl<'a> RequestAuth<'a> {
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
         let ctx = self.resolve(key, headers).await?;
-        Entity::touch_authenticated(self.app, &ctx).await?;
-        Ok(ctx)
-    }
-
-    pub(crate) async fn verify_audit(
-        &self,
-        key: &str,
-        headers: &[(String, String)],
-    ) -> Result<AuthContext, YorishiroError> {
-        let ctx = self.resolve(key, headers).await?;
-        require_audit(&ctx)?;
         Entity::touch_authenticated(self.app, &ctx).await?;
         Ok(ctx)
     }

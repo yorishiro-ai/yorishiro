@@ -1,4 +1,4 @@
-use crate::controllers::mcp::try_tool;
+use crate::controllers::mcp::{render, try_tool, verified};
 use axum::http::request::Parts;
 use rmcp::ErrorData;
 use rmcp::handler::server::common::Extension;
@@ -8,8 +8,7 @@ use rmcp::{tool, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::{YorishiroMcpServer, err_to_tool_result, ok_json};
-use crate::controllers::middleware::auth;
+use super::YorishiroMcpServer;
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -21,53 +20,29 @@ pub(crate) struct AuditLogArgs {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_audit_log)]
 impl YorishiroMcpServer {
-    #[tool(
-        meta = audit_requirement(),
-        description = "List paginated audit history across permitted workspaces, or narrow to a selected workspace (requires audit_log_list IAM permission and the independent audit grant)"
-    )]
-    pub(crate) async fn list_audit_log(
+    #[tool(description = "List workspace audit events allowed by audit:ListWorkspaceAuditEvents.")]
+    pub(crate) async fn list_workspace_audit_events(
         &self,
         Parameters(args): Parameters<AuditLogArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let key = super::extract_bearer_key(&parts)?;
-        let headers = auth::header_pairs(&parts.headers).map_err(super::header_error)?;
-        let actor = match auth::RequestAuth::new(self.app_context())
-            .verify_audit(key, &headers)
-            .await
-        {
-            Ok(authorized) => authorized,
-            Err(crate::error::YorishiroError::Unauthenticated) => {
-                return Err(ErrorData::invalid_request("authentication failed", None));
-            }
-            Err(error) => return Ok(err_to_tool_result(error)),
-        };
+        let actor = verified!(self, parts);
         let page = try_tool!(
             crate::models::pagination::ListParams::from_pagination_query(
                 args.page.unwrap_or(1),
                 args.page_size.unwrap_or(50),
             )
         );
-        match crate::models::api_key_audit_log::list_for_actor(self.app_context(), &actor, page)
-            .await
-        {
-            Ok(records) => match crate::controllers::audit_log::render_records(
-                records,
-                crate::data::time::configured(self.app_context()),
-            ) {
-                Ok(rendered) => ok_json(rendered),
-                Err(error) => Ok(err_to_tool_result(error)),
-            },
-            Err(error) => Ok(err_to_tool_result(error)),
-        }
+        let ctx = self.app_context();
+        render(
+            crate::models::access_key_audit_log::list_for_actor(ctx, &actor, page)
+                .await
+                .and_then(|records| {
+                    crate::controllers::audit_log::render_records(
+                        records,
+                        crate::data::time::configured(ctx),
+                    )
+                }),
+        )
     }
-}
-
-fn audit_requirement() -> rmcp::model::MetaObject {
-    let mut meta = rmcp::model::MetaObject::new();
-    meta.0.insert(
-        "yorishiro/required_grants".into(),
-        serde_json::json!(["audit"]),
-    );
-    meta
 }

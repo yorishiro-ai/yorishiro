@@ -16,7 +16,7 @@
 //! OAuth is configured (that is the point of it: a client has to be able to tell "not configured"
 //! from "not present"), so its 404 has exactly one possible source.
 //!
-//! **Ungated inside a gated controller** (`/api/workspace/llm-key`) sits in `inference` beside a
+//! **Ungated inside a gated controller** (`/api/workspace/llm-provider`) sits in `inference` beside a
 //! gated route without being gated itself, because storing a credential is not a paid action while
 //! spending it on an inference call is. A layer applies per `Routes`, so this group exists to keep
 //! the two apart.
@@ -28,7 +28,7 @@
 //! handler's own "no secret configured") rather than merely "not 404": 501 is a status only the
 //! handler produces, so it cannot be reached unless the request got past the gate.
 //!
-//! **Ungated** (`dashboard`, `embedding`, `entity_columns`, `origin`, `worker_class`) must stay
+//! **Ungated** (`embedding`, `entity_columns`, `origin`, `worker_class`) must stay
 //! reachable in both boot states. Nothing in the current code can make these 404 for licence reasons:
 //! `Routes::layer` wraps each handler's own `MethodRouter`, so a layer cannot reach a route it was
 //! not attached to. That is exactly why the assertion is worth keeping: it does not guard a leak
@@ -64,12 +64,10 @@ const GATED: &[&str] = &[
 /// Asserted separately from `UNGATED` because the failure they catch is specific: collapsing
 /// `inference`'s two route groups into one would gate them, and nothing else in this file would
 /// notice.
-const UNGATED_INSIDE_A_GATED_CONTROLLER: &[&str] = &["/api/workspace/llm-key"];
+const UNGATED_INSIDE_A_GATED_CONTROLLER: &[&str] = &["/api/workspace/llm-provider"];
 
 /// One per ungated controller. These must be served in both boots.
 const UNGATED: &[&str] = &[
-    // dashboard.rs: `.prefix("api/tenant").add("/overview", get(tenant_overview))`
-    "/api/tenant/overview",
     // origin.rs: `.prefix("api/schemas").add("/upstream-changes", get(list_upstream_changes))`
     "/api/schemas/upstream-changes",
 ];
@@ -175,7 +173,7 @@ async fn missing_licence_state_closes_the_gate_again() {
             );
         }
         let licensed = request.get(GATED[0]).await.status_code();
-        // 401 here rather than 200: the request carries no API key, and the point is only that the
+        // 401 here rather than 200: the request carries no access key, and the point is only that the
         // *licence* is not what rejects it. Asserting the exact code rather than `!= 404` matters:
         // a bare `assert_ne!(.., 404)` also holds when the gate is disabled entirely.
         assert_eq!(

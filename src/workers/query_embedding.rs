@@ -122,7 +122,7 @@ async fn embed(
 
 /// Embeds `query_text` for a search by asking a worker, and waits a bounded time for the answer.
 ///
-/// `tenant_id` and `workspace_id` come from the verified API key.
+/// `tenant_id` and `workspace_id` come from the verified access key.
 /// On PostgreSQL every read and write of the request row runs on the tenant pool inside that workspace's scope, so row level security applies; SQLite is single-tenant.
 /// There is no fallback: when no worker answers in time the search fails, because a lexical result would silently differ from the semantic one the caller asked for.
 ///

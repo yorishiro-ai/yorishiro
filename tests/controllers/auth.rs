@@ -42,7 +42,7 @@ async fn signup_without_invite_creates_its_own_tenant() {
         assert!(login.get("workspace_id").is_none());
         let workspaces = request
             .get("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", login["api_key"].as_str().unwrap()))
+            .add_header("Authorization", format!("Bearer {}", login["access_key"].as_str().unwrap()))
             .await;
         workspaces.assert_status_ok();
         assert_eq!(workspaces.json::<serde_json::Value>(), serde_json::json!([]));

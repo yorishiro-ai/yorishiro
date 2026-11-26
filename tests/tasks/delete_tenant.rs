@@ -117,7 +117,7 @@ async fn delete_task_requires_confirmation_and_disablement_and_supports_retry() 
             1
         );
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", other.api_key))
             .await
             .assert_status(axum::http::StatusCode::OK);
@@ -145,7 +145,7 @@ async fn sqlite_retirement_retains_quota_until_deletion_and_preserves_identities
             .await
             .unwrap();
         assert!(inventory.disabled_at.is_some());
-        assert_eq!(inventory.api_keys, 0);
+        assert_eq!(inventory.access_keys, 0);
         assert!(inventory.workspace_ids.contains(&target.workspace_id));
         assert_disabled_creation_rejected(&ctx, target.tenant_id).await;
         let txn = ctx.db.begin().await.unwrap();

@@ -30,17 +30,6 @@ pub(crate) fn error_responses(
         .collect()
 }
 
-pub(crate) fn extension(
-    name: &'static str,
-    value: serde_json::Value,
-) -> impl FnOnce(aide::transform::TransformOperation<'_>) -> aide::transform::TransformOperation<'_>
-{
-    move |mut operation| {
-        operation.inner_mut().extensions.insert(name.into(), value);
-        operation
-    }
-}
-
 /// Keeps Loco's route groups and aide's inferred contract in one registration.
 #[derive(Default)]
 pub struct Routes {
@@ -71,7 +60,18 @@ impl Routes {
     #[must_use]
     /// # Panics
     /// Panics if aide cannot assemble the registered operation.
-    pub fn add(mut self, uri: &str, method: ApiMethodRouter<AppContext>) -> Self {
+    pub fn add(self, uri: &str, method: ApiMethodRouter<AppContext>) -> Self {
+        self.add_action(uri, "", method)
+    }
+
+    /// Documents a command suffix that the handler parses because Axum captures the entire path segment.
+    #[must_use]
+    pub(crate) fn add_action(
+        mut self,
+        uri: &str,
+        suffix: &str,
+        method: ApiMethodRouter<AppContext>,
+    ) -> Self {
         let prefix = self
             .loco
             .prefix
@@ -89,8 +89,16 @@ impl Routes {
         let _ = ApiRouter::new()
             .api_route(path, method.clone())
             .finish_api(&mut api);
+        if !suffix.is_empty()
+            && let Some(paths) = &mut api.paths
+            && let Some(item) = paths.paths.shift_remove(path)
+        {
+            paths.paths.insert(format!("{path}{suffix}"), item);
+        }
         for (path, method, operation) in operations_mut(&mut api) {
-            operation.operation_id = Some(operation_id(method, path));
+            if operation.operation_id.is_none() {
+                operation.operation_id = Some(operation_id(method, path));
+            }
             operation.tags.extend(self.tag.map(Into::into));
         }
         merge_api(&mut self.api, api);

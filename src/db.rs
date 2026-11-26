@@ -54,11 +54,9 @@ fn connection_options(config: &loco_rs::config::Database) -> sea_orm::ConnectOpt
 
 /// Builds the tenant pool and stores it with the existing identity pool in [`DbHandle`].
 ///
-/// The identity pool connects as the migration role for control-plane access (signup, setup, the admin CLI).
-/// Both pools install the configured PostgreSQL session timezone per connection and reset it on release.
+/// The identity pool is Loco's own pool; it connects as the migration role for control-plane access (signup, setup, the admin CLI).
 pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Result<()> {
-    let timezone = crate::data::time::configured(ctx).to_string();
-    let tenant = TenantDb::connect(&ctx.config.database, timezone)
+    let tenant = TenantDb::connect(&ctx.config.database)
         .await
         .map_err(|e| loco_rs::Error::Message(format!("failed to build tenant pool: {e}")))?;
     let identity = ctx.db.get_postgres_connection_pool().clone();
@@ -66,185 +64,23 @@ pub(crate) async fn install_pools(ctx: &loco_rs::app::AppContext) -> loco_rs::Re
     Ok(())
 }
 
-/// Replaces Loco's application pool with the backend's configured timezone hooks.
+/// Installs session ownership and reset policy for the tenant pool.
 ///
-/// # Errors
-/// Returns an error if the configured application pool cannot be opened.
-pub(crate) async fn replace_app_pool(ctx: &mut loco_rs::app::AppContext) -> loco_rs::Result<()> {
-    let config = &ctx.config.database;
-    let mut options = connection_options(config);
-    let zone = crate::data::time::configured(ctx);
-    if is_sqlite(&ctx.db) {
-        require_min_sqlite_connections(config.max_connections).map_err(loco_rs::Error::Message)?;
-        // Keep Loco's per-connection PRAGMAs and its busy_timeout-aware acquire budget.
-        let loco_pool = ctx.db.get_sqlite_connection_pool();
-        let loco_options = (*loco_pool.connect_options()).clone();
-        options.acquire_timeout(loco_pool.options().get_acquire_timeout());
-        // Close before reopening SQLite so connection-local functions own the configured zone.
-        ctx.db.close_by_ref().await.map_err(|error| {
-            loco_rs::Error::Message(format!(
-                "failed to close Loco's default SQLite app pool: {error}"
-            ))
-        })?;
-        options.map_sqlx_sqlite_opts(move |_| loco_options.clone());
-        options.map_sqlx_sqlite_pool_opts(move |pool| {
-            pool.after_connect(move |conn, _meta| {
-                Box::pin(async move {
-                    register_sqlite_timestamp(conn, zone).await?;
-                    Ok(())
-                })
-            })
-        });
-    } else if is_postgres(&ctx.db) {
-        postgres_session_options(&mut options, zone.to_string(), PoolRole::Identity);
-    } else {
-        return Ok(());
-    }
-    let replacement = sea_orm::Database::connect(options).await.map_err(|error| {
-        loco_rs::Error::Message(format!("failed to build application pool: {error}"))
-    })?;
-    let previous = std::mem::replace(&mut ctx.db, replacement);
-    previous.close_by_ref().await.map_err(|error| {
-        loco_rs::Error::Message(format!(
-            "failed to close Loco's default application pool: {error}"
-        ))
-    })?;
-    Ok(())
-}
-
-async fn register_sqlite_timestamp(
-    conn: &mut sea_orm::sqlx::SqliteConnection,
-    timezone: chrono_tz::Tz,
-) -> Result<(), sea_orm::sqlx::Error> {
-    let mut handle = conn.lock_handle().await?;
-    // SQLite owns this allocation after the call and invokes xDestroy on success or failure.
-    let timezone = Box::into_raw(Box::new(timezone)).cast();
-    // SAFETY: SQLx's locked handle excludes worker-thread SQLite calls; static C strings and valid
-    // callbacks are supplied, and SQLite owns `timezone` through xDestroy after invocation.
-    let result = unsafe {
-        libsqlite3_sys::sqlite3_create_function_v2(
-            handle.as_raw_handle().as_ptr(),
-            c"current_timestamp".as_ptr(),
-            0,
-            libsqlite3_sys::SQLITE_UTF8,
-            timezone,
-            Some(sqlite_current_timestamp),
-            None,
-            None,
-            Some(drop_sqlite_timezone),
-        )
-    };
-    if result == libsqlite3_sys::SQLITE_OK {
-        Ok(())
-    } else {
-        Err(sea_orm::sqlx::Error::Protocol(format!(
-            "failed to register SQLite CURRENT_TIMESTAMP: {result}"
-        )))
-    }
-}
-
-unsafe extern "C" fn drop_sqlite_timezone(value: *mut std::ffi::c_void) {
-    // SAFETY: SQLite calls xDestroy exactly once with the Box pointer transferred at registration.
-    unsafe { drop(Box::from_raw(value.cast::<chrono_tz::Tz>())) };
-}
-
-unsafe extern "C" fn sqlite_current_timestamp(
-    context: *mut libsqlite3_sys::sqlite3_context,
-    _argument_count: std::ffi::c_int,
-    _arguments: *mut *mut libsqlite3_sys::sqlite3_value,
-) {
-    let result = std::panic::catch_unwind(|| {
-        // SAFETY: the context is live for this callback, and its user data was installed above.
-        let timezone = unsafe {
-            libsqlite3_sys::sqlite3_user_data(context)
-                .cast::<chrono_tz::Tz>()
-                .as_ref()
-        }
-        .copied()
-        .unwrap_or(chrono_tz::UTC);
-        let timestamp = crate::data::time::sqlite_timestamp(&crate::data::time::now(), timezone);
-        std::ffi::c_int::try_from(timestamp.len()).map(|length| (timestamp, length))
-    });
-    match result {
-        // SAFETY: `timestamp` remains live for the call and SQLITE_TRANSIENT copies it immediately.
-        Ok(Ok((timestamp, length))) => unsafe {
-            libsqlite3_sys::sqlite3_result_text(
-                context,
-                timestamp.as_ptr().cast(),
-                length,
-                libsqlite3_sys::SQLITE_TRANSIENT(),
-            );
-        },
-        // SAFETY: the static error string is NUL-terminated and remains valid for the call.
-        Ok(Err(_)) | Err(_) => unsafe {
-            libsqlite3_sys::sqlite3_result_error(
-                context,
-                c"timestamp conversion failed".as_ptr(),
-                -1,
-            );
-        },
-    }
-}
-
-#[derive(Clone, Copy)]
-enum PoolRole {
-    Identity,
-    Tenant,
-}
-
-impl PoolRole {
-    async fn initialize(
-        self,
-        conn: &mut sea_orm::sqlx::PgConnection,
-    ) -> Result<(), sea_orm::sqlx::Error> {
-        if matches!(self, Self::Tenant) {
-            sea_orm::sqlx::query("SET ROLE yorishiro_app")
-                .execute(conn)
-                .await?;
-        }
-        Ok(())
-    }
-
-    async fn reset(
-        self,
-        conn: &mut sea_orm::sqlx::PgConnection,
-    ) -> Result<(), sea_orm::sqlx::Error> {
-        if matches!(self, Self::Tenant) {
-            sea_orm::sqlx::raw_sql("RESET app.current_tenant; RESET app.current_workspace")
-                .execute(conn)
-                .await?;
-        }
-        Ok(())
-    }
-}
-
-/// Installs session ownership and reset policy for every application-owned PostgreSQL pool.
-fn postgres_session_options(
-    options: &mut sea_orm::ConnectOptions,
-    timezone: String,
-    role: PoolRole,
-) {
-    options.map_sqlx_postgres_pool_opts(move |pool| {
-        let connect_timezone = timezone.clone();
-        let release_timezone = timezone.clone();
-        let pool = pool.after_connect(move |conn, _meta| {
-            let timezone = connect_timezone.clone();
+/// `after_connect` assumes `yorishiro_app` once per physical connection; `after_release` clears the tenant and workspace settings before the connection returns to the pool.
+fn tenant_session_options(options: &mut sea_orm::ConnectOptions) {
+    options.map_sqlx_postgres_pool_opts(|pool| {
+        pool.after_connect(|conn, _meta| {
             Box::pin(async move {
-                role.initialize(conn).await?;
-                sea_orm::sqlx::query("SELECT set_config('TimeZone', $1, false)")
-                    .bind(timezone)
-                    .execute(&mut *conn)
+                sea_orm::sqlx::query("SET ROLE yorishiro_app")
+                    .execute(conn)
                     .await?;
                 Ok(())
             })
-        });
-        pool.after_release(move |conn, _meta| {
-            let timezone = release_timezone.clone();
+        })
+        .after_release(|conn, _meta| {
             Box::pin(async move {
-                role.reset(conn).await?;
-                sea_orm::sqlx::query("SELECT set_config('TimeZone', $1, false)")
-                    .bind(timezone)
-                    .execute(&mut *conn)
+                sea_orm::sqlx::raw_sql("RESET app.current_tenant; RESET app.current_workspace")
+                    .execute(conn)
                     .await?;
                 Ok(true)
             })
@@ -332,11 +168,10 @@ impl TenantDb {
     /// Returns an error if the operation cannot be completed.
     pub(crate) async fn connect(
         config: &loco_rs::config::Database,
-        timezone: String,
     ) -> Result<Self, sea_orm::sqlx::Error> {
         let mut options = connection_options(config);
         options.connect_lazy(true);
-        postgres_session_options(&mut options, timezone, PoolRole::Tenant);
+        tenant_session_options(&mut options);
         let connection = sea_orm::Database::connect(options)
             .await
             .map_err(|error| sea_orm::sqlx::Error::Protocol(error.to_string()))?;
@@ -420,24 +255,21 @@ pub async fn set_workspace_scope(
     tenant_id: Uuid,
     workspace_id: Uuid,
 ) -> Result<(), DbErr> {
-    use sea_orm::sea_query::{Alias, Expr, Func, Query, SimpleExpr};
-
-    let set_local = |name: &str, value: Uuid| -> SimpleExpr {
-        Func::cust(Alias::new("set_config"))
-            .args([
-                Expr::val(name),
-                Expr::val(value.to_string()),
-                Expr::val(true),
-            ])
-            .into()
-    };
-    let scope = Query::select()
-        .expr(set_local("app.current_tenant", tenant_id))
-        .expr(set_local("app.current_workspace", workspace_id))
+    let scope = sea_orm::sea_query::Query::select()
+        .expr(set_local("app.current_tenant", tenant_id.to_string()))
+        .expr(set_local("app.current_workspace", workspace_id.to_string()))
         .to_owned();
     txn.execute_raw(sea_orm::DatabaseBackend::Postgres.build(&scope))
         .await?;
     Ok(())
+}
+
+fn set_local(name: &str, value: String) -> sea_orm::sea_query::SimpleExpr {
+    use sea_orm::sea_query::{Alias, Expr, Func};
+
+    Func::cust(Alias::new("set_config"))
+        .args([Expr::val(name), Expr::val(value), Expr::val(true)])
+        .into()
 }
 
 /// Begins the transaction one workspace's request work runs in.
@@ -483,17 +315,23 @@ pub(crate) async fn begin_workspace_list(
         .begin_with_config(None, Some(sea_orm::AccessMode::ReadOnly))
         .await
         .internal()?;
-    txn.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "SELECT set_config('app.current_tenant', $1, true), set_config('app.current_workspace', $2, true), set_config('app.workspace_list', ($3::uuid[])::text, true)",
-        [
-            tenant_id.to_string().into(),
-            Uuid::nil().to_string().into(),
-            workspaces.to_vec().into(),
-        ],
-    ))
-    .await
-    .internal()?;
+    // UUID text never needs escaping in a PostgreSQL array literal.
+    let workspace_list = workspaces
+        .iter()
+        .map(Uuid::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let scope = sea_orm::sea_query::Query::select()
+        .expr(set_local("app.current_tenant", tenant_id.to_string()))
+        .expr(set_local("app.current_workspace", Uuid::nil().to_string()))
+        .expr(set_local(
+            "app.workspace_list",
+            format!("{{{workspace_list}}}"),
+        ))
+        .to_owned();
+    txn.execute_raw(sea_orm::DatabaseBackend::Postgres.build(&scope))
+        .await
+        .internal()?;
     Ok(txn)
 }
 
@@ -547,45 +385,61 @@ impl DbHandle {
     }
 }
 
-/// A `UUIDv7` for a primary key `before_save` hook to set on SQLite, or `ActiveValue::NotSet` to leave the column alone.
+/// The id a `before_save` hook carries into an insert: the caller's own, or a new `UUIDv7`.
 ///
-/// PostgreSQL's `id UUID PRIMARY KEY DEFAULT uuidv7()` (see `migration/src/helpers.rs::uuidv7_pk`) has no SQLite equivalent, so on that backend every insert must supply its own id or hit `NOT NULL constraint failed`.
-/// Every `ActiveModelBehavior::before_save` for a `uuidv7_pk`-keyed entity assigns the result to `self.id` unconditionally: `NotSet` means "leave what the caller put there", so a caller that set `id` explicitly is respected.
-pub fn sqlite_generated_id(
-    conn: &impl ConnectionTrait,
-    current: sea_orm::ActiveValue<Uuid>,
-) -> sea_orm::ActiveValue<Uuid> {
-    if current.is_not_set() && conn.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+/// Both backends use it, so no table depends on a database default for its primary key.
+#[must_use]
+pub fn generated_id(current: sea_orm::ActiveValue<Uuid>) -> sea_orm::ActiveValue<Uuid> {
+    if current.is_not_set() {
         sea_orm::ActiveValue::Set(Uuid::now_v7())
     } else {
         current
     }
 }
 
-/// The `updated_at` value a `before_save` hook should carry into an update, given what the caller already set.
-///
-/// Returns `Set(now)` for an update that has not named its own timestamp, and the value untouched otherwise, so a deliberate caller (a backfill, an import preserving original timestamps) is never overwritten.
-///
-/// Checks `is_set()` rather than `is_unchanged()`: an `ActiveModel` built with `..Default::default()` leaves untouched fields `NotSet`, which `is_unchanged()` does not match.
-///
-/// `insert` is a parameter because an insert normally takes the column's database default. `schema_schemas` is the exception and passes `false` on both paths, since SQLite refuses a non-constant default on a column added to an existing table.
-///
-/// There is deliberately no counterpart for `created_at`: that column has `NOT NULL DEFAULT now()` on both backends, so nothing in application code should be able to move it.
+/// The `created_at` a `before_save` hook carries into an insert, unless the caller set it.
 #[must_use]
-pub fn stamped_updated_at(
+pub fn stamped_created_at(
     insert: bool,
     current: sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>>,
 ) -> sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>> {
-    if !insert && !current.is_set() {
+    if insert && !current.is_set() {
         sea_orm::ActiveValue::Set(crate::data::time::now().into())
     } else {
         current
     }
 }
 
+/// The `updated_at` a `before_save` hook carries into an insert or update, unless the caller set it.
+///
+/// A deliberate caller (a backfill, an import preserving original timestamps) is never overwritten.
+/// It checks `is_set()` rather than `is_unchanged()`: a model built with `..Default::default()` leaves untouched fields `NotSet`.
+#[must_use]
+pub fn stamped_updated_at(
+    current: sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>>,
+) -> sea_orm::ActiveValue<chrono::DateTime<chrono::FixedOffset>> {
+    if current.is_set() {
+        current
+    } else {
+        sea_orm::ActiveValue::Set(crate::data::time::now().into())
+    }
+}
+
+/// [`stamped_updated_at`] for a nullable column.
+#[must_use]
+pub fn stamped_updated_at_optional(
+    current: sea_orm::ActiveValue<Option<chrono::DateTime<chrono::FixedOffset>>>,
+) -> sea_orm::ActiveValue<Option<chrono::DateTime<chrono::FixedOffset>>> {
+    if current.is_set() {
+        current
+    } else {
+        sea_orm::ActiveValue::Set(Some(crate::data::time::now().into()))
+    }
+}
+
 /// Rejects boot outright when `database.max_connections` is below 2, on SQLite only.
 ///
-/// An `Authorized<R>`/`AuditAuthorized` request needs two connections at once: one held by its
+/// An `Authorized<R>` request needs two connections at once: one held by its
 /// transaction for the request's lifetime, and a second for `touch_last_used_at`, which cannot share
 /// the transaction because a read-only handler drops it uncommitted and the update would roll back
 /// with it.

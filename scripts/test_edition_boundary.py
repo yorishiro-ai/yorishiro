@@ -23,7 +23,7 @@ class EditionBoundaryTest(unittest.TestCase):
         return [finding.rule for finding in CHECKER.scan(path, source)]
 
     def test_clean_source_passes(self) -> None:
-        source = '#[cfg(feature = "openapi")]\nuse crate::models::api_keys;\nlet tree = 1;\nsqlx("JOIN t ee ON ee.id = e.id");\n'
+        source = '#[cfg(feature = "openapi")]\nuse crate::models::access_keys;\nlet tree = 1;\nsqlx("JOIN t ee ON ee.id = e.id");\n'
         self.assertEqual(self.rules_for(source), [])
 
     def test_enterprise_feature_gates_are_found(self) -> None:

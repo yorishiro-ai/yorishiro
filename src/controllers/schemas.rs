@@ -19,9 +19,10 @@ pub(crate) async fn archive_schema(
     State(ctx): State<AppContext>,
     verified: Verified,
     Path(crate::dtos::common::SchemaIdPath { schema_id }): Path<
-        crate::dtos::common::SchemaIdPath<Uuid>,
+        crate::dtos::common::SchemaIdPath<String>,
     >,
 ) -> Result<Json<SchemaRecord>, ApiError> {
+    let schema_id = super::action_resource_id(&schema_id, ":archive")?;
     Ok(Json(
         schema_schemas::archive_for_actor(&ctx, verified.ctx, schema_id).await?,
     ))
@@ -66,10 +67,12 @@ async fn create_schema(
 async fn get_active_schema(
     State(ctx): State<AppContext>,
     verified: Verified,
-    Path(crate::dtos::common::NamePath { name }): Path<crate::dtos::common::NamePath<String>>,
+    Path(crate::dtos::common::SchemaNamePath { schema_name }): Path<
+        crate::dtos::common::SchemaNamePath,
+    >,
 ) -> Result<Json<SchemaRecord>, ApiError> {
     Ok(Json(
-        schema_schemas::get_active_for_actor(&ctx, verified.ctx, &name).await?,
+        schema_schemas::get_active_for_actor(&ctx, verified.ctx, &schema_name).await?,
     ))
 }
 
@@ -86,8 +89,15 @@ pub(crate) async fn get_schema_by_id(
 }
 
 pub(crate) async fn list_templates(
-    _verified: Verified,
+    State(ctx): State<AppContext>,
+    verified: Verified,
 ) -> Result<Json<Vec<TemplateSummary>>, ApiError> {
+    crate::models::template_templates::authorize_builtin(
+        &ctx.db,
+        &verified.ctx,
+        crate::models::iam::policy::Action::ListBuiltinTemplates,
+    )
+    .await?;
     Ok(Json(templates::list_templates()))
 }
 
@@ -95,23 +105,38 @@ pub(crate) async fn list_templates(
 /// # Errors
 /// Returns an error if the operation cannot be completed.
 async fn get_template(
-    _verified: Verified,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<String>>,
+    State(ctx): State<AppContext>,
+    verified: Verified,
+    Path(crate::dtos::common::TemplateIdPath { template_id }): Path<
+        crate::dtos::common::TemplateIdPath<String>,
+    >,
 ) -> Result<Json<MetaSchemaDefinition>, ApiError> {
-    let definition = templates::get_template(&id)?;
+    crate::models::template_templates::authorize_builtin(
+        &ctx.db,
+        &verified.ctx,
+        crate::models::iam::policy::Action::GetBuiltinTemplate,
+    )
+    .await?;
+    let definition = templates::get_template(&template_id)?;
     Ok(Json(definition))
 }
 
 pub(crate) async fn get_entity_type_json_schema(
     State(ctx): State<AppContext>,
     verified: Verified,
-    Path(crate::dtos::common::NameEntityTypePath { name, entity_type }): Path<
-        crate::dtos::common::NameEntityTypePath<String, String>,
-    >,
+    Path(crate::dtos::common::SchemaNameEntityTypePath {
+        schema_name,
+        entity_type,
+    }): Path<crate::dtos::common::SchemaNameEntityTypePath>,
 ) -> Result<Json<Value>, ApiError> {
     Ok(Json(
-        schema_schemas::entity_type_json_schema_for_actor(&ctx, verified.ctx, &name, &entity_type)
-            .await?,
+        schema_schemas::entity_type_json_schema_for_actor(
+            &ctx,
+            verified.ctx,
+            &schema_name,
+            &entity_type,
+        )
+        .await?,
     ))
 }
 
@@ -121,65 +146,33 @@ pub fn routes() -> Routes {
         .prefix("api/schemas")
         .add(
             "/",
-            aide::axum::routing::get_with(list_schemas, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_list"]),
-                ))
-            }),
+            aide::axum::routing::get_with(list_schemas, |op| op.id("ListSchemas")),
         )
         .add(
             "/",
-            aide::axum::routing::post_with(create_schema, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_create"]),
-                ))
-            }),
+            aide::axum::routing::post_with(create_schema, |op| op.id("CreateSchema")),
         )
         .add(
-            "/active/{name}",
-            aide::axum::routing::get_with(get_active_schema, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_get"]),
-                ))
-            }),
+            "/active/{schema_name}",
+            aide::axum::routing::get_with(get_active_schema, |op| op.id("GetActiveSchema")),
         )
         .add(
             "/{schema_id}",
-            aide::axum::routing::get_with(get_schema_by_id, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_get"]),
-                ))
-            }),
+            aide::axum::routing::get_with(get_schema_by_id, |op| op.id("GetSchema")),
         )
         .add(
             "/{schema_id}",
-            aide::axum::routing::delete_with(delete_schema, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_delete"]),
-                ))
-            }),
+            aide::axum::routing::delete_with(delete_schema, |op| op.id("DeleteSchema")),
+        )
+        .add_action(
+            "/{schema_id}",
+            ":archive",
+            aide::axum::routing::post_with(archive_schema, |op| op.id("ArchiveSchema")),
         )
         .add(
-            "/{schema_id}/archive",
-            aide::axum::routing::post_with(archive_schema, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_archive"]),
-                ))
-            }),
-        )
-        .add(
-            "/active/{name}/entity-types/{entity_type}/json-schema",
+            "/active/{schema_name}/entity-types/{entity_type}/json-schema",
             aide::axum::routing::get_with(get_entity_type_json_schema, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_get"]),
-                ))
+                op.id("GetEntityTypeJsonSchema")
             }),
         )
 }
@@ -188,6 +181,12 @@ pub(crate) fn template_routes() -> Routes {
     Routes::new()
         .tag("community")
         .prefix("api/templates")
-        .add("/", aide::axum::routing::get(list_templates))
-        .add("/{id}", aide::axum::routing::get(get_template))
+        .add(
+            "/",
+            aide::axum::routing::get_with(list_templates, |op| op.id("ListBuiltinTemplates")),
+        )
+        .add(
+            "/{template_id}",
+            aide::axum::routing::get_with(get_template, |op| op.id("GetBuiltinTemplate")),
+        )
 }

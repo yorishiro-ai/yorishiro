@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use loco_rs::app::AppContext;
 use sea_orm::TransactionTrait;
 use uuid::Uuid;
-use yorishiro::models::_entities::api_keys;
+use yorishiro::models::_entities::access_keys;
 use yorishiro::models::tenancy;
 
 /// Caps the tenant's workspaces.
@@ -71,7 +71,10 @@ impl TestTenant {
             .await;
         login.assert_status_ok();
         let login = login.json::<serde_json::Value>();
-        let bearer = format!("Bearer {}", login["api_key"].as_str().expect("login key"));
+        let bearer = format!(
+            "Bearer {}",
+            login["access_key"].as_str().expect("login key")
+        );
         let workspace = request
             .post("/api/workspaces")
             .add_header("Authorization", &bearer)
@@ -82,18 +85,17 @@ impl TestTenant {
             serde_json::from_value(workspace.json::<serde_json::Value>()["id"].clone())
                 .expect("workspace ID");
         let key = request
-            .post("/api/api-keys")
+            .post("/api/access-keys")
             .add_header("Authorization", &bearer)
-            .add_header("X-Workspace-Id", workspace_id.to_string())
+            .add_header("x-workspace-id", workspace_id.to_string())
             .json(&serde_json::json!({
                 "name": "test-workspace-key",
-                "audit": args.key_audit,
             }))
             .await;
         key.assert_status(StatusCode::CREATED);
         let api_key = key.json::<serde_json::Value>()["full_key"]
             .as_str()
-            .expect("workspace API key")
+            .expect("workspace access key")
             .to_owned();
         Self {
             tenant_id,
@@ -104,34 +106,33 @@ impl TestTenant {
     }
 }
 
+/// Attaches the tenant's managed policy `name` to a user.
+pub(crate) async fn attach_managed_policy(
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    name: &str,
+) {
+    use sea_orm::{ActiveModelTrait, Set};
+    let policy_id =
+        yorishiro::models::iam::builtin::managed_policy_id(name).expect("a managed policy name");
+    yorishiro::models::iam_user_policy_attachments::ActiveModel {
+        tenant_id: Set(tenant_id),
+        user_id: Set(user_id),
+        policy_id: Set(policy_id),
+        ..Default::default()
+    }
+    .insert(txn)
+    .await
+    .expect("attach the managed policy");
+}
+
 pub(crate) async fn grant_iam_administrator(
     txn: &sea_orm::DatabaseTransaction,
     tenant_id: Uuid,
     user_id: Uuid,
 ) {
-    use sea_orm::{ActiveModelTrait, Set};
-    let policy = yorishiro::models::iam_policies::ActiveModel {
-        tenant_id: Set(tenant_id),
-        name: Set(format!("fixture-admin-{user_id}")),
-        document: Set(
-            serde_json::json!({"statements":[{"effect":"allow","actions":["*"],
-            "resources":[{"type":"tenant","tenant_id":tenant_id},
-                {"type":"all_workspaces","tenant_id":tenant_id}]}]}),
-        ),
-        ..Default::default()
-    }
-    .insert(txn)
-    .await
-    .expect("create fixture administrator policy");
-    yorishiro::models::iam_user_policy_attachments::ActiveModel {
-        tenant_id: Set(tenant_id),
-        user_id: Set(user_id),
-        policy_id: Set(policy.id),
-        ..Default::default()
-    }
-    .insert(txn)
-    .await
-    .expect("attach fixture administrator policy");
+    attach_managed_policy(txn, tenant_id, user_id, "AdministratorAccess").await;
 }
 
 pub(crate) async fn create_iam_administrator(ctx: &AppContext, tenant_id: Uuid) -> Uuid {
@@ -150,9 +151,8 @@ pub(crate) async fn create_iam_administrator(ctx: &AppContext, tenant_id: Uuid) 
     user.id
 }
 
-/// A tenant member who holds only the built-in `Tenant Reader` policy: it reads, and every write is denied by IAM.
+/// A tenant member who holds only the managed `ReadOnlyAccess` policy: it reads, and every write is denied by IAM.
 pub(crate) async fn create_iam_reader(ctx: &AppContext, tenant_id: Uuid) -> Uuid {
-    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
     let txn = ctx.db.begin().await.expect("begin reader setup");
     let user = tenancy::register_member(
         &txn,
@@ -163,22 +163,7 @@ pub(crate) async fn create_iam_reader(ctx: &AppContext, tenant_id: Uuid) -> Uuid
     )
     .await
     .expect("create reader");
-    let policy = yorishiro::models::iam_policies::Entity::find()
-        .filter(yorishiro::models::iam_policies::Column::TenantId.eq(tenant_id))
-        .filter(yorishiro::models::iam_policies::Column::Name.eq("Tenant Reader"))
-        .one(&txn)
-        .await
-        .expect("find the built-in reader policy")
-        .expect("the tenant has the built-in reader policy");
-    yorishiro::models::iam_user_policy_attachments::ActiveModel {
-        tenant_id: Set(tenant_id),
-        user_id: Set(user.id),
-        policy_id: Set(policy.id),
-        ..Default::default()
-    }
-    .insert(&txn)
-    .await
-    .expect("attach the reader policy");
+    attach_managed_policy(&txn, tenant_id, user.id, "ReadOnlyAccess").await;
     txn.commit().await.expect("commit reader setup");
     user.id
 }
@@ -193,8 +178,6 @@ pub(crate) struct TenantArgs {
     pub owner_email: String,
     /// Owner password. Defaults to `"hunter2-hunter2"`.
     pub owner_password: String,
-    /// Whether the audit key is audit-scoped.
-    pub key_audit: bool,
 }
 
 impl Default for TenantArgs {
@@ -204,23 +187,21 @@ impl Default for TenantArgs {
             workspace_name: format!("workspace-{}", Uuid::new_v4().simple()),
             owner_email: unique_email("owner"),
             owner_password: "hunter2-hunter2".into(),
-            key_audit: false,
         }
     }
 }
 
-/// Issue an API key for an existing user.
+/// Issue an access key for an existing user.
 ///
 /// Create a `TestTenant` first, then use its owner ID for additional scoped keys.
-pub(crate) async fn issue_api_key(
+pub(crate) async fn issue_access_key(
     ctx: &AppContext,
     workspace_id: Uuid,
     user_id: Uuid,
-    audit: bool,
 ) -> String {
-    api_keys::Entity::create_api_key(&ctx.db, workspace_id, Some(user_id), audit)
+    access_keys::Entity::create_access_key(&ctx.db, workspace_id, Some(user_id))
         .await
-        .expect("issue api key")
+        .expect("issue access key")
         .plaintext
 }
 
@@ -238,11 +219,10 @@ pub(crate) async fn issue_tenant_key(ctx: &AppContext, tenant_id: Uuid, user_id:
             .0
             .plaintext;
     }
-    api_keys::Entity::create_tenant_api_key(
+    access_keys::Entity::create_tenant_access_key(
         &ctx.db,
         tenant_id,
         Some(user_id),
-        false,
         "test-tenant-admin",
     )
     .await
@@ -408,4 +388,80 @@ pub(crate) async fn rename_table(db: &sea_orm::DatabaseConnection, from: &str, t
     )
     .await
     .unwrap_or_else(|error| panic!("rename {from} to {to}: {error}"));
+}
+
+/// A policy document with one statement.
+pub(crate) fn policy_document(
+    effect: &str,
+    actions: &[&str],
+    resources: &[String],
+) -> serde_json::Value {
+    serde_json::json!({
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": effect, "Action": actions, "Resource": resources}],
+    })
+}
+
+pub(crate) fn tenant_yrn(tenant_id: Uuid) -> String {
+    format!("yrn:tenant:{tenant_id}")
+}
+
+pub(crate) fn workspace_yrn(tenant_id: Uuid, workspace_id: Uuid) -> String {
+    format!("yrn:workspace:{tenant_id}:{workspace_id}")
+}
+
+/// Creates a policy through the REST API and returns its id.
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
+pub(crate) async fn create_policy(
+    request: &loco_rs::TestServer,
+    authorization: &str,
+    name: &str,
+    document: &serde_json::Value,
+) -> String {
+    let response = request
+        .post("/api/policies")
+        .add_header("Authorization", authorization)
+        .json(&serde_json::json!({"name": name, "document": document}))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    response.json::<serde_json::Value>()["id"]
+        .as_str()
+        .expect("policy id")
+        .to_owned()
+}
+
+/// Gives a policy a new document: adds a version as the default and deletes the previous default.
+#[expect(
+    clippy::future_not_send,
+    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
+)]
+pub(crate) async fn replace_policy_document(
+    request: &loco_rs::TestServer,
+    authorization: &str,
+    policy_id: &str,
+    document: &serde_json::Value,
+) {
+    let current = request
+        .get(&format!("/api/policies/{policy_id}"))
+        .add_header("Authorization", authorization)
+        .await;
+    current.assert_status_ok();
+    let previous = current.json::<serde_json::Value>()["default_version_id"]
+        .as_str()
+        .expect("default version id")
+        .to_owned();
+    request
+        .post(&format!("/api/policies/{policy_id}/versions"))
+        .add_header("Authorization", authorization)
+        .json(&serde_json::json!({"document": document, "set_as_default": true}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    request
+        .delete(&format!("/api/policies/{policy_id}/versions/{previous}"))
+        .add_header("Authorization", authorization)
+        .await
+        .assert_status(StatusCode::NO_CONTENT);
 }

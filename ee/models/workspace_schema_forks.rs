@@ -22,7 +22,7 @@ pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Column, 
 
 pub(crate) async fn workspace_for_actor(
     db: &impl ConnectionTrait,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
     if let Some(workspace_id) = actor.workspace_id {
@@ -38,11 +38,11 @@ pub(crate) async fn workspace_for_actor(
 
 pub(crate) async fn list_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<ForkRecord>, YorishiroError> {
     use crate::models::iam::{access::read_workspaces, policy::Action};
-    let workspaces = read_workspaces(&ctx.db, actor, Action::SchemaForkList).await?;
+    let workspaces = read_workspaces(&ctx.db, actor, Action::ListSchemaForks).await?;
     let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
     let rows = Entity::find()
         .filter(Column::TenantId.eq(actor.tenant_id))
@@ -445,7 +445,7 @@ pub async fn create<C: ConnectionTrait>(
     .await?
     .0;
     let row = ActiveModel {
-        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
+        id: crate::db::generated_id(ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(workspace_id),
         source_workspace_id: ActiveValue::Set(input.source_workspace_id),
@@ -463,7 +463,7 @@ pub async fn create<C: ConnectionTrait>(
         )
     })?;
     fork_heads::ActiveModel {
-        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
+        id: crate::db::generated_id(ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(workspace_id),
         fork_id: ActiveValue::Set(row.id),
@@ -568,7 +568,7 @@ pub async fn update<C: ConnectionTrait>(
         });
     }
     fork_heads::ActiveModel {
-        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
+        id: crate::db::generated_id(ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(workspace_id),
         fork_id: ActiveValue::Set(fork_id),
@@ -626,7 +626,7 @@ pub async fn delete<C: ConnectionTrait>(
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn get_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     fork_id: Uuid,
 ) -> Result<ForkRecord, YorishiroError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
@@ -636,7 +636,7 @@ pub(crate) async fn get_for_actor(
         ctx,
         actor,
         target,
-        crate::models::iam::policy::Action::SchemaForkGet,
+        crate::models::iam::policy::Action::GetSchemaFork,
         async |session| {
             get(
                 session.txn(),
@@ -656,16 +656,16 @@ pub(crate) async fn get_for_actor(
 /// Returns the session, authorization or create error.
 pub(crate) async fn create_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     input: CreateInput,
 ) -> Result<ForkRecord, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::SchemaForkCreate,
+            crate::models::iam::policy::Action::CreateSchemaFork,
         ),
-        Some(crate::models::iam::policy::Action::SchemaForkCreate),
+        Some(crate::models::iam::policy::Action::CreateSchemaFork),
         async |session| {
             create(
                 session.txn(),
@@ -685,7 +685,7 @@ pub(crate) async fn create_for_actor(
 /// Returns the session, authorization or update error.
 pub(crate) async fn update_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     fork_id: Uuid,
     input: UpdateInput,
 ) -> Result<ForkRecord, YorishiroError> {
@@ -696,7 +696,7 @@ pub(crate) async fn update_for_actor(
         ctx,
         actor,
         target,
-        Some(crate::models::iam::policy::Action::SchemaForkUpdate),
+        Some(crate::models::iam::policy::Action::UpdateSchemaFork),
         async |session| {
             update(
                 session.txn(),
@@ -717,7 +717,7 @@ pub(crate) async fn update_for_actor(
 /// Returns the session, authorization or delete error.
 pub(crate) async fn delete_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     fork_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
@@ -727,7 +727,7 @@ pub(crate) async fn delete_for_actor(
         ctx,
         actor,
         target,
-        Some(crate::models::iam::policy::Action::SchemaForkDelete),
+        Some(crate::models::iam::policy::Action::DeleteSchemaFork),
         async |session| {
             delete(
                 session.txn(),

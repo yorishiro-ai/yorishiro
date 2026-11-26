@@ -70,13 +70,13 @@ async fn owner_can_inspect_and_confirm_disablement_without_deleting_data() {
             yorishiro::models::tenant_tenants::retirement::inventory(&ctx.db, target.tenant_id)
                 .await
                 .unwrap();
-        assert_eq!(after.api_keys, 0);
+        assert_eq!(after.access_keys, 0);
         assert_eq!(
             serde_json::to_value(after.workspace_ids).unwrap(),
             before["workspace_ids"]
         );
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", other.api_key))
             .await
             .assert_status(StatusCode::OK);

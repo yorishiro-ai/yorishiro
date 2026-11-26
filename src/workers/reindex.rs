@@ -41,7 +41,7 @@ pub struct ReindexArgs {
 )]
 pub struct ReindexActor {
     pub tenant_id: Uuid,
-    pub api_key_id: Uuid,
+    pub access_key_id: Uuid,
     pub user_id: Option<Uuid>,
 }
 
@@ -67,19 +67,18 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
     let actor = args
         .actor
         .as_ref()
-        .map(|actor| crate::models::api_keys::AuthContext {
+        .map(|actor| crate::models::access_keys::AuthContext {
             tenant_id: actor.tenant_id,
-            api_key_id: actor.api_key_id,
+            access_key_id: actor.access_key_id,
             user_id: actor.user_id,
             workspace_id: Some(args.workspace_id),
-            audit: false,
         });
     if let Some(actor) = &actor {
         let txn = crate::db::begin_write(&ctx.db).await?;
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::iam::policy::Action::WorkspaceReindex,
+            crate::models::iam::policy::Action::ReindexWorkspace,
             crate::models::iam::policy::Resource::Workspace {
                 tenant_id: actor.tenant_id,
                 workspace_id: args.workspace_id,
@@ -204,13 +203,13 @@ pub async fn enqueue_reindex(
 /// Returns the session, authorization or enqueue error.
 pub(crate) async fn enqueue_requested_for_actor(
     ctx: &AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
 ) -> Result<String, crate::YorishiroError> {
     WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::WorkspaceReindex,
+            crate::models::iam::policy::Action::ReindexWorkspace,
         ),
         None,
         async |session| enqueue_requested(ctx, session.txn(), &session.ctx).await,
@@ -221,10 +220,10 @@ pub(crate) async fn enqueue_requested_for_actor(
 pub(crate) async fn enqueue_requested(
     ctx: &AppContext,
     txn: &sea_orm::DatabaseTransaction,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
 ) -> Result<String, crate::YorishiroError> {
     use crate::error::ResultExt;
-    use crate::models::api_key_audit_log::{self, AuditAction, AuditActor};
+    use crate::models::access_key_audit_log::{self, AuditAction, AuditActor};
     if ctx.queue_provider.is_none() {
         return Err(crate::YorishiroError::BackendUnavailable {
             message: "reindex requires a queue provider (configure queue: in the server config)"
@@ -235,19 +234,19 @@ pub(crate) async fn enqueue_requested(
     crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         actor,
-        crate::models::iam::policy::Action::WorkspaceReindex,
+        crate::models::iam::policy::Action::ReindexWorkspace,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id: actor.require_workspace()?,
         },
     )
     .await?;
-    api_key_audit_log::record(
+    access_key_audit_log::record(
         txn,
         AuditActor {
             workspace_id: actor.require_workspace()?,
             tenant_id: actor.tenant_id,
-            api_key_id: actor.api_key_id,
+            access_key_id: actor.access_key_id,
             user_id: actor.user_id,
         },
         AuditAction::ReindexEmbeddings,
@@ -265,7 +264,7 @@ pub(crate) async fn enqueue_requested(
             startup: false,
             actor: Some(ReindexActor {
                 tenant_id: actor.tenant_id,
-                api_key_id: actor.api_key_id,
+                access_key_id: actor.access_key_id,
                 user_id: actor.user_id,
             }),
         },

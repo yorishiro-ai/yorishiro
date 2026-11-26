@@ -58,13 +58,13 @@ class ToolInventoryTests(unittest.TestCase):
         client.app = app
         text = '{"kind":"schema"}\n{"kind":"entity"}\n'
         client.rpc = Mock(return_value={"result": {"content": [{"type": "text", "text": text}]}})
-        self.assertEqual(client.call("export_jsonl", raw=True), text)
+        self.assertEqual(client.call("export_workspace", raw=True), text)
         self.assertEqual(app.tool_calls, [
-            {"tool": "export_jsonl", "scenario": "mcp.graph", "outcome": "succeeded"},
+            {"tool": "export_workspace", "scenario": "mcp.graph", "outcome": "succeeded"},
         ])
         client.rpc.return_value = {"result": {"isError": True, "content": []}}
         with self.assertRaises(AssertionError):
-            client.call("export_jsonl", raw=True)
+            client.call("export_workspace", raw=True)
         self.assertEqual(len(app.tool_calls), 1)
 
     def test_calls_record_only_successfully_validated_outcomes(self):
@@ -72,13 +72,13 @@ class ToolInventoryTests(unittest.TestCase):
         client = run.MCP.__new__(run.MCP)
         client.app = app
         client.rpc = Mock(return_value={"result": {"content": [{"type": "text", "text": "{}"}]}})
-        self.assertEqual(client.call("whoami"), {})
+        self.assertEqual(client.call("get_caller_identity"), {})
         client.rpc.return_value = {"result": {"isError": True, "content": []}}
         client.call("get_entity", error=True)
         with self.assertRaises(AssertionError):
             client.call("get_entity")
         self.assertEqual(app.tool_calls, [
-            {"tool": "whoami", "scenario": "mcp.example", "outcome": "succeeded"},
+            {"tool": "get_caller_identity", "scenario": "mcp.example", "outcome": "succeeded"},
             {"tool": "get_entity", "scenario": "mcp.example", "outcome": "rejected"},
         ])
 
@@ -125,11 +125,11 @@ class ProtocolTests(unittest.TestCase):
         api.client = Mock()
         api.client.call.return_value = text
         self.assertEqual(api.export(), text)
-        api.client.call.assert_called_once_with("export_jsonl", raw=True)
+        api.client.call.assert_called_once_with("export_workspace", raw=True)
         api.client.call.reset_mock()
         api.client.call.return_value = {"job_id": "job"}
         self.assertEqual(api.submit(text), {"job_id": "job"})
-        api.client.call.assert_called_once_with("import_jsonl", {"jsonl": text})
+        api.client.call.assert_called_once_with("create_import_job", {"jsonl": text})
 
 
 class TemplateFixtureTests(unittest.TestCase):
@@ -158,7 +158,7 @@ class RedactionTests(unittest.TestCase):
         self.assertIn('"Authorization": "Bearer [REDACTED]"', result)
 
     def test_serialized_cli_and_server_outputs(self):
-        text = json.dumps({"stdout": "api key (shown once): ysr_ABC_DEF\n",
+        text = json.dumps({"stdout": "access key (shown once): ysr_ABC_DEF\n",
                            "stderr": "prefix=ysr_ABC"})
         result = run.redact(text)
         self.assertNotIn("ysr_", result)
@@ -283,10 +283,10 @@ class ArgumentTests(unittest.TestCase):
             with patch.object(app, "rest", return_value={"id": value, "full_key": "ysr_delegated"}) as rest:
                 self.assertEqual(app.issue(value, issuer="ysr_member", audit=True),
                                  (value, "ysr_delegated"))
-                rest.assert_called_once_with("POST", "/api/api-keys", {
+                rest.assert_called_once_with("POST", "/api/access-keys", {
                     "name": "contract-delegated", "audit": True,
                     "expires_at": rest.call_args.args[2]["expires_at"],
-                }, status=201, key="ysr_member", headers={"X-Workspace-Id": value})
+                }, status=201, key="ysr_member", headers={"x-workspace-id": value})
                 self.assertGreater(datetime.fromisoformat(rest.call_args.args[2]["expires_at"]),
                                    datetime.now(UTC))
             self.assertIn("ysr_delegated", app.secrets)
@@ -294,7 +294,7 @@ class ArgumentTests(unittest.TestCase):
 
     def test_bootstrap_uses_setup_or_signup_without_removed_tasks(self):
         value = "00000000-0000-0000-0000-000000000001"
-        account = {"user_id": value, "tenant_id": value, "api_key": "ysr_bootstrap"}
+        account = {"user_id": value, "tenant_id": value, "access_key": "ysr_bootstrap"}
         for suite, edition in (("management", "ce"), ("tenant-postgres", "ee")):
             args = run.parse_args(self.arguments())
             args.suite, args.edition = suite, edition
@@ -349,7 +349,7 @@ class ArgumentTests(unittest.TestCase):
             with patch("run.http.client.HTTPConnection", return_value=connection):
                 self.assertEqual(api.submit(text), {"job_id": "job"})
             request = connection.request.call_args.args
-            self.assertEqual(request[:3], ("POST", "/api/import.jsonl", text))
+            self.assertEqual(request[:3], ("POST", "/api/import-jobs", text))
             self.assertEqual(request[3]["Content-Type"], "application/x-ndjson")
             self.assertEqual(app.events[-1]["request"], text)
             connection.close.assert_called_once()

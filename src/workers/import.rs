@@ -11,8 +11,8 @@ use super::{
 };
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::{
-    api_key_audit_log::{self, AuditAction, AuditActor},
-    api_keys::AuthContext,
+    access_key_audit_log::{self, AuditAction, AuditActor},
+    access_keys::AuthContext,
 };
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -20,7 +20,7 @@ pub(crate) struct ImportArgs {
     lifecycle_id: Option<Uuid>,
     tenant_id: Uuid,
     workspace_id: Uuid,
-    api_key_id: Uuid,
+    access_key_id: Uuid,
     user_id: Option<Uuid>,
     jsonl: String,
     worker_class: WorkerClass,
@@ -63,7 +63,7 @@ impl ImportWorker {
         crate::db::lock_for_update(&txn, &format!("import:{id}"))
             .await
             .internal()?;
-        if !api_key_audit_log::job_completed(
+        if !access_key_audit_log::job_completed(
             &txn,
             args.workspace_id,
             id,
@@ -76,11 +76,10 @@ impl ImportWorker {
                 &AuthContext {
                     tenant_id: args.tenant_id,
                     workspace_id: Some(args.workspace_id),
-                    api_key_id: args.api_key_id,
+                    access_key_id: args.access_key_id,
                     user_id: args.user_id,
-                    audit: false,
                 },
-                crate::models::iam::policy::Action::ImportCreate,
+                crate::models::iam::policy::Action::CreateImportJob,
                 crate::models::iam::policy::Resource::Workspace {
                     tenant_id: args.tenant_id,
                     workspace_id: args.workspace_id,
@@ -106,9 +105,9 @@ impl ImportWorker {
                 )
                 .await?;
             }
-            api_key_audit_log::record(&txn, AuditActor {
+            access_key_audit_log::record(&txn, AuditActor {
                 tenant_id: args.tenant_id, workspace_id: args.workspace_id,
-                api_key_id: args.api_key_id, user_id: args.user_id,
+                access_key_id: args.access_key_id, user_id: args.user_id,
             }, AuditAction::BackgroundJobCompleted, serde_json::json!({"job_id": id, "schemas": result.schemas, "entities": result.entities, "relations": result.relations})).await?;
         }
         txn.commit().await.internal()?;
@@ -132,7 +131,7 @@ pub(crate) async fn enqueue_for_actor(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::ImportCreate,
+            crate::models::iam::policy::Action::CreateImportJob,
         ),
         None,
         async |session| enqueue(ctx, session.txn(), &session.ctx, jsonl).await,
@@ -150,7 +149,7 @@ pub(crate) async fn enqueue(
     crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         auth,
-        crate::models::iam::policy::Action::ImportCreate,
+        crate::models::iam::policy::Action::CreateImportJob,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: auth.tenant_id,
             workspace_id: auth.require_workspace()?,
@@ -163,7 +162,7 @@ pub(crate) async fn enqueue(
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
         workspace_id: auth.require_workspace()?,
-        api_key_id: auth.api_key_id,
+        access_key_id: auth.access_key_id,
         user_id: auth.user_id,
         jsonl,
         worker_class,

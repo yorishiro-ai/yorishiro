@@ -15,7 +15,7 @@ pub mod metaschema;
 
 pub(crate) async fn workspace_for_actor(
     db: &impl ConnectionTrait,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
     let record = Entity::find_by_id(id)
@@ -30,19 +30,14 @@ use metaschema::{MetaSchemaDefinition, VersioningDiff, validate_definition};
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(self, db: &C, _insert: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
         let mut this = self;
-        this.id = crate::db::sqlite_generated_id(db, this.id);
-        // Stamped on insert as well as update, unlike the seven models that stamp only on update: those tables' `updated_at` columns carry a database default on both backends, and this one cannot.
-        // SQLite refuses a non-constant default on `ADD COLUMN` for an existing table, so `schema_schemas.updated_at` has `now()` on PostgreSQL and nothing on SQLite, and an insert that relied on the default would be NULL there.
-        // A caller that sets it deliberately (a backfill, an import preserving original timestamps) is still not overwritten.
-        if !this.updated_at.is_set() {
-            this.updated_at = ActiveValue::Set(Some(crate::data::time::now().into()));
-        }
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        this.updated_at = crate::db::stamped_updated_at_optional(this.updated_at);
         Ok(this)
     }
 }
@@ -459,12 +454,12 @@ pub(crate) async fn list(
 
 pub(crate) async fn list_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<SchemaSummary>, YorishiroError> {
     use crate::models::_entities::schema_schemas::Column;
     use crate::models::iam::{access::read_workspaces, policy::Action};
-    let workspaces = read_workspaces(&ctx.db, actor, Action::SchemaList).await?;
+    let workspaces = read_workspaces(&ctx.db, actor, Action::ListSchemas).await?;
     let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
     if let [workspace] = workspaces.as_slice() {
         let records = list(&txn, *workspace, page).await?;
@@ -506,6 +501,34 @@ pub(crate) async fn notify_upstream_change(
         .internal()?;
 
     usize::try_from(result.rows_affected).internal()
+}
+
+/// Detaches every linked schema whose origin template matches `origin`.
+///
+/// Call it before deleting those templates: a deleted template can no longer be followed.
+/// It runs on a connection that is not scoped to one workspace, because the schemas live in other workspaces and tenants.
+pub(crate) async fn detach_origins(
+    conn: &impl ConnectionTrait,
+    origin: impl sea_orm::sea_query::IntoCondition,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::schema_schemas::{Column, Entity};
+    use sea_orm::EntityTrait;
+
+    Entity::update_many()
+        .col_expr(
+            Column::OriginStatus,
+            Expr::value(SchemaOriginStatus::Detached.as_db_str()),
+        )
+        .col_expr(
+            Column::UpdatedAt,
+            Expr::value(Some(crate::data::time::now())),
+        )
+        .filter(origin)
+        .filter(Column::OriginStatus.eq(SchemaOriginStatus::Linked.as_db_str()))
+        .exec(conn)
+        .await
+        .internal()?;
+    Ok(())
 }
 
 ///
@@ -638,14 +661,14 @@ pub(crate) type CreateSchemaSource = crate::dtos::schemas::CreateSchemaRequest;
 /// Returns the session, authorization or archive error.
 pub(crate) async fn archive_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     schema_id: Uuid,
 ) -> Result<SchemaRecord, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-        Some(crate::models::iam::policy::Action::SchemaArchive),
+        Some(crate::models::iam::policy::Action::ArchiveSchema),
         async |session| archive(session.txn(), session.workspace_id()?, schema_id).await,
     )
     .await
@@ -657,14 +680,14 @@ pub(crate) async fn archive_for_actor(
 /// Returns the session, authorization or delete error.
 pub(crate) async fn delete_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     schema_id: Uuid,
 ) -> Result<(), YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-        Some(crate::models::iam::policy::Action::SchemaDelete),
+        Some(crate::models::iam::policy::Action::DeleteSchema),
         async |session| delete(session.txn(), session.workspace_id()?, schema_id).await,
     )
     .await
@@ -676,16 +699,16 @@ pub(crate) async fn delete_for_actor(
 /// Returns the session, authorization, template-resolution or create error.
 pub(crate) async fn create_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     source: CreateSchemaSource,
 ) -> Result<crate::dtos::schemas::CreateSchemaResponse, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::SchemaCreate,
+            crate::models::iam::policy::Action::CreateSchema,
         ),
-        Some(crate::models::iam::policy::Action::SchemaCreate),
+        Some(crate::models::iam::policy::Action::CreateSchema),
         async |session| {
             let tenant_id = session.ctx.tenant_id;
             // Carried alongside the definition so the schema can record which library template it came from.
@@ -730,16 +753,29 @@ pub(crate) async fn create_for_actor(
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn get_active_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     name: &str,
+) -> Result<SchemaRecord, YorishiroError> {
+    active_for_action(
+        ctx,
+        actor,
+        name,
+        crate::models::iam::policy::Action::GetActiveSchema,
+    )
+    .await
+}
+
+async fn active_for_action(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::access_keys::AuthContext,
+    name: &str,
+    action: crate::models::iam::policy::Action,
 ) -> Result<SchemaRecord, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::SchemaGet,
-        ),
-        crate::models::iam::policy::Action::SchemaGet,
+        crate::models::iam::access::WorkspaceTarget::Permission(action),
+        action,
         async |session| get_active_schema(session.txn(), session.workspace_id()?, name).await,
     )
     .await
@@ -751,14 +787,14 @@ pub(crate) async fn get_active_for_actor(
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn get_by_id_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     schema_id: Uuid,
 ) -> Result<SchemaRecord, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-        crate::models::iam::policy::Action::SchemaGet,
+        crate::models::iam::policy::Action::GetSchema,
         async |session| get_by_id(session.txn(), session.workspace_id()?, schema_id).await,
     )
     .await
@@ -770,11 +806,17 @@ pub(crate) async fn get_by_id_for_actor(
 /// Returns the lookup error, or not-found when the entity type is not in the schema.
 pub(crate) async fn entity_type_json_schema_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     name: &str,
     entity_type: &str,
 ) -> Result<serde_json::Value, YorishiroError> {
-    let record = get_active_for_actor(ctx, actor, name).await?;
+    let record = active_for_action(
+        ctx,
+        actor,
+        name,
+        crate::models::iam::policy::Action::GetEntityTypeJsonSchema,
+    )
+    .await?;
     let definition = record
         .definition
         .entity_types

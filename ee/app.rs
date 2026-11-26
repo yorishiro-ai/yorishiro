@@ -116,12 +116,12 @@ pub(crate) fn workers(registry: WorkerRegistry) -> WorkerRegistry {
 /// Both still need their own configuration to do anything, and the webhook still verifies its Stripe signature; neither of those made them community routes.
 ///
 /// `inference` is two route groups because the licence line runs through the middle of it:
-/// `infer-fill` spends an LLM call and is gated, while the `/workspace/llm-key` routes beside it only store the credential.
+/// `infer-fill` requires a licence because it calls an LLM.
+/// The `/workspace/llm-provider` routes only store configuration.
 /// A layer applies to a whole `Routes`, so one group would gate all four.
 pub(crate) fn mount_routes(mounts: &mut RouteMounts, ctx: &AppContext) {
     let gate = axum::middleware::from_fn_with_state(ctx.clone(), edition::licence_gate);
 
-    mounts.mount(controllers::dashboard::routes());
     mounts.mount(controllers::embedding::routes());
     mounts.mount(controllers::entity_columns::routes());
     mounts.mount(controllers::inference::routes());

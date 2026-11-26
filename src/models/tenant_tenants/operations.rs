@@ -46,6 +46,6 @@ pub async fn create_tenant(
         max_workspaces: ActiveValue::Set(None),
         ..Default::default()
     };
-    // `id` on SQLite is filled in by tenant_tenants::ActiveModel's before_save (crate::db::sqlite_generated_id), not here.
+    // `id` is filled in by tenant_tenants::ActiveModel's before_save (crate::db::generated_id), not here.
     active.insert(conn).await.internal()
 }

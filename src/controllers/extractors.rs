@@ -11,7 +11,7 @@ use loco_rs::app::AppContext;
 
 use crate::controllers::middleware::auth;
 use crate::error::YorishiroError;
-use crate::models::api_keys;
+use crate::models::access_keys;
 
 use super::ApiError;
 
@@ -53,7 +53,7 @@ pub(crate) fn search_token_limiter(
 /// The sole entry point for authenticated requests with no DB connection.
 ///
 /// Requiring this type as a handler argument is itself a declaration that "this route requires authentication."
-pub struct AuthContext(pub api_keys::AuthContext);
+pub struct AuthContext(pub access_keys::AuthContext);
 
 impl<S> FromRequestParts<S> for AuthContext
 where
@@ -77,53 +77,11 @@ where
     }
 }
 
-/// As `Verified`, for the `audit` grant.
-pub(crate) struct AuditAuthorized {
-    app_ctx: AppContext,
-    pub ctx: api_keys::AuthContext,
-}
-
-impl AuditAuthorized {
-    pub(crate) async fn records(
-        &self,
-        page: crate::models::pagination::ListParams,
-    ) -> Result<Vec<crate::models::_entities::api_key_audit_log::Model>, ApiError> {
-        crate::models::api_key_audit_log::list_for_actor(&self.app_ctx, &self.ctx, page)
-            .await
-            .map_err(ApiError)
-    }
-
-    pub(crate) fn timezone(&self) -> chrono_tz::Tz {
-        crate::data::time::configured(&self.app_ctx)
-    }
-}
-
-impl<S> FromRequestParts<S> for AuditAuthorized
-where
-    AppContext: FromRef<S>,
-    S: Send + Sync,
-{
-    type Rejection = ApiError;
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let presented_key = extract_bearer_key(parts)?;
-
-        let app_ctx = AppContext::from_ref(state);
-
-        let headers = auth::header_pairs(&parts.headers).map_err(ApiError)?;
-        let ctx = auth::RequestAuth::new(&app_ctx)
-            .verify_audit(presented_key, &headers)
-            .await
-            .inspect_err(|err| log_auth_rejection(parts, err))?;
-        Ok(Self { app_ctx, ctx })
-    }
-}
-
 /// Authenticates the caller without acquiring a DB connection.
 ///
 /// Handlers that do slow work before touching the database should use this instead and call `TenantDb::acquire_for_workspace` afterward.
 pub struct Verified {
-    pub ctx: api_keys::AuthContext,
+    pub ctx: access_keys::AuthContext,
 }
 
 impl<S> FromRequestParts<S> for Verified
@@ -160,15 +118,6 @@ pub(crate) fn document_authentication(
 }
 
 impl aide::OperationInput for AuthContext {
-    fn operation_input(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) {
-        document_authentication(ctx, operation);
-    }
-}
-
-impl aide::OperationInput for AuditAuthorized {
     fn operation_input(
         ctx: &mut aide::generate::GenContext,
         operation: &mut aide::openapi::Operation,

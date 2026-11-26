@@ -17,13 +17,13 @@ use uuid::Uuid;
 
 pub(crate) async fn for_job_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     job_id: Uuid,
 ) -> Result<Vec<ProposalRecord>, YorishiroError> {
     let txn = super::iam::access::workspace_transaction(
         db,
         actor,
-        crate::models::iam::policy::Action::InferenceProposalList,
+        crate::models::iam::policy::Action::ListInferenceProposals,
     )
     .await?;
     let workspace_id = actor.require_workspace()?;
@@ -33,13 +33,13 @@ pub(crate) async fn for_job_as(
 
 pub(crate) async fn reject_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     job_id: Uuid,
 ) -> Result<ProposalActionReport, YorishiroError> {
     let txn = super::iam::access::workspace_transaction(
         db,
         actor,
-        crate::models::iam::policy::Action::InferenceReject,
+        crate::models::iam::policy::Action::DiscardInferenceProposals,
     )
     .await?;
     let workspace_id = actor.require_workspace()?;
@@ -51,13 +51,13 @@ pub(crate) async fn reject_as(
 
 pub(crate) async fn discard_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     job_id: Uuid,
 ) -> Result<ProposalActionReport, YorishiroError> {
     let txn = super::iam::access::workspace_transaction(
         db,
         actor,
-        crate::models::iam::policy::Action::InferenceDiscard,
+        crate::models::iam::policy::Action::DiscardInferenceProposals,
     )
     .await?;
     let workspace_id = actor.require_workspace()?;

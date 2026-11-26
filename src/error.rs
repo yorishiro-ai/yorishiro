@@ -37,8 +37,8 @@ pub enum YorishiroError {
         message: String,
     },
 
-    /// The authenticated principal lacks the required scope or role.
-    ScopeInsufficient {
+    /// The authenticated principal does not have permission for the operation.
+    AccessDenied {
         message: String,
         hint: String,
     },
@@ -111,8 +111,8 @@ impl std::fmt::Display for YorishiroError {
                 formatter.write_str("no workspace permits this operation")
             }
             Self::NotFound { message } => write!(formatter, "not found: {message}"),
-            Self::ScopeInsufficient { message, .. } => {
-                write!(formatter, "scope insufficient: {message}")
+            Self::AccessDenied { message, .. } => {
+                write!(formatter, "access denied: {message}")
             }
             Self::Conflict { message } => write!(formatter, "conflict: {message}"),
             Self::RelationTypeMismatch { message } => {
@@ -174,7 +174,6 @@ pub(crate) fn mcp_internal(error: impl Into<BoxError>) -> rmcp::ErrorData {
 /// |---|---|---|
 /// | `validation_failed` | 422 | Request body does not conform to schema |
 /// | `not_found` | 404 | Resource does not exist |
-/// | `scope_insufficient` | 403 | Insufficient permissions |
 /// | `conflict` | 409 | Duplicate or contradicting request |
 /// | `relation_type_mismatch` | 422 | Relation type does not match category |
 /// | `unauthenticated` | 401 | Authentication required |
@@ -197,7 +196,6 @@ pub enum YorishiroErrorCode {
     /// 404 Not Found — the requested resource does not exist.
     NotFound,
     /// 403 Forbidden — the authenticated principal lacks the required scope or role.
-    ScopeInsufficient,
     /// 409 Conflict — the request would create a duplicate or contradict an existing resource.
     Conflict,
     /// 422 Unprocessable Entity — the relation type does not match the expected category.
@@ -236,7 +234,6 @@ impl YorishiroErrorCode {
             Self::WorkspaceSelectionRequired => "workspace_selection_required",
             Self::AccessDenied => "access_denied",
             Self::NotFound => "not_found",
-            Self::ScopeInsufficient => "scope_insufficient",
             Self::Conflict => "conflict",
             Self::RelationTypeMismatch => "relation_type_mismatch",
             Self::Unauthenticated => "unauthenticated",
@@ -259,7 +256,7 @@ impl YorishiroErrorCode {
             | Self::RelationTypeMismatch
             | Self::WorkspaceSelectionRequired => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             Self::NotFound => axum::http::StatusCode::NOT_FOUND,
-            Self::ScopeInsufficient | Self::AccessDenied => axum::http::StatusCode::FORBIDDEN,
+            Self::AccessDenied => axum::http::StatusCode::FORBIDDEN,
             Self::Conflict => axum::http::StatusCode::CONFLICT,
             Self::Unauthenticated => axum::http::StatusCode::UNAUTHORIZED,
             Self::MaintenanceReadOnly => axum::http::StatusCode::LOCKED,
@@ -277,9 +274,8 @@ impl YorishiroErrorCode {
         match self {
             Self::ValidationFailed => "The request body does not conform to the expected schema",
             Self::WorkspaceSelectionRequired => "Select one of the permitted workspaces",
-            Self::AccessDenied => "No workspace permits this operation",
+            Self::AccessDenied => "Insufficient permissions for the requested operation",
             Self::NotFound => "The requested resource does not exist",
-            Self::ScopeInsufficient => "Insufficient permissions for the requested operation",
             Self::Conflict => "The request conflicts with an existing resource",
             Self::RelationTypeMismatch => "The relation type does not match the expected category",
             Self::Unauthenticated => "Authentication is required",
@@ -322,9 +318,10 @@ impl YorishiroError {
             Self::WorkspaceSelectionRequired { .. } => {
                 Some(YorishiroErrorCode::WorkspaceSelectionRequired)
             }
-            Self::WorkspaceAccessDenied => Some(YorishiroErrorCode::AccessDenied),
+            Self::WorkspaceAccessDenied | Self::AccessDenied { .. } => {
+                Some(YorishiroErrorCode::AccessDenied)
+            }
             Self::NotFound { .. } => Some(YorishiroErrorCode::NotFound),
-            Self::ScopeInsufficient { .. } => Some(YorishiroErrorCode::ScopeInsufficient),
             Self::Conflict { .. } => Some(YorishiroErrorCode::Conflict),
             Self::RelationTypeMismatch { .. } => Some(YorishiroErrorCode::RelationTypeMismatch),
             Self::Unauthenticated => Some(YorishiroErrorCode::Unauthenticated),
@@ -365,7 +362,7 @@ impl YorishiroError {
                         "problem": id.to_string(),
                         "code": ValidationErrorCode::Other,
                     })).collect::<Vec<_>>(),
-                    "hint": "select a workspace with workspace_id or X-Workspace-Id; use discover_workspaces to see workspace names",
+                    "hint": "select a workspace with workspace_id or x-workspace-id; use discover_workspaces to see workspace names",
                 }}),
             ),
             Self::WorkspaceAccessDenied => YorishiroErrorCode::AccessDenied
@@ -386,11 +383,11 @@ impl YorishiroError {
                 }),
             ),
             Self::NotFound { message } => YorishiroErrorCode::NotFound.message_response(message),
-            Self::ScopeInsufficient { message, hint } => (
-                YorishiroErrorCode::ScopeInsufficient.http_status(),
+            Self::AccessDenied { message, hint } => (
+                YorishiroErrorCode::AccessDenied.http_status(),
                 serde_json::json!({
                     "error": {
-                        "code": YorishiroErrorCode::ScopeInsufficient.as_str(),
+                        "code": YorishiroErrorCode::AccessDenied.as_str(),
                         "message": message,
                         "hint": hint
                     }

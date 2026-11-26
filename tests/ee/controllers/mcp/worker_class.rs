@@ -18,7 +18,7 @@ async fn worker_class_tools_match_rest_and_enforce_schema_scope() {
             &tenant.api_key,
             2,
             "tools/call",
-            json!({"name":"set_worker_class","arguments":{"worker_class":"shared"}}),
+            json!({"name":"update_workspace_worker_class","arguments":{"worker_class":"shared"}}),
         )
         .await;
         assert_eq!(tool_result_json(&saved)["saved"], true);
@@ -28,7 +28,7 @@ async fn worker_class_tools_match_rest_and_enforce_schema_scope() {
             &tenant.api_key,
             3,
             "tools/call",
-            json!({"name":"get_worker_class","arguments":{}}),
+            json!({"name":"get_workspace_worker_class","arguments":{}}),
         )
         .await;
         let http_response = request
@@ -38,18 +38,21 @@ async fn worker_class_tools_match_rest_and_enforce_schema_scope() {
         http_response.assert_status_ok();
         assert_eq!(tool_result_json(&current), http_response.json::<Value>());
         assert_eq!(tool_result_json(&current)["worker_class"], "shared");
-        let read_key = yorishiro::models::api_keys::Entity::create_api_key(
+        let read_key = yorishiro::models::access_keys::Entity::create_access_key(
             &ctx.db,
             tenant.workspace_id,
             None,
-            false,
         )
         .await
         .unwrap()
         .plaintext;
         for (id, name, arguments) in [
-            (4, "set_worker_class", json!({"worker_class":"shared"})),
-            (5, "reset_worker_class", json!({})),
+            (
+                4,
+                "update_workspace_worker_class",
+                json!({"worker_class":"shared"}),
+            ),
+            (5, "delete_workspace_worker_class", json!({})),
         ] {
             let denied = mcp_call(
                 &request,
@@ -68,7 +71,7 @@ async fn worker_class_tools_match_rest_and_enforce_schema_scope() {
             &tenant.api_key,
             6,
             "tools/call",
-            json!({"name":"reset_worker_class","arguments":{}}),
+            json!({"name":"delete_workspace_worker_class","arguments":{}}),
         )
         .await;
         assert_eq!(tool_result_json(&reset)["reset"], true);
@@ -83,7 +86,7 @@ async fn worker_class_tools_match_rest_and_enforce_schema_scope() {
             &read_key,
             7,
             "tools/call",
-            json!({"name":"get_worker_class","arguments":{}}),
+            json!({"name":"get_workspace_worker_class","arguments":{}}),
         )
         .await;
         assert_eq!(absent["result"]["isError"], true);
@@ -91,7 +94,7 @@ async fn worker_class_tools_match_rest_and_enforce_schema_scope() {
     .await;
 }
 
-/// The get, set and reset tools of each per-workspace setting all advertise `workspace_id`.
+/// The get, update and delete tools of each per-workspace setting advertise `workspace_id`.
 #[tokio::test]
 async fn per_workspace_setting_tools_all_accept_a_workspace_selector() {
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -108,8 +111,8 @@ async fn per_workspace_setting_tools_all_accept_a_workspace_selector() {
         .await;
         let tools = tool_inventory(&listed);
         for setting in ["embedding_provider", "llm_provider", "worker_class"] {
-            for verb in ["get", "set", "reset"] {
-                let name = format!("{verb}_{setting}");
+            for verb in ["get", "update", "delete"] {
+                let name = format!("{verb}_workspace_{setting}");
                 let tool = tools
                     .iter()
                     .find(|tool| tool["name"] == name.as_str())

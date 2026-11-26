@@ -78,8 +78,7 @@ pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
 ///
 /// An edition that brings its own rule for a seam inserts its own `Arc<dyn Trait>` afterwards: the store is keyed by `TypeId`, so the later insert wins without changing any call site.
 pub(crate) async fn after_context(ctx: AppContext) -> Result<AppContext> {
-    let mut ctx = ctx;
-    initializers::database::install(&mut ctx).await?;
+    initializers::database::install(&ctx).await?;
     let ctx = install_services(ctx)?;
     initializers::queue::install(&ctx);
     Ok(ctx)
@@ -112,14 +111,15 @@ impl RouteMounts {
             .guard_credentials("/auth/tenant/login");
 
         mounts.mount(controllers::audit_log::routes());
-        mounts.mount(controllers::api_keys::routes());
+        mounts.mount(controllers::access_keys::routes());
         mounts.mount(controllers::auth::routes());
         mounts.mount(controllers::entities::routes());
         mounts.mount(controllers::entities::migration_routes());
         mounts.mount(controllers::export::routes());
         mounts.mount(controllers::import::routes());
         mounts.mount(controllers::iam::routes());
-        mounts.mount(controllers::members::routes());
+        mounts.mount(controllers::groups::routes());
+        mounts.mount(controllers::policies::routes());
         mounts.mount(controllers::tenants::routes());
         mounts.mount(controllers::relations::routes());
         mounts.mount(controllers::schemas::routes());
@@ -127,7 +127,7 @@ impl RouteMounts {
         mounts.mount(controllers::search::routes());
         mounts.mount(controllers::setup::routes());
         mounts.mount(controllers::template_library::routes());
-        mounts.mount(controllers::whoami::routes());
+        mounts.mount(controllers::caller_identity::routes());
         mounts.mount(controllers::users::routes());
         mounts.mount(controllers::workspaces::routes());
         mounts

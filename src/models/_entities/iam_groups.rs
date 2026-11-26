@@ -12,10 +12,12 @@ pub struct Model {
         unique_key = "uq_iam_groups_tenant_id_id"
     )]
     pub id: Uuid,
-    #[sea_orm(unique_key = "uq_iam_groups_tenant_id_name")]
+    #[sea_orm(unique_key = "uq_iam_groups_tenant_id_name_key")]
     pub tenant_id: Uuid,
-    #[sea_orm(column_type = "Text", unique_key = "uq_iam_groups_tenant_id_name")]
+    #[sea_orm(column_type = "Text")]
     pub name: String,
+    #[sea_orm(column_type = "Text", unique_key = "uq_iam_groups_tenant_id_name_key")]
+    pub name_key: String,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }

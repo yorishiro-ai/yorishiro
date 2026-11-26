@@ -5,7 +5,7 @@ use yorishiro::App;
 use yorishiro::models::schema_schemas;
 
 use crate::requests::boot_request;
-use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
+use crate::requests::fixtures::{TenantArgs, TestTenant, issue_access_key};
 
 use super::*;
 
@@ -42,7 +42,7 @@ async fn workspace_deletion_reports_fork_references_without_exposing_destination
         request.get(&format!("/api/workspaces/{}", tenant.workspace_id))
             .add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status_ok();
         fork.delete(&ctx.db).await.unwrap();
-        let destination_key = issue_api_key(&ctx, destination.id, tenant.owner_id, false).await;
+        let destination_key = issue_access_key(&ctx, destination.id, tenant.owner_id).await;
         let deleted = mcp_call(&request, &session, &tenant_admin_key, 3, "tools/call",
             json!({"name":"delete_workspace","arguments":{"workspace_id":tenant.workspace_id}})).await;
         assert_eq!(tool_result_json(&deleted)["deleted"], true);
@@ -60,7 +60,7 @@ async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
         let session = initialize(&request).await;
         for header in ["x-tenant-id", "x-workspace-id"] {
             let invalid = HeaderValue::from_bytes(b"\xff").unwrap();
-            let rest = request.get("/api/whoami")
+            let rest = request.get("/api/caller-identity")
                 .add_header("Authorization", format!("Bearer {}", tenant.api_key))
                 .add_header(header, invalid.clone()).await;
             assert_eq!(rest.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -71,7 +71,7 @@ async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
                 .add_header(header, invalid.clone()).await
                 .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 
-            for (id, tool) in [(2, "whoami"), (3, "list_schemas"), (4, "list_audit_log")] {
+            for (id, tool) in [(2, "get_caller_identity"), (3, "list_schemas"), (4, "list_workspace_audit_events")] {
                 let response = request.post("/mcp")
                     .add_header("Accept", "application/json, text/event-stream")
                     .add_header("MCP-Session-Id", session.clone())
@@ -125,11 +125,14 @@ async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
 async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let tenant_key =
+            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
+                .await;
         let session = initialize(&request).await;
         let response = mcp_call(
             &request,
             &session,
-            &tenant.api_key,
+            &tenant_key,
             2,
             "tools/call",
             json!({"name":"discover_workspaces","arguments":{}}),
@@ -147,11 +150,10 @@ async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity
                 .iter()
                 .all(|workspace| workspace["tenant_id"] == tenant.tenant_id.to_string())
         );
-        let service = yorishiro::models::api_keys::Entity::create_api_key(
+        let service = yorishiro::models::access_keys::Entity::create_access_key(
             &ctx.db,
             tenant.workspace_id,
             None,
-            false,
         )
         .await
         .unwrap();
@@ -164,27 +166,10 @@ async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity
             json!({"name":"discover_workspaces","arguments":{}}),
         )
         .await;
-        let workspaces = tool_result_json(&response);
-        assert_eq!(workspaces.as_array().unwrap().len(), 1);
-        assert_eq!(
-            workspaces[0]["workspace_id"],
-            tenant.workspace_id.to_string()
-        );
+        assert_eq!(response["result"]["isError"], true);
         assert!(!response.to_string().contains(&service.plaintext));
-        let grants = mcp_call(
-            &request,
-            &session,
-            &service.plaintext,
-            4,
-            "tools/call",
-            json!({"name":"capabilities","arguments":{}}),
-        )
-        .await;
-        let grants = tool_result_json(&grants);
-        assert_eq!(grants["audit"], false);
-        assert_eq!(grants["tenant_root"], false);
         let rest = request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", service.plaintext))
             .await;
         assert_eq!(rest.status_code(), StatusCode::OK);
@@ -194,11 +179,12 @@ async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity
             &service.plaintext,
             5,
             "tools/call",
-            json!({"name":"whoami","arguments":{}}),
+            json!({"name":"get_caller_identity","arguments":{}}),
         )
         .await;
         let identity = tool_result_json(&result);
         assert_eq!(identity, rest.json::<Value>());
+        assert_eq!(identity["tenant_root"], false);
         assert_eq!(identity["identity_kind"], "service");
         assert!(identity.get("workspace_access").is_none());
         assert!(identity["user_id"].is_null());

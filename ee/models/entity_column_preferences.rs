@@ -58,11 +58,11 @@ pub(crate) async fn list(
 
 pub(crate) async fn list_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     page: ListParams,
 ) -> Result<Vec<ColumnPreference>, YorishiroError> {
     use crate::models::iam::{access::read_workspaces, policy::Action};
-    let workspaces = read_workspaces(&ctx.db, actor, Action::EntityColumnsGet).await?;
+    let workspaces = read_workspaces(&ctx.db, actor, Action::ListWorkspaceEntityColumns).await?;
     let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
     let records = if let [workspace] = workspaces.as_slice() {
         list(&txn, *workspace, page).await?
@@ -117,13 +117,16 @@ pub(crate) async fn set(
     let encoded = serde_json::to_value(columns).internal()?;
 
     let active = ActiveModel {
-        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
+        id: crate::db::generated_id(ActiveValue::NotSet),
         workspace_id: ActiveValue::Set(workspace_id),
         entity_type: ActiveValue::Set(entity_type.to_string()),
         columns: ActiveValue::Set(encoded),
         updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     Entity::insert(active)
         .on_conflict(
             OnConflict::columns([Column::WorkspaceId, Column::EntityType])
@@ -164,7 +167,7 @@ pub(crate) async fn clear(
 /// Returns the session, authorization or store error.
 pub(crate) async fn set_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     entity_type: &str,
     columns: &[String],
 ) -> Result<ColumnPreference, YorishiroError> {
@@ -172,9 +175,9 @@ pub(crate) async fn set_for_actor(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::EntityColumnsUpdate,
+            crate::models::iam::policy::Action::UpdateWorkspaceEntityColumns,
         ),
-        Some(crate::models::iam::policy::Action::EntityColumnsUpdate),
+        Some(crate::models::iam::policy::Action::UpdateWorkspaceEntityColumns),
         async |session| set(session.txn(), session.workspace_id()?, entity_type, columns).await,
     )
     .await
@@ -186,16 +189,16 @@ pub(crate) async fn set_for_actor(
 /// Returns the session, authorization or delete error.
 pub(crate) async fn clear_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     entity_type: &str,
 ) -> Result<(), YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::EntityColumnsDelete,
+            crate::models::iam::policy::Action::DeleteWorkspaceEntityColumns,
         ),
-        Some(crate::models::iam::policy::Action::EntityColumnsDelete),
+        Some(crate::models::iam::policy::Action::DeleteWorkspaceEntityColumns),
         async |session| clear(session.txn(), session.workspace_id()?, entity_type).await,
     )
     .await

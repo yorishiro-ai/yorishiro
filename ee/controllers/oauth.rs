@@ -1,4 +1,4 @@
-//! `GET /auth/oauth/status|authorize|callback`: OAuth2/OIDC login, an additional way to obtain a Yorishiro API key alongside the community server's own `POST /auth/root/login`.
+//! `GET /auth/oauth/status|authorize|callback`: OAuth2/OIDC login, an additional way to obtain a Yorishiro access key alongside the community server's own `POST /auth/root/login`.
 //!
 //! All three routes carry the licence gate, so an unlicensed deployment answers `404` to every one of them before any of the below runs.
 //! SSO login is a enterprise-edition feature, which is a decision about what the feature is; needing configuration on top of that does not make it a community route.
@@ -87,7 +87,7 @@ async fn authorize(State(ctx): State<AppContext>) -> Result<Response, ApiError> 
 
 /// `GET /auth/oauth/callback`: the identity provider's redirect target.
 /// Verifies the OAuth identity and finds or provisions the Yorishiro user and tenant.
-/// Issues a tenant-scoped API key like `POST /auth/root/login` and returns it in a URL fragment to keep it out of access logs and `Referer` headers.
+/// Issues a tenant-scoped access key like `POST /auth/root/login` and returns it in a URL fragment to keep it out of access logs and `Referer` headers.
 async fn callback(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -134,9 +134,9 @@ async fn callback(
     Ok(login_success_redirect(&created.plaintext, clear_cookie))
 }
 
-fn login_success_redirect(api_key: &str, clear_cookie: String) -> Response {
+fn login_success_redirect(access_key: &str, clear_cookie: String) -> Response {
     // Generated keys contain only alphanumeric characters and underscores, so no fragment encoding is needed.
-    let location = format!("/#api_key={api_key}");
+    let location = format!("/#access_key={access_key}");
     (
         StatusCode::FOUND,
         AppendHeaders([

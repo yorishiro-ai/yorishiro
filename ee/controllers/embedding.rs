@@ -14,7 +14,7 @@ use loco_rs::app::AppContext;
 use crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest;
 use crate::edition::ee::models::workspace_embedding_keys::{self, EmbeddingKeyDescription};
 
-/// `PUT /api/workspace/embedding-key`
+/// `PUT /api/workspace/embedding-provider`
 async fn set_embedding_key(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
@@ -24,7 +24,7 @@ async fn set_embedding_key(
     Ok(axum::response::NoContent)
 }
 
-/// `GET /api/workspace/embedding-key`
+/// `GET /api/workspace/embedding-provider`
 async fn get_embedding_key(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
@@ -37,7 +37,7 @@ async fn get_embedding_key(
     Ok(Json(described))
 }
 
-/// `DELETE /api/workspace/embedding-key`
+/// `DELETE /api/workspace/embedding-provider`
 async fn delete_embedding_key(
     State(ctx): State<AppContext>,
     WorkspaceAuthenticated(auth_ctx): WorkspaceAuthenticated,
@@ -51,30 +51,21 @@ pub fn routes() -> Routes {
         .tag("enterprise")
         .prefix("api/workspace")
         .add(
-            "/embedding-key",
+            "/embedding-provider",
             aide::axum::routing::put_with(set_embedding_key, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["embedding_provider_update"]),
-                ))
+                op.id("UpdateWorkspaceEmbeddingProvider")
             }),
         )
         .add(
-            "/embedding-key",
+            "/embedding-provider",
             aide::axum::routing::get_with(get_embedding_key, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["embedding_provider_get"]),
-                ))
+                op.id("GetWorkspaceEmbeddingProvider")
             }),
         )
         .add(
-            "/embedding-key",
+            "/embedding-provider",
             aide::axum::routing::delete_with(delete_embedding_key, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["embedding_provider_delete"]),
-                ))
+                op.id("DeleteWorkspaceEmbeddingProvider")
             }),
         )
 }

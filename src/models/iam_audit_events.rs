@@ -2,16 +2,18 @@ pub use crate::models::_entities::iam_audit_events::{ActiveModel, Entity, Model}
 use sea_orm::{ActiveValue::Set, DatabaseTransaction, QueryOrder, QuerySelect, entity::prelude::*};
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(mut self, db: &C, _: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
-        self.id = crate::db::sqlite_generated_id(db, self.id);
-        Ok(self)
+        let mut this = self;
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        Ok(this)
     }
 }
 
@@ -22,7 +24,6 @@ impl Model {
         params: crate::models::pagination::ListParams,
     ) -> Result<Vec<Self>, YorishiroError> {
         use crate::models::{
-            api_keys,
             iam::access,
             iam::policy::{Action, Resource},
         };
@@ -30,14 +31,12 @@ impl Model {
         access::require_iam_action(
             &txn,
             actor,
-            Action::IamAuditList,
+            Action::ListIamAuditEvents,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
         )
         .await?;
-        let current = api_keys::Model::current_context(&txn, actor).await?;
-        access::require_audit(&current)?;
         let events = Entity::find()
             .filter(
                 crate::models::_entities::iam_audit_events::Column::TenantId.eq(actor.tenant_id),
@@ -57,14 +56,14 @@ impl Model {
 pub(crate) async fn record(
     txn: &DatabaseTransaction,
     actor: &AuthContext,
-    action: &str,
+    action: crate::models::iam::policy::Action,
     detail: serde_json::Value,
 ) -> Result<(), YorishiroError> {
     ActiveModel {
         tenant_id: Set(actor.tenant_id),
         user_id: Set(Some(actor.user_id.ok_or(YorishiroError::Unauthenticated)?)),
-        api_key_id: Set(actor.api_key_id),
-        action: Set(action.to_owned()),
+        access_key_id: Set(actor.access_key_id),
+        action: Set(action.name().to_owned()),
         detail: Set(detail),
         ..Default::default()
     }

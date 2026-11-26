@@ -6,7 +6,7 @@ use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
 use yorishiro::models::schema_schemas;
 
 use crate::requests::boot_request;
-use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
+use crate::requests::fixtures::{TenantArgs, TestTenant, issue_access_key};
 
 use super::*;
 
@@ -21,12 +21,16 @@ async fn mcp_origin_tools_match_ungated_rest_when_same_session_licence_state_is_
             owner_id,
             ..
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let key = issue_api_key(&ctx, workspace_id, owner_id, false).await;
+        let key = issue_access_key(&ctx, workspace_id, owner_id).await;
         let session = initialize(&request).await;
 
         let licensed = mcp_call(&request, &session, &key, 2, "tools/list", json!({})).await;
         let licensed_tools = tool_inventory(&licensed);
-        for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
+        for name in [
+            "list_schema_upstream_changes",
+            "preview_schema_merge",
+            "apply_schema_merge",
+        ] {
             assert!(licensed_tools.iter().any(|tool| tool["name"] == name));
         }
         for tool in licensed_tools {
@@ -41,23 +45,12 @@ async fn mcp_origin_tools_match_ungated_rest_when_same_session_licence_state_is_
         );
         let community = mcp_call(&request, &session, &key, 3, "tools/list", json!({})).await;
         let community_tools = tool_inventory(&community);
-        let grants = mcp_call(
-            &request,
-            &session,
-            &key,
-            4,
-            "tools/call",
-            json!({"name":"capabilities","arguments":{}}),
-        )
-        .await;
-        let grants = tool_result_json(&grants);
-        let capabilities = grants["tools"]
-            .as_array()
-            .expect("visible tool capabilities");
-        assert_eq!(capabilities.len(), community_tools.len());
-        for name in ["list_upstream_changes", "merge_preview", "merge_apply"] {
+        for name in [
+            "list_schema_upstream_changes",
+            "preview_schema_merge",
+            "apply_schema_merge",
+        ] {
             assert!(community_tools.iter().any(|tool| tool["name"] == name));
-            assert!(capabilities.iter().any(|tool| tool["name"] == name));
         }
         let rest = request
             .get("/api/schemas/upstream-changes")
@@ -70,7 +63,7 @@ async fn mcp_origin_tools_match_ungated_rest_when_same_session_licence_state_is_
             &key,
             10,
             "tools/call",
-            json!({"name":"list_upstream_changes","arguments":{}}),
+            json!({"name":"list_schema_upstream_changes","arguments":{}}),
         )
         .await;
         assert_ne!(result["result"]["isError"], true, "{result}");
@@ -96,7 +89,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             api_key: schema_key,
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let administrator = crate::requests::fixtures::create_iam_reader(&ctx, tenant_id).await;
-        let read_key = issue_api_key(&ctx, workspace_id, administrator, false).await;
+        let read_key = issue_access_key(&ctx, workspace_id, administrator).await;
 
         let library_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant_id, owner_id).await;
@@ -164,7 +157,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             2,
             "tools/call",
             json!({
-                "name": "list_upstream_changes",
+                "name": "list_schema_upstream_changes",
                 "arguments": { "limit": 10, "offset": 0 }
             }),
         )
@@ -180,7 +173,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             3,
             "tools/call",
             json!({
-                "name": "merge_preview",
+                "name": "preview_schema_merge",
                 "arguments": { "schema_id": schema_id }
             }),
         )
@@ -195,7 +188,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             4,
             "tools/call",
             json!({
-                "name": "merge_apply",
+                "name": "apply_schema_merge",
                 "arguments": { "schema_id": schema_id }
             }),
         )
@@ -203,7 +196,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
         assert_eq!(denied["result"]["isError"], true, "MCP call: {denied}");
         assert_eq!(
             denied["result"]["structuredContent"]["error"]["code"],
-            "scope_insufficient"
+            "access_denied"
         );
         assert_eq!(
             schema_schemas::get_active_schema(&ctx.db, workspace_id, "library-note")
@@ -220,7 +213,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             5,
             "tools/call",
             json!({
-                "name": "merge_apply",
+                "name": "apply_schema_merge",
                 "arguments": { "schema_id": schema_id }
             }),
         )
@@ -241,7 +234,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
     .await;
 }
 
-/// `list_upstream_changes` maps `limit`/`offset` onto the page of changed schemas.
+/// `list_schema_upstream_changes` maps `limit` and `offset` onto the page of changed schemas.
 #[tokio::test]
 async fn list_upstream_changes_pages_by_limit_and_offset() {
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -253,7 +246,7 @@ async fn list_upstream_changes_pages_by_limit_and_offset() {
             api_key: schema_key,
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let administrator = crate::requests::fixtures::create_iam_reader(&ctx, tenant_id).await;
-        let read_key = issue_api_key(&ctx, workspace_id, administrator, false).await;
+        let read_key = issue_access_key(&ctx, workspace_id, administrator).await;
         let library_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant_id, owner_id).await;
         for index in 0..3 {
@@ -290,7 +283,7 @@ async fn list_upstream_changes_pages_by_limit_and_offset() {
             &read_key,
             2,
             "tools/call",
-            json!({"name":"list_upstream_changes","arguments":{}}),
+            json!({"name":"list_schema_upstream_changes","arguments":{}}),
         )
         .await;
         let all = tool_result_json(&all);
@@ -307,7 +300,7 @@ async fn list_upstream_changes_pages_by_limit_and_offset() {
                 &read_key,
                 3,
                 "tools/call",
-                json!({"name":"list_upstream_changes","arguments":arguments}),
+                json!({"name":"list_schema_upstream_changes","arguments":arguments}),
             )
             .await;
             assert_ne!(page["result"]["isError"], true, "{page}");

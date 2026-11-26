@@ -2,7 +2,7 @@ use crate::requests::boot_request;
 use axum::http::StatusCode;
 use yorishiro::App;
 
-use crate::requests::fixtures::{self, TenantArgs, TestTenant, issue_api_key};
+use crate::requests::fixtures::{self, TenantArgs, TestTenant, issue_access_key};
 
 fn note_definition() -> serde_json::Value {
     fixtures::note_schema("library-note", false)
@@ -10,7 +10,7 @@ fn note_definition() -> serde_json::Value {
 
 #[tokio::test]
 async fn template_update_rejects_a_revoked_previously_authenticated_actor() {
-    use yorishiro::models::api_keys;
+    use yorishiro::models::access_keys;
     use yorishiro::models::template_templates::{self, UpdateTemplateInput};
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
@@ -21,14 +21,14 @@ async fn template_update_rejects_a_revoked_previously_authenticated_actor() {
         created.assert_status(StatusCode::CREATED);
         let id = created.json::<serde_json::Value>()["id"].as_str().unwrap().parse().unwrap();
         let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
-        let key = api_keys::Entity::create_tenant_api_key(&ctx.db, tenant.tenant_id, Some(administrator), false, "template-admin").await.unwrap();
-        let actor = api_keys::AuthContext { api_key_id:key.id, workspace_id:None,
-            tenant_id:tenant.tenant_id, user_id:Some(administrator), audit:false };
+        let key = access_keys::Entity::create_tenant_access_key(&ctx.db, tenant.tenant_id, Some(administrator), "template-admin").await.unwrap();
+        let actor = access_keys::AuthContext { access_key_id:key.id, workspace_id:None,
+            tenant_id:tenant.tenant_id, user_id:Some(administrator), };
         template_templates::update_as(&ctx.db, &actor, id, UpdateTemplateInput {
             name: None, description: Some("before-revocation".into()), definition: None, tags: None, locale: None,
         }).await.unwrap();
         let input = || UpdateTemplateInput { name:None,description:Some("must-not-save".into()),definition:None,tags:None,locale:None };
-        api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+        access_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
         assert!(matches!(template_templates::update_as(&ctx.db, &actor, id, input()).await,
             Err(yorishiro::YorishiroError::Unauthenticated)));
         let stored = template_templates::get_template(&ctx.db, tenant.tenant_id, id).await.unwrap();
@@ -51,7 +51,7 @@ async fn member_role_cannot_manage_the_template_library() {
         yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant.tenant_id, member.id)
             .await
             .expect("add member");
-        let member_key = issue_api_key(&ctx, tenant.workspace_id, member.id, false).await;
+        let member_key = issue_access_key(&ctx, tenant.workspace_id, member.id).await;
 
         let response = request
             .post("/api/template-library")

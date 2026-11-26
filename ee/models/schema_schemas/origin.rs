@@ -165,14 +165,14 @@ pub(crate) async fn merge_apply(
 /// Returns the session, authorization or preview error.
 pub(crate) async fn merge_preview_for_actor(
     ctx: &AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     schema_id: Uuid,
 ) -> Result<MergePlan, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-        crate::models::iam::policy::Action::SchemaMergePreview,
+        crate::models::iam::policy::Action::PreviewSchemaMerge,
         async |session| {
             // Workspace content uses the scoped transaction; templates require the identity pool.
             merge_preview(
@@ -194,14 +194,14 @@ pub(crate) async fn merge_preview_for_actor(
 /// Returns the session, authorization or merge error.
 pub(crate) async fn merge_apply_for_actor(
     ctx: &AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     schema_id: Uuid,
 ) -> Result<crate::edition::ee::dtos::origin::MergeResponse, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-        Some(crate::models::iam::policy::Action::SchemaMergeApply),
+        Some(crate::models::iam::policy::Action::ApplySchemaMerge),
         async |session| {
             let (schema, diff, summary) = merge_apply(
                 session.txn(),

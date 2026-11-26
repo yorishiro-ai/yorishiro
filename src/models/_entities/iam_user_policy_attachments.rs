@@ -20,14 +20,6 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::iam_policies::Entity",
-        from = "(Column::TenantId, Column::PolicyId)",
-        to = "(super::iam_policies::Column::Id, super::iam_policies::Column::TenantId, super::iam_policies::Column::Id, super::iam_policies::Column::TenantId)",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    IamPolicies,
-    #[sea_orm(
         belongs_to = "super::tenant_memberships::Entity",
         from = "(Column::TenantId, Column::UserId)",
         to = "(super::tenant_memberships::Column::TenantId, super::tenant_memberships::Column::UserId, super::tenant_memberships::Column::TenantId, super::tenant_memberships::Column::UserId)",
@@ -35,12 +27,6 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     TenantMemberships,
-}
-
-impl Related<super::iam_policies::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::IamPolicies.def()
-    }
 }
 
 impl Related<super::tenant_memberships::Entity> for Entity {

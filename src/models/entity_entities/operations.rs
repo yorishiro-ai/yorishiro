@@ -63,7 +63,7 @@ pub async fn count(conn: &impl ConnectionTrait, workspace_id: Uuid) -> Result<i6
 
 /// Creates a new entity: resolves the schema name to its currently active schema, checks that the `entity_type` exists in that version, validates `data`, and persists the result.
 ///
-/// `created_by` is the acting user's ID, or `None` for an unattributed service/automation API key.
+/// `created_by` is the acting user's ID, or `None` for an unattributed service/automation access key.
 ///
 /// The quota check and insert are serialized with a workspace-scoped advisory lock: without it, concurrent creates could each read a count under `max_entities` and both insert, overshooting the cap.
 ///
@@ -149,7 +149,7 @@ pub async fn get(
 /// Fully replaces an existing entity's `data`.
 ///
 /// Validation is done against the schema version the entity was actually created with (the row's `schema_id`), so existing entities don't silently break compatibility even if the active version has since moved on.
-/// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation API key.
+/// `updated_by` is the acting user's ID, or `None` for an unattributed service/automation access key.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -201,6 +201,9 @@ pub async fn update(
             .exec_with_returning(conn)
             .await
             .internal()?;
+        for row in &rows {
+            super::resync_full_text(conn, row.id).await.internal()?;
+        }
         return rows
             .pop()
             .map(EntityRecord::from)
@@ -225,6 +228,14 @@ pub async fn delete(
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::entity_entities::Column;
 
+    super::forget_full_text(
+        conn,
+        sea_orm::Condition::all()
+            .add(Column::WorkspaceId.eq(workspace_id))
+            .add(Column::Id.eq(id)),
+    )
+    .await
+    .internal()?;
     let result = Entity::delete_many()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::Id.eq(id))
@@ -232,6 +243,11 @@ pub async fn delete(
         .await
         .internal()?;
 
+    if result.rows_affected > 0 {
+        super::touch_content_revision(conn, workspace_id)
+            .await
+            .internal()?;
+    }
     if result.rows_affected == 0 {
         Err(YorishiroError::not_found(format!(
             "entity '{id}' was not found"
@@ -260,11 +276,11 @@ pub async fn list(
 
 pub(crate) async fn list_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     query: ListEntitiesQuery,
 ) -> Result<Vec<EntityRecord>, YorishiroError> {
     use crate::models::iam::{access::read_workspaces, policy::Action};
-    let workspaces = read_workspaces(&ctx.db, actor, Action::EntityList).await?;
+    let workspaces = read_workspaces(&ctx.db, actor, Action::ListEntities).await?;
     let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
     let records = list_workspaces(&txn, &workspaces, Some(actor.tenant_id), query).await?;
     txn.commit().await.internal()?;
@@ -273,7 +289,7 @@ pub(crate) async fn list_for_actor(
 
 pub(crate) async fn get_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<EntityRecord, YorishiroError> {
     let inferred = actor.workspace_id.is_none();
@@ -284,7 +300,7 @@ pub(crate) async fn get_for_actor(
         &txn,
         &ctx.db,
         &actor,
-        crate::models::iam::policy::Action::EntityGet,
+        crate::models::iam::policy::Action::GetEntity,
     )
     .await
     .map_err(|error| crate::models::iam::access::hide_inferred_resource(inferred, error))?;
@@ -293,17 +309,17 @@ pub(crate) async fn get_for_actor(
 
 pub(crate) async fn create_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     input: CreateEntityInput,
 ) -> Result<EntityRecord, YorishiroError> {
     use crate::models::iam::{access, policy::Action};
     let mut actor = actor.clone();
-    let workspace_id = access::select_workspace(&ctx.db, &actor, Action::EntityCreate).await?;
+    let workspace_id = access::select_workspace(&ctx.db, &actor, Action::CreateEntity).await?;
     actor.workspace_id = Some(workspace_id);
     let quotas = crate::data::quotas::for_tenant(ctx, actor.tenant_id).await?;
     let txn = crate::db::begin_workspace_write(ctx, actor.tenant_id, workspace_id).await?;
     let authorization =
-        access::authorize_workspace_action(&txn, &ctx.db, &actor, Action::EntityCreate).await?;
+        access::authorize_workspace_action(&txn, &ctx.db, &actor, Action::CreateEntity).await?;
     let record =
         create_with_quota(&txn, workspace_id, input, actor.user_id, quotas.entities).await?;
     crate::workers::embedding_sync::enqueue_after_write(ctx, workspace_id, record.id, &txn).await?;
@@ -316,7 +332,7 @@ pub(crate) async fn create_for_actor(
 
 pub(crate) async fn update_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     mut input: UpdateEntityInput,
 ) -> Result<EntityRecord, YorishiroError> {
     let inferred = actor.workspace_id.is_none();
@@ -328,7 +344,7 @@ pub(crate) async fn update_for_actor(
         &txn,
         &ctx.db,
         &actor,
-        crate::models::iam::policy::Action::EntityUpdate,
+        crate::models::iam::policy::Action::UpdateEntity,
     )
     .await
     .map_err(|error| crate::models::iam::access::hide_inferred_resource(inferred, error))?;
@@ -344,7 +360,7 @@ pub(crate) async fn update_for_actor(
 
 pub(crate) async fn delete_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<(), YorishiroError> {
     let inferred = actor.workspace_id.is_none();
@@ -356,7 +372,7 @@ pub(crate) async fn delete_for_actor(
         &txn,
         &ctx.db,
         &actor,
-        crate::models::iam::policy::Action::EntityDelete,
+        crate::models::iam::policy::Action::DeleteEntity,
     )
     .await
     .map_err(|error| crate::models::iam::access::hide_inferred_resource(inferred, error))?;

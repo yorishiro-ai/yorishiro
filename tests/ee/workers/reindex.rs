@@ -83,7 +83,7 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     .await
     .expect("entity");
     let configured = request
-        .put("/api/workspace/embedding-key")
+        .put("/api/workspace/embedding-provider")
         .add_header("Authorization", format!("Bearer {api_key}"))
         .json(&serde_json::json!({
             "base_url": workspace_server.url,
@@ -95,7 +95,7 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
         .await;
     configured.assert_status(axum::http::StatusCode::NO_CONTENT);
     let described = request
-        .get("/api/workspace/embedding-key")
+        .get("/api/workspace/embedding-provider")
         .add_header("Authorization", format!("Bearer {api_key}"))
         .await;
     described.assert_status(axum::http::StatusCode::OK);

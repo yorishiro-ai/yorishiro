@@ -6,7 +6,7 @@ use sea_orm::EntityTrait;
 use yorishiro::App;
 use yorishiro::db::DbHandle;
 use yorishiro::edition::ee::controllers::middleware::auth::WORKSPACE_HEADER;
-use yorishiro::edition::ee::models::api_keys::create_tenant_api_key;
+use yorishiro::edition::ee::models::access_keys::create_tenant_access_key;
 
 /// Enterprise edition composition must not break a workspace-scoped key on a route base itself defines.
 #[tokio::test]
@@ -50,29 +50,34 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let user_id = crate::requests::fixtures::create_iam_administrator(&ctx, tenant_id).await;
 
-        // create_tenant_api_key reads tenant_tenants and tenant_memberships, neither granted to yorishiro_app (see tenant_tenants's migration doc comment), so it runs on the identity pool (the migration/admin role), not the RLS-scoped tenant pool.
+        // create_tenant_access_key reads tenant_tenants and tenant_memberships, neither granted to yorishiro_app (see tenant_tenants's migration doc comment), so it runs on the identity pool (the migration/admin role), not the RLS-scoped tenant pool.
         let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let identity = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.identity.clone());
-        let tenant_key = create_tenant_api_key(&identity, tenant_id, Some(user_id))
+        let tenant_key = create_tenant_access_key(&identity, tenant_id, Some(user_id))
             .await
             .expect("issuing a tenant-scoped key");
 
-        let rotated = request
-            .post(&format!("/api/api-keys/{}/rotate", tenant_key.id))
+        let created = request
+            .post("/api/access-keys")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
-            .add_header(WORKSPACE_HEADER, workspace_id.to_string())
+            .json(&serde_json::json!({"name":"successor","tenant_scoped":true}))
             .await;
-        rotated.assert_status(StatusCode::CREATED);
-        let replacement = rotated.json::<serde_json::Value>();
+        created.assert_status(StatusCode::CREATED);
+        let replacement = created.json::<serde_json::Value>();
         assert!(replacement["workspace_id"].is_null());
         assert_eq!(replacement["tenant_id"], tenant_id.to_string());
         request
-            .get("/api/whoami")
+            .delete(&format!("/api/access-keys/{}", tenant_key.id))
+            .add_header("Authorization", format!("Bearer {}", replacement["full_key"].as_str().unwrap()))
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+        request
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, workspace_id.to_string())
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
-        let tenant_key = yorishiro::edition::ee::models::api_keys::CreatedTenantApiKey {
+        let tenant_key = yorishiro::edition::ee::models::access_keys::CreatedTenantAccessKey {
             id: replacement["id"].as_str().unwrap().parse().unwrap(),
             plaintext: replacement["full_key"].as_str().unwrap().to_owned(),
         };
@@ -101,27 +106,27 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             with_header.text()
         );
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, workspace_id.to_string())
             .add_header("x-tenant-id", tenant_id.to_string())
             .await
             .assert_status(StatusCode::OK);
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, workspace_id.to_string())
             .add_header("x-tenant-id", uuid::Uuid::new_v4().to_string())
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, workspace_id.to_string())
             .add_header("x-tenant-id", "invalid")
             .await
             .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
-        let persisted = yorishiro::models::api_keys::Entity::find_by_id(tenant_key.id)
+        let persisted = yorishiro::models::access_keys::Entity::find_by_id(tenant_key.id)
             .one(&identity)
             .await
             .unwrap()
@@ -131,7 +136,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             "a read-only request must persist last_used_at outside its rolled-back transaction"
         );
         let missing_target = request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .await;
         assert_eq!(missing_target.status_code(), 200);
@@ -155,7 +160,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             .await
             .assert_status(StatusCode::OK);
         let response = request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, workspace_id.to_string())
             .await;
@@ -185,7 +190,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             let response = call
                 .json(&serde_json::json!({
                     "jsonrpc":"2.0", "id":id, "method":"tools/call",
-                    "params":{"name":"whoami","arguments":{}}
+                    "params":{"name":"get_caller_identity","arguments":{}}
                 }))
                 .await;
             assert_eq!(response.status_code(), 200, "{}", response.text());
@@ -234,7 +239,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
 #[tokio::test]
 async fn tenant_key_rechecks_iam_policy_after_detachment() {
     use sea_orm::TransactionTrait;
-    use yorishiro::models::{api_keys, tenancy};
+    use yorishiro::models::{access_keys, tenancy};
 
     if !crate::require_postgres_backend() {
         return;
@@ -245,14 +250,14 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
         let member = tenancy::register_member(&txn, tenant.tenant_id,
             &crate::requests::fixtures::unique_email("tenant-target"), "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
-        let key = create_tenant_api_key(&ctx.db, tenant.tenant_id, Some(member.id)).await.unwrap();
+        let key = create_tenant_access_key(&ctx.db, tenant.tenant_id, Some(member.id)).await.unwrap();
         let root_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let created = request.post("/api/iam/policies")
+        let created = request.post("/api/policies")
             .add_header("Authorization", format!("Bearer {root_key}"))
-            .json(&serde_json::json!({"name":"schema-reader", "document":{"statements":[{"effect":"allow","actions":["schema_list"],"resources":[{"type":"workspace","tenant_id":tenant.tenant_id,"workspace_id":tenant.workspace_id}]}]}})).await;
+            .json(&serde_json::json!({"name":"schema-reader", "document":{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["schema:ListSchemas"],"Resource":[format!("yrn:workspace:{}:{}", tenant.tenant_id, tenant.workspace_id)]}]}})).await;
         created.assert_status(StatusCode::CREATED);
         let policy_id = created.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
-        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {root_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
         let session = mcp::initialize(&request).await;
@@ -280,9 +285,9 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
                 assert_ne!(body["result"]["isError"], true, "{body}");
             } else {
                 assert_eq!(body["result"]["isError"], true, "{body}");
-                assert_eq!(body["result"]["structuredContent"]["error"]["code"], "scope_insufficient");
+                assert_eq!(body["result"]["structuredContent"]["error"]["code"], "access_denied");
             }
-            assert!(api_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().is_some());
+            assert!(access_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().is_some());
         }
     }).await;
 }
@@ -310,13 +315,14 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
 
         let db = ctx.shared_store.get::<DbHandle>().unwrap();
         let identity = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.identity.clone());
-        let tenant_key = create_tenant_api_key(&identity, caller.tenant_id, Some(caller.owner_id))
-            .await
-            .expect("issuing a tenant-scoped key");
+        let tenant_key =
+            create_tenant_access_key(&identity, caller.tenant_id, Some(caller.owner_id))
+                .await
+                .expect("issuing a tenant-scoped key");
 
         // The key works in its own tenant's workspace.
         let own = request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, caller.workspace_id.to_string())
             .await;
@@ -324,7 +330,7 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
 
         // Naming a workspace that belongs to another tenant is refused as a scope denial, not resolved.
         let foreign_target = request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, foreign.workspace_id.to_string())
             .await;
@@ -337,11 +343,11 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
 
         // The same header is valid for a key of the foreign tenant, proving the refusal is about the pairing, not the workspace.
         let foreign_key =
-            create_tenant_api_key(&identity, foreign.tenant_id, Some(foreign.owner_id))
+            create_tenant_access_key(&identity, foreign.tenant_id, Some(foreign.owner_id))
                 .await
                 .expect("issuing a second tenant-scoped key");
         let valid = request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", foreign_key.plaintext))
             .add_header(WORKSPACE_HEADER, foreign.workspace_id.to_string())
             .await;

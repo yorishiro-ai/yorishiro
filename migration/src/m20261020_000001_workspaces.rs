@@ -29,7 +29,6 @@ impl MigrationTrait for Migration {
 async fn up_workspaces(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let mut table = Table::create()
         .table(Alias::new("workspace_workspaces"))
-        .if_not_exists()
         .col(helpers::uuidv7_pk(manager))
         .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
         .col(ColumnDef::new(Alias::new("name")).text().not_null())
@@ -131,7 +130,7 @@ async fn up_workspaces(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
 
     helpers::pg_only(
         manager,
-        "GRANT UPDATE (status, schema_id) ON workspace_workspaces TO yorishiro_app;",
+        "GRANT UPDATE (status, schema_id, embedding_content_revision, embedding_revision, embedding_reindexing) ON workspace_workspaces TO yorishiro_app;",
     )
     .await?;
 

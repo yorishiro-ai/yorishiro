@@ -120,7 +120,7 @@ pub(crate) async fn reindex_workspace_with_actor(
     ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
     provider: &dyn crate::services::embedding::EmbeddingProvider,
-    actor: Option<&crate::models::api_keys::AuthContext>,
+    actor: Option<&crate::models::access_keys::AuthContext>,
     startup: bool,
 ) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
     let lock = if crate::db::is_sqlite(&ctx.db) {

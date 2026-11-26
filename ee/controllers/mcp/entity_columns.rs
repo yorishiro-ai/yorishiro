@@ -37,7 +37,7 @@ impl YorishiroMcpServer {
     #[tool(
         description = "List the selected workspace's stored entity-table column preferences (requires entity_columns_get IAM permission); these display preferences are shared by workspace users"
     )]
-    pub(crate) async fn list_entity_columns(
+    pub(crate) async fn list_workspace_entity_columns(
         &self,
         Parameters(args): Parameters<ListColumnsArgs>,
         Extension(parts): Extension<Parts>,
@@ -56,7 +56,7 @@ impl YorishiroMcpServer {
     #[tool(
         description = "Replace the selected workspace's visible columns for one entity type (requires entity_columns_update IAM permission); validates duplicate columns and the display limit without changing schema definitions"
     )]
-    pub(crate) async fn set_entity_columns(
+    pub(crate) async fn update_workspace_entity_columns(
         &self,
         Parameters(args): Parameters<SetColumnsArgs>,
         Extension(parts): Extension<Parts>,
@@ -76,7 +76,7 @@ impl YorishiroMcpServer {
     #[tool(
         description = "Reset the selected workspace's entity-table columns for one entity type to schema-derived defaults (requires entity_columns_delete IAM permission); this removes only the display preference"
     )]
-    pub(crate) async fn reset_entity_columns(
+    pub(crate) async fn delete_workspace_entity_columns(
         &self,
         Parameters(args): Parameters<ResetColumnsArgs>,
         Extension(parts): Extension<Parts>,

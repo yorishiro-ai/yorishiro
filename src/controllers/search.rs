@@ -30,11 +30,6 @@ pub(crate) async fn search_entities(
 pub fn routes() -> Routes {
     Routes::new().tag("community").prefix("api/search").add(
         "/",
-        aide::axum::routing::get_with(search_entities, |op| {
-            op.with(crate::controllers::openapi::extension(
-                "x-yorishiro-required-actions",
-                serde_json::json!(["search"]),
-            ))
-        }),
+        aide::axum::routing::get_with(search_entities, |op| op.id("SearchEntities")),
     )
 }

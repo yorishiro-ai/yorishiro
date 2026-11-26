@@ -83,7 +83,7 @@ SeaORM is the default. Raw SQL requires an explicit reason:
 
 Examples:
 - `src/db.rs`: connection primitives (`SET ROLE`, `RESET`, advisory locks)
-- `src/models/api_keys/authenticate.rs`: `authenticate_api_key($1)` — the SECURITY DEFINER function that bypasses RLS
+- `src/models/access_keys/authenticate.rs`: `authenticate_access_key($1)` — the SECURITY DEFINER function that bypasses RLS
 - `src/models/entity_embeddings/` and `src/tasks/resync_embeddings.rs`: pgvector `embedding` column operations
 
 ### MCP placement

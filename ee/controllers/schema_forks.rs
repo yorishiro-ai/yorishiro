@@ -67,47 +67,22 @@ pub fn routes() -> Routes {
         .prefix("api/schema-forks")
         .add(
             "",
-            aide::axum::routing::get_with(list, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_fork_list"]),
-                ))
-            }),
+            aide::axum::routing::get_with(list, |op| op.id("ListSchemaForks")),
         )
         .add(
             "",
-            aide::axum::routing::post_with(create, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_fork_create"]),
-                ))
-            }),
+            aide::axum::routing::post_with(create, |op| op.id("CreateSchemaFork")),
         )
         .add(
             "/{fork_id}",
-            aide::axum::routing::get_with(get, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_fork_get"]),
-                ))
-            }),
+            aide::axum::routing::get_with(get, |op| op.id("GetSchemaFork")),
         )
         .add(
             "/{fork_id}",
-            aide::axum::routing::put_with(update, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_fork_update"]),
-                ))
-            }),
+            aide::axum::routing::put_with(update, |op| op.id("UpdateSchemaFork")),
         )
         .add(
             "/{fork_id}",
-            aide::axum::routing::delete_with(delete, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_fork_delete"]),
-                ))
-            }),
+            aide::axum::routing::delete_with(delete, |op| op.id("DeleteSchemaFork")),
         )
 }

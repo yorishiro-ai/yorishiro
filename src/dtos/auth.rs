@@ -38,10 +38,10 @@ pub struct TenantLoginRequest {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub struct LoginResponse {
-    /// The freshly issued API key's plaintext.
+    /// The freshly issued access key's plaintext.
     /// Shown only in this response: only its hash is ever persisted, so it cannot be recovered afterward.
-    pub api_key: String,
-    pub api_key_id: Uuid,
+    pub access_key: String,
+    pub access_key_id: Uuid,
     pub tenant_id: Uuid,
     pub user_id: Uuid,
 }

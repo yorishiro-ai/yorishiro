@@ -39,7 +39,7 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
-        request.put("/api/workspace/llm-key")
+        request.put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
             .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
@@ -134,7 +134,7 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
         };
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
-        request.put("/api/workspace/llm-key")
+        request.put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
             .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
@@ -364,7 +364,7 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
             .await;
         assert_eq!(first_update.status_code(), 201, "{}", first_update.text());
         let llm_key = request
-            .put("/api/workspace/llm-key")
+            .put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
                 "base_url": base_url,
@@ -552,7 +552,7 @@ async fn two_jobs_for_one_workspace_never_run_together() {
                 .await;
             assert_eq!(next.status_code(), 201, "{:?}", next.text());
             let key = request
-                .put("/api/workspace/llm-key")
+                .put("/api/workspace/llm-provider")
                 .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .json(&serde_json::json!({
                     "base_url": base_url,
@@ -672,7 +672,7 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
-        request.put("/api/workspace/llm-key")
+        request.put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
             .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
@@ -683,19 +683,19 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
             &crate::requests::fixtures::unique_email("infer-iam"), "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
         for mode in ["revoke", "detach", "deny"] {
-        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["inference_create"],
-            "resources":[{"type":"workspace","tenant_id":fixture.tenant_id,"workspace_id":fixture.workspace_id}]}]});
-        let policy = request.post("/api/iam/policies")
+        let document = serde_json::json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["inference:CreateInferenceJob"],
+            "Resource":[format!("yrn:workspace:{}:{}", fixture.tenant_id, fixture.workspace_id)]}]});
+        let policy = request.post("/api/policies")
             .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":mode,"document":document})).await;
         policy.assert_status(axum::http::StatusCode::CREATED);
         let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
-        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
-        let key = yorishiro::models::api_keys::Entity::create_api_key(
+        let key = yorishiro::models::access_keys::Entity::create_access_key(
             &ctx.db, fixture.workspace_id,
-            Some(member.id), false).await.unwrap();
+            Some(member.id)).await.unwrap();
         define_schema(&request, &tenant_key, "note").await;
         let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
             .await
@@ -711,15 +711,13 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
             .unwrap()
             .id;
         match mode {
-            "revoke" => yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap(),
+            "revoke" => yorishiro::models::access_keys::Entity::revoke(&ctx.db, key.id).await.unwrap(),
             "detach" => { request.delete(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
                 .await.assert_status(axum::http::StatusCode::NO_CONTENT); },
             _ => {
                 let mut deny = document;
-                deny["statements"][0]["effect"] = serde_json::json!("deny");
-                request.put(&format!("/api/iam/policies/{policy_id}"))
-                    .add_header("Authorization", format!("Bearer {tenant_key}"))
-                    .json(&serde_json::json!({"name":mode,"document":deny})).await.assert_status_ok();
+                deny["Statement"][0]["Effect"] = serde_json::json!("Deny");
+                crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {tenant_key}"), &policy_id, &deny).await;
             }
         }
         crate::requests::jobs::finish_job(&ctx, lifecycle, "failed", None).await;
@@ -742,7 +740,7 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
          if mode != "revoke" {
              let error = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
                  .await.expect_err("denied IAM permission must reject enqueue");
-             assert!(matches!(error, yorishiro::YorishiroError::ScopeInsufficient { .. }));
+             assert!(matches!(error, yorishiro::YorishiroError::AccessDenied { .. }));
          }
          if mode != "detach" {
             request.delete(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
@@ -793,7 +791,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
                 "title":{"type":"string","required":true}, "summary":{"type":"string"}, "extra":{"type":"string"}
             }}}})).await;
         assert_eq!(response.status_code(), 201, "{}", response.text());
-        let response = request.put("/api/workspace/llm-key")
+        let response = request.put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({"base_url":llm.url,"model":"test-model","api_key":"sk-test"})).await;
         assert_eq!(response.status_code(), 204, "{}", response.text());
@@ -804,18 +802,18 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
             &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("inflight-member"),
             "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
-        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["inference_create"],
-            "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
-        let policy = request.post("/api/iam/policies")
+        let document = serde_json::json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["inference:CreateInferenceJob"],
+            "Resource":[format!("yrn:workspace:{}:{}", setup.tenant_id, setup.workspace_id)]}]});
+        let policy = request.post("/api/policies")
             .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":"inflight-inference","document":document})).await;
         policy.assert_status(axum::http::StatusCode::CREATED);
         let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
-        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", user.id);
+        let attachment = format!("/api/users/{}/policies/{policy_id}", user.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
-        let key = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, setup.workspace_id, Some(user.id), false,
+        let key = yorishiro::models::access_keys::Entity::create_access_key(
+            &ctx.db, setup.workspace_id, Some(user.id),
         ).await.unwrap();
         let job_id = enqueue_infer_fill(&ctx, &actor(&ctx, &key.plaintext).await, "note".into())
             .await.unwrap().parse::<Uuid>().unwrap();
@@ -828,7 +826,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
             let changed = tokio::time::timeout(Duration::from_secs(5), async {
                 match change {
                     PermissionChange::RevokeKey => {
-                        yorishiro::models::api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+                        yorishiro::models::access_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
                     }
                     PermissionChange::DetachPolicy => {
                         request.delete(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
@@ -836,10 +834,8 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
                     }
                     PermissionChange::DenyPolicy => {
                         let mut deny = document;
-                        deny["statements"][0]["effect"] = serde_json::json!("deny");
-                        request.put(&format!("/api/iam/policies/{policy_id}"))
-                            .add_header("Authorization", format!("Bearer {tenant_key}"))
-                            .json(&serde_json::json!({"name":"inflight-inference","document":deny})).await.assert_status_ok();
+                        deny["Statement"][0]["Effect"] = serde_json::json!("Deny");
+                        crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {tenant_key}"), &policy_id, &deny).await;
                     }
                 }
             }).await;
@@ -875,8 +871,8 @@ async fn define_schema(request: &loco_rs::TestServer, key: &str, name: &str) {
         .assert_status(axum::http::StatusCode::CREATED);
 }
 
-async fn actor(ctx: &AppContext, key: &str) -> yorishiro::models::api_keys::AuthContext {
-    use yorishiro::models::api_keys::Entity;
+async fn actor(ctx: &AppContext, key: &str) -> yorishiro::models::access_keys::AuthContext {
+    use yorishiro::models::access_keys::Entity;
     if let Some(db) = ctx.shared_store.get::<yorishiro::db::DbHandle>() {
         Entity::authenticate(&db, key, None).await.unwrap()
     } else {
