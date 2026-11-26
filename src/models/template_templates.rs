@@ -3,6 +3,7 @@
 //! Distinct from `crate::data::templates` (the built-in templates shipped with the binary and served from memory): these are tenant-scoped, DB-backed templates that a tenant's members create and manage.
 //! Runs on `ctx.db` (the migration-role connection): `template_templates` has no RLS of its own, so every function here takes a `tenant_id` and filters/checks visibility explicitly.
 
+use crate::error::OptionExt;
 pub use crate::models::_entities::template_templates::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, Condition, DatabaseTransaction, QueryOrder, QuerySelect};
@@ -155,7 +156,7 @@ pub async fn get_template(
         .await
         .internal()?;
 
-    row.ok_or_else(|| YorishiroError::not_found(format!("template '{template_id}' was not found")))?
+    row.or_not_found(format!("template '{template_id}' was not found"))?
         .try_into()
 }
 

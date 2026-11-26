@@ -1,5 +1,6 @@
 //! Relation model: records and operations, with each relation type validated against the schema of its source entity.
 
+use crate::error::OptionExt;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, SqlErr, Statement};
 use serde::{Deserialize, Serialize};
@@ -74,7 +75,7 @@ pub(crate) async fn workspace_for_actor(
         .one(db)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("relation was not found"))?;
+        .or_not_found("relation was not found")?;
     crate::models::iam::access::check_workspace_target(db, actor, record.workspace_id).await
 }
 
@@ -208,7 +209,7 @@ pub(crate) async fn get(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("relation '{id}' was not found")))
+        .or_not_found(format!("relation '{id}' was not found"))
         .and_then(TryInto::try_into)
 }
 

@@ -1,5 +1,6 @@
 //! Workspace-owned schema fork metadata and immutable fork heads.
 
+use crate::error::OptionExt;
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Alias, Asterisk, Expr, Func, Query};
@@ -32,7 +33,7 @@ pub(crate) async fn workspace_for_actor(
         .one(db)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("schema fork was not found"))?;
+        .or_not_found("schema fork was not found")?;
     crate::models::iam::access::check_workspace_target(db, actor, fork.workspace_id).await
 }
 
@@ -228,7 +229,7 @@ async fn current_source<C: ConnectionTrait>(
 ) -> Result<schema_schemas::Model, YorishiroError> {
     let source = source_by_id(conn, tenant_id, source_workspace_id, source_schema_id)
         .await?
-        .ok_or_else(|| YorishiroError::not_found("source schema was not found"))?;
+        .or_not_found("source schema was not found")?;
     if source.status != schema_schemas::SchemaStatus::Active.as_db_str() {
         return Err(YorishiroError::ValidationFailed {
             message: "source_schema_id must name the active source schema".into(),
@@ -247,7 +248,7 @@ async fn latest_source<C: ConnectionTrait>(
 ) -> Result<schema_schemas::Model, YorishiroError> {
     latest_source_by_name(conn, tenant_id, source_workspace_id, source_schema_name)
         .await?
-        .ok_or_else(|| YorishiroError::not_found("source schema was not found"))
+        .or_not_found("source schema was not found")
 }
 
 async fn get_fork<C: ConnectionTrait>(
@@ -263,7 +264,7 @@ async fn get_fork<C: ConnectionTrait>(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("schema fork '{fork_id}' was not found")))
+        .or_not_found(format!("schema fork '{fork_id}' was not found"))
 }
 
 async fn next_version<C: ConnectionTrait>(
@@ -324,7 +325,7 @@ async fn to_record<C: ConnectionTrait>(conn: &C, row: Model) -> Result<ForkRecor
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::Internal("fork head is missing".into()))?;
+        .or_internal("fork head is missing")?;
     let source_active = latest_source_by_name(
         conn,
         row.tenant_id,

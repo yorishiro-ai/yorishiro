@@ -1,5 +1,6 @@
 //! IAM model for attaching policies to groups.
 
+use crate::error::OptionExt;
 pub use crate::models::_entities::iam_group_policy_attachments::{
     ActiveModel, Column, Entity, Model,
 };
@@ -123,7 +124,7 @@ impl Model {
         }
         let policy = crate::models::iam_policies::Model::find(&txn, actor.tenant_id, policy_id)
             .await?
-            .ok_or_else(|| YorishiroError::not_found("IAM policy was not found"))?;
+            .or_not_found("IAM policy was not found")?;
         if policy.is_administrator_access() {
             crate::models::iam::access::require_administrator(&txn, actor).await?;
         }

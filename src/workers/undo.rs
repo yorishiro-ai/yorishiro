@@ -1,5 +1,6 @@
 //! Snapshot restoration runs on the configured Loco queue, not the request task.
 
+use crate::error::OptionExt;
 use crate::models::iam::session::WorkspaceSession;
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker, prelude::async_trait};
 use serde::{Deserialize, Serialize};
@@ -48,9 +49,7 @@ impl BackgroundWorker<UndoArgs> for UndoWorker {
 
 impl UndoWorker {
     async fn restore(&self, args: &UndoArgs) -> Result<(), YorishiroError> {
-        let id = args
-            .lifecycle_id
-            .ok_or_else(|| YorishiroError::Internal("undo lifecycle missing".into()))?;
+        let id = args.lifecycle_id.or_internal("undo lifecycle missing")?;
         // Hold control-plane permission stable until snapshot restoration commits.
         let authorization = crate::db::begin_authorization(&self.ctx.db)
             .await

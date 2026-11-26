@@ -563,3 +563,24 @@ impl<T, E: Into<BoxError>> ResultExt<T> for Result<T, E> {
         self.map_err(|err| YorishiroError::Internal(err.into()))
     }
 }
+
+/// Turns a missing optional value into the matching [`YorishiroError`].
+pub trait OptionExt<T> {
+    /// # Errors
+    /// Returns `NotFound` with `message` when the value is absent.
+    fn or_not_found(self, message: impl Into<String>) -> Result<T, YorishiroError>;
+
+    /// # Errors
+    /// Returns `Internal` with `message` when the value is absent.
+    fn or_internal(self, message: &'static str) -> Result<T, YorishiroError>;
+}
+
+impl<T> OptionExt<T> for Option<T> {
+    fn or_not_found(self, message: impl Into<String>) -> Result<T, YorishiroError> {
+        self.ok_or_else(|| YorishiroError::not_found(message))
+    }
+
+    fn or_internal(self, message: &'static str) -> Result<T, YorishiroError> {
+        self.ok_or_else(|| YorishiroError::Internal(message.into()))
+    }
+}

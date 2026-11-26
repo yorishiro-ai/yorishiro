@@ -3,6 +3,7 @@
 //! Persistence of keys lives on `models::access_keys`; this module turns a presented credential into an authorized, tenant-scoped transaction.
 //! [`Authenticator`] is the seam an edition replaces, so a new authenticated entry point must go through it rather than calling `Entity::authenticate` directly.
 
+use crate::error::OptionExt;
 use std::sync::Arc;
 
 use axum::http::HeaderMap;
@@ -143,7 +144,7 @@ impl<'a> RequestAuth<'a> {
             .app
             .shared_store
             .get::<Arc<dyn Authenticator>>()
-            .ok_or_else(|| YorishiroError::Internal("Authenticator missing".into()))?;
+            .or_internal("Authenticator missing")?;
         let ctx = authenticator.authenticate(self.app, key, headers).await?;
         for (_, value) in headers.iter().filter(|(name, _)| name == "x-tenant-id") {
             let tenant_id =

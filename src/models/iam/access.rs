@@ -1,6 +1,7 @@
 //! Cross-table authorization decisions shared by every transport.
 //! Credential verification and table mutations remain in their owning models.
 
+use crate::error::OptionExt;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, TransactionTrait};
 use uuid::Uuid;
 
@@ -106,10 +107,10 @@ impl WorkspaceTarget {
                     .one(db)
                     .await
                     .internal()?
-                    .ok_or_else(|| YorishiroError::not_found("job was not found"))?;
+                    .or_not_found("job was not found")?;
                 let workspace = record
                     .workspace_id
-                    .ok_or_else(|| YorishiroError::not_found("workspace job was not found"))?;
+                    .or_not_found("workspace job was not found")?;
                 check_workspace_target(db, actor, workspace).await
             }
             Self::Workspace(id) => check_workspace_target(db, actor, id).await,

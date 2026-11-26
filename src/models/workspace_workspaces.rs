@@ -1,5 +1,6 @@
 //! Workspace model: lifecycle in `operations`, plus the embedding provider assignment and the revision fence that guards vector publication.
 
+use crate::error::OptionExt;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ExprTrait, QuerySelect};
 use serde::Serialize;
@@ -88,7 +89,7 @@ pub(crate) async fn embedding_revision(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))
+        .or_not_found(format!("workspace {workspace_id} not found"))
 }
 
 pub(crate) async fn embedding_content_revision(
@@ -103,7 +104,7 @@ pub(crate) async fn embedding_content_revision(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))
+        .or_not_found(format!("workspace {workspace_id} not found"))
 }
 
 /// Locks the workspace generation for a short publication transaction.
@@ -298,7 +299,7 @@ pub(crate) async fn embedding_reindexing(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
+        .or_not_found(format!("workspace {workspace_id} not found"))?;
     Ok(row)
 }
 
@@ -332,7 +333,7 @@ pub(crate) async fn startup_reindex_needed(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
+        .or_not_found(format!("workspace {workspace_id} not found"))?;
     Ok(row.needs_reindex(
         &provider.model_name(),
         provider.dimensions(),

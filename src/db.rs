@@ -4,6 +4,7 @@
 //! RLS session state cannot cross control-plane and tenant operations.
 //!
 //! Requests reach the database through `TenantDb::begin_for_workspace`, whose returned `DatabaseTransaction` carries both the entity API and raw SQL the entity layer can't express (JSONB containment, pgvector search, advisory locks).
+use crate::error::OptionExt;
 use sea_orm::sqlx::PgPool;
 use sea_orm::{
     ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbErr, Statement, TransactionTrait,
@@ -104,7 +105,7 @@ pub(crate) async fn active_connections(pool: &PgPool) -> Result<i64, crate::Yori
     db.query_one_raw(db.get_database_backend().build(&query))
         .await
         .internal()?
-        .ok_or_else(|| crate::YorishiroError::Internal("activity count returned no row".into()))?
+        .or_internal("activity count returned no row")?
         .try_get_by_index(0)
         .internal()
 }
@@ -377,7 +378,7 @@ impl DbHandle {
     pub(crate) fn of(ctx: &loco_rs::app::AppContext) -> Result<Self, crate::YorishiroError> {
         ctx.shared_store
             .get::<Self>()
-            .ok_or_else(|| crate::YorishiroError::Internal("DbHandle missing".into()))
+            .or_internal("DbHandle missing")
     }
 
     pub(crate) fn identity_connection(&self) -> DatabaseConnection {

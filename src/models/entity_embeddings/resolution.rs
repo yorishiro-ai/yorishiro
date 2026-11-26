@@ -1,3 +1,4 @@
+use crate::error::OptionExt;
 use sea_orm::ConnectionTrait;
 use uuid::Uuid;
 
@@ -34,7 +35,7 @@ pub(crate) async fn resolve_embedding_chain(
 ) -> Result<ResolvedEmbedding, YorishiroError> {
     let row = crate::models::workspace_workspaces::embedding_chain(conn, workspace_id)
         .await?
-        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
+        .or_not_found(format!("workspace {workspace_id} not found"))?;
 
     Ok(ResolvedEmbedding {
         workspace_model: row.embedding_model,

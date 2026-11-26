@@ -1,3 +1,4 @@
+use crate::error::OptionExt;
 use serde::Serialize;
 
 use crate::error::YorishiroError;
@@ -83,5 +84,5 @@ pub fn get_template(id: &str) -> Result<MetaSchemaDefinition, YorishiroError> {
         .iter()
         .find(|template| template.id == id)
         .map(parse)
-        .ok_or_else(|| YorishiroError::not_found(format!("no template named '{id}'")))
+        .or_not_found(format!("no template named '{id}'"))
 }

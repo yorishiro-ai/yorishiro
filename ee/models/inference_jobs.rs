@@ -1,5 +1,6 @@
 //! Durable state for asynchronous infer-fill jobs.
 
+use crate::error::OptionExt;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::inference_jobs::{ActiveModel, Column, Entity, Model};
 use sea_orm::sea_query::Expr;
@@ -40,7 +41,7 @@ pub(crate) async fn workspace_job(
 ) -> Result<InferenceJobRecord, YorishiroError> {
     let job = get(conn, job_id)
         .await?
-        .ok_or_else(|| YorishiroError::not_found("infer-fill job not found"))?;
+        .or_not_found("infer-fill job not found")?;
     if job.workspace_id != workspace_id {
         return Err(YorishiroError::AccessDenied {
             message: "cannot access infer-fill jobs for another workspace".into(),

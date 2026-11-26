@@ -1,5 +1,6 @@
 //! Proposal confirmation runs on the configured Loco provider.
 
+use crate::error::OptionExt;
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker, prelude::async_trait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -52,7 +53,7 @@ impl ConfirmProposalsWorker {
     async fn confirm(&self, args: &ConfirmProposalsArgs) -> Result<(), YorishiroError> {
         let id = args
             .lifecycle_id
-            .ok_or_else(|| YorishiroError::Internal("confirmation lifecycle missing".into()))?;
+            .or_internal("confirmation lifecycle missing")?;
         let txn =
             crate::db::begin_workspace_write(&self.ctx, args.tenant_id, args.workspace_id).await?;
         crate::db::lock_for_update(&txn, &format!("confirm-proposals:{id}"))

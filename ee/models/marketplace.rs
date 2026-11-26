@@ -9,6 +9,7 @@ mod write;
 
 pub(crate) use write::{fork_template, publish_version, set_visibility, submit_review};
 
+use crate::error::OptionExt;
 use sea_orm::SelectExt;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -83,7 +84,7 @@ pub(crate) async fn get_template_as(
     marketplace_listings(&txn, Some(template_id), ListParams::default())
         .await?
         .pop()
-        .ok_or_else(|| YorishiroError::not_found("marketplace template was not found"))
+        .or_not_found("marketplace template was not found")
 }
 
 pub(crate) async fn get_version_as(
@@ -108,7 +109,7 @@ pub(crate) async fn get_version_as(
     )
     .await?
     .pop()
-    .ok_or_else(|| YorishiroError::not_found("marketplace version was not found"))
+    .or_not_found("marketplace version was not found")
 }
 
 pub(crate) async fn reviews_as(
@@ -644,7 +645,7 @@ pub(crate) async fn insert_next_version(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::Internal("insert did not return a row".into()))
+        .or_internal("insert did not return a row")
         .and_then(TemplateVersionRecord::try_from)
 }
 

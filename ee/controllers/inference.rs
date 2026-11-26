@@ -7,6 +7,7 @@ use crate::controllers::Accepted;
 use crate::controllers::ApiError;
 use crate::controllers::openapi::Routes;
 use crate::edition::ee::controllers::middleware::auth::WorkspaceAuthenticated;
+use crate::error::OptionExt;
 use crate::error::YorishiroError;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -238,7 +239,7 @@ async fn get_llm_key(
 ) -> Result<Json<workspace_llm_keys::LlmKeyDescription>, ApiError> {
     let described = workspace_llm_keys::describe_as(&ctx.db, &auth_ctx)
         .await?
-        .ok_or_else(|| YorishiroError::not_found("no LLM credentials configured"))?;
+        .or_not_found("no LLM credentials configured")?;
     Ok(Json(described))
 }
 

@@ -18,6 +18,7 @@
 //! Query embedding is not done here: the server holds no model, so `workers::query_embedding` asks a worker for the vector before any DB connection is held for the search.
 //! Both use the same provider, so documents and queries share one vector space.
 
+use crate::error::OptionExt;
 use sea_orm::sea_query::{
     Alias, Expr, ExprTrait, Func, JoinType, Order, Query, SelectStatement,
     extension::postgres::{PgBinOper, PgExpr},
@@ -277,7 +278,7 @@ pub(crate) async fn check_query_width(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
+        .or_not_found(format!("workspace {workspace_id} not found"))?;
     if let Some(expected) = dimensions
         && usize::try_from(expected).ok() != Some(vector_len)
     {

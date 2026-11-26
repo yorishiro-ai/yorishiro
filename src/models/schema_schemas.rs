@@ -1,5 +1,6 @@
 //! Schema model: versioned schemas per workspace, with the version lock, archiving and deleting of versions.
 
+use crate::error::OptionExt;
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Alias, Expr, Func, Query};
@@ -22,7 +23,7 @@ pub(crate) async fn workspace_for_actor(
         .one(db)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("schema was not found"))?;
+        .or_not_found("schema was not found")?;
     crate::models::iam::access::check_workspace_target(db, actor, record.workspace_id).await
 }
 
@@ -123,7 +124,7 @@ pub(crate) async fn delete(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("schema '{schema_id}' was not found")))?;
+        .or_not_found(format!("schema '{schema_id}' was not found"))?;
     let schema = SchemaRecord::try_from(row)?;
     if schema.status != SchemaStatus::Archived {
         return Err(YorishiroError::Conflict {
@@ -330,7 +331,7 @@ pub async fn get_active_schema(
         .await
         .internal()?;
 
-    row.ok_or_else(|| YorishiroError::not_found(format!("no active schema named '{name}'")))?
+    row.or_not_found(format!("no active schema named '{name}'"))?
         .try_into()
 }
 
@@ -368,7 +369,7 @@ pub(crate) async fn get_by_id(
         .await
         .internal()?;
 
-    row.ok_or_else(|| YorishiroError::not_found(format!("schema '{schema_id}' was not found")))?
+    row.or_not_found(format!("schema '{schema_id}' was not found"))?
         .try_into()
 }
 

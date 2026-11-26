@@ -1,5 +1,6 @@
 //! The job lifecycle table: enqueue, dispatch, lease heartbeat, deferral and completion state for every background job.
 
+use crate::error::OptionExt;
 pub use crate::models::_entities::queue_job_lifecycles::{ActiveModel, Column, Entity, Model};
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
@@ -59,7 +60,7 @@ pub(crate) async fn bulk_job_status(
         .one(db)
         .await
         .internal()?
-        .ok_or_else(|| crate::YorishiroError::not_found("migration job not found"))?;
+        .or_not_found("migration job not found")?;
     let action = if row.job_name == "undo" {
         AuditAction::UndoMigrationJob
     } else if row.job_name == "fill_defaults" {

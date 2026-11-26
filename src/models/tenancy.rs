@@ -1,5 +1,6 @@
 //! Explicit operations that compose more than one tenancy table.
 
+use crate::error::OptionExt;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait,
     PaginatorTrait, QueryFilter,
@@ -260,8 +261,7 @@ async fn login_options(
         .internal()?;
     let mut memberships = Vec::with_capacity(rows.len());
     for (_, tenant) in rows {
-        let tenant =
-            tenant.ok_or_else(|| YorishiroError::Internal("membership tenant missing".into()))?;
+        let tenant = tenant.or_internal("membership tenant missing")?;
         if tenant.disabled_at.is_some() {
             continue;
         }
@@ -325,7 +325,7 @@ async fn login_options(
             }
             let tenant_name = names
                 .get(&workspace.tenant_id)
-                .ok_or_else(|| YorishiroError::Internal("workspace membership missing".into()))?;
+                .or_internal("workspace membership missing")?;
             candidates.push(LoginWorkspace {
                 workspace_id: workspace.id,
                 workspace_name: workspace.name,
@@ -375,7 +375,7 @@ pub(crate) async fn create_workspace_with_quota(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("tenant '{tenant_id}' was not found")))?;
+        .or_not_found(format!("tenant '{tenant_id}' was not found"))?;
 
     if let Some(max) = crate::data::quotas::effective_limit(tenant.max_workspaces, workspace_quota)
     {

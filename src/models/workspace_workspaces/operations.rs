@@ -1,5 +1,6 @@
 //! Workspace reads and lifecycle operations.
 
+use crate::error::OptionExt;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, PaginatorTrait,
     QueryFilter, RuntimeErr, SqlErr,
@@ -20,7 +21,7 @@ pub(crate) async fn get_workspace_tenant(
         .await
         .internal()?
         .map(|w| w.tenant_id)
-        .ok_or_else(|| YorishiroError::not_found("workspace not found"))
+        .or_not_found("workspace not found")
 }
 
 /// The advisory-lock key serializing every operation that counts a tenant's workspaces before writing.

@@ -1,5 +1,6 @@
 //! Tenant model: detail and metadata updates, the infrastructure tenant, and the creation and retirement operations in its submodules.
 
+use crate::error::OptionExt;
 pub use crate::models::_entities::tenant_tenants::{ActiveModel, Entity, Model};
 use sea_orm::entity::prelude::*;
 
@@ -122,12 +123,12 @@ impl Model {
         conn: &impl ConnectionTrait,
         id: Uuid,
     ) -> Result<Self, crate::error::YorishiroError> {
-        use crate::error::{ResultExt, YorishiroError};
+        use crate::error::ResultExt;
 
         Entity::find_by_id(id)
             .one(conn)
             .await
             .internal()?
-            .ok_or_else(|| YorishiroError::not_found("tenant not found"))
+            .or_not_found("tenant not found")
     }
 }

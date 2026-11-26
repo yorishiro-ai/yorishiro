@@ -1,6 +1,7 @@
 //! IAM group model: creating, renaming, reading and deleting groups.
 //! A group name is unique within its tenant regardless of case.
 
+use crate::error::OptionExt;
 pub use crate::models::_entities::iam_groups::{ActiveModel, Column, Entity, Model};
 use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::prelude::*};
 
@@ -80,7 +81,7 @@ impl Model {
         .await?;
         let group = Self::find(&txn, actor.tenant_id, id)
             .await?
-            .ok_or_else(|| YorishiroError::not_found("IAM group was not found"))?;
+            .or_not_found("IAM group was not found")?;
         let members =
             crate::models::iam_group_memberships::Model::members(&txn, actor.tenant_id, id).await?;
         txn.commit().await.internal()?;
@@ -106,7 +107,7 @@ impl Model {
         names::validate_name("group", &name, names::MAX_GROUP_NAME_CHARS)?;
         let before = Self::find(&txn, actor.tenant_id, id)
             .await?
-            .ok_or_else(|| YorishiroError::not_found("IAM group was not found"))?;
+            .or_not_found("IAM group was not found")?;
         Self::rename(&txn, actor.tenant_id, id, name.clone()).await?;
         crate::models::iam_audit_events::record(
             &txn,
@@ -117,7 +118,7 @@ impl Model {
         .await?;
         let group = Self::find(&txn, actor.tenant_id, id)
             .await?
-            .ok_or_else(|| YorishiroError::not_found("IAM group was not found"))?;
+            .or_not_found("IAM group was not found")?;
         txn.commit().await.internal()?;
         Ok(group)
     }
@@ -140,7 +141,7 @@ impl Model {
         .await?;
         let group = Self::find(&txn, actor.tenant_id, id)
             .await?
-            .ok_or_else(|| YorishiroError::not_found("IAM group was not found"))?;
+            .or_not_found("IAM group was not found")?;
         crate::db::lock_for_update(&txn, &format!("tenant-membership:{}", actor.tenant_id))
             .await
             .internal()?;

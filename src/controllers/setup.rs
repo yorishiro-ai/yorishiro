@@ -6,6 +6,7 @@
 //! An unlimited cap disables the wizard; the source default is one tenant.
 
 use crate::controllers::Created;
+use crate::error::OptionExt;
 use axum::Json;
 use axum::extract::State;
 use loco_rs::app::AppContext;
@@ -20,7 +21,7 @@ fn max_tenants(ctx: &AppContext) -> Result<Option<i32>, YorishiroError> {
     ctx.shared_store
         .get::<crate::data::tenant_policy::TenantCap>()
         .map(|cap| cap.resolve())
-        .ok_or_else(|| YorishiroError::Internal("tenant cap policy missing".into()))
+        .or_internal("tenant cap policy missing")
 }
 
 ///

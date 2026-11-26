@@ -1,5 +1,6 @@
 //! IAM model for attaching policies directly to users.
 
+use crate::error::OptionExt;
 pub use crate::models::_entities::iam_user_policy_attachments::{
     ActiveModel, Column, Entity, Model,
 };
@@ -90,7 +91,7 @@ impl Model {
         .await?;
         let policy = crate::models::iam_policies::Model::find(&txn, actor.tenant_id, policy_id)
             .await?
-            .ok_or_else(|| YorishiroError::not_found("user or IAM policy was not found"))?;
+            .or_not_found("user or IAM policy was not found")?;
         if policy.is_administrator_access() {
             crate::models::iam::access::require_administrator(&txn, actor).await?;
         }

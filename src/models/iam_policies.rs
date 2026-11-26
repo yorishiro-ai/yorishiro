@@ -1,6 +1,7 @@
 //! IAM policy model: creating, reading and deleting policies, and resolving the policies that apply to a user.
 //! A policy's document lives in its versions; see `iam_policy_versions`.
 
+use crate::error::OptionExt;
 pub use crate::models::_entities::iam_policies::{ActiveModel, Column, Entity, Model};
 use sea_orm::{ActiveValue::Set, QueryFilter, QueryOrder, QuerySelect, entity::prelude::*};
 
@@ -173,7 +174,7 @@ impl Model {
         .await?;
         let row = Self::find(&txn, actor.tenant_id, id)
             .await?
-            .ok_or_else(|| YorishiroError::not_found("IAM policy was not found"))?;
+            .or_not_found("IAM policy was not found")?;
         let view = Self::views(&txn, actor.tenant_id, vec![row])
             .await?
             .remove(0);
@@ -202,7 +203,7 @@ impl Model {
         .await?;
         let policy = Self::find(&txn, actor.tenant_id, id)
             .await?
-            .ok_or_else(|| YorishiroError::not_found("IAM policy was not found"))?;
+            .or_not_found("IAM policy was not found")?;
         if crate::models::iam::builtin::is_managed_policy_name(&policy.name) {
             return Err(YorishiroError::Conflict {
                 message: "managed policies cannot be deleted".into(),

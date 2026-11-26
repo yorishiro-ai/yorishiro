@@ -1,5 +1,6 @@
 //! User creation, self-service profiles and authentication lookups.
 
+use crate::error::OptionExt;
 use loco_rs::hash;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
@@ -71,7 +72,7 @@ pub async fn reset_root_password_by_operator(
         .one(&txn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("user not found"))?;
+        .or_not_found("user not found")?;
     if user.tenant_id.is_some() || user.password_hash.is_none() {
         return Err(YorishiroError::Conflict {
             message: "password recovery requires an existing password-bearing root account".into(),
@@ -139,7 +140,7 @@ pub async fn delete_by_operator(
         .one(&txn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("user not found"))?;
+        .or_not_found("user not found")?;
     let membership = memberships::Entity::find()
         .filter(memberships::Column::UserId.eq(user_id))
         .one(&txn)
@@ -232,7 +233,7 @@ pub(crate) async fn find_in_tenant(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("user was not found"))
+        .or_not_found("user was not found")
 }
 
 /// Creates a human user account.
@@ -405,7 +406,7 @@ pub(crate) async fn reset_tenant_password(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("user was not found"))?;
+        .or_not_found("user was not found")?;
     let mut active: ActiveModel = user.into();
     active.password_hash = ActiveValue::Set(Some(hash_blocking(password).await?));
     active.update(conn).await.internal()?;

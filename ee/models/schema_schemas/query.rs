@@ -7,6 +7,7 @@
 //! Workspace schema definitions are only loaded on the RLS-scoped connection.
 
 use super::merge;
+use crate::error::OptionExt;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::pagination::ListParams;
 use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
@@ -101,7 +102,7 @@ pub(crate) async fn list_for_actor(
                 serde_json::from_value(schema.definition).internal()?;
             let base: MetaSchemaDefinition = schema
                 .origin_snapshot
-                .ok_or_else(|| YorishiroError::Internal("linked schema has no merge base".into()))
+                .or_internal("linked schema has no merge base")
                 .and_then(|value| serde_json::from_value(value).internal())?;
             let template_definition: MetaSchemaDefinition =
                 serde_json::from_value(row.template_definition).internal()?;

@@ -3,6 +3,7 @@
 //! Both run on `ctx.db` (Loco's own connection, migration role, no RLS scope), same as the admin CLI tasks: no tenant/workspace context exists yet for RLS to scope by.
 
 use crate::controllers::Created;
+use crate::error::OptionExt;
 use axum::Json;
 use axum::extract::State;
 use loco_rs::app::AppContext;
@@ -28,7 +29,7 @@ async fn signup(
     let max_tenants = ctx
         .shared_store
         .get::<crate::data::tenant_policy::TenantCap>()
-        .ok_or_else(|| YorishiroError::Internal("tenant cap policy missing".into()))?
+        .or_internal("tenant cap policy missing")?
         .resolve();
     let (user, tenant_id) = tenancy::signup_account(
         &ctx.db,
