@@ -50,16 +50,15 @@ test-location-check:
 		echo 'ERROR: tests and test-only code belong in tests/' >&2; exit 1; \
 	fi
 
-# Request tests create disposable databases from template1, which must already contain vector and pg_trgm.
+# Request tests create disposable databases from template1, which must already contain vector.
 test-postgres: patch-check
 	@if [ "$(DATABASE_URL)" = "postgres://yorishiro:yorishiro@localhost:15432/yorishiro" ]; then \
 		$(TEST_COMPOSE) up -d --wait testdb; \
 	fi
 	QUEUE_URL='$(DATABASE_URL)' cargo test --locked --workspace $(TEST_FEATURES)
 
-# SQLite runs the store, worker and task layers plus a few request smoke tests.
-# HTTP and MCP behaviour does not depend on the backend, so `make test-postgres` is the full suite.
-SQLITE_TEST_FILTERS = models:: db:: data:: services:: workers:: tasks:: initializers:: integration:: error:: app:: controllers::entities controllers::search controllers::auth controllers::schemas
+# PostgreSQL runs the full suite; SQLite covers its storage and queue paths plus request smoke tests.
+SQLITE_TEST_FILTERS = db:: models::search:: models::entity_entities::sqlite:: models::tenancy::sqlite:: models::inference_jobs:: controllers::setup:: controllers::mcp::search:: list_entities_with_filter_returns_501_on_sqlite mcp_authentication_database_failure_is_redacted sqlite_schema_fork_integrity the_marketplace_answers_501_on_sqlite tenant_reindex_schedule::scheduler:: workers::queue:: stalled_provider_enqueue_does_not_block_new_dispatch_records independently_booted_contexts_keep_independent_embedding_limits sqlite_scans parallel_sqlite_boots sqlite_retirement root_reset_rolls_back_password sqlite_timestamp_fixture
 
 test-sqlite: patch-check
 	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' cargo test --locked --workspace $(TEST_FEATURES) -- $(SQLITE_TEST_FILTERS)

@@ -1,4 +1,4 @@
-# Work plan: backend seams without changing search results
+# Work plan: embedding-only search and backend seams
 
 Working document for `refactor/iam-and-backend-seams`.
 Delete it before the pull request is opened.
@@ -6,29 +6,40 @@ Delete it before the pull request is opened.
 ## Decisions
 
 - SQLite and PostgreSQL both stay supported. Performance means PostgreSQL for the database and PostgreSQL or Valkey (Redis) for the queue; RabbitMQ is a later Loco provider, not part of this work.
-- Search results do not change. The PostgreSQL hybrid search (vector + `pg_trgm` through RRF, `@>` filter) and the SQLite search (sqlite-vec, FTS5 fill-in, no filter) keep their queries and ranking.
-- Backend differences live behind one seam each. Models and controllers do not call `is_sqlite` or `is_postgres`.
+- Both backends use embedding-only search and the same final cosine ranking.
+- PostgreSQL keeps pgvector HNSW for performance; SQLite keeps exact sqlite-vec candidate selection.
+- Approximate PostgreSQL candidate selection can differ from SQLite on large workspaces.
+- Search applies the same JSON containment filter to the bounded candidate set on both backends.
+- No comparison against the old hybrid ranking is required.
+- Search and locking choose the backend in their infrastructure code.
+- Unrelated SQL differences, including RLS and schema fork integrity, stay unchanged.
 - Tests: no push, PR or merge without authorisation. Run the suites once at the end.
 
 ## Steps
 
 ### 1. Search seam
-- [ ] `SearchBackend` trait in `src/models/search/` with `PostgresSearch` and `SqliteSearch`, moving today's queries as they are.
-- [ ] Shared part only: input validation, width check, availability check, mapping rows to hits.
-- [ ] Parity test per backend: a fixed corpus returns a fixed ranking, recorded before the move and asserted after.
+- [x] Separate pgvector and sqlite-vec candidate queries under `src/models/search/`; dispatch by backend without a new trait.
+- [x] Share validation, filtering, final ranking, and result limits.
+- [x] Verify ranking and filtering on both backends using the existing fixed-corpus tests.
 
-### 2. Full-text index seam
-- [ ] SQLite FTS5 maintenance (`forget_full_text`, `resync_full_text`, retirement cleanup) sits behind the same seam; entity models call it through the trait.
+### 2. Remove lexical search
+- [x] Remove RRF, FTS5 and `pg_trgm` search, index maintenance hooks, and provisioning dependencies.
+- [x] Regenerate SeaORM entities after changing the migrations.
 
 ### 3. Locks
-- [ ] One small interface in `src/db.rs` for the transaction lock, the long-held lock (scheduler ownership, reindex, HNSW maintenance).
-- [ ] PostgreSQL uses advisory locks; SQLite uses `BEGIN IMMEDIATE` and the lock file.
-- [ ] No `is_sqlite` or `is_postgres` outside `src/db.rs`, `ee/db.rs`, the search backends and migrations.
+- [x] Keep transaction locks in `src/db.rs` and share PostgreSQL session-lock acquisition for scheduler ownership, reindex, and HNSW maintenance.
+- [x] Keep SQLite write transactions and scheduler lock files without imposing a session lock on SQLite reindex.
 
 ### 4. Queue
-- [ ] Keep Loco providers as they are; confirm `QueuePolicy` and worker registration do not depend on the provider kind beyond the existing queue module.
+- [x] Keep Loco providers as they are. Dispatch uses `AppContext::queue_provider`; worker registration and edition queue policies do not select the transport.
 
 ### 5. Tests and docs
-- [ ] Narrow `SQLITE_TEST_FILTERS` to the SQLite implementations plus smoke tests.
-- [ ] Update `AGENTS.md` and `.agents/rules/testing.md`.
-- [ ] `make check-all check-all-ee`, SQLite and PostgreSQL suites for CE and EE.
+- [x] Narrow `SQLITE_TEST_FILTERS` to SQLite-specific tests and smoke tests.
+- [x] Update `AGENTS.md` and `.agents/rules/testing.md`.
+- [x] `make check-all check-all-ee`, SQLite and PostgreSQL suites for CE and EE.
+
+## Verification
+
+`make entities` and `make check-all check-all-ee` pass.
+The SQLite subset passes 36 CE and 73 EE integration tests.
+The full PostgreSQL suite passes 371 CE and 600 EE integration tests, with one ignored in each edition.

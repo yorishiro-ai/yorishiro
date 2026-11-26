@@ -104,17 +104,18 @@ Each tool authenticates, parses its arguments, calls a model operation, and rend
 - `src/db.rs::require_min_sqlite_connections(2)` requires at least 2 connections.
 - Vector search uses sqlite-vec (BLOB storage).
 - Models create ids and timestamps on both backends through `db::generated_id` and `db::stamped_*`; no database default or trigger supplies them.
-- The embedding sync token, the SQLite FTS5 index and the template origin detach are application code, not triggers.
+- The embedding sync token and the template origin detach are application code, not triggers.
 - The embedding column lives in `entity_embeddings` on both backends, with a `(workspace_id, entity_id)` primary key.
 - PostgreSQL uses 64 workspace hash partitions, tenant RLS, and scheduled workspace-specific HNSW promotion starting at 2,000 vectors.
 - Each promoted workspace has one partial pgvector HNSW index: up to 2,000 dimensions on `embedding::vector(N)`, 2,001 through 4,000 on the normalized `halfvec(N)`, and 4,001 through 4,096 on the normalized first 4,000 dimensions as `halfvec(4000)`.
 - Every search takes at most 1,000 index candidates and reranks them in original full-precision coordinates; the `embedding_index_maintenance` scheduler job builds and retires the indexes.
-- FTS5 with `tokenize='trigram'` provides fuzzy text search on SQLite (the counterpart of `pg_trgm`).
+- Search ranks by cosine distance on both backends.
+- PostgreSQL HNSW can select different candidates from SQLite's exact scan.
 
 ### SQL-side behaviour that remains
 
 PostgreSQL still owns RLS policies, per-table GRANTs, the `authenticate_access_key` SECURITY DEFINER function, partitions, and the fork integrity triggers and fork read functions.
-SQLite has the fork integrity triggers and the FTS5 table.
+SQLite has the fork integrity triggers.
 
 ### Migration helpers (`migration/src/helpers.rs`)
 
@@ -149,9 +150,9 @@ SQLite has the fork integrity triggers and the FTS5 table.
 - `tests/requests/mod.rs` owns `close_app_pools`.
 - Request tests boot through `boot_request`: SQLite gets its own file and PostgreSQL its own throwaway database per test.
 - `make test-postgres` runs the whole suite (`EDITION=ce|ee`).
-- `make test-sqlite` runs only the module prefixes in `SQLITE_TEST_FILTERS` (store, worker and task layers plus request smoke tests); there is no per-test registration.
+- `make test-sqlite` uses `SQLITE_TEST_FILTERS` to cover SQLite storage, locking, queue behavior, and request smoke tests.
 - Licensed tests install a test licence when `YORISHIRO_LICENSE_KEY` is unset, and the E5 model tests skip without the model files.
-- Tests need PostgreSQL with `vector` and `pg_trgm` in `template1` (not just the deployment database). Loco's harness creates each test database via `CREATE DATABASE`, which copies `template1`.
+- Tests need PostgreSQL with `vector` in `template1` (not just the deployment database). Loco's harness creates each test database via `CREATE DATABASE`, which copies `template1`.
 - Tests need a non-superuser role (superuser bypasses RLS regardless of `FORCE`).
 
 ## Git workflow

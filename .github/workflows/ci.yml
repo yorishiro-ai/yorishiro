@@ -1,6 +1,6 @@
 name: CI
 
-# Every edition and backend runs `cargo test` as is.
+# PostgreSQL runs the full suite, while SQLite runs backend-specific checks and smoke tests.
 
 on:
   pull_request:
