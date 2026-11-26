@@ -47,26 +47,18 @@ struct CandidateRow {
 /// Returns an error on catalog, connection, or concurrent index DDL failure.
 pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), YorishiroError> {
     use sea_orm::sqlx::AssertSqlSafe;
-    if !crate::db::is_postgres(db) {
+    let Some(pool) = crate::db::postgres_pool(db) else {
         return Ok(());
-    }
+    };
     // Concurrent index DDL cannot run in a transaction; close the detached session on every exit.
-    let mut conn = db
-        .get_postgres_connection_pool()
-        .acquire()
-        .await
-        .internal()?
-        .detach();
+    let Some(mut conn) =
+        crate::db::postgres_session_lock(pool, "embedding-index-maintenance", false)
+            .await
+            .internal()?
+    else {
+        return Ok(());
+    };
     let outcome: Result<(), YorishiroError> = async {
-        let locked: bool = sea_orm::sqlx::query_scalar(
-            "SELECT pg_try_advisory_lock(hashtextextended('embedding-index-maintenance', 0))",
-        )
-        .fetch_one(&mut conn)
-        .await
-        .internal()?;
-        if !locked {
-            return Ok(());
-        }
         // One aggregate over workspaces, stored vectors, and the index catalog: only workspaces
         // above the threshold or already indexed come back, so a busy database does not pay a
         // per-workspace count for the workspaces that need nothing.

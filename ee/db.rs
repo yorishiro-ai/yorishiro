@@ -110,31 +110,14 @@ pub async fn acquire_postgres_scheduler_lock(
     pool: PgPool,
     key: &str,
 ) -> Result<Option<SchedulerOwnership>, String> {
-    let mut conn = pool
-        .acquire()
+    let Some(conn) = crate::db::postgres_session_lock(&pool, key, false)
         .await
-        .map_err(|err| format!("scheduler ownership connection: {err}"))?;
-    let locked = sea_orm::sqlx::query_scalar::<_, bool>(
-        "SELECT pg_try_advisory_lock(hashtextextended($1, 0))",
-    )
-    .bind(key)
-    .fetch_one(conn.as_mut())
-    .await;
-    let locked = match locked {
-        Ok(locked) => locked,
-        Err(err) => {
-            let _ = conn.close().await;
-            return Err(format!("scheduler ownership lock: {err}"));
-        }
-    };
-    if !locked {
-        conn.close()
-            .await
-            .map_err(|err| format!("scheduler contention connection close: {err}"))?;
+        .map_err(|err| format!("scheduler ownership lock: {err}"))?
+    else {
         return Ok(None);
-    }
+    };
     Ok(Some(SchedulerOwnership::Postgres {
-        conn: Some(conn.detach()),
+        conn: Some(conn),
         key: key.to_string(),
     }))
 }

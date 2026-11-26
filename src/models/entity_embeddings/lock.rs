@@ -69,24 +69,17 @@ pub async fn acquire_workspace_reindex_lock(
     pool: PgPool,
     workspace_id: Uuid,
 ) -> Result<WorkspaceReindexLockGuard, sea_orm::sqlx::Error> {
-    let mut conn = pool.acquire().await?;
-
     // Reindexes serialize with each other, not with entity quota locks during provider calls.
     let key = workspace_reindex_lock_key(workspace_id);
     tracing::info!(%key, "waiting for workspace reindex lock");
 
-    sea_orm::sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")
-        .bind(&key)
-        .execute(conn.as_mut())
-        .await?;
+    let conn = crate::db::postgres_session_lock(&pool, &key, true)
+        .await?
+        .ok_or_else(|| sea_orm::sqlx::Error::Protocol("blocking lock was not acquired".into()))?;
 
     tracing::info!(%key, "acquired workspace reindex lock");
 
-    let detached = conn.detach();
-
-    Ok(WorkspaceReindexLockGuard {
-        conn: Some(detached),
-    })
+    Ok(WorkspaceReindexLockGuard { conn: Some(conn) })
 }
 
 /// Runs a reindex with the backend's workspace serialization policy.
@@ -109,19 +102,9 @@ pub(crate) async fn reindex_workspace_with_actor(
     actor: Option<&crate::models::access_keys::AuthContext>,
     startup: bool,
 ) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
-    let lock = if crate::db::is_sqlite(&ctx.db) {
-        None
-    } else {
-        let handle = ctx
-            .shared_store
-            .get::<crate::db::DbHandle>()
-            .ok_or_else(|| {
-                crate::YorishiroError::Internal(
-                    "reindex requires the tenant pool, which this deployment did not build".into(),
-                )
-            })?;
+    let lock = if let Some(pool) = crate::db::reindex_lock_pool(ctx)? {
         Some(
-            acquire_workspace_reindex_lock(handle.tenant.pool().clone(), workspace_id)
+            acquire_workspace_reindex_lock(pool, workspace_id)
                 .await
                 .map_err(|err| {
                     crate::YorishiroError::Internal(
@@ -129,6 +112,8 @@ pub(crate) async fn reindex_workspace_with_actor(
                     )
                 })?,
         )
+    } else {
+        None
     };
     let outcome = crate::models::entity_embeddings::reindex_workspace_as(
         &ctx.db,

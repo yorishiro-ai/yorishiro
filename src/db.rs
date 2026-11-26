@@ -12,6 +12,44 @@ use sea_orm::{
 use sqlite_vec::sqlite3_vec_init;
 use uuid::Uuid;
 
+/// Acquires a PostgreSQL session lock on a detached connection.
+/// Dropping the connection ends the session instead of returning a locked session to the pool.
+pub(crate) async fn postgres_session_lock(
+    pool: &PgPool,
+    key: &str,
+    wait: bool,
+) -> Result<Option<sea_orm::sqlx::PgConnection>, sea_orm::sqlx::Error> {
+    let mut conn = pool.acquire().await?.detach();
+    if wait {
+        sea_orm::sqlx::query("SELECT pg_advisory_lock(hashtextextended($1, 0))")
+            .bind(key)
+            .execute(&mut conn)
+            .await?;
+    } else if !sea_orm::sqlx::query_scalar::<_, bool>(
+        "SELECT pg_try_advisory_lock(hashtextextended($1, 0))",
+    )
+    .bind(key)
+    .fetch_one(&mut conn)
+    .await?
+    {
+        return Ok(None);
+    }
+    Ok(Some(conn))
+}
+
+pub(crate) fn postgres_pool(db: &DatabaseConnection) -> Option<&PgPool> {
+    is_postgres(db).then(|| db.get_postgres_connection_pool())
+}
+
+pub(crate) fn reindex_lock_pool(
+    ctx: &loco_rs::app::AppContext,
+) -> Result<Option<PgPool>, crate::YorishiroError> {
+    if is_sqlite(&ctx.db) {
+        return Ok(None);
+    }
+    Ok(Some(DbHandle::of(ctx)?.tenant.pool().clone()))
+}
+
 /// Which backend a connection talks to.
 /// Every backend decision outside this module asks through these, so there is one place that names the backends.
 pub(crate) fn is_sqlite(conn: &impl ConnectionTrait) -> bool {
