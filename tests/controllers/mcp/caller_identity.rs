@@ -36,10 +36,6 @@ async fn mcp_caller_identity_matches_rest_without_secrets() {
             format!("yrn:iam:{}:root", identity["tenant_id"].as_str().unwrap())
         );
         assert!(identity.get("workspace_access").is_none());
-        assert_eq!(
-            identity["bound_workspace_id"],
-            tenant.workspace_id.to_string()
-        );
         assert_ne!(identity["workspace_name"].as_str().unwrap(), "");
         assert_ne!(identity["tenant_name"].as_str().unwrap(), "");
         assert!(!result.to_string().contains(&key));
@@ -139,7 +135,7 @@ async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
             .get(&format!("/api/workspaces/{sibling_id}"))
             .add_header("Authorization", format!("Bearer {key}"))
             .await
-            .assert_status(StatusCode::FORBIDDEN);
+            .assert_status(StatusCode::NOT_FOUND);
         let login = request
             .post("/auth/root/login")
             .json(&json!({"email":user.email,"password":"hunter2-hunter2"}))

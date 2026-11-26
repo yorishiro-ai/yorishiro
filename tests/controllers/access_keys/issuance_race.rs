@@ -29,7 +29,7 @@ async fn tenant_key_issuance_rechecks_authority_after_waiting_for_policy_detachm
         let issue = async {
             request.post("/api/access-keys")
                 .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
-                .json(&serde_json::json!({"name":"must-not-exist", "tenant_scoped":true})).await
+                .json(&serde_json::json!({"name":"must-not-exist"})).await
         };
         let demote = async {
             // Observe the real fence wait rather than guessing how long the HTTP request needs.

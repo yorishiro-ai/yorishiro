@@ -115,6 +115,7 @@ async fn concurrent_rest_merges_commit_for_separate_workspaces() {
             let response = request
                 .post("/api/schemas")
                 .add_header("Authorization", format!("Bearer {key}"))
+                .add_header("x-workspace-id", workspace.id.to_string())
                 .json(&json!({"template_id":template.to_string()}))
                 .await;
             response.assert_status(StatusCode::CREATED);
@@ -122,10 +123,10 @@ async fn concurrent_rest_merges_commit_for_separate_workspaces() {
                 .as_str()
                 .unwrap()
                 .to_owned();
-            inputs.push((key, id));
+            inputs.push((key, id, workspace.id));
         }
         let barrier = tokio::sync::Barrier::new(2);
-        let merge = |(key, id): (String, String)| {
+        let merge = |(key, id, workspace): (String, String, Uuid)| {
             let request = &request;
             let barrier = &barrier;
             async move {
@@ -133,6 +134,7 @@ async fn concurrent_rest_merges_commit_for_separate_workspaces() {
                 let response = request
                     .post(&format!("/api/schemas/{id}/merge"))
                     .add_header("Authorization", format!("Bearer {key}"))
+                    .add_header("x-workspace-id", workspace.to_string())
                     .await;
                 response.assert_status(StatusCode::CREATED);
                 let body = response.json::<serde_json::Value>();

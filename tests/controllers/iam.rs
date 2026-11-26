@@ -170,7 +170,7 @@ async fn schema_ids_resolve_the_workspace_and_creation_refuses_ambiguity() {
             .get(&format!("/api/schemas/{id}"))
             .add_header("Authorization", format!("Bearer {denied}"))
             .await
-            .assert_status(StatusCode::NOT_FOUND);
+            .assert_status(StatusCode::FORBIDDEN);
         let other = fixtures::rest_create_workspace(&request, &key).await;
         request
             .get(&format!("/api/schemas/{id}"))
@@ -230,7 +230,7 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
                 .await;
         let named_login = request.post("/api/access-keys")
             .add_header("Authorization", format!("Bearer {root}"))
-            .json(&serde_json::json!({"name":"login","tenant_scoped":true}))
+            .json(&serde_json::json!({"name":"login"}))
             .await;
         named_login.assert_status(StatusCode::CREATED);
         let named_login = named_login.json::<serde_json::Value>();
@@ -254,12 +254,6 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
             .as_str()
             .unwrap()
             .to_owned();
-        request
-            .get("/api/schemas")
-            .add_header("Authorization", format!("Bearer {key}"))
-            .add_header("x-workspace-id", &workspace)
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
         request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {root}"))

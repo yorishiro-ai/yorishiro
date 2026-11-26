@@ -85,6 +85,7 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
         let accepted = request
             .post("/api/import-jobs")
             .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("x-workspace-id", workspace_id.to_string())
             .text("")
             .await;
         assert_eq!(accepted.status_code(), StatusCode::ACCEPTED);
@@ -130,6 +131,7 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
         let foreign = request
             .get(&path)
             .add_header("Authorization", format!("Bearer {other_key}"))
+            .add_header("x-workspace-id", other_workspace.id.to_string())
             .await;
         assert_eq!(foreign.status_code(), StatusCode::NOT_FOUND);
         // The built-in reader policy includes `import_job_get`.

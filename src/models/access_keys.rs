@@ -159,7 +159,7 @@ pub struct AuthContext {
 impl AuthContext {
     /// Requests already authenticated may finish; later authentications read the committed membership.
     pub(crate) async fn with_current_membership(
-        self,
+        mut self,
         conn: &impl ConnectionTrait,
     ) -> Result<Self, YorishiroError> {
         let _key = Entity::find_by_id(self.access_key_id)
@@ -176,7 +176,32 @@ impl AuthContext {
         {
             return Err(YorishiroError::Unauthenticated);
         }
+        if self.workspace_id.is_none() {
+            self.workspace_id = Self::sole_workspace(conn, self.tenant_id).await?;
+        }
         Ok(self)
+    }
+
+    /// The tenant's only workspace, which a request without a selection acts on; `None` when the tenant has several.
+    async fn sole_workspace(
+        conn: &impl ConnectionTrait,
+        tenant_id: Uuid,
+    ) -> Result<Option<Uuid>, YorishiroError> {
+        use crate::models::_entities::workspace_workspaces::{Column, Entity};
+        use sea_orm::QuerySelect;
+        let ids: Vec<Uuid> = Entity::find()
+            .select_only()
+            .column(Column::Id)
+            .filter(Column::TenantId.eq(tenant_id))
+            .limit(2)
+            .into_tuple()
+            .all(conn)
+            .await
+            .internal()?;
+        Ok(match ids.as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        })
     }
 
     /// Requires the authorization or authentication flow to have resolved a workspace.

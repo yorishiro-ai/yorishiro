@@ -50,11 +50,13 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
         let workspace_id = workspace.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
         let fork_key = crate::requests::fixtures::issue_access_key(&ctx, workspace_id, target.owner_id).await;
         let fork = request.post("/api/schema-forks").add_header("Authorization", format!("Bearer {fork_key}"))
+            .add_header("x-workspace-id", workspace_id.to_string())
             .json(&json!({"source_workspace_id":target.workspace_id,"source_schema_id":schemas[0]})).await;
         assert_eq!(fork.status_code(), StatusCode::CREATED, "{}", fork.text());
         let fork_id = fork.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
         let entity = request.post("/api/entities")
             .add_header("Authorization", format!("Bearer {}", target.api_key))
+            .add_header("x-workspace-id", target.workspace_id.to_string())
             .json(&json!({"schema_name":"task-management", "entity_type":"task", "data":{"title":"retire me"}})).await;
         assert_eq!(entity.status_code(), StatusCode::CREATED, "{}", entity.text());
         let entity_id = entity.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();

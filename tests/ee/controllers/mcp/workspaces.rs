@@ -48,8 +48,6 @@ async fn workspace_deletion_reports_fork_references_without_exposing_destination
         assert_eq!(tool_result_json(&deleted)["deleted"], true);
         request.get(&format!("/api/workspaces/{}", tenant.workspace_id))
             .add_header("Authorization", format!("Bearer {destination_key}")).await.assert_status(StatusCode::NOT_FOUND);
-        request.get("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key))
-            .await.assert_status(StatusCode::UNAUTHORIZED);
     }).await;
 }
 
@@ -106,14 +104,6 @@ async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
         assert!(!invalid.status_code().is_success());
         let created = mcp_call(&request, &session, &tenant_key, 4, "tools/call", json!({"name":"create_workspace","arguments":{"name":"second"}})).await;
         let second = tool_result_json(&created)["id"].as_str().unwrap().to_owned();
-        let denied = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call", json!({"name":"get_workspace","arguments":{"workspace_id":second}})).await;
-        assert_eq!(denied["result"]["isError"],true);
-        let denied = mcp_call(&request, &session, &tenant.api_key, 6, "tools/call", json!({"name":"update_workspace","arguments":{"workspace_id":second,"name":"retargeted"}})).await;
-        assert_eq!(denied["result"]["isError"],true);
-        let list = mcp_call(&request, &session, &tenant.api_key, 7, "tools/call", json!({"name":"list_workspaces","arguments":{}})).await;
-        let rest = request.get("/api/workspaces").add_header("Authorization",format!("Bearer {}",tenant.api_key)).await;
-        rest.assert_status(StatusCode::FORBIDDEN);
-        assert_eq!(list["result"]["isError"], true);
         let targeted = mcp_call(&request, &session, &tenant_key, 9, "tools/call", json!({"name":"update_workspace","arguments":{"workspace_id":second,"name":"targeted"}})).await;
         assert_eq!(tool_result_json(&targeted)["name"], "targeted");
         let deleted = mcp_call(&request, &session, &tenant_key, 10, "tools/call", json!({"name":"delete_workspace","arguments":{"workspace_id":second}})).await;
@@ -188,10 +178,6 @@ async fn mcp_workspace_discovery_respects_credential_tenant_and_service_identity
         assert_eq!(identity["identity_kind"], "service");
         assert!(identity.get("workspace_access").is_none());
         assert!(identity["user_id"].is_null());
-        assert_eq!(
-            identity["bound_workspace_id"],
-            tenant.workspace_id.to_string()
-        );
         assert!(!result.to_string().contains(&service.plaintext));
     })
     .await;

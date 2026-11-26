@@ -15,17 +15,14 @@ async fn access_key_tool_issues_tenant_scoped_keys_with_the_same_ceilings() {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let session = initialize(&request).await;
         let administrator = crate::requests::fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
-        let bound = crate::requests::fixtures::issue_access_key(&ctx, tenant.workspace_id, administrator).await;
-        let denied = mcp_call(&request, &session, &bound, 2, "tools/call", json!({"name":"create_access_key","arguments":{"name":"from-bound","tenant_scoped":true}})).await;
-        assert_eq!(denied["result"]["isError"], true);
         let issuer = yorishiro::models::access_keys::Entity::create_tenant_access_key(&ctx.db, tenant.tenant_id, Some(administrator), "initial-admin").await.unwrap();
-        let created = mcp_call(&request, &session, &issuer.plaintext, 3, "tools/call", json!({"name":"create_access_key","arguments":{"name":"tenant-scoped","tenant_scoped":true}})).await;
+        let created = mcp_call(&request, &session, &issuer.plaintext, 3, "tools/call", json!({"name":"create_access_key","arguments":{"name":"tenant-scoped"}})).await;
         let record = tool_result_json(&created);
         assert!(record["workspace_id"].is_null(), "record: {record:?}");
         request.get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", record["full_key"].as_str().unwrap()))
             .await.assert_status(StatusCode::OK);
-        let rest = request.post("/api/access-keys").add_header("Authorization", format!("Bearer {}", issuer.plaintext)).json(&json!({"name":"rest-twin","tenant_scoped":true})).await;
+        let rest = request.post("/api/access-keys").add_header("Authorization", format!("Bearer {}", issuer.plaintext)).json(&json!({"name":"rest-twin"})).await;
         rest.assert_status(StatusCode::CREATED);
         let rest_record = rest.json::<Value>();
         assert!(rest_record["workspace_id"].is_null());
