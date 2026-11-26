@@ -156,14 +156,25 @@ async fn missing_licence_state_closes_the_gate_again() {
             serde_json::json!({}),
         )
         .await;
-        let licensed_tools: Vec<_> = serde_json::from_str::<serde_json::Value>(include_str!(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/contract/tools.json")
-        ))
-        .unwrap()["licensed"]
-            .as_array()
-            .unwrap()
-            .clone();
-        for name in &licensed_tools {
+        let licensed_tools = [
+            "confirm_inference_proposals",
+            "discard_inference_proposals",
+            "reject_inference_proposals",
+            "create_inference_job",
+            "get_inference_job",
+            "get_inference_confirmation",
+            "list_inference_proposals",
+            "fork_marketplace_template",
+            "list_marketplace_templates",
+            "get_marketplace_template",
+            "get_marketplace_version",
+            "list_marketplace_reviews",
+            "list_marketplace_versions",
+            "publish_marketplace_version",
+            "update_marketplace_visibility",
+            "create_marketplace_review",
+        ];
+        for name in licensed_tools {
             assert!(
                 listed["result"]["tools"]
                     .as_array()
