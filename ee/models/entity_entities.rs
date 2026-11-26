@@ -45,9 +45,6 @@ pub(crate) async fn update_if_unchanged(
         crate::models::entity_entities::touch_content_revision(conn, workspace_id)
             .await
             .internal()?;
-        crate::models::entity_entities::resync_full_text(conn, existing.id)
-            .await
-            .internal()?;
     }
     Ok(result.rows_affected == 1)
 }

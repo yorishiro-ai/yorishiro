@@ -352,12 +352,6 @@ async fn delete_disabled_in(
         .exec(txn)
         .await
         .internal()?;
-    crate::models::entity_entities::forget_full_text(
-        txn,
-        entity_entities::Column::WorkspaceId.is_in(snapshot.workspace_ids.clone()),
-    )
-    .await
-    .internal()?;
     entity_entities::Entity::delete_many()
         .filter(entity_entities::Column::WorkspaceId.is_in(snapshot.workspace_ids.clone()))
         .exec(txn)

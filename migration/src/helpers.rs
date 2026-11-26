@@ -142,7 +142,7 @@ pub(super) async fn pg_only(manager: &SchemaManager<'_>, sql: &str) -> Result<()
 
 /// Runs `sql` only on SQLite; a no-op on Postgres.
 ///
-/// For the SQLite counterpart of a `pg_only` statement, such as the fork integrity triggers or the FTS5 table.
+/// For the SQLite counterpart of a `pg_only` statement, such as the fork integrity triggers.
 pub(super) async fn sqlite_only(manager: &SchemaManager<'_>, sql: &str) -> Result<(), DbErr> {
     if manager.get_database_backend() != DbBackend::Sqlite {
         return Ok(());

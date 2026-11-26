@@ -38,7 +38,7 @@ runs:
         EDITION: ${{ inputs.edition }}
       run: |
         db=postgres://yorishiro:secret@127.0.0.1:5432/yorishiro
-        psql "$db" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+        psql "$db" -c "CREATE EXTENSION IF NOT EXISTS vector;"
         reference=$(python3 scripts/release_images.py reference --image "$IMAGE" --source "$SOURCE" --run-id "$RUN_ID" --edition "$EDITION" --directory "$RUNNER_TEMP/release-images")
 
         docker run -d --name smoke --network host \

@@ -25,93 +25,7 @@ fn note_definition() -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn postgres_rrf_promotes_rare_text_and_gates_common_text() {
-    if !crate::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let fixture = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
-        schema_schemas::create_schema(&ctx.db, fixture.tenant_id, fixture.workspace_id,
-            serde_json::from_value(note_definition()).unwrap(), None, None).await.unwrap();
-        let mut rare = None;
-        for i in 0..60 {
-            let entity = entity_entities::create(&ctx.db, fixture.workspace_id, entity_entities::CreateEntityInput {
-                schema_name:"note".into(), entity_type:"note".into(),
-                data:serde_json::json!({"title":if i==20 {"common ERR-4821x"} else {"common document"}})
-            }, None).await.unwrap();
-            vectors::ActiveModel { workspace_id:Set(fixture.workspace_id), entity_id:Set(entity.id),
-                tenant_id:Set(fixture.tenant_id), embedding:Set(Some(sea_orm::entity::prelude::PgVector::from(vec![1.0, f32::from(i16::try_from(i).unwrap()) / 60.0 + 0.01]))) }
-                .insert(&ctx.db).await.unwrap();
-            if i==20 { rare=Some(entity.id); }
-        }
-        let query = || search::SearchQuery { limit:10, ..Default::default() };
-        for (text, eligible) in [("boundary", true), ("ERR-4821x", true), ("café", true), ("Łódź", true), ("Việt", true), ("a\u{301}bc", true), ("éà", false), ("a\u{301}b", false), ("Αθήνα", false), ("Москва", false), ("ab", false), ("東京", false), ("東京都", false)] {
-            let statement = ctx.db.get_database_backend().build(&search::postgres_rrf_query(
-                fixture.workspace_id, vec![1.0,0.0], text, &query()).unwrap());
-            assert_eq!(statement.sql.contains("word_similarity"), eligible, "{text}: {}", statement.sql);
-        }
-        let mut signed = vec![1.0_f32;4000]; signed[0] = -1.0;
-        let high = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, signed, &query()).unwrap();
-        let sql = ctx.db.get_database_backend().build(&high).sql;
-        assert!(sql.contains("<=>") && sql.contains("halfvec"), "above pgvector's vector limit the index expression is a normalized halfvec: {sql}");
-        assert!(!sql.contains("\"w\".\"id\" = \"e\".\"workspace_id\""), "reindex guard must not correlate the ANN join");
-        let positive = search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4096], &query()).unwrap();
-        let positive_sql = ctx.db.get_database_backend().build(&positive).sql;
-        assert!(positive_sql.contains("subvector"), "above the halfvec limit the index expression is the first 4000 dimensions: {positive_sql}");
-        assert!(search::vector_candidates_query(sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vec![1.0;4097], &query()).is_err());
-        let baseline = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "", query()).await.unwrap();
-        let common = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "common", query()).await.unwrap();
-        assert_eq!(baseline.iter().map(|h|h.entity.id).collect::<Vec<_>>(),common.iter().map(|h|h.entity.id).collect::<Vec<_>>(), "21+ matches must disable text list");
-        let rare_hits = search::search_by_vector(&ctx.db, fixture.workspace_id, vec![1.0,0.0], "ERR-4821x", query()).await.unwrap();
-        assert_eq!(rare_hits[0].entity.id, rare.unwrap(), "vector rank21 plus text rank1 must lead RRF");
-        assert_eq!(rare_hits.len(),10);
-        assert_eq!(rare_hits.iter().map(|h|h.entity.id).collect::<std::collections::HashSet<_>>().len(),10);
-        // A second workspace of the same tenant isolates the corpus without exceeding the deployment's tenant cap.
-        let text_workspace = {
-            let txn = TransactionTrait::begin(&ctx.db).await.unwrap();
-            let workspace = yorishiro::models::tenancy::create_workspace(
-                &txn,
-                fixture.tenant_id,
-                &format!("text-{}", uuid::Uuid::new_v4()),
-                None,
-                None,
-            )
-            .await
-            .unwrap();
-            txn.commit().await.unwrap();
-            workspace
-        };
-        schema_schemas::create_schema(
-            &ctx.db,
-            fixture.tenant_id,
-            text_workspace.id,
-            serde_json::from_value(note_definition()).unwrap(),
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        let mut first = None;
-        for i in 0..21 {
-            if i == 20 {
-                let hits = search::search_by_vector(&ctx.db, text_workspace.id, vec![1.0,0.0], "境界 boundary", query()).await.unwrap();
-                assert_eq!(hits.len(), 10, "exactly 20 matches must enable text-only results");
-                assert_eq!(hits[0].entity.id, first.unwrap(), "closest literal text must rank first");
-                assert!(hits.iter().all(|hit| hit.distance.is_none()));
-            }
-            let title = if i == 0 { "境界 boundary".to_string() } else { format!("境界 boundary {}", "unrelated filler ".repeat(20)) };
-            let entity = entity_entities::create(&ctx.db, text_workspace.id, entity_entities::CreateEntityInput {
-                schema_name:"note".into(), entity_type:"note".into(), data:serde_json::json!({"title":title})
-            }, None).await.unwrap();
-            if i == 0 { first = Some(entity.id); }
-        }
-        let gated = search::search_by_vector(&ctx.db, text_workspace.id, vec![1.0,0.0], "境界 boundary", query()).await.unwrap();
-        assert!(gated.is_empty(), "exactly 21 text-only matches must disable the text list");
-    }).await;
-}
-
-#[tokio::test]
-async fn postgres_materialized_recall_1024() {
+async fn postgres_candidate_recall_1024() {
     postgres_genuine_recall(
         1024,
         include_str!("../fixtures/search/recall_1024.json"),
@@ -232,12 +146,17 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
                     ..Default::default()
                 };
                 let statement = ctx.db.get_database_backend().build(
-                    &search::postgres_rrf_query(fixture.workspace_id, vector.clone(), "", &query)
-                        .unwrap(),
+                    &search::vector_candidates_query(
+                        sea_orm::DatabaseBackend::Postgres,
+                        fixture.workspace_id,
+                        vector.clone(),
+                        &query,
+                    )
+                    .unwrap(),
                 );
                 if dimensions <= 2000 {
                 assert!(
-                    statement.sql.contains("MATERIALIZED") && statement.to_string().contains("LIMIT 1000")
+                    statement.to_string().contains("LIMIT 1000")
                 );
                 txn.execute_unprepared(
                     "SET LOCAL hnsw.ef_search=400; SET LOCAL hnsw.iterative_scan=relaxed_order",
@@ -255,27 +174,18 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
                     .unwrap();
                 let mut nodes = vec![&plan[0]["Plan"]];
                 let mut hnsw_used = false;
-                let mut candidates_used = false;
-                let mut candidates_bounded = false;
                 while let Some(node) = nodes.pop() {
                     if node["Index Name"].as_str() == Some(&index) {
                         assert!(node["Actual Loops"].as_f64().unwrap() > 0.0);
                         hnsw_used = true;
                     }
-                    if node["CTE Name"].as_str() == Some("ann_candidates") {
-                        candidates_used |= node["Actual Loops"].as_f64().unwrap() > 0.0;
-                    }
-                    if node["Subplan Name"].as_str() == Some("CTE ann_candidates") {
-                        candidates_bounded = true;
-                        assert_eq!(node["Node Type"], "Limit", "{plan}");
-                        assert!(node["Actual Rows"].as_f64().unwrap()
-                            * node["Actual Loops"].as_f64().unwrap() <= 1000.0, "{plan}");
-                    }
                     if let Some(children) = node["Plans"].as_array() {
                         nodes.extend(children);
                     }
                 }
-                assert!(hnsw_used && candidates_used && candidates_bounded, "{plan}");
+                assert!(hnsw_used, "{plan}");
+                assert_eq!(plan[0]["Plan"]["Node Type"], "Limit", "{plan}");
+                assert!(plan[0]["Plan"]["Actual Rows"].as_f64().unwrap() <= 1000.0, "{plan}");
                 } else {
                     let state = txn.query_one_raw(Statement::from_sql_and_values(
                         sea_orm::DatabaseBackend::Postgres,
@@ -285,7 +195,7 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
                     assert!(state.try_get::<bool>("", "indisvalid").unwrap(), "the high-dimensional halfvec HNSW index must be valid before the recall run");
                 }
                 let hits =
-                    search::search_by_vector(&txn, fixture.workspace_id, vector.clone(), "", query)
+                    search::search_by_vector(&txn, fixture.workspace_id, vector.clone(), query)
                         .await
                         .unwrap();
                 txn.execute_unprepared(
@@ -310,6 +220,7 @@ async fn postgres_genuine_recall(dimensions: usize, metadata: &str, bytes: &[u8]
                     .await
                     .unwrap()
                     .iter()
+                    .take(10)
                     .map(|row| row.try_get("", "id").unwrap())
                     .collect();
                 txn.execute_unprepared(
@@ -385,17 +296,17 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         txn.execute_unprepared("SET LOCAL plan_cache_mode=force_custom_plan; SET LOCAL hnsw.ef_search=200; SET LOCAL hnsw.iterative_scan=relaxed_order").await.unwrap();
         let query = search::SearchQuery { limit: 200, ..Default::default() };
         let vector = vec![1.0_f32;7];
-        let statement = ctx.db.get_database_backend().build(&search::postgres_rrf_query(
-            fixture.workspace_id, vector.clone(), "", &query).unwrap());
+        let statement = ctx.db.get_database_backend().build(&search::vector_candidates_query(
+            sea_orm::DatabaseBackend::Postgres, fixture.workspace_id, vector.clone(), &query).unwrap());
         let mut explain = statement.clone();
         explain.sql = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {}", explain.sql);
         let plan = txn.query_one_raw(explain).await.unwrap().unwrap().try_get::<serde_json::Value>("", "QUERY PLAN").unwrap();
         println!("production vector plan: {plan}");
         assert!(plan.to_string().contains(&index), "production query must use workspace HNSW: {plan}");
         let natural = txn.query_all_raw(statement.clone()).await.unwrap();
-        assert_eq!(natural.len(), 200, "candidate limit must not be capped at pgvector's default 40");
+        assert!(natural.len() > 40, "candidate limit must not be capped at pgvector's default 40");
         txn.execute_unprepared("SET LOCAL hnsw.ef_search=40; SET LOCAL hnsw.iterative_scan=off").await.unwrap();
-        let hits = search::search_by_vector(&txn, fixture.workspace_id, vector, "", query).await.unwrap();
+        let hits = search::search_by_vector(&txn, fixture.workspace_id, vector, query).await.unwrap();
         assert_eq!(hits.len(), 200);
         let settings = txn.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
             "SELECT current_setting('hnsw.ef_search') AS ef, current_setting('hnsw.iterative_scan') AS scan")).await.unwrap().unwrap();
@@ -403,8 +314,8 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         assert_eq!(settings.try_get::<String>("", "scan").unwrap(), "off");
         txn.execute_unprepared("SET LOCAL enable_indexscan=off; SET LOCAL enable_bitmapscan=off").await.unwrap();
         let exact = txn.query_all_raw(statement).await.unwrap();
-        assert_eq!(exact.len(), natural.len());
-        let exact_ids: std::collections::HashSet<uuid::Uuid> = exact.iter().map(|row| row.try_get("", "id").unwrap()).collect();
+        assert!(exact.len() >= 200);
+        let exact_ids: std::collections::HashSet<uuid::Uuid> = exact.iter().take(200).map(|row| row.try_get("", "id").unwrap()).collect();
         let recall = f64::from(u32::try_from(hits.iter().filter(|hit| exact_ids.contains(&hit.entity.id)).count()).unwrap()) / 200.0;
         assert!(recall >= 0.95, "production recall@200={recall}; plan={plan}");
         txn.rollback().await.unwrap();
@@ -435,7 +346,7 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
             .await.unwrap().unwrap().try_get::<String>("", "name").unwrap();
         assert_eq!(same_partition, partition);
         let scoped = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
-        let after = search::search_by_vector(&scoped, fixture.workspace_id, vec![1.0_f32;7], "", search::SearchQuery { limit:200, ..Default::default() }).await.unwrap();
+        let after = search::search_by_vector(&scoped, fixture.workspace_id, vec![1.0_f32;7], search::SearchQuery { limit:200, ..Default::default() }).await.unwrap();
         assert!(after.iter().all(|hit| hit.entity.workspace_id == fixture.workspace_id));
         let after_ids: std::collections::HashSet<_> = after.iter().map(|hit| hit.entity.id).collect();
         assert_eq!(after_ids, hits.iter().map(|hit| hit.entity.id).collect(), "neighbor vectors must not change the workspace graph results");
@@ -499,7 +410,7 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         assert!(exists(high_index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "the width change must build the halfvec index");
         assert!(exists(index.clone()).await.unwrap().is_none(), "the old width's index must be retired");
         let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
-        let positive = search::search_by_vector(&tenant, fixture.workspace_id, spread(0), "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        let positive = search::search_by_vector(&tenant, fixture.workspace_id, spread(0), search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(positive.len(), 10);
         assert_eq!(positive[0].entity.id, ids[0], "the stored vector itself must rank first");
         assert!(positive[0].distance.unwrap().abs() < 0.00001);
@@ -511,7 +422,7 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
         // The row written after the index build must be reachable and rank first.
         let mut signed = vec![0.0_f32;4000]; signed[0] = 1.0;
-        let reranked = search::search_by_vector(&tenant, fixture.workspace_id, signed.clone(), "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        let reranked = search::search_by_vector(&tenant, fixture.workspace_id, signed.clone(), search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(reranked.len(), 10);
         assert_eq!(reranked[0].entity.id, ids[1], "high-dimensional HNSW must retain the closest original cosine");
         assert!(reranked.iter().all(|hit| hit.entity.workspace_id == fixture.workspace_id));
@@ -519,7 +430,7 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         tenant.rollback().await.unwrap();
         let deleted_id = ids[1];
         vectors::Entity::delete_many().filter(vectors::Column::EntityId.eq(deleted_id)).exec(&ctx.db).await.unwrap();
-        let after_delete = search::search_by_vector(&ctx.db, fixture.workspace_id, signed, "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        let after_delete = search::search_by_vector(&ctx.db, fixture.workspace_id, signed, search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(after_delete.len(), 10);
         assert!(after_delete.iter().all(|hit| hit.entity.id != deleted_id));
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
@@ -539,7 +450,7 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         assert!(exists(high_index.clone()).await.unwrap().is_none(), "the superseded halfvec index must be retired");
         assert!(exists(top_index.clone()).await.unwrap().unwrap().try_get::<bool>("", "indisvalid").unwrap(), "the 4096 width must build the truncated halfvec index");
         let tenant = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
-        let hits = search::search_by_vector(&tenant, fixture.workspace_id, vec![1.0;4096], "", search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
+        let hits = search::search_by_vector(&tenant, fixture.workspace_id, vec![1.0;4096], search::SearchQuery { limit:10, ..Default::default() }).await.unwrap();
         assert_eq!(hits.len(), 10);
         assert!(hits.iter().all(|hit| hit.distance.unwrap().abs() < 0.00001));
         tenant.rollback().await.unwrap();
@@ -611,121 +522,6 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
     }).await;
 }
 
-#[expect(
-    clippy::future_not_send,
-    reason = "test harness supports thread-local HTTP futures, environment guards, and callbacks"
-)]
-async fn literal_search_corpus() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let fixture =
-            crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
-        let definition = serde_json::from_value(note_definition()).unwrap();
-        schema_schemas::create_schema(
-            &ctx.db,
-            fixture.tenant_id,
-            fixture.workspace_id,
-            definition,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        let body = format!(
-            "{} quarterly roadmap コネクタ導入 数据库迁移 ＭＣＰ ｺﾈｸﾀ ＷＩＤＴＨ tunnel-based a:b foo\"bar MCP AND NOT x (x 100%under_score",
-            "背景説明と unrelated filler sentences。".repeat(100)
-        );
-        let mut matching = None;
-        let mut corpus_ids = Vec::new();
-        for title in [body, "unrelated grocery list".into()] {
-            let entity = entity_entities::create(
-                &ctx.db,
-                fixture.workspace_id,
-                entity_entities::CreateEntityInput {
-                    schema_name: "note".into(),
-                    entity_type: "note".into(),
-                    data: serde_json::json!({"title": title}),
-                },
-                None,
-            )
-            .await
-            .unwrap();
-            matching.get_or_insert(entity.id);
-            corpus_ids.push(entity.id);
-        }
-        let sqlite = ConnectionTrait::get_database_backend(&ctx.db)
-            == sea_orm::DatabaseBackend::Sqlite;
-        // Both backends use this exact corpus; only documented SQLite limitations differ.
-        for (text, postgres_hit, sqlite_hit) in [
-            ("quarterly roadmap", true, true),
-            ("コネクタ導入", true, true),
-            ("導入", true, false),
-            ("数据库", true, true),
-            ("数据", true, false),
-            ("MCP", true, true),
-            ("コネクタ", true, true),
-            ("ＭＣＰ", true, true),
-            ("ｺﾈｸﾀ", true, true),
-            ("WIDTH", true, false),
-            ("ＷＩＤＴＨ", true, false),
-            ("tunnel-based", true, true),
-            ("a:b", true, true),
-            ("foo\"bar", false, false),
-            ("foo\\\"bar", true, true),
-            ("MCP AND", true, true),
-            ("NOT", true, true),
-            ("xy", false, false),
-            ("(x", true, false),
-            ("100%under_score", true, true),
-            ("missing-literal", false, false),
-            ("100_other_score", false, false),
-            ("\"", true, false),
-            ("", false, false),
-            ("   ", false, false),
-        ] {
-            let hits = search::search_by_vector(
-                &ctx.db,
-                fixture.workspace_id,
-                vec![1.0_f32; 768],
-                text,
-                search::SearchQuery::default(),
-            )
-            .await
-            .unwrap_or_else(|error| panic!("literal query {text:?}: {error}"));
-            let expected = if sqlite { sqlite_hit } else { postgres_hit };
-            let mut ids: Vec<_> = hits.iter().map(|hit| hit.entity.id).collect();
-            // PostgreSQL searches serialized JSON, whose structural quotes occur in every row.
-            let mut expected_ids = if text == "\"" && !sqlite {
-                corpus_ids.clone()
-            } else if expected {
-                vec![matching.unwrap()]
-            } else {
-                vec![]
-            };
-            ids.sort_unstable();
-            expected_ids.sort_unstable();
-            assert_eq!(ids, expected_ids, "literal query {text:?}, SQLite={sqlite}");
-            assert!(hits.iter().all(|hit| hit.distance.is_none()));
-        }
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn sqlite_literal_search_shared_corpus() {
-    if !crate::require_sqlite_backend() {
-        return;
-    }
-    literal_search_corpus().await;
-}
-
-#[tokio::test]
-async fn postgres_literal_search_shared_corpus() {
-    if !crate::require_postgres_backend() {
-        return;
-    }
-    literal_search_corpus().await;
-}
-
 /// Vector search must rank by cosine distance (closest first) and must not leak another workspace's entities into the results, even when that workspace's vector is a closer match.
 #[tokio::test]
 #[expect(
@@ -739,9 +535,6 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
         vector
     }
 
-    if !crate::require_postgres_backend() {
-        return;
-    }
     boot_request::<App, _, _>(|request, ctx| async move {
         let crate::requests::fixtures::TestTenant {
             tenant_id,
@@ -786,6 +579,7 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             (workspace_id, "close match"),
             (workspace_id, "far match"),
             (other_workspace.id, "belongs to another workspace"),
+            (workspace_id, "match without an embedding"),
         ] {
             created.push(
                 entity_entities::create(
@@ -802,8 +596,8 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
                 .expect("create ranking entity"),
             );
         }
-        let [close, far, other_workspace_entity] = created.as_slice() else {
-            panic!("expected three ranking entities");
+        let [close, far, other_workspace_entity, unembedded] = created.as_slice() else {
+            panic!("expected four ranking entities");
         };
 
         let query_vector = unit_vector(0);
@@ -852,7 +646,6 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
             &ctx.db,
             workspace_id,
             query_vector,
-            "match",
             search::SearchQuery::default(),
         )
         .await
@@ -861,6 +654,7 @@ async fn search_by_vector_ranks_by_distance_and_stays_within_the_workspace() {
         assert_eq!(hits.len(), 2, "hits: {hits:?}");
         assert_eq!(hits[0].entity.id, close.id, "closest vector ranks first");
         assert_eq!(hits[1].entity.id, far.id);
+        assert!(hits.iter().all(|hit| hit.entity.id != unembedded.id));
         assert!(hits[0].distance.unwrap() < hits[1].distance.unwrap());
         assert!(
             hits.iter().all(|h| h.entity.workspace_id == workspace_id),
@@ -1431,201 +1225,6 @@ async fn reindex_overwrites_existing_entity_embeddings() {
     .await;
 }
 
-/// Gated PostgreSQL literal text search includes an unembedded entity when its data contains `query_text`; a nonmatching entity must not appear.
-#[tokio::test]
-async fn search_by_vector_falls_back_to_trigram_for_unembedded_entities() {
-    if !crate::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let crate::requests::fixtures::TestTenant {
-            tenant_id,
-            workspace_id,
-            ..
-        } = crate::requests::fixtures::TestTenant::create(
-            &request,
-            &ctx,
-            crate::requests::fixtures::TenantArgs::default(),
-        )
-        .await;
-        let def = serde_json::from_value(note_definition()).expect("parse definition");
-        schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
-            .await
-            .expect("create schema");
-
-        let matching = entity_entities::create(
-            &ctx.db,
-            workspace_id,
-            entity_entities::CreateEntityInput {
-                schema_name: "note".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({ "title": "quarterly roadmap review" }),
-            },
-            None,
-        )
-        .await
-        .expect("create matching entity");
-        entity_entities::create(
-            &ctx.db,
-            workspace_id,
-            entity_entities::CreateEntityInput {
-                schema_name: "note".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({ "title": "completely unrelated grocery list" }),
-            },
-            None,
-        )
-        .await
-        .expect("create unrelated entity");
-        // Neither entity has an embedding: both rely entirely on selective literal text matches.
-
-        let hits = search::search_by_vector(
-            &ctx.db,
-            workspace_id,
-            vec![0.0_f32; 768],
-            "quarterly roadmap",
-            search::SearchQuery::default(),
-        )
-        .await
-        .expect("search_by_vector");
-
-        assert_eq!(hits.len(), 1, "hits: {hits:?}");
-        assert_eq!(hits[0].entity.id, matching.id);
-        assert!(
-            hits[0].distance.is_none(),
-            "trigram-only hit has no distance"
-        );
-    })
-    .await;
-}
-
-/// The FTS5 fallback on SQLite surfaces an entity whose `data` matches quoted FTS5 terms from `query_text`, when
-/// the entity has no embedding; an entity with neither an embedding nor a MATCH match must not
-/// appear.
-///
-/// On SQLite, the search function's trigram half (`pg_trgm` on PostgreSQL) is replaced by an
-/// FTS5 query against `entity_fts` with `tokenize='trigram'`. This test boots
-/// against a SQLite file database to confirm the FTS5 path works end to end, including schema
-/// creation, entity insertion, and the FTS index updates the entity model makes.
-#[tokio::test]
-async fn search_by_vector_falls_back_to_fts5_on_sqlite() {
-    if !crate::require_sqlite_backend() {
-        return;
-    }
-
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let crate::requests::fixtures::TestTenant {
-            tenant_id,
-            workspace_id,
-            ..
-        } = crate::requests::fixtures::TestTenant::create(
-            &request,
-            &ctx,
-            crate::requests::fixtures::TenantArgs::default(),
-        )
-        .await;
-        let def = serde_json::from_value(note_definition()).expect("parse definition");
-        schema_schemas::create_schema(&ctx.db, tenant_id, workspace_id, def, None, None)
-            .await
-            .expect("create schema");
-
-        // Create an entity whose title contains the search phrase.
-        let matching = entity_entities::create(
-            &ctx.db,
-            workspace_id,
-            entity_entities::CreateEntityInput {
-                schema_name: "note".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({ "title": "quarterly roadmap review" }),
-            },
-            None,
-        )
-        .await
-        .expect("create matching entity");
-
-        // Create an entity whose title does not match.
-        entity_entities::create(
-            &ctx.db,
-            workspace_id,
-            entity_entities::CreateEntityInput {
-                schema_name: "note".into(),
-                entity_type: "note".into(),
-                data: serde_json::json!({ "title": "completely unrelated grocery list" }),
-            },
-            None,
-        )
-        .await
-        .expect("create unrelated entity");
-
-        // Neither entity has a stored vector, so both rely on the FTS5 fallback path.
-        let hits = search::search_by_vector(
-            &ctx.db,
-            workspace_id,
-            vec![0.0_f32; 768],
-            "quarterly roadmap",
-            search::SearchQuery::default(),
-        )
-        .await
-        .expect("search_by_vector");
-
-        assert_eq!(hits.len(), 1, "hits: {hits:?}");
-        assert_eq!(hits[0].entity.id, matching.id);
-        assert!(hits[0].distance.is_none(), "FTS5-only hit has no distance");
-
-        // Modify the entity's data so the old search phrase no longer matches, then
-        // confirm a search for the new phrase finds it.
-        entity_entities::update(
-            &ctx.db,
-            workspace_id,
-            entity_entities::UpdateEntityInput {
-                id: matching.id,
-                data: serde_json::json!({ "title": "quarterly board meeting notes" }),
-                updated_by: None,
-                expected_updated_at: None,
-            },
-        )
-        .await
-        .expect("update entity");
-
-        // Old phrase should no longer match.
-        let hits = search::search_by_vector(
-            &ctx.db,
-            workspace_id,
-            vec![0.0_f32; 768],
-            "quarterly roadmap",
-            search::SearchQuery::default(),
-        )
-        .await
-        .expect("search_by_vector after update");
-        assert_eq!(
-            hits.len(),
-            0,
-            "old phrase must not match after update: {hits:?}"
-        );
-
-        // New phrase should find it.
-        let hits = search::search_by_vector(
-            &ctx.db,
-            workspace_id,
-            vec![0.0_f32; 768],
-            "quarterly board meeting",
-            search::SearchQuery::default(),
-        )
-        .await
-        .expect("search_by_vector after update");
-        assert_eq!(hits.len(), 1, "new phrase must match: {hits:?}");
-        assert_eq!(hits[0].entity.id, matching.id);
-
-        entity_entities::delete(&ctx.db, workspace_id, matching.id)
-            .await
-            .expect("delete entity");
-
-        let after_delete = entity_entities::get(&ctx.db, workspace_id, matching.id).await;
-        assert!(after_delete.is_err(), "deleted entity must not be found");
-    })
-    .await;
-}
-
 /// SQLite end-to-end: entity create → document embed via test provider → persisted vector → vector search hit.
 ///
 /// Drives the public `sync_embedding_for_record` directly, not the worker.
@@ -1702,7 +1301,6 @@ async fn sqlite_document_embed_persist_and_search() {
             &ctx.db,
             workspace_id,
             model_vector(&provider.model_name()),
-            "quarterly roadmap",
             search::SearchQuery::default(),
         )
         .await
@@ -1827,7 +1425,6 @@ async fn reindex_switches_between_arbitrary_widths() {
                 &ctx.db,
                 fixture.workspace_id,
                 vec![1.0; width],
-                "arbitrary",
                 search::SearchQuery::default(),
             )
             .await

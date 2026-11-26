@@ -77,12 +77,6 @@ async fn up_entities(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         )
         .await?;
 
-    helpers::sqlite_only(
-        manager,
-        "CREATE VIRTUAL TABLE entity_fts USING fts5(entity_id UNINDEXED, data, tokenize='trigram');",
-    )
-    .await?;
-
     manager
         .create_index(
             Index::create()
@@ -95,7 +89,21 @@ async fn up_entities(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         )
         .await?;
 
-    create_data_indexes(manager).await?;
+    if manager.get_database_backend() == DbBackend::Postgres {
+        manager
+            .create_index(
+                Index::create()
+                    .name("entities_data_gin")
+                    .table(Alias::new("entity_entities"))
+                    .full_text()
+                    .col(
+                        IndexColumn::from(Alias::new("data"))
+                            .with_operator_class(Alias::new("jsonb_path_ops")),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+    }
 
     helpers::enable_rls_with_policy(
         manager,
@@ -111,40 +119,7 @@ async fn up_entities(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     Ok(())
 }
 
-async fn create_data_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    if manager.get_database_backend() == DbBackend::Postgres {
-        manager
-            .create_index(
-                Index::create()
-                    .name("entities_data_gin")
-                    .table(Alias::new("entity_entities"))
-                    .full_text()
-                    .col(
-                        IndexColumn::from(Alias::new("data"))
-                            .with_operator_class(Alias::new("jsonb_path_ops")),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_index(
-                Index::create()
-                    .name("entities_data_trgm_idx")
-                    .table(Alias::new("entity_entities"))
-                    .full_text()
-                    .col(
-                        IndexColumn::from(Expr::cust("normalize(data::text, nfkc)"))
-                            .with_operator_class(Alias::new("gin_trgm_ops")),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-    }
-    Ok(())
-}
-
 async fn down_entities(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    helpers::sqlite_only(manager, "DROP TABLE entity_fts;").await?;
     manager
         .drop_table(
             Table::drop()

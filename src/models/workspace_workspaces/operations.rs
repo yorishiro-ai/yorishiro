@@ -70,12 +70,6 @@ pub(crate) async fn delete_workspace(
         });
     }
 
-    crate::models::entity_entities::forget_full_text(
-        conn,
-        crate::models::_entities::entity_entities::Column::WorkspaceId.eq(workspace_id),
-    )
-    .await
-    .internal()?;
     Entity::delete_by_id(workspace_id)
         .exec(conn)
         .await

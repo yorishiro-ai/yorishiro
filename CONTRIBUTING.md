@@ -71,7 +71,7 @@ $ make check-all
 $ make check-all-ee
 ```
 
-Tests need PostgreSQL with `vector` and `pg_trgm` in `template1`, and a non-superuser role.
+Tests need PostgreSQL with `vector` in `template1`, and a non-superuser role.
 
 ## Git workflow
 

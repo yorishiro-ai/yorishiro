@@ -201,9 +201,6 @@ pub async fn update(
             .exec_with_returning(conn)
             .await
             .internal()?;
-        for row in &rows {
-            super::resync_full_text(conn, row.id).await.internal()?;
-        }
         return rows
             .pop()
             .map(EntityRecord::from)
@@ -228,14 +225,6 @@ pub async fn delete(
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::entity_entities::Column;
 
-    super::forget_full_text(
-        conn,
-        sea_orm::Condition::all()
-            .add(Column::WorkspaceId.eq(workspace_id))
-            .add(Column::Id.eq(id)),
-    )
-    .await
-    .internal()?;
     let result = Entity::delete_many()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::Id.eq(id))

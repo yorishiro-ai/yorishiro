@@ -191,7 +191,7 @@ fi
 note "a configured service starts and serves (Postgres)"
 # --------------------------------------------------------------------------------------------
 docker exec "$PG" psql -U yorishiro -d yorishiro \
-  -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null 2>&1
+  -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null 2>&1
 
 # Use an address because systemd-resolved cannot reach Docker's embedded DNS here.
 PGIP=$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')

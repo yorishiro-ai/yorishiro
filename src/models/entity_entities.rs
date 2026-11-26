@@ -199,15 +199,6 @@ impl ActiveModelBehavior for ActiveModel {
         }
         Ok(this)
     }
-
-    /// Keeps the SQLite full-text row of the entity current.
-    async fn after_save<C>(model: Model, db: &C, _insert: bool) -> Result<Model, DbErr>
-    where
-        C: ConnectionTrait,
-    {
-        resync_full_text(db, model.id).await?;
-        Ok(model)
-    }
 }
 
 /// A token that changes with every write, so a reader can tell whether the entity moved since it read it.
@@ -240,53 +231,6 @@ pub(crate) async fn touch_content_revision(
         .filter(Workspace::Id.eq(workspace_id))
         .exec(db)
         .await?;
-    Ok(())
-}
-
-/// SQLite only: removes the full-text rows of the entities matching `condition`.
-///
-/// Call it before deleting entities in bulk, because the full-text table has no foreign key to cascade.
-pub(crate) async fn forget_full_text(
-    db: &impl ConnectionTrait,
-    condition: impl sea_orm::sea_query::IntoCondition,
-) -> Result<(), DbErr> {
-    use sea_orm::sea_query::{Alias, Query};
-    if db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite {
-        return Ok(());
-    }
-    let matching = Query::select()
-        .expr(Expr::col(Column::Id).cast_as(Alias::new("text")))
-        .from(Entity)
-        .cond_where(condition)
-        .to_owned();
-    let delete = Query::delete()
-        .from_table(Alias::new("entity_fts"))
-        .and_where(Expr::col(Alias::new("entity_id")).in_subquery(matching))
-        .to_owned();
-    db.execute(&delete).await?;
-    Ok(())
-}
-
-/// SQLite only: replaces the full-text row of one entity with its stored data.
-pub(crate) async fn resync_full_text(db: &impl ConnectionTrait, id: Uuid) -> Result<(), DbErr> {
-    use sea_orm::sea_query::{Alias, Query};
-    if db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite {
-        return Ok(());
-    }
-    forget_full_text(db, Column::Id.eq(id)).await?;
-    let source = Query::select()
-        .expr(Expr::col(Column::Id).cast_as(Alias::new("text")))
-        .column(Column::Data)
-        .from(Entity)
-        .and_where(Column::Id.eq(id))
-        .to_owned();
-    let mut insert = Query::insert();
-    insert
-        .into_table(Alias::new("entity_fts"))
-        .columns([Alias::new("entity_id"), Alias::new("data")])
-        .select_from(source)
-        .map_err(|error| DbErr::Custom(error.to_string()))?;
-    db.execute(&insert).await?;
     Ok(())
 }
 

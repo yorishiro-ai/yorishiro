@@ -329,7 +329,7 @@ async fn search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result() {
     .await;
 }
 
-/// With no worker running the search must fail, loudly and boundedly: a lexical fallback would return results the caller did not ask for.
+/// With no worker running the search must fail, loudly and boundedly.
 #[tokio::test]
 async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fallback() {
     let overrides = [
@@ -338,7 +338,6 @@ async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fall
     ];
     boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        // An entity whose text matches the query literally, so a lexical fallback would find it.
         let (provider, _server, _) = keyword_provider(768).await;
         embedded_notes(&ctx, &setup, provider.as_ref(), &["alpha plan"]).await;
 
