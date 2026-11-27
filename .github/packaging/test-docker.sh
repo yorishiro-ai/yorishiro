@@ -35,7 +35,7 @@ import sys
 config = json.load(sys.stdin)
 assert set(config["services"]) == {"testdb", "redis"}
 assert all("build" not in service for service in config["services"].values())
-assert any(mount["source"] == "test_pgdata" for mount in config["services"]["testdb"]["volumes"])
+assert "/var/lib/postgresql" in config["services"]["testdb"]["tmpfs"]
 '
   docker compose -f "$repo/docker-compose.dev.yaml" config --format json |
     python3 -c '

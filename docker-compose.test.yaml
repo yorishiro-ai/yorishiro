@@ -1,4 +1,4 @@
-# Test dependencies only. Application tests run through Cargo.
+# Test dependencies only. PostgreSQL data is disposable.
 services:
   testdb:
     image: pgvector/pgvector:pg18
