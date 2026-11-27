@@ -271,7 +271,7 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
             let response = request.get("/api/schemas")
                 .add_header("Authorization", format!("Bearer {}", key.plaintext))
                 .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string()).await;
-            assert_eq!(response.status_code().as_u16(), if allowed { 200 } else { 403 }, "{}", response.text());
+            assert_eq!(response.status_code().as_u16(), if allowed { 200 } else { 404 }, "{}", response.text());
             let response = request.post("/mcp")
                 .add_header("Accept", "application/json, text/event-stream")
                 .add_header("MCP-Session-Id", session.clone())
@@ -284,7 +284,7 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
                 assert_ne!(body["result"]["isError"], true, "{body}");
             } else {
                 assert_eq!(body["result"]["isError"], true, "{body}");
-                assert_eq!(body["result"]["structuredContent"]["error"]["code"], "access_denied");
+                assert_eq!(body["result"]["structuredContent"]["error"]["code"], "not_found");
             }
             assert!(access_keys::Entity::find_by_id(key.id).one(&ctx.db).await.unwrap().is_some());
         }
@@ -326,17 +326,22 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
             .await;
         assert_eq!(own.status_code(), 200, "{}", own.text());
 
-        // Naming a workspace that belongs to another tenant is refused as a scope denial, not resolved.
+        // A foreign workspace gives the same response as a missing workspace.
         let foreign_target = request
             .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
             .add_header(WORKSPACE_HEADER, foreign.workspace_id.to_string())
             .await;
+        foreign_target.assert_status(StatusCode::NOT_FOUND);
+        let missing_target = request
+            .get("/api/caller-identity")
+            .add_header("Authorization", format!("Bearer {}", tenant_key.plaintext))
+            .add_header(WORKSPACE_HEADER, uuid::Uuid::now_v7().to_string())
+            .await;
+        missing_target.assert_status(StatusCode::NOT_FOUND);
         assert_eq!(
-            foreign_target.status_code(),
-            403,
-            "{}",
-            foreign_target.text()
+            foreign_target.json::<serde_json::Value>(),
+            missing_target.json::<serde_json::Value>()
         );
 
         // The same header is valid for a key of the foreign tenant, proving the refusal is about the pairing, not the workspace.
