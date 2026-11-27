@@ -24,6 +24,7 @@ jobs:
   prepare:
     runs-on: ubuntu-26.04
     outputs:
+      image: ${{ steps.plan.outputs.image }}
       tag: ${{ steps.plan.outputs.tag }}
       ref: ${{ steps.plan.outputs.ref }}
       commit: ${{ steps.snapshot.outputs.commit || github.sha }}
@@ -80,6 +81,7 @@ jobs:
             file_version=$VERSION
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "image=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "package-version=$package_version" >> "$GITHUB_OUTPUT"
           echo "file-version=$file_version" >> "$GITHUB_OUTPUT"
           echo "ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
@@ -146,41 +148,38 @@ jobs:
           version: ${{ needs.prepare.outputs.package-version }}
           file-version: ${{ needs.prepare.outputs.file-version }}
 
-  docker:
+  # Only dry runs can build images before package validation because they do not push.
+  docker-dry-run:
     needs: prepare
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-26.04
-            arch: amd64
-          - os: ubuntu-26.04-arm
-            arch: arm64
-    runs-on: ${{ matrix.os }}
+    if: inputs.dry_run
+    uses: ./.github/workflows/release-docker.yml
     permissions:
+      contents: read
+    with:
+      image: ${{ needs.prepare.outputs.image }}
+      ref: ${{ needs.prepare.outputs.ref }}
+      tag: ${{ needs.prepare.outputs.tag }}
+      source: ${{ needs.prepare.outputs.commit }}
+      version: ${{ inputs.version }}
+      push: false
+
+  docker:
+    needs: [prepare, package-tests]
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/release-docker.yml
+    permissions:
+      contents: read
       packages: write
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.prepare.outputs.ref }}
-          persist-credentials: false
-
-      - uses: ./.github/actions/prepare-stable-source
-        if: ${{ !inputs.prerelease }}
-        with:
-          version: ${{ inputs.version }}
-
-      - uses: ./.github/actions/build-docker
-        with:
-          image: ${{ env.IMAGE_NAME }}
-          tag: ${{ needs.prepare.outputs.tag }}
-          source: ${{ needs.prepare.outputs.commit }}
-          arch: ${{ matrix.arch }}
-          push: ${{ !inputs.dry_run }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+    with:
+      image: ${{ needs.prepare.outputs.image }}
+      ref: ${{ needs.prepare.outputs.ref }}
+      tag: ${{ needs.prepare.outputs.tag }}
+      source: ${{ needs.prepare.outputs.commit }}
+      version: ${{ inputs.version }}
+      push: true
 
   docker-manifest:
-    needs: [docker, package-tests, prepare]
+    needs: [docker, prepare]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-26.04
     permissions:
