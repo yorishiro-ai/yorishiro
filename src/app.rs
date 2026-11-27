@@ -249,9 +249,7 @@ pub(crate) async fn connect_workers(
     }
     workers.connect(ctx, queue).await?;
     initializers::queue::start_relay(ctx)?;
-    if role == crate::data::settings::ConsumerRole::Embedding
-        && tasks::reindex_scheduler::runs_immediately(&ctx.config)
-    {
+    if role == crate::data::settings::ConsumerRole::Embedding {
         crate::workers::startup_reindex::run(ctx).await;
     }
     Ok(())

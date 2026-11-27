@@ -78,11 +78,9 @@ pub(crate) async fn configure(
         return Ok(());
     }
     save(&txn, workspace_id, config).await?;
-    if crate::tasks::reindex_scheduler::runs_immediately(&ctx.config) {
-        crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
-            .await
-            .internal()?;
-    }
+    crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
+        .await
+        .internal()?;
     txn.commit().await.internal()?;
     Ok(())
 }
@@ -221,11 +219,9 @@ pub(crate) async fn remove(
     )
     .await?;
     clear(&txn, workspace_id).await?;
-    if crate::tasks::reindex_scheduler::runs_immediately(&ctx.config) {
-        crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
-            .await
-            .internal()?;
-    }
+    crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
+        .await
+        .internal()?;
     txn.commit().await.internal()?;
     Ok(())
 }

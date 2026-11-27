@@ -1,7 +1,6 @@
 mod gate;
 mod licence;
 
-use loco_rs::task::{Task, Vars};
 use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::edition::ee::data::plan::Plan;
 
@@ -117,7 +116,7 @@ async fn a_signed_licence_key_activates_enterprise_at_boot() {
         ).unwrap();
         let job = &scheduler.jobs["reindex_scheduler"];
         assert_eq!(job.cron, schedule);
-        assert!(!job.run_on_start);
+        assert!(job.run_on_start);
 
         let tenant = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
         let (_, provider, _) = crate::http_stub::keyword_provider(32).await;
@@ -126,12 +125,7 @@ async fn a_signed_licence_key_activates_enterprise_at_boot() {
             .json(&serde_json::json!({"base_url": provider.url, "model": "scheduled-model", "api_key": "test-key", "dimensions": 32}))
             .await;
         response.assert_status(axum::http::StatusCode::NO_CONTENT);
-        for name in ["reindex", "startup_reindex"] {
-            assert!(!crate::has_active_job(&ctx.db, name, tenant.workspace_id).await.unwrap());
-        }
-
-        yorishiro::tasks::reindex_scheduler::ReindexScheduler.run(&ctx, &Vars::default()).await.unwrap();
-        assert!(crate::has_active_job(&ctx.db, "startup_reindex", tenant.workspace_id).await.unwrap());
+        assert!(crate::has_active_job(&ctx.db, "reindex", tenant.workspace_id).await.unwrap());
     })
     .await;
 }

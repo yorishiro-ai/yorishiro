@@ -34,18 +34,10 @@ pub(crate) fn configure(config: &mut Config, schedule: Option<&str>) {
         loco_rs::scheduler::Job {
             run: NAME.into(),
             shell: false,
-            run_on_start: schedule.is_none(),
+            run_on_start: true,
             cron: schedule.unwrap_or(DEFAULT_CRON).into(),
             tags: None,
             output: None,
         },
     );
-}
-
-pub(crate) fn runs_immediately(config: &Config) -> bool {
-    config
-        .scheduler
-        .as_ref()
-        .and_then(|scheduler| scheduler.jobs.get(NAME))
-        .is_none_or(|job| job.run_on_start)
 }
