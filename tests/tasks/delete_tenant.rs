@@ -45,8 +45,7 @@ async fn delete_task_requires_confirmation_and_disablement_and_supports_retry() 
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert!(run(&ctx, vec![]).await.is_err());

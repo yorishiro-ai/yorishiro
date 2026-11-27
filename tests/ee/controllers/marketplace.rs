@@ -127,8 +127,7 @@ async fn publish_list_fork_and_review_round_trip() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id)
@@ -591,8 +590,7 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id)
@@ -646,8 +644,7 @@ async fn a_rating_outside_the_range_is_rejected() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let mut owner = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         owner.api_key =
             crate::requests::fixtures::issue_tenant_key(&ctx, owner.tenant_id, owner.owner_id)

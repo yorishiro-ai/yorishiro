@@ -353,8 +353,7 @@ async fn workspace_endpoints_enforce_tenant_isolation() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let TestTenant {
             api_key: owner_a_key,
             ..

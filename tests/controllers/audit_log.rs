@@ -284,8 +284,7 @@ async fn an_audit_key_cannot_read_another_tenants_audit_log() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let tenant_a = setup(&request, &ctx).await;
         let tenant_b = setup(&request, &ctx).await;
 

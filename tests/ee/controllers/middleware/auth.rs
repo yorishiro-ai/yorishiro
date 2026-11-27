@@ -297,8 +297,7 @@ async fn a_tenant_scoped_key_cannot_retarget_another_tenants_workspace() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let caller = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let foreign = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let membership = yorishiro::models::tenant_memberships::add_member(

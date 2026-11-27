@@ -425,8 +425,7 @@ async fn postgres_row_level_security_scopes_requests_to_the_current_workspace() 
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let db = ctx
             .shared_store
             .get::<yorishiro::db::DbHandle>()

@@ -636,8 +636,7 @@ async fn proposals_cannot_be_listed_by_another_tenant() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let rejected_job = Uuid::new_v4();

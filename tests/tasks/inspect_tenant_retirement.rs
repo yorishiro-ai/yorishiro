@@ -67,8 +67,7 @@ async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let mut ids = Vec::new();
@@ -170,8 +169,7 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
         return;
     }
 
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let service = crate::requests::fixtures::create_key(&ctx.db, target.workspace_id, None)
@@ -218,8 +216,7 @@ async fn retirement_inventory_does_not_expose_accounts() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let second = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert!(
@@ -254,8 +251,7 @@ async fn retirement_inventory_preserves_cross_tenant_fork_integrity() {
         return;
     }
 
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let source = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = yorishiro::data::templates::get_template("general-notes").unwrap();

@@ -404,8 +404,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let TestTenant {
             tenant_id: tenant_a,
             workspace_id: source_workspace,
@@ -621,8 +620,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let TestTenant {
             tenant_id: tenant_a,
             workspace_id: source_workspace,

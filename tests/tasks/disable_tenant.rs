@@ -25,8 +25,7 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
         return;
     }
 
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id).await;
@@ -114,8 +113,7 @@ async fn irreversible_cleanup_requires_disablement_and_preserves_root_identities
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert!(
@@ -204,8 +202,7 @@ async fn operator_disablement_requires_confirmation_and_is_retry_safe() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let task = Some("disable_tenant".to_owned());
@@ -291,8 +288,7 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
         return;
     }
 
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let target = TestTenant::create(
             &request,
             &ctx,

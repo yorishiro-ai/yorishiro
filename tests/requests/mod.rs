@@ -56,6 +56,24 @@ pub(crate) fn max_tenants(limit: i32) -> Override {
     ("settings.max_tenants", limit.into())
 }
 
+/// Boots a licensed deployment that can create more than one tenant.
+#[cfg(feature = "enterprise")]
+#[expect(
+    clippy::future_not_send,
+    reason = "matches the request harness callback"
+)]
+pub(crate) async fn boot_multitenant_request<F, Fut>(callback: F)
+where
+    F: FnOnce(TestServer, loco_rs::app::AppContext) -> Fut,
+    Fut: Future<Output = ()>,
+{
+    boot_request_with::<yorishiro::App, _, _>(&[max_tenants(0)], move |request, ctx| {
+        require_licence(&ctx);
+        callback(request, ctx)
+    })
+    .await;
+}
+
 /// Boots the app without a licence key, whatever the ambient environment holds.
 pub(crate) fn unlicensed() -> Override {
     ("initializers.licence_key", "".into())
