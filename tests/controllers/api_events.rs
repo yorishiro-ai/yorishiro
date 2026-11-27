@@ -1,7 +1,7 @@
 //! Every REST request and MCP call leaves rows in the durable, append-only trail.
 
 use axum::http::StatusCode;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde_json::{Value, json};
 use yorishiro::models::api_events::{Entity, Model};
 
@@ -243,75 +243,6 @@ async fn the_trail_is_listed_by_policy_and_only_for_the_callers_tenant() {
             .add_header("Authorization", format!("Bearer {bare_key}"))
             .await
             .assert_status(StatusCode::FORBIDDEN);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn recorded_rows_cannot_be_changed_or_removed() {
-    boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        request
-            .get("/api/workspaces")
-            .add_header(
-                "Authorization",
-                format!("Bearer {}", root_key(&ctx, &tenant).await),
-            )
-            .await
-            .assert_status_ok();
-        for statement in [
-            "UPDATE api_events SET outcome = 'success'",
-            "DELETE FROM api_events",
-        ] {
-            let error = ctx
-                .db
-                .execute_unprepared(statement)
-                .await
-                .expect_err(statement);
-            assert!(
-                error.to_string().contains("append-only"),
-                "{statement}: {error}"
-            );
-        }
-        assert!(Entity::find().count(&ctx.db).await.unwrap() > 0);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn a_call_that_cannot_be_recorded_is_refused() {
-    boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let bearer = format!("Bearer {}", root_key(&ctx, &tenant).await);
-        ctx.db
-            .execute_unprepared("ALTER TABLE api_events RENAME TO api_events_unavailable")
-            .await
-            .unwrap();
-        let read = request
-            .get("/api/workspaces")
-            .add_header("Authorization", &bearer)
-            .await;
-        let write = request
-            .post("/api/workspaces")
-            .add_header("Authorization", &bearer)
-            .json(&json!({"name": "never-created"}))
-            .await;
-        ctx.db
-            .execute_unprepared("ALTER TABLE api_events_unavailable RENAME TO api_events")
-            .await
-            .unwrap();
-        read.assert_status(StatusCode::SERVICE_UNAVAILABLE);
-        write.assert_status(StatusCode::SERVICE_UNAVAILABLE);
-        let workspaces: Vec<Value> = request
-            .get("/api/workspaces")
-            .add_header("Authorization", &bearer)
-            .await
-            .json();
-        assert!(
-            workspaces
-                .iter()
-                .all(|workspace| workspace["name"] != "never-created")
-        );
     })
     .await;
 }

@@ -3,7 +3,7 @@
 //! A call that can change something leaves a `started` row before it runs and an `authenticated` row once it has an identity.
 //! Every call leaves a `completed` row when it ends. The rows of one call share a `request_id`.
 //! An `authenticated` row with no `completed` row marks a write that was interrupted, and whose it was.
-//! Rows are never updated or removed, which the database enforces with triggers.
+//! The application only appends and lists rows.
 //! They hold identifiers and outcomes only: no credentials, bodies, query values or tool arguments.
 
 pub use crate::models::_entities::api_events::{ActiveModel, Entity, Model};

@@ -1,5 +1,4 @@
 use sea_orm_migration::prelude::*;
-use sea_orm_migration::sea_orm::DbBackend;
 
 use crate::helpers;
 
@@ -12,10 +11,9 @@ impl MigrationTrait for Migration {
         helpers::use_transaction()
     }
 
-    /// One row per recorded call phase (`started`, `authenticated`, `completed`), written by the application and never changed or removed.
+    /// One row per recorded call phase (`started`, `authenticated`, `completed`); the application only appends and reads.
     /// `tenant_id` has no foreign key so a retired tenant's trail survives the tenant.
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let sqlite = manager.get_database_backend() == DbBackend::Sqlite;
         let mut read_only = ColumnDef::new(Alias::new("read_only"));
         read_only.boolean().not_null();
         manager
@@ -73,35 +71,12 @@ impl MigrationTrait for Migration {
         )
         .await?;
         helpers::grant(manager, "SELECT", "api_events").await?;
-        helpers::pg_only(
-            manager,
-            "CREATE FUNCTION api_events_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
-             BEGIN RAISE EXCEPTION 'api_events is append-only'; END $$;
-             CREATE TRIGGER api_events_append_only BEFORE UPDATE OR DELETE ON api_events
-                 FOR EACH ROW EXECUTE FUNCTION api_events_immutable();
-             CREATE TRIGGER api_events_no_truncate BEFORE TRUNCATE ON api_events
-                 FOR EACH STATEMENT EXECUTE FUNCTION api_events_immutable();",
-        )
-        .await?;
-        if sqlite {
-            for event in ["UPDATE", "DELETE"] {
-                manager
-                    .get_connection()
-                    .execute_unprepared(&format!(
-                        "CREATE TRIGGER api_events_no_{} BEFORE {event} ON api_events
-                         BEGIN SELECT RAISE(ABORT, 'api_events is append-only'); END;",
-                        event.to_lowercase()
-                    ))
-                    .await?;
-            }
-        }
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .drop_table(Table::drop().table(Alias::new("api_events")).to_owned())
-            .await?;
-        helpers::pg_only(manager, "DROP FUNCTION IF EXISTS api_events_immutable();").await
+            .await
     }
 }
