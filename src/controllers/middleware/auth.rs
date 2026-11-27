@@ -157,11 +157,7 @@ impl<'a> RequestAuth<'a> {
                 return Err(YorishiroError::Unauthenticated);
             }
         }
-        let span = tracing::Span::current();
-        span.record("caller", ctx.yrn().as_str());
-        if let Some(workspace) = ctx.workspace_yrn() {
-            span.record("workspace", workspace.as_str());
-        }
+        super::access_log::authenticated(&ctx);
         Ok(ctx)
     }
 

@@ -1,9 +1,8 @@
 //! The MCP server type and its tool dispatch.
 
-use std::time::Instant;
-
 use loco_rs::controller::middleware::request_id::LocoRequestId;
-use tracing::Instrument;
+
+use crate::controllers::middleware::access_log;
 
 use super::{
     AppContext, Arc, CallToolRequestParams, CallToolResponse, ErrorData, ListToolsResult,
@@ -134,34 +133,36 @@ impl ServerHandler for YorishiroMcpServer {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let request_id = context
-            .extensions
-            .get::<axum::http::request::Parts>()
+        let parts = context.extensions.get::<axum::http::request::Parts>();
+        let request_id = parts
             .and_then(|parts| parts.extensions.get::<LocoRequestId>())
-            .map_or("req-id-none", LocoRequestId::get);
-        let started = Instant::now();
-        let span = tracing::error_span!(
-            "mcp-tool",
-            tool = %request.name,
-            request_id,
-            caller = tracing::field::Empty,
-            workspace = tracing::field::Empty,
-        );
-        async move {
-            let result = self.dispatch_tool(request, context).await;
-            let failed = match &result {
-                Err(_) => true,
-                Ok(CallToolResponse::Complete(response)) => response.is_error.unwrap_or(false),
-                Ok(_) => false,
-            };
-            tracing::info!(
-                failed,
-                latency_ms = started.elapsed().as_secs_f64() * 1000.0,
-                "mcp tool completed",
-            );
-            result
-        }
-        .instrument(span)
+            .cloned();
+        let source_ip = parts.and_then(|parts| access_log::source_ip(&parts.extensions));
+        let user_agent =
+            parts.map_or_default(|parts| access_log::user_agent(&parts.headers).to_owned());
+        let tool = self
+            .tool_router
+            .get(&request.name)
+            .map_or_else(|| "<unknown tool>".to_owned(), |tool| tool.name.to_string());
+        let call = access_log::Call {
+            transport: "mcp",
+            operation: &tool,
+            request_id: request_id.as_ref(),
+            read_only: self.tool_policy.read_only(&tool),
+            source_ip,
+            user_agent: &user_agent,
+        };
+        access_log::track(
+            call,
+            self.dispatch_tool(request, context),
+            |result| match result {
+                Err(error) => ("failed", Some(i64::from(error.code.0))),
+                Ok(CallToolResponse::Complete(response)) if response.is_error == Some(true) => {
+                    ("failed", None)
+                }
+                Ok(_) => ("success", None),
+            },
+        )
         .await
     }
 

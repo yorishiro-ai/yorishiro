@@ -14,6 +14,7 @@ pub(crate) enum VerifyOutcome {
 /// Requires a nonempty bearer credential on the request.
 pub(super) fn extract_bearer_key(parts: &Parts) -> Result<&str, ErrorData> {
     auth::extract_bearer_key(&parts.headers).ok_or_else(|| {
+        crate::controllers::middleware::access_log::denied();
         ErrorData::invalid_request("missing or malformed Authorization header", None)
     })
 }
@@ -48,6 +49,7 @@ pub(crate) async fn verify(ctx: &AppContext, parts: &Parts) -> Result<VerifyOutc
             Ok(VerifyOutcome::Denied(err_to_tool_result(err)))
         }
         Err(YorishiroError::Unauthenticated) => {
+            crate::controllers::middleware::access_log::denied();
             Err(ErrorData::invalid_request("authentication failed", None))
         }
         Err(YorishiroError::ValidationFailed { message, .. }) => {

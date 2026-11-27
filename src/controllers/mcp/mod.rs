@@ -95,7 +95,10 @@ pub fn compose_tool_routers(
 /// Converts a business-logic error into a tool call result (`is_error: true`).
 /// `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
 pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
-    let (_, body) = err.into_http_parts();
+    let (status, body) = err.into_http_parts();
+    if crate::controllers::middleware::access_log::is_denial(status) {
+        crate::controllers::middleware::access_log::denied();
+    }
     let mut message = body["error"]["message"]
         .as_str()
         .unwrap_or("request failed")

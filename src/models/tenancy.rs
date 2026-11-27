@@ -84,9 +84,13 @@ pub async fn issue_login_key(
     let key =
         crate::models::access_keys::Entity::create_login_key(&txn, tenant_id, user_id).await?;
     txn.commit().await.internal()?;
-    tracing::info!(
-        caller = %crate::models::iam::names::access_key_yrn(tenant_id, key.id),
-        "login succeeded",
+    crate::controllers::middleware::access_log::authenticated(
+        &crate::models::access_keys::AuthContext {
+            access_key_id: key.id,
+            workspace_id: None,
+            tenant_id,
+            user_id: Some(user_id),
+        },
     );
     Ok((key, tenant_id))
 }

@@ -410,12 +410,9 @@ impl<'a> IamEvaluation<'a> {
     ) -> Result<(), YorishiroError> {
         let result = self.require_with_owner(action, target, false).await;
         match &result {
-            Ok(()) if tracing::Span::current().has_field("request_id") => tracing::info!(
-                action = %action.qualified(),
-                target = %target.yrn(),
-                "IAM authorized the operation",
-            ),
+            Ok(()) => crate::controllers::middleware::access_log::authorized(action, target),
             Err(YorishiroError::AccessDenied { message, .. }) => {
+                crate::controllers::middleware::access_log::denied();
                 let principal = self.principal_yrn().await;
                 tracing::warn!(
                     caller = %self.current.yrn(),
