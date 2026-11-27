@@ -40,10 +40,6 @@ server:
 scheduler:
   output: stdout
   jobs:
-    tenant_reindex_scheduler:
-      run: "tenant_reindex_scheduler"
-      schedule: "0 * * * * *"
-      run_on_start: true
     worker_dispatch_recovery:
       run: "recover_worker_dispatches"
       schedule: "0 * * * * *"
@@ -56,8 +52,6 @@ scheduler:
       run: "delete_due_tenants"
       schedule: "0 0 * * * *"
       run_on_start: true
-# SQLite scheduler ownership uses a non-blocking lock file beside the configured database.
-# PostgreSQL scheduler replicas use a detached session advisory lock and may run concurrently.
 
 # Run HTTP and worker processes separately. Start a worker with an explicit target, such as
 # --worker=worker-target:shared. Official and tenant workers need their own selected targets.
@@ -192,6 +186,8 @@ database:
 # Authentication uses API keys through RequestAuth, not Loco's JWT configuration.
 
 initializers:
+  # Set a deployment-wide UTC cron schedule with an active licence, e.g. "0 0 3 * * *".
+  reindex_schedule: '<%= get_env(name="YORISHIRO_REINDEX_SCHEDULE", default="") | replace(from="'", to="''") %>'
   plan_policy_enabled: '<%= get_env(name="YORISHIRO_PLAN_POLICY_ENABLED", default="false") %>'
   worker_admission:
     shared: '<%= get_env(name="YORISHIRO_WORKER_CLASS_SHARED_LIMIT", default="") %>'

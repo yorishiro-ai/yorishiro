@@ -74,14 +74,16 @@ Booting without `YORISHIRO_LICENSE_KEY` serves the shared baseline and the ungat
 | Shared REST and MCP operations | Available | Available | Available |
 | Tenant cap on PostgreSQL | One tenant | One tenant | Configurable |
 | Plan-based quotas and queue policy | Use base limits and queue policy | Use base limits and queue policy | Apply plan rules when enabled |
-| Scheduled embedding reindex | Detect embedding changes from provider metadata | Same default | Use tenant reindex schedules |
+| Automatic embedding reindex | Check at startup and every minute | Same default | Optionally set one UTC cron schedule for the deployment |
 | Workspace embedding override, entity columns, origin and schema forks, worker class, LLM provider settings | Absent | Available | Available |
 | Marketplace, inference jobs and proposals, Stripe, OAuth | Absent | Gated | Available |
 
 SQLite limits both builds to one tenant.
 Gated REST routes return 404 without a licence, and gated MCP tools are omitted from listings and cannot be called.
 
-Stripe webhooks and OAuth login require their own configuration in addition to an active licence.
+In EE, `YORISHIRO_REINDEX_SCHEDULE` sets the UTC cron for automatic reindexing across all tenants and workspaces.
+When configured with an active licence at startup, automatic reindexing waits for the schedule and explicit reindex requests still queue immediately.
+Stripe and OAuth SSO are EE-only and require their own configuration in addition to an active licence.
 The Stripe webhook verifies its signature.
 Without OAuth login, users need password credentials for `POST /auth/login`.
 

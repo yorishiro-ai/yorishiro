@@ -83,13 +83,6 @@ pub mod edition {
         active::workspace_embedding_metadata(conn, workspace_id).await
     }
 
-    pub(crate) async fn run_reindex_schedule(
-        ctx: &AppContext,
-        tick: chrono::DateTime<chrono::Utc>,
-    ) -> Result<()> {
-        active::run_reindex_schedule(ctx, tick).await
-    }
-
     #[async_trait]
     impl Hooks for App {
         fn app_name() -> &'static str {
@@ -122,8 +115,10 @@ pub mod edition {
         }
 
         async fn after_context(ctx: AppContext) -> Result<AppContext> {
-            let ctx = base::after_context(ctx).await?;
+            let mut ctx = base::after_context(ctx).await?;
             active::compose_context(&ctx)?;
+            let schedule = active::reindex_schedule(&ctx)?;
+            crate::tasks::reindex_scheduler::configure(&mut ctx.config, schedule.as_deref());
             let settings = crate::data::settings::configured(&ctx)?;
             let cap = active::tenant_creation_cap(settings.max_tenants, &ctx);
             ctx.shared_store
@@ -231,11 +226,12 @@ pub mod edition {
             Ok(None)
         }
 
-        pub(super) async fn run_reindex_schedule(
-            ctx: &AppContext,
-            _tick: chrono::DateTime<chrono::Utc>,
-        ) -> Result<()> {
-            crate::tasks::tenant_reindex_scheduler::run_default(ctx).await
+        #[expect(
+            clippy::unnecessary_wraps,
+            reason = "the overlay validates its schedule configuration"
+        )]
+        pub(super) const fn reindex_schedule(_ctx: &AppContext) -> Result<Option<String>> {
+            Ok(None)
         }
 
         #[expect(
@@ -283,7 +279,7 @@ pub mod workers;
 
 pub use edition::App;
 pub(crate) use edition::{
-    quota_override, run_reindex_schedule, workspace_embedding_metadata,
-    workspace_embedding_provider, workspace_worker_class,
+    quota_override, workspace_embedding_metadata, workspace_embedding_provider,
+    workspace_worker_class,
 };
 pub use error::YorishiroError;

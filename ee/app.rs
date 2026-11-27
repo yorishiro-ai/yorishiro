@@ -55,18 +55,25 @@ pub(crate) async fn workspace_embedding_metadata(
     crate::edition::ee::models::workspace_embedding_keys::metadata(conn, workspace_id).await
 }
 
-pub(crate) fn is_active(ctx: &AppContext) -> bool {
-    edition::is_active(ctx)
-}
-
-pub(crate) async fn run_reindex_schedule(
-    ctx: &AppContext,
-    tick: chrono::DateTime<chrono::Utc>,
-) -> Result<()> {
-    if !is_active(ctx) {
-        return crate::tasks::tenant_reindex_scheduler::run_default(ctx).await;
+pub(crate) fn reindex_schedule(ctx: &AppContext) -> Result<Option<String>> {
+    if !edition::is_active(ctx) {
+        return Ok(None);
     }
-    crate::edition::ee::models::tenant_reindex_schedules::tick(ctx, tick).await
+    match ctx
+        .config
+        .initializers
+        .as_ref()
+        .and_then(|settings| settings.get("reindex_schedule"))
+    {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(schedule)) => {
+            let schedule = schedule.trim();
+            Ok((!schedule.is_empty()).then(|| schedule.to_owned()))
+        }
+        Some(_) => Err(loco_rs::Error::Message(
+            "initializers.reindex_schedule must be a cron string".into(),
+        )),
+    }
 }
 
 pub(crate) fn tenant_creation_cap(
@@ -147,7 +154,6 @@ pub(crate) fn mcp_tools(tools: McpToolSet) -> McpToolSet {
 /// Registers enterprise tasks after the base tasks, preserving task-list order.
 pub(crate) fn register_tasks(tasks: &mut Tasks) {
     tasks.register(crate::edition::ee::tasks::seed_official_templates::SeedOfficialTemplates);
-    tasks.register(crate::edition::ee::tasks::tenant_reindex_schedule::TenantReindexSchedule);
     // tasks-inject (do not remove)
 }
 

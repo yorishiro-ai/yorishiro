@@ -306,9 +306,20 @@ pub(crate) async fn embedding_reindexing(
 pub(crate) async fn stamped_for_reindex(
     conn: &impl ConnectionTrait,
 ) -> Result<Vec<StartupReindexRow>, YorishiroError> {
+    use crate::models::_entities::tenant_tenants as tenants;
     use crate::models::_entities::workspace_workspaces::Column;
+    use sea_orm::QueryTrait;
 
     startup_reindex_rows()
+        .filter(
+            Column::TenantId.in_subquery(
+                tenants::Entity::find()
+                    .select_only()
+                    .column(tenants::Column::Id)
+                    .filter(tenants::Column::DisabledAt.is_null())
+                    .into_query(),
+            ),
+        )
         .filter(
             Column::EmbeddingModel
                 .is_not_null()

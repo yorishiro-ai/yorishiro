@@ -18,7 +18,6 @@ pub mod pagination;
 // Tenants, users, workspaces and their memberships and keys.
 pub mod tenancy;
 pub mod tenant_memberships;
-pub mod tenant_reindex_schedules;
 pub mod tenant_retirement_events;
 pub mod tenant_tenants;
 pub mod user_users;

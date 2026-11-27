@@ -1,6 +1,7 @@
 mod gate;
 mod licence;
 
+use loco_rs::task::{Task, Vars};
 use yorishiro::edition::ee::controllers::middleware::edition::{LicenceClaims, LicenceState};
 use yorishiro::edition::ee::data::plan::Plan;
 
@@ -103,12 +104,34 @@ async fn a_signed_licence_key_activates_enterprise_at_boot() {
         eprintln!("skipping: set YORISHIRO_LICENSE_KEY to verify a signed key");
         return;
     }
-    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+    let schedule = "0 0 3 * * *";
+    crate::requests::boot_request_with::<yorishiro::App, _, _>(&[("initializers.reindex_schedule", schedule.into())], |request, ctx| async move {
         let state = ctx
             .shared_store
             .get::<std::sync::Arc<LicenceState>>()
             .expect("production boot installs licence state");
         assert!(state.is_active(), "the signed key does not verify at boot");
+        let scheduler = loco_rs::scheduler::Scheduler::new::<yorishiro::App>(
+            ctx.config.scheduler.as_ref().unwrap(),
+            &ctx.environment,
+        ).unwrap();
+        let job = &scheduler.jobs["reindex_scheduler"];
+        assert_eq!(job.cron, schedule);
+        assert!(!job.run_on_start);
+
+        let tenant = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
+        let (_, provider, _) = crate::http_stub::keyword_provider(32).await;
+        let response = request.put("/api/workspace/embedding-provider")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .json(&serde_json::json!({"base_url": provider.url, "model": "scheduled-model", "api_key": "test-key", "dimensions": 32}))
+            .await;
+        response.assert_status(axum::http::StatusCode::NO_CONTENT);
+        for name in ["reindex", "startup_reindex"] {
+            assert!(!crate::has_active_job(&ctx.db, name, tenant.workspace_id).await.unwrap());
+        }
+
+        yorishiro::tasks::reindex_scheduler::ReindexScheduler.run(&ctx, &Vars::default()).await.unwrap();
+        assert!(crate::has_active_job(&ctx.db, "startup_reindex", tenant.workspace_id).await.unwrap());
     })
     .await;
 }

@@ -13,8 +13,8 @@ pub(crate) mod reset_root_password;
 // Embeddings and the queue.
 pub(crate) mod embedding_index_maintenance;
 pub(crate) mod recover_worker_dispatches;
+pub mod reindex_scheduler;
 pub(crate) mod resync_embeddings;
-pub mod tenant_reindex_scheduler;
 
 // Database and system maintenance.
 pub(crate) mod db_load_guard;

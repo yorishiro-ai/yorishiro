@@ -27,5 +27,4 @@ pub mod workspace_worker_classes;
 // Tenants, users, keys and access.
 pub mod access_keys;
 pub(crate) mod iam;
-pub mod tenant_reindex_schedules;
 pub mod user_users;

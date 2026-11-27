@@ -78,9 +78,11 @@ pub(crate) async fn configure(
         return Ok(());
     }
     save(&txn, workspace_id, config).await?;
-    crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
-        .await
-        .internal()?;
+    if crate::tasks::reindex_scheduler::runs_immediately(&ctx.config) {
+        crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
+            .await
+            .internal()?;
+    }
     txn.commit().await.internal()?;
     Ok(())
 }
@@ -110,36 +112,6 @@ pub(crate) struct EmbeddingKeyDescription {
     /// Always true when present: the row cannot exist without a key.
     /// Callers use the absence of the whole description to mean "not configured".
     pub(crate) configured: bool,
-}
-
-/// Stores a provider assignment and invalidates the workspace embedding generation.
-/// Callers enqueue a full reindex in the same transaction.
-///
-/// # Errors
-/// Returns an error when credentials, dimensions, or persistence are invalid.
-pub async fn set(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    base_url: &str,
-    model: &str,
-    api_key: &str,
-    dimensions: i32,
-    send_dimensions_param: bool,
-) -> Result<(), YorishiroError> {
-    save(
-        conn,
-        workspace_id,
-        OpenAiCompatibleConfig {
-            base_url: validate_credentials(base_url, api_key)?.into(),
-            model: model.into(),
-            api_key: api_key.into(),
-            dimensions: dimension_count(dimensions)?,
-            send_dimensions_param,
-            query_instruction: String::new(),
-            document_prefix: String::new(),
-        },
-    )
-    .await
 }
 
 fn dimension_count(dimensions: i32) -> Result<usize, YorishiroError> {
@@ -249,9 +221,11 @@ pub(crate) async fn remove(
     )
     .await?;
     clear(&txn, workspace_id).await?;
-    crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
-        .await
-        .internal()?;
+    if crate::tasks::reindex_scheduler::runs_immediately(&ctx.config) {
+        crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
+            .await
+            .internal()?;
+    }
     txn.commit().await.internal()?;
     Ok(())
 }

@@ -1,4 +1,4 @@
-use loco_rs::{app::Hooks, task::Tasks};
+use loco_rs::task::Task;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
     QueryFilter, QuerySelect, QueryTrait,
@@ -7,16 +7,25 @@ use yorishiro::services::embedding::{
     EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
 };
 
-#[test]
-fn tenant_reindex_scheduler_is_registered_in_community() {
-    let mut tasks = Tasks::default();
-    yorishiro::App::register_tasks(&mut tasks);
-    assert!(
-        tasks
-            .names()
-            .iter()
-            .any(|name| name == "tenant_reindex_scheduler")
-    );
+#[tokio::test]
+async fn the_default_reindex_schedule_is_automatic() {
+    crate::requests::boot_request_with::<yorishiro::App, _, _>(
+        &[
+            ("initializers.licence_key", "".into()),
+            ("initializers.reindex_schedule", "0 0 3 * * *".into()),
+        ],
+        |_, ctx| async move {
+            let scheduler = loco_rs::scheduler::Scheduler::new::<yorishiro::App>(
+                ctx.config.scheduler.as_ref().unwrap(),
+                &ctx.environment,
+            )
+            .unwrap();
+            let job = &scheduler.jobs["reindex_scheduler"];
+            assert_eq!(job.cron, "0 * * * * *");
+            assert!(job.run_on_start);
+        },
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -53,7 +62,7 @@ async fn community_task_scans_mismatch_without_constructing_a_provider() {
             mismatched.dimensions(),
         )
         .await;
-        let task = yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler;
+        let task = yorishiro::tasks::reindex_scheduler::ReindexScheduler;
         assert!(
             ctx.shared_store
                 .get::<std::sync::Arc<dyn EmbeddingProvider>>()
@@ -61,7 +70,7 @@ async fn community_task_scans_mismatch_without_constructing_a_provider() {
             "scheduler scan does not require a provider"
         );
         for _ in 0..2 {
-            task.run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
+            task.run(&ctx, &loco_rs::task::Vars::default())
                 .await
                 .unwrap();
             let lifecycle_count = yorishiro::models::queue_job_lifecycles::Entity::find()
@@ -151,8 +160,8 @@ async fn enqueue_rejection_is_workspace_scoped_and_scan_continues() {
         // Direct write (c): deterministic fault injection rejecting one workspace's dispatch.
         ctx.db.execute_unprepared(&sql).await.unwrap();
 
-        let error = yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler
-            .run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
+        let error = yorishiro::tasks::reindex_scheduler::ReindexScheduler
+            .run(&ctx, &loco_rs::task::Vars::default())
             .await.expect_err("targeted outbox rejection must be returned");
         let diagnostic = error.to_string();
         assert!(diagnostic.contains(&failed.to_string()), "{diagnostic}");
@@ -195,8 +204,8 @@ async fn all_enqueue_failures_are_aggregated_with_each_workspace_id() {
         };
         // Direct write (c): deterministic fault injection rejecting every dispatch.
         ctx.db.execute_unprepared(fault).await.unwrap();
-        let error = yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler
-            .run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
+        let error = yorishiro::tasks::reindex_scheduler::ReindexScheduler
+            .run(&ctx, &loco_rs::task::Vars::default())
             .await.expect_err("both workspace enqueue attempts must fail");
         let diagnostic = error.to_string();
         assert!(diagnostic.contains(&first.workspace_id.to_string()), "{diagnostic}");
@@ -241,8 +250,8 @@ async fn missing_lifecycle_table_returns_workspace_lookup_error() {
             "queue_job_lifecycles_hidden",
         )
         .await;
-        let error = yorishiro::tasks::tenant_reindex_scheduler::TenantReindexScheduler
-            .run_at(&ctx, &loco_rs::task::Vars::default(), chrono::Utc::now())
+        let error = yorishiro::tasks::reindex_scheduler::ReindexScheduler
+            .run(&ctx, &loco_rs::task::Vars::default())
             .await
             .expect_err("missing lifecycle table must fail lookup");
         assert!(
@@ -281,18 +290,6 @@ async fn stamp_workspace(
 }
 
 fn configure_deployment_metadata(ctx: &mut loco_rs::app::AppContext) {
-    #[cfg(feature = "enterprise")]
-    {
-        use yorishiro::edition::ee::controllers::middleware::edition::LicenceState;
-        ctx.shared_store
-            .insert(std::sync::Arc::new(LicenceState::default()));
-        assert!(
-            !ctx.shared_store
-                .get::<std::sync::Arc<LicenceState>>()
-                .unwrap()
-                .is_active()
-        );
-    }
     let mut value = ctx.config.settings.as_ref().unwrap().clone();
     value["embedding"]["provider"] = serde_json::json!("openai");
     value["embedding"]["base_url"] = serde_json::json!("http://unused.invalid");
