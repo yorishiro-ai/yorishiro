@@ -30,7 +30,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Set the workspace's inference endpoint, model and secret. The response omits the secret."
+        description = "Set the workspace's inference endpoint, model and secret after checking them with a sample chat completion. The response omits the secret."
     )]
     pub(crate) async fn update_workspace_llm_provider(
         &self,

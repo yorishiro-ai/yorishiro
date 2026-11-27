@@ -132,7 +132,7 @@ async fn deleting_the_root_reaps_the_tenant_once_the_deadline_passes() {
             .await;
         created.assert_status(axum::http::StatusCode::CREATED);
         let body: serde_json::Value = created.json();
-        let delegate_id = uuid::Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+        let delegate_id = uuid::Uuid::parse_str(body["user_id"].as_str().unwrap()).unwrap();
 
         delete(&ctx, tenant.owner_id, tenant.owner_id)
             .await

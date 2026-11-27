@@ -85,7 +85,7 @@ async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
                 "Resource":[format!("yrn:workspace:{}:{}", tenant.tenant_id, tenant.workspace_id)]
             }]}})).await;
         policy.assert_status(StatusCode::CREATED);
-        let policy_id = policy.json::<Value>()["id"].as_str().unwrap().to_owned();
+        let policy_id = policy.json::<Value>()["policy_id"].as_str().unwrap().to_owned();
         let key = issue_access_key(&ctx, tenant.workspace_id, user.id).await;
         let discovery_key = yorishiro::models::access_keys::Entity::create_tenant_access_key(
             &ctx.db, tenant.tenant_id, Some(user.id), "discovery",

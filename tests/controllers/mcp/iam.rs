@@ -36,28 +36,28 @@ async fn mcp_manages_users_groups_and_policies_by_id() {
             )
             .await,
         );
-        let user_id = user["id"].as_str().unwrap().to_owned();
+        let user_id = user["user_id"].as_str().unwrap().to_owned();
         assert!(user["yrn"].as_str().unwrap().contains(":user/mcp-"));
         let fetched = tool_result_json(&call(&request, &session, &key, "get_user", json!({"user_id":user_id})).await);
-        assert_eq!(fetched["id"], user_id);
+        assert_eq!(fetched["user_id"], user_id);
         let updated = tool_result_json(
             &call(&request, &session, &key, "update_user", json!({"user_id":user_id,"display_name":"MCP"})).await,
         );
         assert_eq!(updated["display_name"], "MCP");
         let listed = tool_result_json(&call(&request, &session, &key, "list_users", json!({})).await);
-        assert!(listed.as_array().unwrap().iter().any(|u| u["id"] == user_id));
+        assert!(listed.as_array().unwrap().iter().any(|u| u["user_id"] == user_id));
         let reset = call(&request, &session, &key, "update_login_profile", json!({"user_id":user_id,"password":"another-password"})).await;
         assert_eq!(tool_result_json(&reset)["updated"], true);
 
         let group = tool_result_json(&call(&request, &session, &key, "create_group", json!({"name":"mcp-group"})).await);
-        let group_id = group["id"].as_str().unwrap().to_owned();
+        let group_id = group["group_id"].as_str().unwrap().to_owned();
         let renamed = tool_result_json(&call(&request, &session, &key, "update_group", json!({"group_id":group_id,"name":"mcp-renamed"})).await);
         assert_eq!(renamed["name"], "mcp-renamed");
         call(&request, &session, &key, "add_user_to_group", json!({"group_id":group_id,"user_id":user_id})).await;
         let detail = tool_result_json(&call(&request, &session, &key, "get_group", json!({"group_id":group_id})).await);
         assert_eq!(detail["members"][0]["user_id"], user_id);
         let of_user = tool_result_json(&call(&request, &session, &key, "list_groups_for_user", json!({"user_id":user_id})).await);
-        assert_eq!(of_user[0]["id"], group_id);
+        assert_eq!(of_user[0]["group_id"], group_id);
 
         let policy = tool_result_json(
             &call(
@@ -69,7 +69,7 @@ async fn mcp_manages_users_groups_and_policies_by_id() {
             )
             .await,
         );
-        let policy_id = policy["id"].as_str().unwrap().to_owned();
+        let policy_id = policy["policy_id"].as_str().unwrap().to_owned();
         let version = tool_result_json(
             &call(
                 &request,
@@ -108,9 +108,8 @@ async fn mcp_manages_users_groups_and_policies_by_id() {
         assert_eq!(simulated["decision"], "allowed");
         assert_eq!(simulated["matched_policies"], json!(["mcp-policy"]));
 
-        // Nothing is deleted while something still depends on it.
+        // A group or policy with attachments cannot be deleted.
         for (tool, args) in [
-            ("delete_user", json!({"user_id":user_id})),
             ("delete_group", json!({"group_id":group_id})),
             ("delete_policy", json!({"policy_id":policy_id})),
         ] {
@@ -118,9 +117,9 @@ async fn mcp_manages_users_groups_and_policies_by_id() {
             assert_eq!(refused["result"]["isError"], true, "{tool}: {refused}");
             assert_eq!(refused["result"]["structuredContent"]["error"]["code"], "conflict", "{tool}: {refused}");
         }
-        call(&request, &session, &key, "detach_user_policy", json!({"user_id":user_id,"policy_id":policy_id})).await;
+        let deleted = call(&request, &session, &key, "delete_user", json!({"user_id":user_id})).await;
+        assert_eq!(tool_result_json(&deleted)["deleted"], true);
         call(&request, &session, &key, "detach_group_policy", json!({"group_id":group_id,"policy_id":policy_id})).await;
-        call(&request, &session, &key, "remove_user_from_group", json!({"group_id":group_id,"user_id":user_id})).await;
         let first_version = policy["default_version_id"].as_str().unwrap();
         let refused = call(&request, &session, &key, "delete_policy_version", json!({"policy_id":policy_id,"version_id":version_id})).await;
         assert_eq!(refused["result"]["isError"], true, "the default version stays: {refused}");
@@ -128,7 +127,6 @@ async fn mcp_manages_users_groups_and_policies_by_id() {
         assert_eq!(tool_result_json(&removed)["deleted"], true);
         for (tool, args) in [
             ("delete_group", json!({"group_id":group_id})),
-            ("delete_user", json!({"user_id":user_id})),
             ("delete_policy", json!({"policy_id":policy_id})),
         ] {
             let done = call(&request, &session, &key, tool, args).await;

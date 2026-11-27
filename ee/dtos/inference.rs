@@ -29,6 +29,7 @@ pub(crate) struct InferJobStatusResponse {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "LlmKeyRequest")]
 pub(crate) struct SetLlmKeyRequest {
+    /// The server checks this endpoint with a sample completion before saving.
     pub(crate) base_url: String,
     pub(crate) model: String,
     /// Stored as given and never returned.

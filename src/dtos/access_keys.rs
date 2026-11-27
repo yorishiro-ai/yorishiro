@@ -7,6 +7,8 @@ use uuid::Uuid;
 #[serde(deny_unknown_fields)]
 pub(crate) struct CreateAccessKeyRequest {
     pub(crate) name: String,
+    /// Omit to inherit the issuing key's expiry.
+    /// A root sign-in session can issue a key with any expiry or no expiry.
     pub(crate) expires_at: Option<DateTime<chrono::FixedOffset>>,
 }
 
@@ -54,7 +56,8 @@ pub(crate) struct AccessKeyRecord {
 pub(crate) struct CreateAccessKeyResponse {
     pub(crate) id: Uuid,
     pub(crate) prefix: String,
-    pub(crate) full_key: String,
+    /// The secret is returned once.
+    pub(crate) access_key: String,
     pub(crate) name: String,
     pub(crate) created_at: DateTime<Timezone>,
     #[serde(flatten)]

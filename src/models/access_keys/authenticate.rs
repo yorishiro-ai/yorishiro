@@ -2,8 +2,7 @@
 
 use super::{
     AuthContext, ColumnTrait, ConnectionTrait, DbHandle, Entity, EntityTrait, Expr,
-    FromQueryResult, Model, QueryFilter, ResultExt, Uuid, WORKSPACE_HEADER, YorishiroError,
-    hash_key,
+    FromQueryResult, Model, QueryFilter, ResultExt, Uuid, YorishiroError, hash_key,
 };
 
 impl Entity {
@@ -15,7 +14,7 @@ impl Entity {
     /// The workspace is `requested_workspace` when present, otherwise the tenant's only workspace, otherwise none.
     ///
     /// # Errors
-    /// Returns `Unauthenticated` for an unknown, inactive or stale credential and `AccessDenied` for a workspace of another tenant.
+    /// Returns `Unauthenticated` for an unknown, inactive or stale credential and `NotFound` for a workspace outside the tenant.
     pub async fn authenticate(
         db: &DbHandle,
         presented_key: &str,
@@ -70,8 +69,9 @@ impl Entity {
         requested: Option<Uuid>,
     ) -> Result<Option<Uuid>, YorishiroError> {
         if let Some(requested) = requested {
-            let tenant =
-                crate::models::workspace_workspaces::get_workspace_tenant(conn, requested).await?;
+            let tenant = crate::models::workspace_workspaces::get_workspace_tenant(conn, requested)
+                .await
+                .map_err(|error| crate::models::iam::access::hide_inferred_resource(true, error))?;
             if tenant != tenant_id {
                 tracing::warn!(
                     tenant = %crate::models::iam::policy::Resource::Tenant { tenant_id }.yrn(),
@@ -82,12 +82,7 @@ impl Entity {
                     .yrn(),
                     "request names a workspace of another tenant",
                 );
-                return Err(YorishiroError::AccessDenied {
-                    message: format!("{WORKSPACE_HEADER} names a workspace this key cannot act on"),
-                    hint: "the named workspace belongs to another tenant; send a workspace this \
-                            key can act on"
-                        .into(),
-                });
+                return Err(YorishiroError::not_found("resource was not found"));
             }
             return Ok(Some(requested));
         }

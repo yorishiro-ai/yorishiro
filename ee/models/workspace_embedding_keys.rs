@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use super::super::data::provider::{check_client, check_error, validate_credentials};
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_embedding_keys::{ActiveModel, Column, Entity};
 use crate::models::access_keys::AuthContext;
@@ -24,27 +25,46 @@ pub(crate) async fn configure(
     request: crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest,
 ) -> Result<(), YorishiroError> {
     let workspace_id = actor.require_workspace()?;
-    let txn = super::iam::access::workspace_transaction(
-        &ctx.db,
-        actor,
-        Action::UpdateWorkspaceEmbeddingProvider,
-    )
-    .await?;
+    let action = Action::UpdateWorkspaceEmbeddingProvider;
+    super::iam::access::workspace_transaction(&ctx.db, actor, action)
+        .await?
+        .commit()
+        .await
+        .internal()?;
+    let config = OpenAiCompatibleConfig {
+        base_url: validate_credentials(&request.base_url, &request.api_key)?.into(),
+        model: request.model,
+        api_key: request.api_key,
+        dimensions: dimension_count(request.dimensions)?,
+        send_dimensions_param: request.send_dimensions_param,
+        query_instruction: request.query_instruction,
+        document_prefix: request.document_prefix,
+    };
+    let sample = OpenAiCompatibleProvider::with_client(config.clone(), check_client()?)
+        .embed_as(
+            crate::services::embedding::EmbedKind::Document,
+            "Provider check",
+        )
+        .await
+        .map_err(|error| check_error(&config.base_url, error))?;
+    crate::models::entity_embeddings::validate_vector(&sample, config.dimensions)?;
+
+    let txn = super::iam::access::workspace_transaction(&ctx.db, actor, action).await?;
     let previous = get(&txn, workspace_id).await?;
     let query_only = previous.as_ref().is_some_and(|old| {
-        old.base_url == request.base_url.trim_end_matches('/')
-            && old.model == request.model
-            && old.api_key == request.api_key
-            && i32::try_from(old.dimensions).ok() == Some(request.dimensions)
-            && old.send_dimensions_param == request.send_dimensions_param
-            && old.document_prefix == request.document_prefix
+        old.base_url == config.base_url
+            && old.model == config.model
+            && old.api_key == config.api_key
+            && old.dimensions == config.dimensions
+            && old.send_dimensions_param == config.send_dimensions_param
+            && old.document_prefix == config.document_prefix
     });
     if query_only {
         // A query-only change keeps stored document vectors valid, so it skips the revision bump and the reindex.
         Entity::update_many()
             .col_expr(
                 Column::QueryInstruction,
-                sea_orm::sea_query::Expr::value(request.query_instruction),
+                sea_orm::sea_query::Expr::value(config.query_instruction),
             )
             .col_expr(
                 Column::UpdatedAt,
@@ -57,18 +77,7 @@ pub(crate) async fn configure(
         txn.commit().await.internal()?;
         return Ok(());
     }
-    set_with_instructions(
-        &txn,
-        workspace_id,
-        &request.base_url,
-        &request.model,
-        &request.api_key,
-        request.dimensions,
-        request.send_dimensions_param,
-        &request.query_instruction,
-        &request.document_prefix,
-    )
-    .await?;
+    save(&txn, workspace_id, config).await?;
     crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
         .await
         .internal()?;
@@ -117,37 +126,23 @@ pub async fn set(
     dimensions: i32,
     send_dimensions_param: bool,
 ) -> Result<(), YorishiroError> {
-    set_with_instructions(
+    save(
         conn,
         workspace_id,
-        base_url,
-        model,
-        api_key,
-        dimensions,
-        send_dimensions_param,
-        "",
-        "",
+        OpenAiCompatibleConfig {
+            base_url: validate_credentials(base_url, api_key)?.into(),
+            model: model.into(),
+            api_key: api_key.into(),
+            dimensions: dimension_count(dimensions)?,
+            send_dimensions_param,
+            query_instruction: String::new(),
+            document_prefix: String::new(),
+        },
     )
     .await
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the table columns written in one statement"
-)]
-async fn set_with_instructions(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    base_url: &str,
-    model: &str,
-    api_key: &str,
-    dimensions: i32,
-    send_dimensions_param: bool,
-    query_instruction: &str,
-    document_prefix: &str,
-) -> Result<(), YorishiroError> {
-    let base_url = crate::edition::ee::data::provider::validate_credentials(base_url, api_key)?;
-
+fn dimension_count(dimensions: i32) -> Result<usize, YorishiroError> {
     if !(1..=4096).contains(&dimensions) {
         return Err(YorishiroError::ValidationFailed {
             message: "dimensions must be between 1 and 4096".into(),
@@ -155,15 +150,23 @@ async fn set_with_instructions(
             hint: "set it to the embedding model's own output width".into(),
         });
     }
+    usize::try_from(dimensions).internal()
+}
+
+async fn save(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    config: OpenAiCompatibleConfig,
+) -> Result<(), YorishiroError> {
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(workspace_id),
-        base_url: ActiveValue::Set(base_url.to_string()),
-        model: ActiveValue::Set(model.to_string()),
-        api_key: ActiveValue::Set(api_key.to_string()),
-        dimensions: ActiveValue::Set(dimensions),
-        send_dimensions_param: ActiveValue::Set(send_dimensions_param),
-        query_instruction: ActiveValue::Set(query_instruction.to_owned()),
-        document_prefix: ActiveValue::Set(document_prefix.to_owned()),
+        base_url: ActiveValue::Set(config.base_url),
+        model: ActiveValue::Set(config.model),
+        api_key: ActiveValue::Set(config.api_key),
+        dimensions: ActiveValue::Set(i32::try_from(config.dimensions).internal()?),
+        send_dimensions_param: ActiveValue::Set(config.send_dimensions_param),
+        query_instruction: ActiveValue::Set(config.query_instruction),
+        document_prefix: ActiveValue::Set(config.document_prefix),
         updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };

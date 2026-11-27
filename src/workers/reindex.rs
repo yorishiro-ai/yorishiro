@@ -15,6 +15,7 @@ use loco_rs::prelude::async_trait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::YorishiroError;
 use crate::services::embedding::EmbeddingProviderAvailability;
 use crate::workers::embedding_sync::WorkerClass;
 
@@ -59,10 +60,6 @@ impl ReindexArgs {
     }
 }
 
-/// Shared implementation of the reindex worker's `perform` body: builds the provider,
-/// fetches candidates, acquires the lock, and runs `reindex_workspace_with_lock`.
-///
-/// Called by [`ReindexWorker`] once the job has been admitted.
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
     let actor = args
         .actor
@@ -88,17 +85,6 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         .map_err(loco_rs::Error::wrap)?;
         txn.commit().await?;
     }
-    // Resolve in the worker so workspace-specific overrides are honored without putting
-    // credentials in the queue payload.
-    let provider = crate::models::workspace_workspaces::embedding_provider(ctx, args.workspace_id)
-        .await
-        .map_err(loco_rs::Error::wrap)?
-        .ok_or_else(|| loco_rs::Error::Message("embedding provider absent".into()))?;
-    if provider.availability() == EmbeddingProviderAvailability::Disabled {
-        return Err(loco_rs::Error::Message(
-            "embedding provider disabled".into(),
-        ));
-    }
     let concurrency = ctx
         .shared_store
         .get::<std::sync::Arc<tokio::sync::Semaphore>>()
@@ -107,23 +93,54 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         .acquire_owned()
         .await
         .map_err(loco_rs::Error::wrap)?;
-    let outcome = crate::models::entity_embeddings::reindex_workspace_with_actor(
-        ctx,
+    crate::models::entity_embeddings::with_reindex_lock(ctx, args.workspace_id, async || {
+        // A provider change or entity write can invalidate a reindex even while it holds the reindex lock.
+        for _ in 0..2 {
+            let result = reindex_current_assignment(ctx, args, actor.as_ref()).await;
+            if !matches!(result, Err(YorishiroError::Conflict { .. })) {
+                return result;
+            }
+        }
+        reindex_current_assignment(ctx, args, actor.as_ref()).await
+    })
+    .await
+    .map_err(loco_rs::Error::wrap)
+}
+
+async fn reindex_current_assignment(
+    ctx: &AppContext,
+    args: &ReindexArgs,
+    actor: Option<&crate::models::access_keys::AuthContext>,
+) -> Result<(), YorishiroError> {
+    // Resolve after taking the reindex lock so a preceding reindex cannot invalidate this snapshot.
+    let provider = crate::models::workspace_workspaces::embedding_provider(ctx, args.workspace_id)
+        .await?
+        .filter(|provider| provider.availability() != EmbeddingProviderAvailability::Disabled)
+        .ok_or_else(|| YorishiroError::BackendUnavailable {
+            message: "no embedding provider is configured".into(),
+        })?;
+    let outcome = crate::models::entity_embeddings::reindex_workspace_as(
+        &ctx.db,
         args.workspace_id,
         provider.as_ref(),
-        actor.as_ref(),
+        actor,
         args.startup,
     )
-    .await
-    .map_err(loco_rs::Error::wrap)?;
-
+    .await?;
     if !outcome.failures.is_empty() {
-        return Err(loco_rs::Error::Message(format!(
-            "reindex incomplete: {} entities, {} reindexed, {} failed",
-            outcome.total,
-            outcome.reindexed,
-            outcome.failures.len()
-        )));
+        tracing::warn!(
+            workspace_id = %args.workspace_id,
+            total = outcome.total,
+            failed = outcome.failures.len(),
+            "reindex could not prepare all workspace embeddings"
+        );
+        return Err(YorishiroError::BackendUnavailable {
+            message: format!(
+                "reindex could not prepare embeddings for {} of {} entities",
+                outcome.failures.len(),
+                outcome.total
+            ),
+        });
     }
 
     Ok(())
@@ -204,7 +221,7 @@ pub async fn enqueue_reindex(
 pub(crate) async fn enqueue_requested_for_actor(
     ctx: &AppContext,
     actor: crate::models::access_keys::AuthContext,
-) -> Result<String, crate::YorishiroError> {
+) -> Result<String, YorishiroError> {
     WorkspaceSession::run(
         ctx,
         actor,
@@ -221,11 +238,11 @@ pub(crate) async fn enqueue_requested(
     ctx: &AppContext,
     txn: &sea_orm::DatabaseTransaction,
     actor: &crate::models::access_keys::AuthContext,
-) -> Result<String, crate::YorishiroError> {
+) -> Result<String, YorishiroError> {
     use crate::error::ResultExt;
     use crate::models::access_key_audit_log::{self, AuditAction, AuditActor};
     if ctx.queue_provider.is_none() {
-        return Err(crate::YorishiroError::BackendUnavailable {
+        return Err(YorishiroError::BackendUnavailable {
             message: "reindex requires a queue provider (configure queue: in the server config)"
                 .into(),
         });

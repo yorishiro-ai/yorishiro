@@ -66,7 +66,7 @@ async fn unselected_lists_do_not_expose_workspaces_without_iam_grants() {
             }]}})).await;
         policy.assert_status(StatusCode::CREATED);
         let policy = policy.json::<serde_json::Value>();
-        request.put(&format!("/api/users/{}/policies/{}", member.id, policy["id"].as_str().unwrap()))
+        request.put(&format!("/api/users/{}/policies/{}", member.id, policy["policy_id"].as_str().unwrap()))
             .add_header("Authorization", format!("Bearer {root}")).await.assert_status(StatusCode::NO_CONTENT);
         let response = request.get("/api/schemas")
             .add_header("Authorization", format!("Bearer {key}")).await;
@@ -234,7 +234,7 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
         named_login.assert_status(StatusCode::CREATED);
         let named_login = named_login.json::<serde_json::Value>();
         request.post("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", named_login["full_key"].as_str().unwrap()))
+            .add_header("Authorization", format!("Bearer {}", named_login["access_key"].as_str().unwrap()))
             .json(&serde_json::json!({"name":"denied"}))
             .await.assert_status(StatusCode::FORBIDDEN);
         request
@@ -512,7 +512,7 @@ async fn simulation_reports_decisions_and_matching_policies_like_real_requests()
             .json(&serde_json::json!({"user_name":"erin","password":"tenant-user-password"}))
             .await
             .json::<serde_json::Value>();
-        let user_id = user["id"].as_str().unwrap().to_owned();
+        let user_id = user["user_id"].as_str().unwrap().to_owned();
         for (name, effect, action) in [
             ("lists", "Allow", "iam:List*"),
             ("no-user-listing", "Deny", "iam:ListUsers"),
@@ -653,7 +653,7 @@ async fn only_administrators_can_grant_administrator_access() {
                 .await;
             created.assert_status(StatusCode::CREATED);
             users.push(
-                created.json::<serde_json::Value>()["id"]
+                created.json::<serde_json::Value>()["user_id"]
                     .as_str()
                     .unwrap()
                     .to_owned(),
@@ -682,7 +682,7 @@ async fn only_administrators_can_grant_administrator_access() {
             .json(&serde_json::json!({"name":"admins"}))
             .await;
         group.assert_status(StatusCode::CREATED);
-        let group_id = group.json::<serde_json::Value>()["id"]
+        let group_id = group.json::<serde_json::Value>()["group_id"]
             .as_str()
             .unwrap()
             .to_owned();

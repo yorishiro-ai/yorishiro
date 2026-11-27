@@ -73,7 +73,7 @@ pub(crate) struct UserPolicy {
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct PolicyRecord {
-    pub id: Uuid,
+    pub policy_id: Uuid,
     pub tenant_id: Uuid,
     /// `yrn:iam:<tenant-id>:policy/<name>`; a managed policy uses `yorishiro` in place of the tenant id.
     pub yrn: String,
@@ -88,7 +88,7 @@ pub(crate) struct PolicyRecord {
 impl From<crate::models::iam_policies::PolicyView> for PolicyRecord {
     fn from(policy: crate::models::iam_policies::PolicyView) -> Self {
         Self {
-            id: policy.id,
+            policy_id: policy.id,
             tenant_id: policy.tenant_id,
             yrn: policy.yrn,
             name: policy.name,

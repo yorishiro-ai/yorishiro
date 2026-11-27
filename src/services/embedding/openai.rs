@@ -12,6 +12,7 @@ use crate::error::{ResultExt, YorishiroError};
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(5);
 const MAX_RETRY_AFTER_SECONDS: u64 = 60;
 
+#[derive(Clone)]
 pub struct OpenAiCompatibleConfig {
     /// Example: `http://localhost:11434`
     pub base_url: String,

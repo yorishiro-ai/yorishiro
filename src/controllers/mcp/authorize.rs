@@ -45,7 +45,7 @@ pub(crate) async fn verify(ctx: &AppContext, parts: &Parts) -> Result<VerifyOutc
                 .map_err(crate::error::mcp_internal)?;
             Ok(VerifyOutcome::Verified(current))
         }
-        Err(err @ YorishiroError::AccessDenied { .. }) => {
+        Err(err @ (YorishiroError::AccessDenied { .. } | YorishiroError::NotFound { .. })) => {
             Ok(VerifyOutcome::Denied(err_to_tool_result(err)))
         }
         Err(YorishiroError::Unauthenticated) => {

@@ -42,7 +42,7 @@ pub(crate) async fn create(
     Ok(Created(CreateAccessKeyResponse {
         id: created.id,
         prefix: created.key_prefix,
-        full_key: created.plaintext,
+        access_key: created.plaintext,
         name: created.name,
         created_at: crate::data::time::render(&ctx, &created.created_at),
         grant: render_grant(&ctx, created.grant),

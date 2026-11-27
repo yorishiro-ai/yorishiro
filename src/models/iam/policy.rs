@@ -569,96 +569,112 @@ impl Policy {
             return Err(invalid("invalid statement count"));
         }
         let mut statements = Vec::with_capacity(raw_statements.len());
-        for raw in raw_statements {
-            if raw.sid.as_ref().is_some_and(|sid| {
-                sid.len() > MAX_SID_BYTES || !sid.chars().all(|c| c.is_ascii_alphanumeric())
-            }) {
-                return Err(invalid("Sid must be alphanumeric"));
-            }
-            let resources = raw.resource.into_vec();
-            if resources.is_empty() || (enforce_limits && resources.len() > MAX_RESOURCES) {
-                return Err(invalid("invalid resource count"));
-            }
-            let mut selectors = Vec::with_capacity(resources.len());
-            for resource in &resources {
-                if resource == "*" {
-                    selectors.push(ResourceSelector::Any);
-                    continue;
-                }
-                let parsed = Resource::parse(resource)?;
-                if parsed.tenant_id() != tenant_id {
-                    return Err(invalid("resource belongs to another tenant"));
-                }
-                if let Resource::Workspace {
-                    tenant_id,
-                    workspace_id,
-                } = parsed
-                    && !owns_workspace(tenant_id, workspace_id)
-                {
-                    return Err(invalid("workspace ownership could not be verified"));
-                }
-                selectors.push(ResourceSelector::Exact(parsed));
-            }
-            let actions = match (raw.action, raw.not_action) {
-                (Some(action), None) => {
-                    let selectors_text = action.into_vec();
-                    if selectors_text.is_empty()
-                        || (enforce_limits && selectors_text.len() > MAX_ACTIONS)
-                    {
-                        return Err(invalid("invalid action count"));
+        for (index, raw) in raw_statements.into_iter().enumerate() {
+            let statement = Self::parse_statement(raw, tenant_id, &owns_workspace, enforce_limits)
+                .map_err(|mut error| {
+                    if let YorishiroError::ValidationFailed { message, .. } = &mut error {
+                        *message = format!("Statement[{index}]: {message}");
                     }
-                    let mut actions = HashSet::new();
-                    for selector in &selectors_text {
-                        let matched = select_actions(selector)?;
-                        if selector != "*"
-                            && !matched
-                                .iter()
-                                .any(|action| selectors.iter().any(|r| r.applies_to(*action)))
-                        {
-                            return Err(invalid("action and resource scopes do not match"));
-                        }
-                        actions.extend(matched);
-                    }
-                    actions
-                }
-                (None, Some(not_action)) => {
-                    let selectors_text = not_action.into_vec();
-                    if selectors_text.is_empty()
-                        || (enforce_limits && selectors_text.len() > MAX_ACTIONS)
-                    {
-                        return Err(invalid("invalid action count"));
-                    }
-                    let mut excluded = HashSet::new();
-                    for selector in &selectors_text {
-                        excluded.extend(select_actions(selector)?);
-                    }
-                    Action::ALL
-                        .iter()
-                        .copied()
-                        .filter(|action| !excluded.contains(action))
-                        .collect()
-                }
-                _ => {
-                    return Err(invalid(
-                        "a statement needs exactly one of Action and NotAction",
-                    ));
-                }
-            };
-            if selectors
-                .iter()
-                .any(|selector| !actions.iter().any(|action| selector.applies_to(*action)))
-            {
-                return Err(invalid("action and resource scopes do not match"));
-            }
-            statements.push(Statement {
-                effect: raw.effect,
-                actions,
-                resources: selectors,
-            });
+                    error
+                })?;
+            statements.push(statement);
         }
         Ok(Self {
             tenant_id,
             statements,
+        })
+    }
+
+    fn parse_statement(
+        raw: RawStatement,
+        tenant_id: Uuid,
+        owns_workspace: impl Fn(Uuid, Uuid) -> bool,
+        enforce_limits: bool,
+    ) -> Result<Statement, YorishiroError> {
+        if raw.sid.as_ref().is_some_and(|sid| {
+            sid.len() > MAX_SID_BYTES || !sid.chars().all(|c| c.is_ascii_alphanumeric())
+        }) {
+            return Err(invalid("Sid must be alphanumeric"));
+        }
+        let resources = raw.resource.into_vec();
+        if resources.is_empty() || (enforce_limits && resources.len() > MAX_RESOURCES) {
+            return Err(invalid("invalid resource count"));
+        }
+        let mut selectors = Vec::with_capacity(resources.len());
+        for resource in &resources {
+            if resource == "*" {
+                selectors.push(ResourceSelector::Any);
+                continue;
+            }
+            let parsed = Resource::parse(resource)?;
+            if parsed.tenant_id() != tenant_id {
+                return Err(invalid("resource belongs to another tenant"));
+            }
+            if let Resource::Workspace {
+                tenant_id,
+                workspace_id,
+            } = parsed
+                && !owns_workspace(tenant_id, workspace_id)
+            {
+                return Err(invalid("workspace ownership could not be verified"));
+            }
+            selectors.push(ResourceSelector::Exact(parsed));
+        }
+        let actions = match (raw.action, raw.not_action) {
+            (Some(action), None) => {
+                let selectors_text = action.into_vec();
+                if selectors_text.is_empty()
+                    || (enforce_limits && selectors_text.len() > MAX_ACTIONS)
+                {
+                    return Err(invalid("invalid action count"));
+                }
+                let mut actions = HashSet::new();
+                for selector in &selectors_text {
+                    let matched = select_actions(selector)?;
+                    if selector != "*"
+                        && !matched
+                            .iter()
+                            .any(|action| selectors.iter().any(|r| r.applies_to(*action)))
+                    {
+                        return Err(invalid("action and resource scopes do not match"));
+                    }
+                    actions.extend(matched);
+                }
+                actions
+            }
+            (None, Some(not_action)) => {
+                let selectors_text = not_action.into_vec();
+                if selectors_text.is_empty()
+                    || (enforce_limits && selectors_text.len() > MAX_ACTIONS)
+                {
+                    return Err(invalid("invalid action count"));
+                }
+                let mut excluded = HashSet::new();
+                for selector in &selectors_text {
+                    excluded.extend(select_actions(selector)?);
+                }
+                Action::ALL
+                    .iter()
+                    .copied()
+                    .filter(|action| !excluded.contains(action))
+                    .collect()
+            }
+            _ => {
+                return Err(invalid(
+                    "a statement needs exactly one of Action and NotAction",
+                ));
+            }
+        };
+        if selectors
+            .iter()
+            .any(|selector| !actions.iter().any(|action| selector.applies_to(*action)))
+        {
+            return Err(invalid("action and resource scopes do not match"));
+        }
+        Ok(Statement {
+            effect: raw.effect,
+            actions,
+            resources: selectors,
         })
     }
 

@@ -73,7 +73,7 @@ pub enum YorishiroError {
         retry_after: std::time::Duration,
     },
 
-    /// The embedding provider HTTP endpoint is unreachable.
+    /// The provider HTTP endpoint is unreachable or does not respond as expected.
     ProviderUnreachable {
         url: String,
         message: String,
@@ -121,10 +121,9 @@ impl std::fmt::Display for YorishiroError {
             Self::Unauthenticated => formatter.write_str("unauthenticated"),
             Self::Maintenance { message, .. } => write!(formatter, "maintenance: {message}"),
             Self::ProviderBusy { message, .. } => write!(formatter, "provider busy: {message}"),
-            Self::ProviderUnreachable { url, message } => write!(
-                formatter,
-                "embedding provider unreachable at {url}: {message}"
-            ),
+            Self::ProviderUnreachable { url, message } => {
+                write!(formatter, "provider unreachable at {url}: {message}")
+            }
             Self::BackendUnsupported { message } => {
                 write!(formatter, "not implemented for backend: {message}")
             }
@@ -279,7 +278,7 @@ impl YorishiroErrorCode {
             Self::MaintenanceReadOnly => "The deployment is in read-only maintenance mode",
             Self::MaintenanceFullLock => "The deployment is fully locked for maintenance",
             Self::ProviderBusy => "The backend provider is temporarily busy",
-            Self::ProviderUnreachable => "The embedding provider is unreachable",
+            Self::ProviderUnreachable => "The configured provider is unreachable",
             Self::BackendUnsupported => "The requested feature is not supported on this backend",
             Self::BackendUnavailable => "A required backend component is not configured",
         }
@@ -436,8 +435,8 @@ impl YorishiroError {
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::ProviderUnreachable.as_str(),
-                        "message": format!("the embedding provider at {url} could not be reached: {message}"),
-                        "hint": "check that the provider is running and that YORISHIRO_EMBEDDING_BASE_URL points at it",
+                        "message": format!("provider at {url}: {message}"),
+                        "hint": "check that the provider is running and that its base URL, model and credentials are correct",
                     }
                 }),
             ),

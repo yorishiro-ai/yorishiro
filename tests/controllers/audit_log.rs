@@ -62,15 +62,17 @@ async fn audit_reads_require_iam_and_preserve_the_configured_timezone() {
         let delegated = issue_access_key(&ctx, setup.workspace_id, member.id).await;
         let root_key = crate::requests::fixtures::issue_tenant_key(&ctx, setup.tenant_id, setup.owner_id).await;
         let document = serde_json::json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["audit:ListWorkspaceAuditEvents"],
+            "Resource":[format!("yrn:workspace:{}:{}", setup.tenant_id, setup.workspace_id)]},
+            {"Effect":"Allow","Action":["workspace:GetWorkspace"],
             "Resource":[format!("yrn:workspace:{}:{}", setup.tenant_id, setup.workspace_id)]}]});
         let policy = request.post("/api/policies")
             .add_header("Authorization", format!("Bearer {root_key}"))
             .json(&serde_json::json!({"name":"audit-reader","document":document})).await;
         policy.assert_status(StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let policy_id = policy.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
         let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         request.get("/api/audit-log").add_header("Authorization", format!("Bearer {delegated}"))
-            .await.assert_status(StatusCode::FORBIDDEN);
+            .await.assert_status(StatusCode::NOT_FOUND);
         request.put(&attachment).add_header("Authorization", format!("Bearer {root_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
         request.get("/api/audit-log").add_header("Authorization", format!("Bearer {delegated}"))

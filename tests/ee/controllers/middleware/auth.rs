@@ -68,7 +68,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
         assert_eq!(replacement["tenant_id"], tenant_id.to_string());
         request
             .delete(&format!("/api/access-keys/{}", tenant_key.id))
-            .add_header("Authorization", format!("Bearer {}", replacement["full_key"].as_str().unwrap()))
+            .add_header("Authorization", format!("Bearer {}", replacement["access_key"].as_str().unwrap()))
             .await
             .assert_status(StatusCode::NO_CONTENT);
         request
@@ -79,7 +79,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             .assert_status(StatusCode::UNAUTHORIZED);
         let tenant_key = yorishiro::edition::ee::models::access_keys::CreatedTenantAccessKey {
             id: replacement["id"].as_str().unwrap().parse().unwrap(),
-            plaintext: replacement["full_key"].as_str().unwrap().to_owned(),
+            plaintext: replacement["access_key"].as_str().unwrap().to_owned(),
         };
 
         // Tenant-level discovery works without selecting a workspace.
@@ -255,7 +255,7 @@ async fn tenant_key_rechecks_iam_policy_after_detachment() {
             .add_header("Authorization", format!("Bearer {root_key}"))
             .json(&serde_json::json!({"name":"schema-reader", "document":{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["schema:ListSchemas"],"Resource":[format!("yrn:workspace:{}:{}", tenant.tenant_id, tenant.workspace_id)]}]}})).await;
         created.assert_status(StatusCode::CREATED);
-        let policy_id = created.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let policy_id = created.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
         let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {root_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);

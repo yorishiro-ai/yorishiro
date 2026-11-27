@@ -29,7 +29,7 @@ fn domain_errors_keep_their_display_and_have_no_source() {
                 url: "http://localhost".into(),
                 message: "offline".into(),
             },
-            "embedding provider unreachable at http://localhost: offline",
+            "provider unreachable at http://localhost: offline",
         ),
     ];
     for (error, message) in errors {

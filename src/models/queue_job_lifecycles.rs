@@ -17,6 +17,8 @@ pub(crate) struct BulkJobStatus {
     job_name: String,
     status: LifecycleStatus,
     result: Option<serde_json::Value>,
+    /// The client-facing failure reason.
+    error: Option<&'static str>,
 }
 
 pub(crate) async fn migration_job_status(
@@ -68,11 +70,38 @@ pub(crate) async fn bulk_job_status(
     } else {
         AuditAction::BackgroundJobCompleted
     };
+    let status = LifecycleStatus::from_row(&row.status).internal()?;
     Ok(BulkJobStatus {
         job_name: row.job_name,
-        status: LifecycleStatus::from_row(&row.status).internal()?,
+        status,
         result: access_key_audit_log::job_result(db, workspace_id, id, action).await?,
+        error: (status == LifecycleStatus::Failed).then(|| public_job_error(row.error.as_deref())),
     })
+}
+
+fn public_job_error(error: Option<&str>) -> &'static str {
+    // The stored diagnostics can contain database or provider details.
+    match error {
+        Some(error) if error.starts_with("conflict: ") => {
+            "The workspace changed while the job was running. Retry the job."
+        }
+        Some("unauthenticated") => "The job's access key is no longer valid.",
+        Some(error) if error.starts_with("access denied: ") => {
+            "The job no longer has the required permission."
+        }
+        Some(
+            "backend unavailable: no embedding provider is configured"
+            | "embedding provider absent"
+            | "embedding provider disabled",
+        ) => "No embedding provider is configured.",
+        Some(error)
+            if error.starts_with("backend unavailable: reindex could not prepare embeddings")
+                || error.starts_with("reindex incomplete:") =>
+        {
+            "The embedding provider could not prepare all workspace embeddings."
+        }
+        _ => "The job failed. See the worker logs for details.",
+    }
 }
 
 db_enum! {

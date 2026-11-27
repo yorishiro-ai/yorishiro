@@ -59,11 +59,15 @@ pub(crate) async fn ensure_available(
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
     if super::workspace_workspaces::embedding_reindexing(db, workspace_id).await? {
-        return Err(YorishiroError::BackendUnavailable {
-            message: "semantic search is temporarily unavailable while workspace embeddings are being reindexed".into(),
-        });
+        return Err(search_generation_changed());
     }
     Ok(())
+}
+
+fn search_generation_changed() -> YorishiroError {
+    YorishiroError::BackendUnavailable {
+        message: "workspace embeddings are changing; retry semantic search".into(),
+    }
 }
 
 async fn search_text(
@@ -80,22 +84,13 @@ async fn search_text(
         .await?
         .is_none();
     // Matching model names are not enough to share a vector across independently configured providers.
-    let vector =
+    let embedded =
         if let (true, Some(vector)) = (uses_deployment_provider, deployment_vector.as_ref()) {
-            vector.clone()
+            Ok(vector.clone())
         } else {
             // Wait for the worker without holding a workspace connection.
-            crate::workers::query_embedding::embed_query(ctx, tenant_id, workspace_id, text).await?
+            crate::workers::query_embedding::embed_query(ctx, tenant_id, workspace_id, text).await
         };
-    if super::workspace_workspaces::embedding_revision(&ctx.db, workspace_id).await? != revision {
-        return Err(YorishiroError::Conflict {
-            message: "workspace embedding configuration changed during search; retry".into(),
-        });
-    }
-    if uses_deployment_provider && deployment_vector.is_none() {
-        *deployment_vector = Some(vector.clone());
-    }
-    check_query_width(&ctx.db, workspace_id, vector.len()).await?;
     let txn = crate::db::begin_workspace(ctx, tenant_id, workspace_id).await?;
     let _authorization = super::iam::access::authorize_workspace_action(
         &txn,
@@ -104,6 +99,13 @@ async fn search_text(
         super::iam::policy::Action::SearchEntities,
     )
     .await?;
+    if super::workspace_workspaces::embedding_revision(&txn, workspace_id).await? != revision {
+        return Err(search_generation_changed());
+    }
+    let vector = embedded?;
+    if uses_deployment_provider && deployment_vector.is_none() {
+        *deployment_vector = Some(vector.clone());
+    }
     search_by_vector(&txn, workspace_id, vector, query).await
 }
 
@@ -282,8 +284,8 @@ pub async fn search_by_vector(
     query: SearchQuery,
 ) -> Result<Vec<SearchHit>, YorishiroError> {
     super::entity_embeddings::validate_vector(&vector, vector.len())?;
-    check_query_width(conn, workspace_id, vector.len()).await?;
     ensure_available(conn, workspace_id).await?;
+    check_query_width(conn, workspace_id, vector.len()).await?;
     let mut rows = match conn.get_database_backend() {
         sea_orm::DatabaseBackend::Postgres => {
             postgres::candidates(conn, workspace_id, vector, &query).await?

@@ -50,7 +50,7 @@ crate::dtos::common::list_params_from!(ListGroupAssociations);
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct GroupRecord {
-    pub id: Uuid,
+    pub group_id: Uuid,
     pub tenant_id: Uuid,
     /// `yrn:iam:<tenant-id>:group/<name>`.
     pub yrn: String,
@@ -61,7 +61,7 @@ impl From<crate::models::iam_groups::Model> for GroupRecord {
     fn from(group: crate::models::iam_groups::Model) -> Self {
         Self {
             yrn: group.yrn(),
-            id: group.id,
+            group_id: group.id,
             tenant_id: group.tenant_id,
             name: group.name,
         }

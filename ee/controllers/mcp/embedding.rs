@@ -30,7 +30,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Set the workspace's embedding provider. Changes to document embeddings queue a reindex atomically. Query-instruction changes alone do not queue a reindex. The response omits the secret."
+        description = "Set the workspace's embedding provider after checking the endpoint and vector dimensions with sample text. Changes to document embeddings queue a reindex atomically. Query-instruction changes alone do not queue a reindex. The response omits the secret."
     )]
     pub(crate) async fn update_workspace_embedding_provider(
         &self,

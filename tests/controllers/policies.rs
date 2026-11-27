@@ -31,7 +31,7 @@ async fn policies_are_named_and_versioned_and_evaluate_their_default_version() {
             format!("yrn:iam:{}:policy/group-lister", tenant.tenant_id)
         );
         assert_eq!(policy["managed"], false);
-        let policy_id = policy["id"].as_str().unwrap().to_owned();
+        let policy_id = policy["policy_id"].as_str().unwrap().to_owned();
         let first_version = policy["default_version_id"].as_str().unwrap().to_owned();
 
         for (name, document, status) in [
@@ -61,7 +61,7 @@ async fn policies_are_named_and_versioned_and_evaluate_their_default_version() {
             .json(&json!({"user_name":"dave","password":"tenant-user-password"}))
             .await
             .json::<Value>();
-        let user_id = user["id"].as_str().unwrap().to_owned();
+        let user_id = user["user_id"].as_str().unwrap().to_owned();
         request
             .put(&format!("/api/users/{user_id}/policies/{policy_id}"))
             .add_header("Authorization", &auth)
@@ -209,7 +209,7 @@ async fn managed_policies_have_one_generated_version_and_cannot_be_changed() {
             administrator["document"],
             json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]})
         );
-        let policy_id = administrator["id"].as_str().unwrap();
+        let policy_id = administrator["policy_id"].as_str().unwrap();
 
         let versions = request
             .get(&format!("/api/policies/{policy_id}/versions"))

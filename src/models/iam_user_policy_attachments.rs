@@ -22,19 +22,6 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Model {
-    pub(crate) async fn count_for_user(
-        conn: &impl ConnectionTrait,
-        tenant_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<u64, YorishiroError> {
-        Entity::find()
-            .filter(Column::TenantId.eq(tenant_id))
-            .filter(Column::UserId.eq(user_id))
-            .count(conn)
-            .await
-            .internal()
-    }
-
     pub(crate) async fn list_as(
         db: &DatabaseConnection,
         actor: &crate::models::access_keys::AuthContext,

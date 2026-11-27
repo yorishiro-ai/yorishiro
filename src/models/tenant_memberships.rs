@@ -8,8 +8,7 @@ pub use operations::create_tenant_user_member;
 pub use operations::list_members;
 pub use operations::{add_member, remove_member};
 pub(crate) use operations::{
-    add_member_in_transaction, is_member, list_member_users, protect_root,
-    remove_member_in_transaction,
+    add_member_in_transaction, is_member, list_member_users, remove_member_in_transaction,
 };
 
 #[derive(Serialize, schemars::JsonSchema)]

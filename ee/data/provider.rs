@@ -1,5 +1,24 @@
 use crate::YorishiroError;
 
+pub(crate) fn check_client() -> Result<reqwest::Client, YorishiroError> {
+    use crate::error::ResultExt;
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .internal()
+}
+
+pub(crate) fn check_error(base_url: &str, error: YorishiroError) -> YorishiroError {
+    match error {
+        YorishiroError::Internal(_) => YorishiroError::ProviderUnreachable {
+            url: base_url.into(),
+            message: "provider did not return a usable response for the configured model".into(),
+        },
+        error => error,
+    }
+}
+
 pub(crate) fn validate_credentials<'a>(
     base_url: &'a str,
     api_key: &str,

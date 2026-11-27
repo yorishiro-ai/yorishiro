@@ -96,7 +96,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Delete a user; refused with a conflict while the user still has group memberships, attached policies or access keys, and for the tenant root (requires iam:DeleteUser)"
+        description = "Delete a user, remove their IAM associations and revoke their access keys. The tenant root cannot be deleted (requires iam:DeleteUser)."
     )]
     pub(crate) async fn delete_user(
         &self,

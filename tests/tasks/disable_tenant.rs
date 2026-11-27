@@ -306,7 +306,7 @@ async fn tenant_deletion_retains_root_accounts_and_deletes_tenant_users() {
             .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"user_name":format!("retiring-user-{}", uuid::Uuid::new_v4()),"password":"tenant-user-password"})).await;
         created.assert_status(StatusCode::CREATED);
-        let tenant_user_id: uuid::Uuid = created.json::<Value>()["id"].as_str().unwrap().parse().unwrap();
+        let tenant_user_id: uuid::Uuid = created.json::<Value>()["user_id"].as_str().unwrap().parse().unwrap();
 
         retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id)
             .await

@@ -114,14 +114,17 @@ impl Entity {
             .await
             .internal()?
             .ok_or(YorishiroError::Unauthenticated)?;
+        let mut expires_at = expires_at;
         if !Model::is_root_credential(&txn, issuer.access_key_id).await?
             && let Some(limit) = issuer_key.expires_at
-            && expires_at.is_none_or(|expiry| expiry > limit)
         {
-            return Err(YorishiroError::AccessDenied {
-                message: "requested expiry exceeds the issuing key's lifetime".into(),
-                hint: "set expires_at no later than the issuing key's expiry".into(),
-            });
+            if expires_at.is_some_and(|expiry| expiry > limit) {
+                return Err(YorishiroError::AccessDenied {
+                    message: "requested expiry exceeds the issuing key's lifetime".into(),
+                    hint: "omit expires_at to inherit the expiry, or set an earlier expiry".into(),
+                });
+            }
+            expires_at = Some(expires_at.unwrap_or(limit));
         }
         crate::models::iam::access::require_key_attribution(&txn, issuer.tenant_id, issuer.user_id)
             .await?;

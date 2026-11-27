@@ -20,7 +20,7 @@ async fn access_key_tool_issues_tenant_scoped_keys_with_the_same_ceilings() {
         let record = tool_result_json(&created);
         assert!(record["workspace_id"].is_null(), "record: {record:?}");
         request.get("/api/caller-identity")
-            .add_header("Authorization", format!("Bearer {}", record["full_key"].as_str().unwrap()))
+            .add_header("Authorization", format!("Bearer {}", record["access_key"].as_str().unwrap()))
             .await.assert_status(StatusCode::OK);
         let rest = request.post("/api/access-keys").add_header("Authorization", format!("Bearer {}", issuer.plaintext)).json(&json!({"name":"rest-twin"})).await;
         rest.assert_status(StatusCode::CREATED);

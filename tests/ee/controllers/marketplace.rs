@@ -174,7 +174,7 @@ async fn publish_list_fork_and_review_round_trip() {
             .json(&json!({"user_name":"marketplace-delegate","password":"marketplace-password"}))
             .await;
         member.assert_status(StatusCode::CREATED);
-        let member_id = member.json::<serde_json::Value>()["id"].clone();
+        let member_id = member.json::<serde_json::Value>()["user_id"].clone();
         let login = request
             .post("/auth/tenant/login")
             .json(&json!({"tenant_id":owner.tenant_id,"user_name":"marketplace-delegate","password":"marketplace-password"}))
@@ -201,7 +201,7 @@ async fn publish_list_fork_and_review_round_trip() {
             .json(&json!({"name":"marketplace-delegate","document":document}))
             .await;
         policy.assert_status(StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"]
+        let policy_id = policy.json::<serde_json::Value>()["policy_id"]
             .as_str()
             .unwrap()
             .to_owned();

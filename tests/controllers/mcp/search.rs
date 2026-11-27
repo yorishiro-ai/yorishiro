@@ -277,7 +277,7 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             unavailable["result"]["content"][0]["text"]
                 .as_str()
                 .unwrap()
-                .contains("reindexed")
+                .contains("workspace embeddings are changing")
         );
         let rest = request
             .get("/api/search?query_text=beta")

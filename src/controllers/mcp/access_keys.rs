@@ -41,7 +41,7 @@ pub(crate) struct UpdateAccessKeyArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_access_keys)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Issue an access key and return its secret once. The key acts for the issuing user. Requires iam:CreateAccessKey. The new key cannot exceed the issuer's effective scope. An expiring issuer must supply expires_at no later than its own expiration, except for a root sign-in session."
+        description = "Issue an access key and return its secret once in access_key. The key acts for the issuing user. Requires iam:CreateAccessKey."
     )]
     pub(crate) async fn create_access_key(
         &self,
@@ -60,7 +60,7 @@ impl YorishiroMcpServer {
             Ok(created) => ok_json(CreateAccessKeyResponse {
                 id: created.id,
                 prefix: created.key_prefix,
-                full_key: created.plaintext,
+                access_key: created.plaintext,
                 name: created.name,
                 created_at: crate::data::time::render(self.app_context(), &created.created_at),
                 grant: render_grant(self.app_context(), created.grant),

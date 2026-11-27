@@ -34,8 +34,9 @@ pub(crate) async fn check_workspace_target(
     actor: &AuthContext,
     workspace_id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
-    let tenant =
-        crate::models::workspace_workspaces::get_workspace_tenant(db, workspace_id).await?;
+    let tenant = crate::models::workspace_workspaces::get_workspace_tenant(db, workspace_id)
+        .await
+        .map_err(|error| hide_inferred_resource(true, error))?;
     if tenant != actor.tenant_id
         || actor
             .workspace_id
@@ -310,14 +311,28 @@ impl<'a> IamEvaluation<'a> {
         action: crate::models::iam::policy::Action,
     ) -> Result<Vec<Uuid>, YorishiroError> {
         if let Some(workspace_id) = self.current.workspace_id {
-            self.require(
-                action,
-                crate::models::iam::policy::Resource::Workspace {
-                    tenant_id: self.current.tenant_id,
-                    workspace_id,
-                },
-            )
-            .await?;
+            use crate::models::iam::policy::{Action, Resource};
+            let target = Resource::Workspace {
+                tenant_id: self.current.tenant_id,
+                workspace_id,
+            };
+            if let Err(error) = self.require(action, target).await {
+                if matches!(error, YorishiroError::AccessDenied { .. }) {
+                    match self
+                        .require_with_owner(Action::GetWorkspace, target, true)
+                        .await
+                    {
+                        Err(YorishiroError::AccessDenied { .. }) => {
+                            return Err(hide_inferred_resource(true, error));
+                        }
+                        result => result?,
+                    }
+                }
+                return Err(hide_inferred_resource(
+                    matches!(error, YorishiroError::NotFound { .. }),
+                    error,
+                ));
+            }
             Ok(vec![workspace_id])
         } else {
             self.workspace_ids(action).await

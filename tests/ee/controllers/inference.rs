@@ -17,6 +17,7 @@ use yorishiro::models::_entities::inference_jobs as rows;
 async fn llm_key_set_get_and_clear_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let provider = crate::http_stub::llm_provider().await;
 
         let missing = request
             .get("/api/workspace/llm-provider")
@@ -33,7 +34,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
             .put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://api.example.com/v1/",
+                "base_url": format!("{}/", provider.url),
                 "model": "gpt-4o-mini",
                 "api_key": "sk-secret-value"
             }))
@@ -57,7 +58,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
         );
         let body: serde_json::Value = get.json();
         // The trailing slash is trimmed once at write time.
-        assert_eq!(body["base_url"], "https://api.example.com/v1");
+        assert_eq!(body["base_url"], provider.url);
         assert_eq!(body["model"], "gpt-4o-mini");
         assert_eq!(body["configured"], true);
         let rendered = get.text();
@@ -274,7 +275,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
                 .add_header("Authorization", format!("Bearer {iam_key}"))
                 .json(&serde_json::json!({"name":format!("confirm-{deny}"),"document":document})).await;
             policy.assert_status(StatusCode::CREATED);
-            let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+            let policy_id = policy.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
             let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
             request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);
@@ -537,7 +538,7 @@ async fn proposals_can_be_listed_and_discarded() {
         let policy = request.post("/api/policies").add_header("Authorization", format!("Bearer {iam_key}"))
             .json(&serde_json::json!({"name":"proposal-reviewer","document":document})).await;
         policy.assert_status(StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let policy_id = policy.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
         let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         for mode in ["implicit", "deny", "detached"] {
             if mode == "deny" {
@@ -756,11 +757,12 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         // Set up a workspace LLM key so infer-fill passes its validation gate.
+        let provider = crate::http_stub::llm_provider().await;
         let put_key = request
             .put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://api.example.com/v1",
+                "base_url": provider.url,
                 "model": "gpt-4o-mini",
                 "api_key": "sk-test-key"
             }))
@@ -866,11 +868,12 @@ async fn infer_fill_dispatch_failure_rolls_back_job() {
     boot_request::<App, _, _>(|request, ctx| async move {
         crate::requests::require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let provider = crate::http_stub::llm_provider().await;
         let put_key = request
             .put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://api.example.com/v1",
+                "base_url": provider.url,
                 "model": "gpt-4o-mini",
                 "api_key": "sk-test-key"
             }))
@@ -989,11 +992,12 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert_ne!(setup.tenant_id, setup.workspace_id);
         crate::requests::fixtures::rest_create_entity(&request, &setup).await;
+        let provider = crate::http_stub::llm_provider().await;
         let key = request
             .put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://api.example.com/v1/",
+                "base_url": format!("{}/", provider.url),
                 "model": "gpt-4o-mini",
                 "api_key": "sk-secret-value"
             }))

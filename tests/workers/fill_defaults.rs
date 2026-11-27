@@ -83,7 +83,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
             .add_header("Authorization", format!("Bearer {iam_key}"))
             .json(&json!({"name":"queued-fill","document":document})).await;
         policy.assert_status(StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let policy_id = policy.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
         let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);

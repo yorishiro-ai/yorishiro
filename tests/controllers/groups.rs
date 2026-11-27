@@ -16,7 +16,10 @@ async fn create_user(request: &loco_rs::TestServer, auth: &str, name: &str) -> S
         .json(&json!({"user_name":name,"password":"tenant-user-password"}))
         .await;
     response.assert_status(StatusCode::CREATED);
-    response.json::<Value>()["id"].as_str().unwrap().to_owned()
+    response.json::<Value>()["user_id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
 }
 
 #[tokio::test]
@@ -40,7 +43,7 @@ async fn groups_have_case_insensitive_names_members_and_policies() {
             group["yrn"],
             format!("yrn:iam:{}:group/Operators", tenant.tenant_id)
         );
-        let group_id = group["id"].as_str().unwrap().to_owned();
+        let group_id = group["group_id"].as_str().unwrap().to_owned();
         for (name, status) in [
             ("operators", StatusCode::CONFLICT),
             ("OPERATORS", StatusCode::CONFLICT),
@@ -110,7 +113,7 @@ async fn groups_have_case_insensitive_names_members_and_policies() {
             .add_header("Authorization", &auth)
             .await;
         groups_of_user.assert_status_ok();
-        assert_eq!(groups_of_user.json::<Value>()[0]["id"], group_id);
+        assert_eq!(groups_of_user.json::<Value>()[0]["group_id"], group_id);
 
         let refused = request
             .delete(&format!("/api/groups/{group_id}"))

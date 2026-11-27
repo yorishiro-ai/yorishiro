@@ -92,6 +92,23 @@ fn a_statement_may_be_a_single_object_and_selectors_may_be_single_strings() {
 }
 
 #[test]
+fn policy_validation_identifies_the_invalid_statement() {
+    let policy = serde_json::json!({
+        "Version": "2012-10-17",
+        "Statement": [
+            {"Effect": "Allow", "Action": "entity:GetEntity", "Resource": "*"},
+            {"Effect": "Allow", "Action": "unknown:GetEntity", "Resource": "*"},
+        ]
+    });
+    let error = parse(&policy.to_string(), tenant()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("Statement[1]: action names an unknown service")
+    );
+}
+
+#[test]
 fn action_wildcards_select_by_service_and_name() {
     let service = parse(&document("Allow", "iam:*", "*"), tenant()).unwrap();
     assert!(allows(

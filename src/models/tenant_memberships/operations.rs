@@ -150,6 +150,9 @@ pub(crate) async fn remove_member_in_transaction(
     user_id: Uuid,
 ) -> Result<(), YorishiroError> {
     use crate::models::_entities::access_keys;
+    crate::db::lock_for_update(txn, &format!("tenant-membership:{tenant_id}"))
+        .await
+        .internal()?;
     protect_root(txn, tenant_id, user_id).await?;
     Entity::delete_many()
         .filter(Column::TenantId.eq(tenant_id))

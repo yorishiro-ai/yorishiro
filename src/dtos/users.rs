@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct UserRecord {
-    pub(crate) id: Uuid,
+    pub(crate) user_id: Uuid,
     /// `yrn:iam:<tenant-id>:user/<name>`, or `yrn:iam:<tenant-id>:root` for the tenant root.
     pub(crate) yrn: String,
     pub(crate) tenant_id: Uuid,
@@ -23,7 +23,7 @@ impl UserRecord {
         user: crate::models::user_users::Model,
     ) -> Self {
         Self {
-            id: user.id,
+            user_id: user.id,
             yrn: user.yrn(tenant_id),
             tenant_id,
             email: user.email,

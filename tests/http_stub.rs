@@ -109,6 +109,17 @@ impl Drop for HttpStub {
     }
 }
 
+#[cfg(feature = "enterprise")]
+pub(crate) async fn llm_provider() -> HttpStub {
+    HttpStub::start(Router::new().route(
+        "/chat/completions",
+        axum::routing::post(|| async {
+            axum::Json(serde_json::json!({"choices":[{"message":{"content":"{}"}}]}))
+        }),
+    ))
+    .await
+}
+
 pub(crate) async fn keyword_provider(
     width: usize,
 ) -> (

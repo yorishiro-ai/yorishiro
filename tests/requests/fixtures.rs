@@ -93,7 +93,7 @@ impl TestTenant {
             }))
             .await;
         key.assert_status(StatusCode::CREATED);
-        let api_key = key.json::<serde_json::Value>()["full_key"]
+        let api_key = key.json::<serde_json::Value>()["access_key"]
             .as_str()
             .expect("workspace access key")
             .to_owned();
@@ -427,7 +427,7 @@ pub(crate) async fn create_policy(
         .json(&serde_json::json!({"name": name, "document": document}))
         .await;
     response.assert_status(StatusCode::CREATED);
-    response.json::<serde_json::Value>()["id"]
+    response.json::<serde_json::Value>()["policy_id"]
         .as_str()
         .expect("policy id")
         .to_owned()

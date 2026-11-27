@@ -92,16 +92,17 @@ pub async fn reindex_workspace_with_lock(
     workspace_id: Uuid,
     provider: &dyn crate::services::embedding::EmbeddingProvider,
 ) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
-    reindex_workspace_with_actor(ctx, workspace_id, provider, None, false).await
+    with_reindex_lock(ctx, workspace_id, async || {
+        crate::models::entity_embeddings::reindex_workspace(&ctx.db, workspace_id, provider).await
+    })
+    .await
 }
 
-pub(crate) async fn reindex_workspace_with_actor(
+pub(crate) async fn with_reindex_lock<T>(
     ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
-    provider: &dyn crate::services::embedding::EmbeddingProvider,
-    actor: Option<&crate::models::access_keys::AuthContext>,
-    startup: bool,
-) -> Result<crate::models::entity_embeddings::ReindexOutcome, crate::YorishiroError> {
+    work: impl AsyncFnOnce() -> Result<T, crate::YorishiroError>,
+) -> Result<T, crate::YorishiroError> {
     let lock = if let Some(pool) = crate::db::reindex_lock_pool(ctx)? {
         Some(
             acquire_workspace_reindex_lock(pool, workspace_id)
@@ -115,14 +116,7 @@ pub(crate) async fn reindex_workspace_with_actor(
     } else {
         None
     };
-    let outcome = crate::models::entity_embeddings::reindex_workspace_as(
-        &ctx.db,
-        workspace_id,
-        provider,
-        actor,
-        startup,
-    )
-    .await;
+    let outcome = work().await;
     if let Some(lock) = lock {
         let _ = lock.release().await;
     }

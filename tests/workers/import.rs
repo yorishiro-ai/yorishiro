@@ -139,7 +139,7 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
             .add_header("Authorization", format!("Bearer {iam_key}"))
             .json(&json!({"name":"queued-import","document":document})).await;
         policy.assert_status(StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let policy_id = policy.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
         let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         let session = crate::controllers::mcp::initialize(&request).await;
         for explicit_deny in [false, true] {

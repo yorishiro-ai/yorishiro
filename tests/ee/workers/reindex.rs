@@ -53,6 +53,75 @@ async fn record_delivery(ctx: &loco_rs::app::AppContext, workspace_id: Uuid) -> 
 }
 
 #[tokio::test]
+async fn reindex_retries_when_the_provider_is_removed_during_embedding() {
+    use axum::{Json, Router, http::StatusCode, routing::post};
+    use loco_rs::bgworker::BackgroundWorker;
+    use serde_json::{Value, json};
+    use tokio::sync::Notify;
+    use yorishiro::workers::reindex::{ReindexArgs, ReindexWorker};
+
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        let setup = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        ).await;
+        let auth = format!("Bearer {}", setup.api_key);
+        request.post("/api/schemas").add_header("Authorization", &auth)
+            .json(&json!({"name":"reindex-test","entity_types":{"note":{"fields":{
+                "title":{"type":"string","x-embed":true}
+            }}}})).await.assert_status(StatusCode::CREATED);
+        request.post("/api/entities").add_header("Authorization", &auth)
+            .json(&json!({"schema_name":"reindex-test","entity_type":"note","data":{"title":"original"}}))
+            .await.assert_status(StatusCode::CREATED);
+
+        let started = Arc::new(Notify::new());
+        let removed = Arc::new(Notify::new());
+        let endpoint = crate::http_stub::HttpStub::start(Router::new().route("/embeddings", post({
+            let (started, removed) = (started.clone(), removed.clone());
+            move |Json(body): Json<Value>| {
+                let (started, removed) = (started.clone(), removed.clone());
+                async move {
+                    if body["input"][0] == "title: original" {
+                        started.notify_one();
+                        removed.notified().await;
+                    }
+                    Json(json!({"data":[{"index":0,"embedding":[1.0,0.0,0.0,0.0]}]}))
+                }
+            }
+        }))).await;
+        let (fallback, _fallback_endpoint) = provider("fallback", 4, 1.0, Arc::new(Mutex::new(0))).await;
+        ctx.shared_store.insert(fallback);
+        request.put("/api/workspace/embedding-provider").add_header("Authorization", &auth)
+            .json(&json!({"base_url":endpoint.url,"model":"override","api_key":"test-key","dimensions":4}))
+            .await.assert_status(StatusCode::NO_CONTENT);
+        let job = request.post("/api/migration-jobs/reindex").add_header("Authorization", &auth).await;
+        job.assert_status(StatusCode::OK);
+        let id = job.json::<Value>()["migration_job_id"].as_str().unwrap().parse::<Uuid>().unwrap();
+        let worker = ReindexWorker::build(&ctx);
+        let dispatch = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
+            .one(&ctx.db).await.unwrap().unwrap();
+        let args: ReindexArgs = serde_json::from_value(dispatch.payload).unwrap();
+        let (result, ()) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            tokio::join!(worker.perform(args), async {
+                started.notified().await;
+                request.delete("/api/workspace/embedding-provider").add_header("Authorization", &auth)
+                    .await.assert_status(StatusCode::NO_CONTENT);
+                removed.notify_one();
+            })
+        }).await.expect("the provider change and reindex finish");
+        result.expect("the same reindex retries and completes");
+        let status = request.get(&format!("/api/migration-jobs/{id}")).add_header("Authorization", &auth).await;
+        status.assert_status(StatusCode::OK);
+        assert_eq!(status.json::<Value>()["status"], "completed");
+        let workspace = workspace_workspaces::Entity::find_by_id(setup.workspace_id)
+            .one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!(workspace.embedding_model.as_deref(), Some("fallback"));
+        assert!(!workspace.embedding_reindexing);
+    }).await;
+}
+
+#[tokio::test]
 async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
     let crate::requests::fixtures::TestTenant { tenant_id, workspace_id, api_key, .. } = crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
@@ -118,7 +187,7 @@ async fn worker_uses_workspace_provider_and_keeps_key_out_of_payload() {
         .expect("row");
     assert_eq!(row.embedding_model.as_deref(), Some("workspace-model"));
     assert_eq!(row.embedding_dimensions, Some(1024));
-    assert_eq!(*workspace_calls.lock().unwrap(), 1);
+    assert_eq!(*workspace_calls.lock().unwrap(), 2);
     assert_eq!(*default_calls.lock().unwrap(), 0);
     let backend = ctx.db.get_database_backend();
     let length = Func::cust(Alias::new(if backend == sea_orm::DatabaseBackend::Sqlite {
@@ -153,14 +222,17 @@ async fn disabled_provider_is_a_terminal_worker_error() {
             .await
             .expect("build disabled production provider");
         ctx.shared_store.insert(provider);
-        let expected_error = "embedding provider disabled";
-        let crate::requests::fixtures::TestTenant { workspace_id, .. } =
-            crate::requests::fixtures::TestTenant::create(
-                &request,
-                &ctx,
-                crate::requests::fixtures::TenantArgs::default(),
-            )
-            .await;
+        let expected_error = "no embedding provider is configured";
+        let crate::requests::fixtures::TestTenant {
+            workspace_id,
+            api_key,
+            ..
+        } = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
         let lifecycle_id = record_delivery(&ctx, workspace_id).await;
         crate::requests::jobs::finish_job(&ctx, lifecycle_id, "failed", None).await;
         let lifecycle = yorishiro::models::queue_job_lifecycles::Entity::find_by_id(lifecycle_id)
@@ -176,6 +248,15 @@ async fn disabled_provider_is_a_terminal_worker_error() {
                 .is_some_and(|error| error.contains(expected_error)),
             "error={:?}, expected substring={expected_error}",
             lifecycle.error
+        );
+        let response = request
+            .get(&format!("/api/migration-jobs/{lifecycle_id}"))
+            .add_header("Authorization", format!("Bearer {api_key}"))
+            .await;
+        response.assert_status(axum::http::StatusCode::OK);
+        assert_eq!(
+            response.json::<serde_json::Value>()["error"],
+            "No embedding provider is configured."
         );
     })
     .await;

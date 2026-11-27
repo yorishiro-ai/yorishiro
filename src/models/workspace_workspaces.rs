@@ -401,10 +401,7 @@ pub(crate) async fn get_for_actor(
     actor: &crate::models::access_keys::AuthContext,
     workspace_id: Uuid,
 ) -> Result<Model, YorishiroError> {
-    let workspace = get_workspace(conn, workspace_id).await?;
-    if workspace.tenant_id != actor.tenant_id {
-        return Err(YorishiroError::not_found("workspace not found"));
-    }
+    crate::models::iam::access::check_workspace_target(conn, actor, workspace_id).await?;
     crate::models::iam::access::require_iam_action(
         conn,
         actor,
@@ -415,10 +412,10 @@ pub(crate) async fn get_for_actor(
         },
     )
     .await
-    .map_err(|error| {
-        crate::models::iam::access::hide_inferred_resource(actor.workspace_id.is_none(), error)
-    })?;
-    Ok(workspace)
+    .map_err(|error| crate::models::iam::access::hide_inferred_resource(true, error))?;
+    get_workspace(conn, workspace_id)
+        .await
+        .map_err(|error| crate::models::iam::access::hide_inferred_resource(true, error))
 }
 
 pub(crate) async fn update_as(

@@ -1,10 +1,8 @@
 //! User operations that span the user, membership, group, policy and access key tables.
 
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::access_keys;
 use crate::models::access_keys::AuthContext;
 use crate::models::iam::policy::{Action, Resource};
 use crate::models::user_users;
@@ -125,10 +123,10 @@ pub(crate) async fn update_as(
     Ok(user)
 }
 
-/// Deletes a user that has no group memberships, no attached policies and no access keys.
+/// Deletes a user, removes their IAM associations and revokes their access keys.
 ///
 /// # Errors
-/// Rejects callers without `iam:DeleteUser`, the tenant root, and a user that still holds any of those.
+/// Rejects callers without `iam:DeleteUser` and protects the tenant root.
 pub(crate) async fn delete_as(
     db: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
@@ -143,30 +141,6 @@ pub(crate) async fn delete_as(
     )
     .await?;
     let user = user_users::find_in_tenant(&txn, actor.tenant_id, user_id).await?;
-    crate::models::tenant_memberships::protect_root(&txn, actor.tenant_id, user_id).await?;
-    let groups =
-        crate::models::iam_group_memberships::Model::count_for_user(&txn, actor.tenant_id, user_id)
-            .await?;
-    let policies = crate::models::iam_user_policy_attachments::Model::count_for_user(
-        &txn,
-        actor.tenant_id,
-        user_id,
-    )
-    .await?;
-    let keys = access_keys::Entity::find()
-        .filter(access_keys::Column::TenantId.eq(actor.tenant_id))
-        .filter(access_keys::Column::UserId.eq(user_id))
-        .filter(access_keys::Column::RevokedAt.is_null())
-        .count(&txn)
-        .await
-        .internal()?;
-    if groups > 0 || policies > 0 || keys > 0 {
-        return Err(YorishiroError::Conflict {
-            message: format!(
-                "the user still has {groups} group membership(s), {policies} attached policy(ies) and {keys} access key(s); remove them first"
-            ),
-        });
-    }
     crate::models::tenant_memberships::remove_member_in_transaction(&txn, actor.tenant_id, user_id)
         .await?;
     crate::models::iam_audit_events::record(

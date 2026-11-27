@@ -78,7 +78,7 @@ async fn users_are_created_read_updated_and_deleted_by_id() {
             body["yrn"],
             format!("yrn:iam:{}:user/Alice.Smith", tenant.tenant_id)
         );
-        let user_id = body["id"].as_str().unwrap().to_owned();
+        let user_id = body["user_id"].as_str().unwrap().to_owned();
 
         for (name, status) in [
             ("alice.smith", StatusCode::CONFLICT),
@@ -103,11 +103,11 @@ async fn users_are_created_read_updated_and_deleted_by_id() {
             .await;
         listed.assert_status_ok();
         let listed = listed.json::<Vec<serde_json::Value>>();
-        assert!(listed.iter().any(|user| user["id"] == user_id));
+        assert!(listed.iter().any(|user| user["user_id"] == user_id));
         assert!(
             listed
                 .iter()
-                .all(|user| user["id"] != tenant.owner_id.to_string()),
+                .all(|user| user["user_id"] != tenant.owner_id.to_string()),
             "the tenant root is not listed"
         );
         let fetched = request
@@ -115,7 +115,7 @@ async fn users_are_created_read_updated_and_deleted_by_id() {
             .add_header("Authorization", &auth)
             .await;
         fetched.assert_status_ok();
-        assert_eq!(fetched.json::<serde_json::Value>()["id"], user_id);
+        assert_eq!(fetched.json::<serde_json::Value>()["user_id"], user_id);
         request
             .get(&format!("/api/users/{}", uuid::Uuid::new_v4()))
             .add_header("Authorization", &auth)
@@ -173,19 +173,6 @@ async fn users_are_created_read_updated_and_deleted_by_id() {
             .await
             .assert_status(StatusCode::OK);
 
-        // A live access key blocks the deletion until it is revoked.
-        let refused = request
-            .delete(&format!("/api/users/{user_id}"))
-            .add_header("Authorization", &auth)
-            .await;
-        refused.assert_status(StatusCode::CONFLICT);
-        assert!(refused.text().contains("access key"), "{}", refused.text());
-        request
-            .put(&format!("/api/users/{user_id}/login-profile"))
-            .add_header("Authorization", &auth)
-            .json(&serde_json::json!({"password":"another-replacement"}))
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
         request
             .delete(&format!("/api/users/{user_id}"))
             .add_header("Authorization", &auth)
@@ -204,7 +191,7 @@ async fn users_are_created_read_updated_and_deleted_by_id() {
 }
 
 #[tokio::test]
-async fn a_user_with_groups_or_policies_cannot_be_deleted() {
+async fn deleting_a_user_removes_iam_associations_and_revokes_keys() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let root_key =
@@ -217,7 +204,7 @@ async fn a_user_with_groups_or_policies_cannot_be_deleted() {
             .json(&serde_json::json!({"user_name":"bob","password":"tenant-user-password"}))
             .await;
         user.assert_status(StatusCode::CREATED);
-        let user_id = user.json::<serde_json::Value>()["id"]
+        let user_id = user.json::<serde_json::Value>()["user_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -227,7 +214,7 @@ async fn a_user_with_groups_or_policies_cannot_be_deleted() {
             .json(&serde_json::json!({"name":"staff"}))
             .await;
         group.assert_status(StatusCode::CREATED);
-        let group_id = group.json::<serde_json::Value>()["id"]
+        let group_id = group.json::<serde_json::Value>()["group_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -237,22 +224,6 @@ async fn a_user_with_groups_or_policies_cannot_be_deleted() {
             .add_header("Authorization", &auth)
             .await
             .assert_status(StatusCode::NO_CONTENT);
-        let refused = request
-            .delete(&format!("/api/users/{user_id}"))
-            .add_header("Authorization", &auth)
-            .await;
-        refused.assert_status(StatusCode::CONFLICT);
-        assert!(
-            refused.text().contains("group membership"),
-            "{}",
-            refused.text()
-        );
-        request
-            .delete(&membership)
-            .add_header("Authorization", &auth)
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-
         let policy = crate::requests::fixtures::create_policy(
             &request,
             &auth,
@@ -270,26 +241,37 @@ async fn a_user_with_groups_or_policies_cannot_be_deleted() {
             .add_header("Authorization", &auth)
             .await
             .assert_status(StatusCode::NO_CONTENT);
-        let refused = request
-            .delete(&format!("/api/users/{user_id}"))
+        let key = crate::requests::fixtures::issue_tenant_key(
+            &ctx,
+            tenant.tenant_id,
+            user_id.parse().unwrap(),
+        )
+        .await;
+        let user_path = format!("/api/users/{user_id}");
+        request
+            .delete(&user_path)
+            .add_header("Authorization", &auth)
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+        request
+            .get(&user_path)
+            .add_header("Authorization", &auth)
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        request
+            .get("/api/caller-identity")
+            .add_header("Authorization", bearer(&key))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        let group = request
+            .get(&format!("/api/groups/{group_id}"))
             .add_header("Authorization", &auth)
             .await;
-        refused.assert_status(StatusCode::CONFLICT);
-        assert!(
-            refused.text().contains("attached policy"),
-            "{}",
-            refused.text()
+        group.assert_status(StatusCode::OK);
+        assert_eq!(
+            group.json::<serde_json::Value>()["members"],
+            serde_json::json!([])
         );
-        request
-            .delete(&attachment)
-            .add_header("Authorization", &auth)
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-        request
-            .delete(&format!("/api/users/{user_id}"))
-            .add_header("Authorization", &auth)
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
     })
     .await;
 }

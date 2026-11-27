@@ -58,19 +58,6 @@ impl Model {
             .internal()
     }
 
-    pub(crate) async fn count_for_user(
-        conn: &impl ConnectionTrait,
-        tenant_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<u64, YorishiroError> {
-        Entity::find()
-            .filter(Column::TenantId.eq(tenant_id))
-            .filter(Column::UserId.eq(user_id))
-            .count(conn)
-            .await
-            .internal()
-    }
-
     /// The groups a user belongs to.
     pub(crate) async fn groups_for_user_as(
         db: &DatabaseConnection,

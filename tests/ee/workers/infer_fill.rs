@@ -39,9 +39,10 @@ async fn relay_dispatches_infer_fill_using_the_registered_worker_class() {
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
+        let provider = crate::http_stub::llm_provider().await;
         request.put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
-            .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
+            .json(&serde_json::json!({"base_url":provider.url, "model":"test-model", "api_key":"sk-test"}))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
         define_schema(&request, &fixture.api_key, "note").await;
         let db = ctx.db.clone();
@@ -134,9 +135,10 @@ async fn stalled_provider_enqueue_does_not_block_new_dispatch_records() {
         };
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
+        let provider = crate::http_stub::llm_provider().await;
         request.put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
-            .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
+            .json(&serde_json::json!({"base_url":provider.url, "model":"test-model", "api_key":"sk-test"}))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
         define_schema(&request, &fixture.api_key, "note").await;
         define_schema(&request, &fixture.api_key, "next-note").await;
@@ -285,10 +287,13 @@ async fn controlled_llm() -> (
     let release = Arc::new(tokio::sync::Semaphore::new(0));
     let (task_entered, task_release) = (entered.clone(), release.clone());
     let (task_flight, task_peak) = (in_flight.clone(), peak.clone());
-    let router = Router::new().route("/chat/completions", post(move || {
+    let router = Router::new().route("/chat/completions", post(move |Json(body): Json<serde_json::Value>| {
             let (flight, peak) = (task_flight.clone(), task_peak.clone());
             let (entered, release) = (task_entered.clone(), task_release.clone());
         async move {
+            if body["messages"][0]["content"].as_str().is_some_and(|text| text.contains("provider check")) {
+                return Json(serde_json::json!({"choices":[{"message":{"content":"{}"}}]}));
+            }
             let now = flight.fetch_add(1, Ordering::SeqCst) + 1;
             peak.fetch_max(now, Ordering::SeqCst);
                 entered.notify_one();
@@ -317,9 +322,12 @@ async fn gated_llm() -> (
     let release = Arc::new(tokio::sync::Semaphore::new(0));
     let task_entered = entered.clone();
     let task_release = release.clone();
-    let router = Router::new().route("/chat/completions", post(move || {
+    let router = Router::new().route("/chat/completions", post(move |Json(body): Json<serde_json::Value>| {
         let (entered, release) = (task_entered.clone(), task_release.clone());
         async move {
+            if body["messages"][0]["content"].as_str().is_some_and(|text| text.contains("provider check")) {
+                return Json(serde_json::json!({"choices":[{"message":{"content":"{}"}}]}));
+            }
             entered.notify_one();
             release.acquire().await.expect("release gated LLM").forget();
             Json(serde_json::json!({"choices":[{"message":{"content":"{\"summary\":\"old-schema-proposal\"}"}}]}))
@@ -672,9 +680,10 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
     crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let fixture =
             crate::requests::fixtures::TestTenant::create(&request, &ctx, crate::requests::fixtures::TenantArgs::default()).await;
+        let provider = crate::http_stub::llm_provider().await;
         request.put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
-            .json(&serde_json::json!({"base_url":"http://127.0.0.1:1", "model":"test-model", "api_key":"sk-test"}))
+            .json(&serde_json::json!({"base_url":provider.url, "model":"test-model", "api_key":"sk-test"}))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
         let tenant_key = crate::requests::fixtures::issue_tenant_key(&ctx, fixture.tenant_id, fixture.owner_id).await;
         let txn = ctx.db.begin().await.unwrap();
@@ -689,7 +698,7 @@ async fn revoked_infer_fill_actor_fails_without_retrying_or_calling_the_provider
             .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":mode,"document":document})).await;
         policy.assert_status(axum::http::StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let policy_id = policy.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
         let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);
@@ -808,7 +817,7 @@ async fn permission_change_during_llm_call(change: PermissionChange) {
             .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":"inflight-inference","document":document})).await;
         policy.assert_status(axum::http::StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let policy_id = policy.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
         let attachment = format!("/api/users/{}/policies/{policy_id}", user.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {tenant_key}"))
             .await.assert_status(axum::http::StatusCode::NO_CONTENT);

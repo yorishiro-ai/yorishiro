@@ -157,7 +157,11 @@ async fn unavailable_workspace_does_not_spend_the_search_budget_of_another() {
             .add_header("Authorization", format!("Bearer {root}"))
             .await;
         response.assert_status(StatusCode::SERVICE_UNAVAILABLE);
-        assert!(response.text().contains("reindexed"));
+        assert!(
+            response
+                .text()
+                .contains("workspace embeddings are changing")
+        );
         let response = request
             .get("/api/search?query_text=abc")
             .add_header("Authorization", format!("Bearer {root}"))
