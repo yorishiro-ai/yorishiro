@@ -1,12 +1,8 @@
 name: Release (prerelease)
 
-# One dispatch cuts a prerelease from `develop`: build, package, publish images, publish a
-# GitHub Release marked prerelease.
-#
-# Prereleases are numbered by date and run: `YYYYMMDD-N`, which is outside SemVer entirely. A
-# prerelease tag has no `v` prefix, so it never looks like a version in a `docker images` listing.
-# Packages use X.Y.(Z+1)~pre.YYYYMMDD.N: newer than the current stable,
-# older than the next patch stable, without changing the public date-based tag.
+# One dispatch builds a prerelease from `develop` and publishes its images and GitHub Release.
+# Public tags and asset filenames use `pre-YYYYMMDD-N`.
+# Package metadata uses `X.Y.(Z+1)~pre.YYYYMMDD.N` to sort between the current stable release and the next patch release.
 #
 # Releases use `vX.Y.Z` and bump `Cargo.toml`; a prerelease does neither. See
 # `.github/workflows/release.yml` for the SemVer release path.
@@ -57,23 +53,15 @@ jobs:
 
       - name: Plan the release
         id: plan
-        env:
-          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           DATE="$(date -u +%Y%m%d)"
-          existing="$(git ls-remote --tags origin \
-            | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}' \
-            | grep -E "^${DATE}-[0-9]+$" | sed "s|^${DATE}-||" | sort -n | tail -1)"
-          TAG="${DATE}-$(( ${existing:-0} + 1 ))"
+          # Old tags still reserve their package version numbers.
+          tags=$(git ls-remote --refs --tags origin "refs/tags/pre-${DATE}-*" "refs/tags/${DATE}-*")
+          existing=$(sed -nE "s|^[^[:space:]]+[[:space:]]+refs/tags/(pre-)?${DATE}-([1-9][0-9]*)$|\2|p" <<< "$tags" | sort -n | tail -1)
+          TAG="pre-${DATE}-$(( ${existing:-0} + 1 ))"
+          package_version=$(python3 scripts/release_version.py "$TAG")
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "package-version=$(python3 scripts/release_version.py "$TAG")" >> "$GITHUB_OUTPUT"
-
-          if [ "$DRY_RUN" = "true" ]; then
-            echo "dry run: would tag ${TAG}, building from ${GITHUB_SHA}"
-            echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
+          echo "package-version=${package_version}" >> "$GITHUB_OUTPUT"
           echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
   binary:
@@ -111,6 +99,7 @@ jobs:
           target: ${{ matrix.target }}
           arch: ${{ matrix.arch }}
           version: ${{ needs.prepare.outputs.package-version }}
+          file-version: ${{ needs.prepare.outputs.tag }}
           build-tag: ${{ needs.prepare.outputs.tag }}
 
   package-tests:
@@ -125,7 +114,7 @@ jobs:
       - uses: ./.github/actions/package-tests
         with:
           version: ${{ needs.prepare.outputs.package-version }}
-          image-tag: ${{ needs.prepare.outputs.tag }}
+          file-version: ${{ needs.prepare.outputs.tag }}
 
   docker:
     needs: [prepare, package-tests]
@@ -150,7 +139,7 @@ jobs:
         with:
           image: ${{ env.IMAGE_NAME }}
           tag: ${{ needs.prepare.outputs.tag }}
-          build-sha: ${{ needs.prepare.outputs.ref }}
+          source: ${{ needs.prepare.outputs.ref }}
           arch: ${{ matrix.arch }}
           push: ${{ !inputs.dry_run }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -236,38 +225,26 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
-          pattern: 'yorishiro-*.{deb,rpm}'
+          pattern: 'yorishiro-*.{tar.gz,deb,rpm}'
           merge-multiple: true
 
-      - name: Every documented artifact is present
-        run: |
-          status=0
-          expect() {
-            n=$(find dist -maxdepth 1 -name "$1" | wc -l)
-            if [ "$n" -ne "$2" ]; then
-              echo "::error::expected $2 matching '$1', found $n" >&2
-              status=1
-            else
-              echo "ok: $1 ($n)"
-            fi
-          }
-          for edition in ce ee; do
-            for arch in amd64 arm64; do
-              for ext in deb rpm; do
-                expect "yorishiro-${edition}-${{ needs.prepare.outputs.package-version }}-${arch}.${ext}" 1
-              done
-            done
-          done
-          exit "$status"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          name: checksums.txt
 
-      - name: Checksums
+      - name: Verify release checksums
+        working-directory: dist
         run: |
-          ( cd dist && sha256sum ./*.deb ./*.rpm | sed 's| \./| |' > checksums.txt )
-          cat dist/checksums.txt
+          sha256sum -- *.tar.gz *.deb *.rpm > "$RUNNER_TEMP/release-checksums.txt"
+          diff -u checksums.txt "$RUNNER_TEMP/release-checksums.txt"
 
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: 'dist/*.deb, dist/*.rpm'
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
 
       - name: Tag the verified prerelease commit
         env:
@@ -279,12 +256,12 @@ jobs:
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${token_header}"
-          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists on remote." >&2
-            exit 1
+          existing=$(git ls-remote --refs origin "refs/tags/${TAG}")
+          if [ -n "$existing" ]; then
+            test "$existing" = "$(printf '%s\trefs/tags/%s' "$REF" "$TAG")"
+          else
+            git push --force-with-lease="refs/tags/${TAG}:" origin "${REF}:refs/tags/${TAG}"
           fi
-          git tag "$TAG" "$REF"
-          git push origin "$TAG"
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -316,11 +293,13 @@ jobs:
 
       - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         with:
+          draft: true
           generate_release_notes: true
           tag_name: ${{ needs.prepare.outputs.tag }}
           prerelease: true
-          # Asset names use the package-manager version; the release tag stays date-based.
+          fail_on_unmatched_files: true
           files: |
+            dist/*.tar.gz
             dist/*.deb
             dist/*.rpm
             dist/checksums.txt
@@ -330,3 +309,9 @@ jobs:
             Commit: ${{ needs.prepare.outputs.ref }}
 
             CE and EE are published as separate compile-time artifacts.
+
+      - name: Publish the prerelease after uploading all assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"

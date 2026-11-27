@@ -19,8 +19,8 @@ test "$(find "$PKG_DIR" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \)
 check_prerelease_version_order() {
   local current earlier later stable
   current="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["package"]["version"])' "$REPO/Cargo.toml")"
-  earlier="$(cd "$REPO" && python3 scripts/release_version.py 20261104-2)"
-  later="$(cd "$REPO" && python3 scripts/release_version.py 20261104-10)"
+  earlier="$(cd "$REPO" && python3 scripts/release_version.py pre-20261104-2)"
+  later="$(cd "$REPO" && python3 scripts/release_version.py pre-20261104-10)"
   stable="${earlier%%~*}"
   dpkg --compare-versions "$current" lt "$earlier"
   dpkg --compare-versions "$earlier" lt "$later"
@@ -75,9 +75,14 @@ run_deb_fresh_install_without_admin_config() {
 run_rpm_colocation_refusal() {
   docker run --rm -v "$PKG_DIR":/pkg:ro almalinux:10 bash -eu -c "
     dnf install -y -q /pkg/yorishiro-ce-${VERSION}-amd64.rpm
-    rpm -i /pkg/yorishiro-ee-${VERSION}-amd64.rpm || true
-    test \"\$(rpm -q yorishiro-ce 2>/dev/null || true)\" = yorishiro-ce-${VERSION}-1.x86_64
-    test \"\$(rpm -q yorishiro-ee 2>/dev/null || true)\" != yorishiro-ee-${VERSION}-1.x86_64
+    if rpm -i /pkg/yorishiro-ee-${VERSION}-amd64.rpm; then
+      echo 'conflicting package unexpectedly installed' >&2
+      exit 1
+    fi
+    rpm -q yorishiro-ce
+    if rpm -q yorishiro-ee; then
+      exit 1
+    fi
   "
 }
 

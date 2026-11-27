@@ -5,6 +5,13 @@
 - [x] Correlate REST and MCP requests and record authenticated identity without logging credentials or tool arguments.
 - [x] Record workspace lifecycle changes and tenant updates, and include policy names in detachment events.
 - [x] Remove the unused path type and correct stale comments without changing policy grants or combining distinct IAM actions.
-- [ ] Run the community and enterprise checks and backend suites after the changes.
-- [ ] Verify GitHub Actions on the updated pull request.
-- [ ] Initialize the local development database and verify startup.
+- [x] Run the community and enterprise checks and backend suites after the changes.
+- [x] Verify GitHub Actions on the updated pull request.
+- [x] Initialize the local development database and verify startup.
+
+# Release follow-up
+
+- [x] Build stable dry runs with the requested version and publish the branch and tag only after verification.
+- [x] Match Actions artifacts and release assets, and use the preview date tag in public filenames.
+- [x] Verify release planning and artifact generation locally.
+- [ ] Verify the release workflows end to end on GitHub Actions.

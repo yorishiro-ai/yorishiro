@@ -12,8 +12,11 @@ inputs:
     description: Package architecture, amd64 or arm64
     required: true
   version:
-    description: Version used in package metadata and file names, without any v prefix
+    description: Package manager version
     required: true
+  file-version:
+    description: Public filename version, if different from the package manager version
+    default: ''
   build-tag:
     description: Value exported to the build as BUILD_SHA
     required: true
@@ -53,6 +56,8 @@ runs:
             else
               cargo build --locked --features enterprise --release --bin yorishiro
             fi
+            manifest_version=$(sed -n '\''s/^version = "\([^"]*\)"$/\1/p'\'' Cargo.toml)
+            test "$(target/release/yorishiro version)" = "$manifest_version ($BUILD_SHA)"
             sections=$(readelf -SW target/release/yorishiro)
             if grep -Eq "\.(symtab|debug_[[:alnum:]_]+)[[:space:]]" <<< "$sections"; then
               echo "Release binary contains static symbols or debug information" >&2
@@ -63,46 +68,49 @@ runs:
     - uses: ./.github/actions/install-nfpm
 
     - name: Package (tar.gz, deb and rpm)
+      id: package
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
+        FILE_VERSION: ${{ inputs.file-version || inputs.version }}
         ARCH: ${{ inputs.arch }}
         EDITION: ${{ inputs.edition }}
       run: |
         set -euo pipefail
         mkdir -p dist
-        case "$ARCH" in amd64) deb_arch=amd64; rpm_arch=x86_64 ;; arm64) deb_arch=arm64; rpm_arch=aarch64 ;; *) echo "unsupported package architecture: $ARCH" >&2; exit 2 ;; esac
+        filename="yorishiro-${EDITION}-${FILE_VERSION}-${ARCH}"
+        stem="dist/$filename"
         for pkg in deb rpm; do
           cat .github/packaging/nfpm-common.yaml ".github/packaging/nfpm-yorishiro-${EDITION}.yaml" |
-            nfpm package --config /dev/stdin --packager "$pkg" --target dist/
-          if [ "$pkg" = deb ]; then
-            source="dist/yorishiro-${EDITION}_${VERSION}_${ARCH}.deb"
-          else
-            source="dist/yorishiro-${EDITION}-${VERSION}-1.${rpm_arch}.rpm"
-          fi
-          mv "$source" "dist/yorishiro-${EDITION}-${VERSION}-${ARCH}.${pkg}"
+            nfpm package --config /dev/stdin --packager "$pkg" --target "${stem}.${pkg}"
         done
         licenses=(LICENSE)
         if [ "$EDITION" = ee ]; then
           licenses+=(ee/LICENSE)
         fi
-        tar -czf "dist/yorishiro-${EDITION}-${VERSION}-${ARCH}.tar.gz" -C "$PWD/target/release" yorishiro -C "$PWD" "${licenses[@]}"
-        ls -1 dist/
+        tar -czf "${stem}.tar.gz" -C "$PWD/target/release" yorishiro -C "$PWD" "${licenses[@]}"
+        echo "filename=$filename" >> "$GITHUB_OUTPUT"
 
     - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        path: dist/yorishiro-${{ inputs.edition }}-${{ inputs.version }}-${{ inputs.arch }}.tar.gz
+        name: ${{ steps.package.outputs.filename }}.tar.gz
+        path: dist/${{ steps.package.outputs.filename }}.tar.gz
         archive: false
+        overwrite: true
         if-no-files-found: error
 
     - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        path: dist/yorishiro-${{ inputs.edition }}-${{ inputs.version }}-${{ inputs.arch }}.deb
+        name: ${{ steps.package.outputs.filename }}.deb
+        path: dist/${{ steps.package.outputs.filename }}.deb
         archive: false
+        overwrite: true
         if-no-files-found: error
 
     - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        path: dist/yorishiro-${{ inputs.edition }}-${{ inputs.version }}-${{ inputs.arch }}.rpm
+        name: ${{ steps.package.outputs.filename }}.rpm
+        path: dist/${{ steps.package.outputs.filename }}.rpm
         archive: false
+        overwrite: true
         if-no-files-found: error

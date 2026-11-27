@@ -1,13 +1,10 @@
 name: Release (SemVer)
 
-# One dispatch cuts a SemVer release from `develop`: bumps `Cargo.toml`, builds, packages,
-# publishes images, and publishes a GitHub Release.
+# One dispatch builds, verifies, and publishes a SemVer release from `develop`.
 #
-# SemVer releases use `vX.Y.Z` tags and are what `Cargo.toml`'s version field represents. A
-# SemVer release bumps the manifest, runs the full build pipeline, then tags the verified commit.
+# SemVer releases use `vX.Y.Z` tags and build from the matching Cargo version.
 #
-# Prereleases use a different workflow (`release_pre.yml`) with date-based tags (`YYYYMMDD-N`)
-# and do not modify `Cargo.toml`.
+# Prereleases use `pre-YYYYMMDD-N` tags and do not modify `Cargo.toml`.
 
 on:
   workflow_dispatch:
@@ -36,11 +33,10 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-26.04
-    permissions:
-      contents: write
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
       ref: ${{ steps.plan.outputs.ref }}
+      commit: ${{ steps.snapshot.outputs.commit }}
 
     steps:
       - name: Check the dispatch ref
@@ -58,105 +54,27 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Validate version format
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Version must match X.Y.Z (no v prefix): '$VERSION'" >&2
-            exit 1
-          fi
+      - uses: ./.github/actions/prepare-stable-source
+        id: snapshot
+        with:
+          version: ${{ inputs.version }}
 
       - name: Plan the release
         id: plan
         env:
           DRY_RUN: ${{ inputs.dry_run }}
           VERSION: ${{ inputs.version }}
-          # The release plan runs before the shared Rust setup action.
-          # Override repository-local build optimizations for this metadata check.
-          RUSTC_WRAPPER: ''
-          RUSTFLAGS: ''
         run: |
           TAG="v${VERSION}"
-
-          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "$TAG"; then
-            echo "Tag ${TAG} already exists on remote." >&2
-            exit 1
+          if [ "$DRY_RUN" != "true" ]; then
+            existing=$(git ls-remote --refs origin "refs/tags/${TAG}")
+            if [ -n "$existing" ]; then
+              echo "Tag ${TAG} already exists on remote." >&2
+              exit 1
+            fi
           fi
-
-          BASE="$(git rev-parse HEAD)"
-          BRANCH="release/prepare-${TAG}"
-          git checkout -b "$BRANCH"
-
-          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
-
-          cp Cargo.lock Cargo.lock.before
-          python3 patches/loco-rs/verify.py --prepare
-          cargo check
-          python3 - "$VERSION" <<'PY'
-          import copy
-          import sys
-          import tomllib
-
-          version = sys.argv[1]
-          with open("Cargo.lock", "rb") as lock:
-              after_bytes = lock.read()
-          with open("Cargo.lock.before", "rb") as lock:
-              before = tomllib.load(lock)
-          after = tomllib.loads(after_bytes.decode())
-
-          def root_packages(lock):
-              return [package for package in lock.get("package", []) if package.get("name") == "yorishiro"]
-
-          before_roots = root_packages(before)
-          after_roots = root_packages(after)
-          if len(before_roots) != 1 or len(after_roots) != 1:
-              raise SystemExit("Cargo.lock must contain exactly one yorishiro package entry before and after")
-          if after_roots[0].get("version") != version:
-              raise SystemExit("Cargo.lock root package version does not match the release version")
-
-          normalized_before = copy.deepcopy(before)
-          normalized_after = copy.deepcopy(after)
-          normalized_after["package"] = [
-              version_package if version_package.get("name") != "yorishiro" else {
-                  **version_package,
-                  "version": before_roots[0]["version"],
-              }
-              for version_package in normalized_after["package"]
-          ]
-          if normalized_before != normalized_after:
-              raise SystemExit("Cargo.lock changed outside the root yorishiro package version")
-          PY
-          rm Cargo.lock.before
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock
-          if git diff --cached --quiet; then
-            echo "No changes to commit (version may already be set)." >&2
-            git checkout --detach "$BASE"
-            git branch -D "$BRANCH"
-            REF="$BASE"
-          else
-            git commit -m "Bump version to ${TAG}"
-            REF=$(git rev-parse HEAD)
-          fi
-
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-
-          if [ "$DRY_RUN" = "true" ]; then
-            # The bump commit exists only on this runner, so later jobs cannot check it out:
-            # a dry run builds the dispatched commit itself.
-            echo "dry run: would tag ${TAG}, building from ${BASE}"
-            echo "ref=${BASE}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ "$(git branch --show-current)" = "$BRANCH" ]; then
-            git push origin "$BRANCH"
-            git push origin "$BRANCH:develop"
-          fi
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
   binary:
     needs: prepare
@@ -187,6 +105,10 @@ jobs:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
+      - uses: ./.github/actions/prepare-stable-source
+        with:
+          version: ${{ inputs.version }}
+
       - uses: ./.github/actions/build-and-package
         with:
           edition: ${{ matrix.edition }}
@@ -203,6 +125,10 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
+
+      - uses: ./.github/actions/prepare-stable-source
+        with:
+          version: ${{ inputs.version }}
 
       - uses: ./.github/actions/package-tests
         with:
@@ -227,17 +153,15 @@ jobs:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
-      - name: Verify the image tag
-        env:
-          TAG: ${{ needs.prepare.outputs.tag }}
-          EXPECTED_TAG: v${{ inputs.version }}
-        run: test "$TAG" = "$EXPECTED_TAG"
+      - uses: ./.github/actions/prepare-stable-source
+        with:
+          version: ${{ inputs.version }}
 
       - uses: ./.github/actions/build-docker
         with:
           image: ${{ env.IMAGE_NAME }}
           tag: ${{ needs.prepare.outputs.tag }}
-          build-sha: ${{ needs.prepare.outputs.ref }}
+          source: ${{ needs.prepare.outputs.commit }}
           arch: ${{ matrix.arch }}
           push: ${{ !inputs.dry_run }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -261,7 +185,7 @@ jobs:
       - uses: ./.github/actions/docker-manifest
         with:
           image: ${{ env.IMAGE_NAME }}
-          source: ${{ needs.prepare.outputs.ref }}
+          source: ${{ needs.prepare.outputs.commit }}
           edition: ${{ matrix.edition }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -299,7 +223,7 @@ jobs:
       - uses: ./.github/actions/smoke
         with:
           image: ${{ env.IMAGE_NAME }}
-          source: ${{ needs.prepare.outputs.ref }}
+          source: ${{ needs.prepare.outputs.commit }}
           edition: ${{ matrix.edition }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -323,55 +247,26 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
-          pattern: 'yorishiro-*.{deb,rpm}'
+          pattern: 'yorishiro-*.{tar.gz,deb,rpm}'
           merge-multiple: true
 
-      - name: Every documented artifact is present
-        run: |
-          status=0
-          expect() {
-            n=$(find dist -maxdepth 1 -name "$1" | wc -l)
-            if [ "$n" -ne "$2" ]; then
-              echo "::error::expected $2 matching '$1', found $n" >&2
-              status=1
-            else
-              echo "ok: $1 ($n)"
-            fi
-          }
-          for edition in ce ee; do
-            for arch in amd64 arm64; do
-              for ext in deb rpm; do
-                expect "yorishiro-${edition}-${{ inputs.version }}-${arch}.${ext}" 1
-              done
-            done
-          done
-          exit "$status"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          name: checksums.txt
 
-      - name: Checksums
+      - name: Verify release checksums
+        working-directory: dist
         run: |
-          ( cd dist && sha256sum ./*.deb ./*.rpm | sed 's| \./| |' > checksums.txt )
-          cat dist/checksums.txt
+          sha256sum -- *.tar.gz *.deb *.rpm > "$RUNNER_TEMP/release-checksums.txt"
+          diff -u checksums.txt "$RUNNER_TEMP/release-checksums.txt"
 
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: 'dist/*.deb, dist/*.rpm'
-
-      - name: Tag the verified release commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REF: ${{ needs.prepare.outputs.ref }}
-          TAG: ${{ needs.prepare.outputs.tag }}
-        run: |
-          token_header=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${token_header}"
-          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists on remote." >&2
-            exit 1
-          fi
-          git tag "$TAG" "$REF"
-          git push origin "$TAG"
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -393,10 +288,38 @@ jobs:
           path: ${{ runner.temp }}/release-images
           merge-multiple: true
 
+      - uses: ./.github/actions/prepare-stable-source
+        id: snapshot
+        with:
+          version: ${{ inputs.version }}
+
+      - name: Publish the verified commit and tag together
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ needs.prepare.outputs.ref }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          SNAPSHOT: ${{ steps.snapshot.outputs.commit }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          test "$COMMIT" = "$SNAPSHOT"
+          token_header=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${token_header}"
+          existing=$(git ls-remote --refs origin "refs/tags/${TAG}")
+          if [ -n "$existing" ]; then
+            # A retry can continue after a successful atomic push.
+            test "$existing" = "$(printf '%s\trefs/tags/%s' "$COMMIT" "$TAG")"
+          else
+            git push --atomic --force-with-lease="refs/heads/develop:$BASE" \
+              --force-with-lease="refs/tags/${TAG}:" origin \
+              "${COMMIT}:refs/heads/develop" "${COMMIT}:refs/tags/${TAG}"
+          fi
+
       - name: Promote only smoke-verified image digests
         env:
           IMAGE: ${{ env.IMAGE_NAME }}
-          SOURCE: ${{ needs.prepare.outputs.ref }}
+          SOURCE: ${{ needs.prepare.outputs.commit }}
           TAG: ${{ needs.prepare.outputs.tag }}
           RUN_ID: ${{ github.run_id }}
         run: python3 scripts/release_images.py promote --image "$IMAGE" --source "$SOURCE" --run-id "$RUN_ID" --tag "$TAG" --directory "$RUNNER_TEMP/release-images"
@@ -406,13 +329,15 @@ jobs:
           generate_release_notes: true
           tag_name: ${{ needs.prepare.outputs.tag }}
           prerelease: false
+          fail_on_unmatched_files: true
           files: |
+            dist/*.tar.gz
             dist/*.deb
             dist/*.rpm
             dist/checksums.txt
           body: |
             Release ${{ needs.prepare.outputs.tag }} built from `${{ github.ref_name }}`.
 
-            Commit: ${{ needs.prepare.outputs.ref }}
+            Commit: ${{ needs.prepare.outputs.commit }}
 
             CE and EE are published as separate compile-time artifacts.

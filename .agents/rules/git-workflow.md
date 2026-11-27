@@ -90,9 +90,9 @@ When unclear, prefer a merge commit: losing an empirical record is the more expe
 
 - The root `Cargo.toml` package version is the source of truth.
 - 0.x: minor bump = breaking change, patch bump = compatible addition/fix.
-- Tag format: `YYYYMMDD-N` (e.g. `20260830-1`), always a prerelease.
-- The `Release (prerelease)` workflow takes only a `dry_run` boolean and publishes date-based `YYYYMMDD-N` tags as prereleases.
-- The separate `Release` workflow creates SemVer `vX.Y.Z` releases and uses the version bump prepared by its release branch.
-- Nothing in the prerelease workflow edits `Cargo.toml` or commits to `develop`: a date tag is not a SemVer version, and cargo rejects `20260830-1` outright.
+- Prerelease tags and asset filenames use `pre-YYYYMMDD-N` (e.g. `pre-20260830-1`).
+- The `Release (prerelease)` workflow takes only a `dry_run` boolean.
+- The separate `Release` workflow creates SemVer `vX.Y.Z` releases and publishes the verified version bump and tag in one Git push.
+- The prerelease workflow keeps the SemVer version in `Cargo.toml` unchanged.
 - `develop` stays at its SemVer position in the manifest for prereleases; `yorishiro version` answers with both versions.
 - Do not hand-edit the version or create the tag locally.

@@ -8,10 +8,9 @@ inputs:
   tag:
     description: Release tag
     required: true
-  build-sha:
-    description: Prepared source commit compiled into the application version
-    required: false
-    default: ''
+  source:
+    description: Source commit recorded in image provenance
+    required: true
   arch:
     description: Image architecture, amd64 or arm64
     required: true
@@ -41,7 +40,7 @@ runs:
         IMAGE: ${{ inputs.image }}
         TAG: candidate-${{ github.run_id }}
         ARCH: ${{ inputs.arch }}
-        BUILD_SHA: ${{ inputs.build-sha || inputs.tag }}
+        BUILD_SHA: ${{ inputs.tag }}
       with:
         source: .
         files: .github/docker/docker-bake.hcl
@@ -54,7 +53,7 @@ runs:
       env:
         METADATA: ${{ steps.bake.outputs.metadata }}
         IMAGE: ${{ inputs.image }}
-        SOURCE: ${{ inputs.build-sha }}
+        SOURCE: ${{ inputs.source }}
         ARCH: ${{ inputs.arch }}
         RUN_ID: ${{ github.run_id }}
       run: |
