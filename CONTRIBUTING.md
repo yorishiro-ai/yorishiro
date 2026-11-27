@@ -45,7 +45,7 @@ Run the local development stack with `docker compose -f docker-compose.dev.yaml 
 The Makefile starts only test dependencies from `docker-compose.test.yaml` when using the default local URLs.
 The separate `docker-compose.yaml` deploys published images and requires a release `TAG` and a production `DATABASE_URL`.
 
-Use `make test-postgres` for the full suite and `make test-sqlite` for the SQLite subset; `EDITION=ce` selects the community edition.
+Use `make test-postgres` or `make test-sqlite` to run the suite against either backend; `EDITION=ce` selects the community edition.
 See the [testing guide](.agents/rules/testing.md) for database requirements, request teardown, and licence checks.
 
 Stripe tests run in the ordinary EE suite, install their own test licence state and require no Stripe account.

@@ -6,7 +6,7 @@ Run commands from the repository root, or use `make -C /path/to/repo <target>`.
 
 | Command | What it does | Backend |
 |---|---|---|
-| `make test-sqlite` | SQLite-specific storage, locking, queue and request smoke tests selected by `SQLITE_TEST_FILTERS`; `EDITION=ce` selects community, the default is `ee` | SQLite |
+| `make test-sqlite` | Full suite; `EDITION=ce` selects community, and `ee` is the default | SQLite |
 | `make test-valkey` | Valkey queue tests; override the default Compose endpoint with `VALKEY_URL` | SQLite + Valkey |
 | `make test-postgres` | Full suite; request tests use disposable databases | PostgreSQL |
 | `make check-ce` | `cargo check --locked --no-default-features --features community --workspace` | CE |
@@ -25,8 +25,8 @@ Run commands from the repository root, or use `make -C /path/to/repo <target>`.
 | Variable | Default | Overrides |
 |---|---|---|
 | `DATABASE_URL` | `postgres://yorishiro:yorishiro@localhost:15432/yorishiro` | Target database for the test command |
-| `DB_MAX_CONNECTIONS` | `100` in CI and the PostgreSQL example | PostgreSQL pool maximum; production defaults are documented separately |
-| `DB_CONNECT_TIMEOUT` | `5000` in CI and the PostgreSQL example | PostgreSQL connection timeout |
+| `DB_MAX_CONNECTIONS` | `10` on SQLite, `100` on PostgreSQL | Application and SQL queue pool maximum |
+| `DB_CONNECT_TIMEOUT` | `500` | Connection timeout in milliseconds |
 
 `DATABASE_URL` selects the database backend, and Cargo features select the edition.
 A Valkey (Redis-compatible) queue runs with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` naming a server; the Valkey tests skip otherwise.
@@ -37,9 +37,7 @@ Only the signature check needs the real key: `make test-licence` runs it, and th
 Custom PostgreSQL:
 
 ```sh
-DATABASE_URL=postgres://user:pass@host:5432/db \
-  DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 \
-  make test-postgres
+DATABASE_URL=postgres://user:pass@host:5432/db make test-postgres
 ```
 
 ### `make entities`
@@ -55,12 +53,14 @@ Development databases are not used; entity generation requires PostgreSQL.
 
 ### Multi-tenant tests
 
+Use `boot_multitenant_request` for tests that create multiple tenants through the API on PostgreSQL.
+It sets the deployment cap to unlimited for that boot and installs a test licence if needed.
 Community Edition and unlicensed Enterprise enforce a one-tenant deployment cap.
-A test that creates more than one tenant in one boot therefore needs a licensed Enterprise deployment: call `require_licence` after boot.
 
 ```rust
-boot_request::<App, _, _>(|request, ctx| async move {
-    crate::requests::require_licence(&ctx);
+crate::requests::boot_multitenant_request(|request, ctx| async move {
+    // Exercise multiple tenants.
+}).await;
 ```
 
 A test that must observe the unlicensed cap boots with `crate::requests::unlicensed()`, so the gate never sees a key.
@@ -70,8 +70,9 @@ A test changes the booted app's configuration by passing overrides to `boot_requ
 
 CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus `make test-licence`, which verifies a signed key with the repository secret.
 The signed licence job runs on pushes to `develop` and eligible same-repository pull requests, not on forks or merge queue refs.
-`RUST_TEST_THREADS` controls parallelism; CI limits the unlicensed EE PostgreSQL job to two threads.
-A new request test belongs to PostgreSQL unless it checks something SQLite-specific.
+Use backend guards only for tests that exercise behaviour specific to one database.
+CI builds the native test harness and CLI once per edition and runs them with the same settings as the Make targets.
+Codecov reports coverage for both editions and databases on pull requests and pushes to `develop`.
 The package and Docker installability checks run in `packaging.yml`, selected by its path filters on pull requests and on pushes to `develop`.
 
 The integration tests form one Loco test binary rooted at `tests/mod.rs`, without `#[path]` includes.
