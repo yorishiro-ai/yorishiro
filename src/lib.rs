@@ -83,11 +83,11 @@ pub mod edition {
         active::workspace_embedding_metadata(conn, workspace_id).await
     }
 
-    pub(crate) async fn run_reindex_schedule_override(
+    pub(crate) async fn run_reindex_schedule(
         ctx: &AppContext,
         tick: chrono::DateTime<chrono::Utc>,
-    ) -> Result<bool> {
-        active::run_reindex_schedule_override(ctx, tick).await
+    ) -> Result<()> {
+        active::run_reindex_schedule(ctx, tick).await
     }
 
     #[async_trait]
@@ -231,15 +231,11 @@ pub mod edition {
             Ok(None)
         }
 
-        #[expect(
-            clippy::unused_async,
-            reason = "edition contributions share an async schedule override contract"
-        )]
-        pub(super) async fn run_reindex_schedule_override(
-            _ctx: &AppContext,
+        pub(super) async fn run_reindex_schedule(
+            ctx: &AppContext,
             _tick: chrono::DateTime<chrono::Utc>,
-        ) -> Result<bool> {
-            Ok(false)
+        ) -> Result<()> {
+            crate::tasks::tenant_reindex_scheduler::run_default(ctx).await
         }
 
         #[expect(
@@ -254,12 +250,13 @@ pub mod edition {
             configured: i32,
             _ctx: &AppContext,
         ) -> impl Fn() -> Option<i32> + Send + Sync + 'static {
-            if configured != 1 {
+            use crate::data::tenant_policy::DEFAULT_TENANT_CAP;
+            if configured != DEFAULT_TENANT_CAP {
                 tracing::warn!(
                     "YORISHIRO_MAX_TENANTS is ignored in Community Edition; enforcing one tenant"
                 );
             }
-            || Some(1)
+            || Some(DEFAULT_TENANT_CAP)
         }
 
         pub(super) const fn workers(registry: WorkerRegistry) -> WorkerRegistry {
@@ -286,7 +283,7 @@ pub mod workers;
 
 pub use edition::App;
 pub(crate) use edition::{
-    quota_override, run_reindex_schedule_override, workspace_embedding_metadata,
+    quota_override, run_reindex_schedule, workspace_embedding_metadata,
     workspace_embedding_provider, workspace_worker_class,
 };
 pub use error::YorishiroError;

@@ -16,13 +16,13 @@ Both check-all targets and CI run it, with deliberate-violation tests.
 
 ## Classification
 
-Classify features by what the server does.
-
-**The server calling an LLM**, billing, external SaaS and rich UI are `ee/` by character.
-
-Using the user's key changes who pays, not what the server does.
-
-If the classification is unclear, ask the user which edition owns the feature.
+Decide ownership and licence requirements separately.
+Use `src/` for the baseline that both builds serve, and `ee/` for extensions and features that only the Enterprise build provides.
+When EE extends a shared feature, keep its entry point and default behaviour in CE and replace the relevant behaviour at the composition seam.
+When only EE provides a feature, add its routes and tools from `ee/`.
+Server-side inference, billing, external SaaS integrations and rich UI belong to EE.
+Using the user's credentials does not change ownership.
+Ask the user before changing which build or licence state serves an existing feature.
 
 ## Composition
 
@@ -62,28 +62,24 @@ Enterprise-specific behaviour lives in `ee/models/`.
 ## Licence gate
 
 `ee/controllers/middleware/edition.rs` verifies licence signatures against `ee/keys/licence-public.pem`.
-Use `Routes::layer` to apply `licence_gate` only to the routes that require an active licence.
+Call `Routes::licensed()` before registering routes that require an active licence.
+The EE mount applies `licence_gate` and the OpenAPI generator uses the same declaration.
 
 `LicenceState::is_active` compares `exp` against the current clock so enterprise access ends at expiry without a restart.
 
-Booting with no `YORISHIRO_LICENSE_KEY` logs "no licence key configured: enterprise features are disabled" and serves every community route unchanged; booting with a valid key logs "licence key accepted: enterprise features are enabled".
+Booting without `YORISHIRO_LICENSE_KEY` serves the shared baseline and the ungated features included in the Enterprise build.
 
-CE artifacts exclude the enterprise overlay; EE artifacts compile it in and apply runtime licence gates to the routes listed below.
+| Capability | CE build | EE without a licence | EE with a licence |
+|---|---|---|---|
+| Shared REST and MCP operations | Available | Available | Available |
+| Tenant cap on PostgreSQL | One tenant | One tenant | Configurable |
+| Plan-based quotas and queue policy | Use base limits and queue policy | Use base limits and queue policy | Apply plan rules when enabled |
+| Scheduled embedding reindex | Detect embedding changes from provider metadata | Same default | Use tenant reindex schedules |
+| Workspace embedding override, entity columns, origin and schema forks, worker class, LLM provider settings | Absent | Available | Available |
+| Marketplace, inference jobs and proposals, Stripe, OAuth | Absent | Gated | Available |
 
-## Gated routes
-
-Gated (return 404 without an active licence):
-- `marketplace`
-- `stripe`
-- `oauth`
-- `inference::gated_routes` (`infer-fill` alone)
-
-Ungated (serve regardless):
-- `embedding`
-- `entity_columns`
-- `origin`
-- `worker_class`
-- `inference`'s `/workspace/llm-provider` routes
+SQLite limits both builds to one tenant.
+Gated REST routes return 404 without a licence, and gated MCP tools are omitted from listings and cannot be called.
 
 Stripe webhooks and OAuth login require their own configuration in addition to an active licence.
 The Stripe webhook verifies its signature.

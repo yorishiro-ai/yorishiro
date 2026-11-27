@@ -1,6 +1,6 @@
 //! Which tools an MCP server exposes and which of them a request may see or call.
 
-use std::{collections::HashSet, sync::LazyLock};
+use std::{collections::HashMap, sync::LazyLock};
 
 use crate::models::iam::policy::{AccessLevel, Action};
 
@@ -116,10 +116,17 @@ impl McpToolSet {
 
 // Unknown tools fail closed in read-only mode; scope alone cannot distinguish reads from IAM writes.
 fn read_only_tool(name: &str) -> bool {
-    static READS: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    name == "get_caller_identity"
+        || action_for_tool(name).is_some_and(|action| {
+            matches!(action.access_level(), AccessLevel::List | AccessLevel::Read)
+        })
+}
+
+pub(crate) fn action_for_tool(name: &str) -> Option<Action> {
+    static ACTIONS: LazyLock<HashMap<String, Action>> = LazyLock::new(|| {
         Action::ALL
             .iter()
-            .filter(|action| matches!(action.access_level(), AccessLevel::List | AccessLevel::Read))
+            .copied()
             .map(|action| {
                 let mut name = String::new();
                 for ch in action.name().chars() {
@@ -128,9 +135,9 @@ fn read_only_tool(name: &str) -> bool {
                     }
                     name.push(ch.to_ascii_lowercase());
                 }
-                name
+                (name, action)
             })
             .collect()
     });
-    name == "get_caller_identity" || READS.contains(name)
+    ACTIONS.get(name).copied()
 }

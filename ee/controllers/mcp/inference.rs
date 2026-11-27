@@ -17,15 +17,6 @@ use crate::edition::ee::dtos::inference::{
 };
 use crate::edition::ee::models::{inference_jobs, inference_proposals};
 
-pub(super) const TOOL_NAMES: &[&str] = &[
-    "create_inference_job",
-    "get_inference_job",
-    "list_inference_proposals",
-    "confirm_inference_proposals",
-    "discard_inference_proposals",
-    "get_inference_confirmation",
-];
-
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct InferArgs {

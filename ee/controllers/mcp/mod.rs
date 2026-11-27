@@ -17,6 +17,8 @@ use rmcp::handler::server::router::tool::ToolRouter;
 use crate::controllers::mcp::McpToolPolicy;
 use crate::controllers::mcp::YorishiroMcpServer;
 use crate::controllers::mcp::compose_tool_routers;
+use crate::controllers::mcp::policy::action_for_tool;
+use crate::models::iam::policy::Service;
 
 struct ManagementToolPolicy;
 
@@ -55,10 +57,10 @@ impl McpToolPolicy for ManagementToolPolicy {
     }
 
     fn allows(&self, ctx: &loco_rs::app::AppContext, name: &str) -> bool {
-        if marketplace::TOOL_NAMES.contains(&name) || inference::TOOL_NAMES.contains(&name) {
-            return crate::edition::ee::controllers::middleware::edition::is_active(ctx);
-        }
-        true
+        let gated = action_for_tool(name).is_some_and(|action| {
+            matches!(action.service(), Service::Marketplace | Service::Inference)
+        });
+        !gated || crate::edition::ee::controllers::middleware::edition::is_active(ctx)
     }
 }
 

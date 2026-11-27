@@ -128,6 +128,12 @@ impl Routes {
         self
     }
 
+    /// Returns the licence requirement shared by route mounting and documentation.
+    #[must_use]
+    pub const fn requires_licence(&self) -> bool {
+        self.licensed
+    }
+
     #[must_use]
     pub fn layer<L>(mut self, layer: L) -> Self
     where

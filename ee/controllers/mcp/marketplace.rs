@@ -16,18 +16,6 @@ use uuid::Uuid;
 
 use crate::edition::ee::models::marketplace;
 
-pub(super) const TOOL_NAMES: &[&str] = &[
-    "list_marketplace_templates",
-    "get_marketplace_template",
-    "get_marketplace_version",
-    "list_marketplace_versions",
-    "publish_marketplace_version",
-    "list_marketplace_reviews",
-    "create_marketplace_review",
-    "fork_marketplace_template",
-    "update_marketplace_visibility",
-];
-
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MarketplacePage {

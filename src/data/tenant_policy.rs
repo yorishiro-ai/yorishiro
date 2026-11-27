@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+pub(crate) const DEFAULT_TENANT_CAP: i32 = 1;
+
 /// A configured deployment quota, or a backend isolation constraint that cannot be relaxed.
 pub(crate) enum TenantLimit {
     Unlimited,

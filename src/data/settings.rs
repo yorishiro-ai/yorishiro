@@ -126,7 +126,7 @@ fn default_timezone() -> String {
 }
 
 const fn default_max_tenants() -> i32 {
-    1
+    super::tenant_policy::DEFAULT_TENANT_CAP
 }
 
 #[derive(Clone, Deserialize, Default)]

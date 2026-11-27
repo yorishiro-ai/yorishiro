@@ -30,9 +30,10 @@ impl TenantReindexScheduler {
         _vars: &Vars,
         tick: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
-        if !crate::run_reindex_schedule_override(ctx, tick).await? {
-            crate::workers::startup_reindex::run_metadata_scan(ctx).await?;
-        }
-        Ok(())
+        crate::run_reindex_schedule(ctx, tick).await
     }
+}
+
+pub(crate) async fn run_default(ctx: &AppContext) -> Result<()> {
+    crate::workers::startup_reindex::run_metadata_scan(ctx).await
 }
