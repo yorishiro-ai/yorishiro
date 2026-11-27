@@ -10,4 +10,3 @@ coverage:
 ignore:
   - src/models/_entities/**
   - migration/src/**
-  - src/bin/**
