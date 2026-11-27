@@ -125,7 +125,10 @@ if [[ $# -gt 0 ]]; then
     fi
     after_base=$(sha256sum "$tmp/config/production.yaml" 2>/dev/null || true)
     after_local=$(sha256sum "$tmp/config/production.local.yaml" 2>/dev/null || true)
-    test "$before_base" = "$after_base" && test "$before_local" = "$after_local"
+    if [[ "$before_base" != "$after_base" || "$before_local" != "$after_local" ]]; then
+      echo "$name: the container changed its mounted configuration" >&2
+      return 1
+    fi
     if [[ "$expected" = success && "$ready" != true ]]; then
       cat "/tmp/yorishiro-docker-$name.log" >&2
       return 1

@@ -6,9 +6,9 @@
 
 <!-- Commands run and their results. If a step couldn't be run (e.g. no local DB), say so. -->
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --all-targets --all-features -- -D warnings`
-- [ ] `cargo test --all`
+- [ ] `make check-all` for Community Edition changes
+- [ ] `make check-all-ee` for Enterprise Edition or shared API changes
+- [ ] `make test-postgres` or `make test-sqlite` for affected backends and editions
 
 ## Breaking changes
 

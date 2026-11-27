@@ -149,13 +149,13 @@ restore=$(docker exec "$APP" bash -c '
   fi
 ')
 for marker in INTEG_OWNER INTEG_PERMS; do
-  case "$integrity" in *"$marker"*) ok "$marker" ;; *) bad "$marker ($integrity)" ;; esac
+  grep -Fxq -- "$marker" <<<"$integrity" && ok "$marker" || bad "$marker ($integrity)"
 done
 for marker in UNPRIV_WRITE UNPRIV_UNRMED UNPRIV_MV_INTEGRITY UNPRIV_REDIRECT_FAIL; do
-  case "$unpriv" in *"$marker"*) ok "$marker" ;; *) bad "$marker ($unpriv)" ;; esac
+  grep -Fxq -- "$marker" <<<"$unpriv" && ok "$marker" || bad "$marker ($unpriv)"
 done
 for marker in INTEG_META_INTACT INTEG_RESTORED; do
-  case "$restore" in *"$marker"*) ok "$marker" ;; *) bad "$marker ($restore)" ;; esac
+  grep -Fxq -- "$marker" <<<"$restore" && ok "$marker" || bad "$marker ($restore)"
 done
 
 # Construct an OpenAI-compatible provider without downloading a local model or contacting the endpoint.
@@ -175,7 +175,7 @@ state=$(docker exec "$APP" bash -c '
   echo "active=$(systemctl is-active yorishiro)"
   echo "ping=$(curl --noproxy localhost -s -o /dev/null -w %{http_code} http://localhost:5150/_ping)"' 2>&1)
 
-if grep -q 'active=active' <<<"$state"; then
+if grep -Fxq 'active=active' <<<"$state"; then
   ok "the packaged SQLite service is active"
 else
   bad "expected active for packaged SQLite start, got: $(grep -o 'active=[a-z-]*' <<<"$state")"

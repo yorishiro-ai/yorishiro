@@ -59,7 +59,6 @@ Run the PostgreSQL benchmark with `cargo bench --bench postgres_search -- DATABA
 The connection role must be allowed to assume `yorishiro_app`; the benchmark applies that restricted role and transaction-local tenant/workspace scope inside a read-only transaction.
 
 Licensed checks run on trusted same-repository pull requests and pushes to `develop`, not fork pull requests or merge queue refs.
-If an external run cannot restore the verified E5 model cache, it still runs the tests that do not require the model.
 
 ## Before you push
 
@@ -81,6 +80,13 @@ For dependent changes in this repository, prefer a [stack of small pull requests
 GitHub does not support cross-fork stacks, so a regular pull request from a fork is welcome.
 Merge commits preferred.
 User-facing documentation lives in the [wiki](https://github.com/yorishiro-ai/wiki) and is managed separately from code changes.
+
+## Release recovery
+
+If publishing fails after the release tag is pushed, fix the cause and rerun the failed jobs from the original Actions run while its artifacts are available.
+The publish job accepts an existing tag only when it points to the verified commit, then resumes image and release publication.
+Use the original run so the workflow keeps the same tag, artifacts, and verified image digests.
+Rerunning jobs uses the original workflow revision, so this recovery path does not pick up fixes committed after dispatch.
 
 ## Rules
 

@@ -131,10 +131,9 @@ probe=$(docker run --rm -v "$PKG_DIR":/pkg:ro -v "$REPO/config/production.yaml":
 ALL_WANTS="RUNS USER COPYRIGHT NO_OVERRIDE EXAMPLE EXAMPLE_BYTES STATEOWNER STATEPERMS STATEGRP PROBEOWNER PROBEPERMS STATEWRITE PROBE_UNRMED_BY_YORISHIRO PROBE_INTACT_AFTER_MV REDIRECTOVERWRITE_FAILED POST_META_INTACT POST_RESTORED"
 if [ "$(edition)" = ee ]; then ALL_WANTS="$ALL_WANTS EE_LICENCE"; fi
 for want in $ALL_WANTS; do
-  case "$probe" in
-    *"$want"*) ok "$want" ;;
-    *) bad "$want (probe output: $(echo "$probe" | tr '\n' ' '))" ;;
-  esac
+  grep -Fxq -- "$want" <<<"$probe" \
+    && ok "$want" \
+    || bad "$want (probe output: $(echo "$probe" | tr '\n' ' '))"
 done
 
 # --------------------------------------------------------------------------------------------
@@ -172,9 +171,7 @@ note "rpm on almalinux:10 — the current RPM-family release this supports"
 # 2.39, which is the declared floor. There is no GLIBCXX floor to check against:
 # the candle-based embedding provider links no C++ standard library dynamically.
 #
-# This is the only block that installs an rpm at all: the others install its counterpart deb. So
-# it is not a second opinion on the deb tests, it is the only evidence that the other half of
-# what a release publishes can be unpacked and run.
+# This probe runs the installed RPM binary on the oldest supported glibc.
 # Pull first: progress is written to stderr, and `2>&1` below would put layer names in front of every failure message.
 docker pull -q almalinux:10 >/dev/null 2>&1 || true
 # The exit code is captured into a variable and always printed, rather than being consumed by an
@@ -197,10 +194,9 @@ case "$out" in
   *) bad "almalinux:10 --help never reported an exit code: $(echo "$out" | tr '\n' ' ')" ;;
 esac
 for want in RUNS COPYRIGHT USER; do
-  case "$out" in
-    *"$want"*) ok "almalinux:10 $want" ;;
-    *) bad "almalinux:10 $want (output: $(echo "$out" | tr '\n' ' '))" ;;
-  esac
+  grep -Fxq -- "$want" <<<"$out" \
+    && ok "almalinux:10 $want" \
+    || bad "almalinux:10 $want (output: $(echo "$out" | tr '\n' ' '))"
 done
 
 # --------------------------------------------------------------------------------------------
@@ -208,14 +204,14 @@ note "the systemd unit is valid"
 # --------------------------------------------------------------------------------------------
 # `systemd-analyze` resolves ExecStart, so a unit checked without its binary reports a missing
 # command: a failure about the test environment rather than about the unit.
-out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '
+if out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -ec '
   apt-get -o Acquire::Retries=5 update -qq >/dev/null 2>&1
   apt-get -o Acquire::Retries=5 install -y -qq systemd /pkg/'"$(basename "$(deb)")"' >/dev/null 2>&1
-  systemd-analyze verify /lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service /lib/systemd/system/yorishiro-jobs.service /lib/systemd/system/yorishiro-scheduler.service 2>&1' 2>&1)
-if [ -z "$(echo "$out" | grep -v '^$')" ]; then
-  ok "systemd-analyze verify is silent on server and worker units"
+  systemd-analyze verify /lib/systemd/system/yorishiro.service /lib/systemd/system/yorishiro-worker.service /lib/systemd/system/yorishiro-jobs.service /lib/systemd/system/yorishiro-scheduler.service' 2>&1) \
+  && [ -z "$out" ]; then
+  ok "systemd-analyze verify is silent on all packaged units"
 else
-  bad "systemd-analyze verify complained: $(echo "$out" | head -3 | tr '\n' ' ')"
+  bad "systemd verification failed: ${out:-no output}"
 fi
 
 out=$(docker run --rm -v "$PKG_DIR":/pkg:ro ubuntu:26.04 bash -c '

@@ -110,17 +110,21 @@ jobs:
           components: rustfmt, clippy
           cache-key: check
 
-      - name: Check formatting, scripts, boundaries, tests and Clippy
+      - name: Check formatting, scripts, boundaries, compilation and Clippy
         run: make check-all-ee
 
       - name: Check pinned versions agree
         # Service containers start before checkout and cannot read repository configuration.
+        shell: bash
         run: |
-          for pattern in 'pgvector/pgvector:[A-Za-z0-9.-]+' 'valkey/valkey:[A-Za-z0-9.-]+'; do
-            found="$(grep -rhoE "$pattern" .github docker-compose.yaml docker-compose.dev.yaml docker-compose.test.yaml Dockerfile Makefile | grep -oE '[0-9][0-9.]*$' | sort -u)"
-            if [ "$(wc -l <<<"$found")" -ne 1 ]; then
-              echo "::error::pinned versions disagree for '$pattern':"
-              echo "$found"
+          for image in pgvector/pgvector valkey/valkey; do
+            if ! found=$(grep -rhoE "${image}:[A-Za-z0-9_.:@-]+" .github docker-compose.yaml docker-compose.dev.yaml docker-compose.test.yaml Dockerfile Makefile | sort -u); then
+              echo "::error::could not read a pinned reference for $image"
+              exit 1
+            fi
+            if [[ "$found" == *$'\n'* ]]; then
+              echo "::error::pinned references disagree for $image"
+              printf '%s\n' "$found"
               exit 1
             fi
           done

@@ -15,4 +15,5 @@
 - [x] Match Actions artifacts and release assets, and use the preview date tag in public filenames.
 - [x] Verify release planning and artifact generation locally.
 - [x] Share the release jobs and composite publishing action across both dispatch workflows.
+- [x] Fix packaging assertions and document release recovery after the Actions review.
 - [ ] Verify the release workflows end to end on GitHub Actions.
