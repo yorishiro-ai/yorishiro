@@ -19,7 +19,7 @@ jobs:
       EDITION: ${{ inputs.edition }}
       CARGO_PROFILE_DEV_STRIP: debuginfo
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/rust-setup
         with:
           cache-key: binary-${{ inputs.edition }}-debug
@@ -28,7 +28,7 @@ jobs:
           case "$EDITION" in ce) features=community ;; ee) features=enterprise ;; *) exit 1 ;; esac
           cargo build --locked --no-default-features --features "$features" --bin yorishiro
           tar -C target/debug -czf "$RUNNER_TEMP/binary-$EDITION.tar.gz" yorishiro
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: binary-${{ inputs.edition }}
           path: ${{ runner.temp }}/binary-${{ inputs.edition }}.tar.gz

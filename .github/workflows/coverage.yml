@@ -42,12 +42,12 @@ jobs:
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/rust-setup
         with:
           components: llvm-tools-preview
           cache-key: coverage
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2
         with:
           tool: cargo-llvm-cov
       - name: Require the signed licence
@@ -65,7 +65,7 @@ jobs:
           ignore='(^|/)src/models/_entities/|(^|/)migration/src/|(^|/)src/bin/'
           cargo llvm-cov --locked --workspace --features enterprise --ignore-filename-regex "$ignore" --lcov --output-path lcov.info
           cargo llvm-cov report --ignore-filename-regex "$ignore" | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: codecov/codecov-action@v7
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
