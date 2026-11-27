@@ -14,4 +14,5 @@
 - [x] Build stable dry runs with the requested version and publish the branch and tag only after verification.
 - [x] Match Actions artifacts and release assets, and use the preview date tag in public filenames.
 - [x] Verify release planning and artifact generation locally.
+- [x] Share the release jobs and composite publishing action across both dispatch workflows.
 - [ ] Verify the release workflows end to end on GitHub Actions.

@@ -1,0 +1,147 @@
+name: Publish release
+description: Verify release assets, push the verified tag, and publish the images and GitHub Release
+
+inputs:
+  base:
+    description: Dispatch commit before any stable version bump
+    required: true
+  commit:
+    description: Verified release commit
+    required: true
+  tag:
+    description: Public release tag
+    required: true
+  stable-version:
+    description: Cargo version for a stable release
+    default: ''
+  prerelease:
+    description: Whether to publish as a prerelease
+    required: true
+  image:
+    description: Container image repository
+    required: true
+  token:
+    description: Token for GitHub and the container registry
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        path: dist
+        pattern: 'yorishiro-*.{tar.gz,deb,rpm}'
+        merge-multiple: true
+
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        path: dist
+        name: checksums.txt
+
+    - name: Verify release checksums
+      working-directory: dist
+      shell: bash
+      run: |
+        sha256sum -- *.tar.gz *.deb *.rpm > "$RUNNER_TEMP/release-checksums.txt"
+        diff -u checksums.txt "$RUNNER_TEMP/release-checksums.txt"
+
+    - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-path: |
+          dist/*.tar.gz
+          dist/*.deb
+          dist/*.rpm
+
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+    - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.token }}
+
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        pattern: release-manifest-*
+        path: ${{ runner.temp }}/release-images
+        merge-multiple: true
+
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        pattern: release-smoke-*
+        path: ${{ runner.temp }}/release-images
+        merge-multiple: true
+
+    - uses: ./.github/actions/prepare-stable-source
+      if: ${{ inputs.prerelease == 'false' }}
+      id: snapshot
+      with:
+        version: ${{ inputs.stable-version }}
+
+    - name: Push the verified release tag
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        BASE: ${{ inputs.base }}
+        COMMIT: ${{ inputs.commit }}
+        SNAPSHOT: ${{ steps.snapshot.outputs.commit || inputs.base }}
+        PRERELEASE: ${{ inputs.prerelease }}
+        TAG: ${{ inputs.tag }}
+      shell: bash
+      run: |
+        test "$COMMIT" = "$SNAPSHOT"
+        token_header=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+        export GIT_CONFIG_COUNT=1
+        export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+        export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${token_header}"
+        existing=$(git ls-remote --refs origin "refs/tags/${TAG}")
+        if [ -n "$existing" ]; then
+          # A retry can continue after a successful atomic push.
+          test "$existing" = "$(printf '%s\trefs/tags/%s' "$COMMIT" "$TAG")"
+        elif [ "$PRERELEASE" = "true" ]; then
+          git push --force-with-lease="refs/tags/${TAG}:" origin "${COMMIT}:refs/tags/${TAG}"
+        else
+          develop=$(git ls-remote --refs origin refs/heads/develop)
+          if [ "$develop" != "$(printf '%s\trefs/heads/develop' "$BASE")" ]; then
+            echo 'develop changed after the release was planned.' >&2
+            exit 1
+          fi
+          git push --atomic --force-with-lease="refs/heads/develop:$BASE" \
+            --force-with-lease="refs/tags/${TAG}:" origin \
+            "${COMMIT}:refs/heads/develop" "${COMMIT}:refs/tags/${TAG}"
+        fi
+
+    - name: Promote only smoke-verified image digests
+      env:
+        IMAGE: ${{ inputs.image }}
+        SOURCE: ${{ inputs.commit }}
+        TAG: ${{ inputs.tag }}
+        RUN_ID: ${{ github.run_id }}
+      shell: bash
+      run: python3 scripts/release_images.py promote --image "$IMAGE" --source "$SOURCE" --run-id "$RUN_ID" --tag "$TAG" --directory "$RUNNER_TEMP/release-images"
+
+    - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
+      with:
+        token: ${{ inputs.token }}
+        generate_release_notes: true
+        tag_name: ${{ inputs.tag }}
+        prerelease: ${{ inputs.prerelease }}
+        draft: true
+        fail_on_unmatched_files: true
+        files: |
+          dist/*.tar.gz
+          dist/*.deb
+          dist/*.rpm
+          dist/checksums.txt
+        body: |
+          Release ${{ inputs.tag }} built from `${{ github.ref_name }}`.
+
+          Commit: ${{ inputs.commit }}
+
+          CE and EE are published as separate compile-time artifacts.
+
+    - name: Publish the release after uploading all assets
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        TAG: ${{ inputs.tag }}
+      run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
