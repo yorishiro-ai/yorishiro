@@ -60,13 +60,8 @@ async fn log_request(request: Request, next: Next) -> Response {
     async move {
         let response = next.run(request).await;
         tracing::info!(
-            http_method = %method,
-            http_uri = %path,
             http_status = response.status().as_u16(),
             latency_ms = started.elapsed().as_secs_f64() * 1000.0,
-            user_agent = %user_agent,
-            environment = %environment,
-            request_id = %request_id,
             "http request completed",
         );
         response

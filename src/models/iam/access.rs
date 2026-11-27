@@ -409,16 +409,24 @@ impl<'a> IamEvaluation<'a> {
         target: crate::models::iam::policy::Resource,
     ) -> Result<(), YorishiroError> {
         let result = self.require_with_owner(action, target, false).await;
-        if let Err(YorishiroError::AccessDenied { message, .. }) = &result {
-            let principal = self.principal_yrn().await;
-            tracing::warn!(
-                caller = %self.current.yrn(),
-                principal = %principal,
+        match &result {
+            Ok(()) if tracing::Span::current().has_field("request_id") => tracing::info!(
                 action = %action.qualified(),
                 target = %target.yrn(),
-                reason = %message,
-                "IAM denied the request",
-            );
+                "IAM authorized the operation",
+            ),
+            Err(YorishiroError::AccessDenied { message, .. }) => {
+                let principal = self.principal_yrn().await;
+                tracing::warn!(
+                    caller = %self.current.yrn(),
+                    principal = %principal,
+                    action = %action.qualified(),
+                    target = %target.yrn(),
+                    reason = %message,
+                    "IAM denied the request",
+                );
+            }
+            _ => {}
         }
         result
     }

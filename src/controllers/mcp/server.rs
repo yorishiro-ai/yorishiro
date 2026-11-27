@@ -1,5 +1,7 @@
 //! The MCP server type and its tool dispatch.
 
+use std::time::Instant;
+
 use loco_rs::controller::middleware::request_id::LocoRequestId;
 use tracing::Instrument;
 
@@ -65,11 +67,8 @@ impl YorishiroMcpServer {
     ) -> Result<super::VerifyOutcome, ErrorData> {
         super::authorize::verify(self.app_context(), parts).await
     }
-}
 
-#[tool_handler(router = self.tool_router.clone())]
-impl ServerHandler for YorishiroMcpServer {
-    async fn call_tool(
+    async fn dispatch_tool(
         &self,
         mut request: CallToolRequestParams,
         mut context: RequestContext<RoleServer>,
@@ -123,11 +122,24 @@ impl ServerHandler for YorishiroMcpServer {
         {
             return Ok(err_to_tool_result(error).into());
         }
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await
+    }
+}
+
+#[tool_handler(router = self.tool_router.clone())]
+impl ServerHandler for YorishiroMcpServer {
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
         let request_id = context
             .extensions
             .get::<axum::http::request::Parts>()
             .and_then(|parts| parts.extensions.get::<LocoRequestId>())
             .map_or("req-id-none", LocoRequestId::get);
+        let started = Instant::now();
         let span = tracing::error_span!(
             "mcp-tool",
             tool = %request.name,
@@ -136,14 +148,17 @@ impl ServerHandler for YorishiroMcpServer {
             workspace = tracing::field::Empty,
         );
         async move {
-            let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-            let result = self.tool_router.call(tcc).await;
+            let result = self.dispatch_tool(request, context).await;
             let failed = match &result {
                 Err(_) => true,
                 Ok(CallToolResponse::Complete(response)) => response.is_error.unwrap_or(false),
                 Ok(_) => false,
             };
-            tracing::info!(failed, "mcp tool completed");
+            tracing::info!(
+                failed,
+                latency_ms = started.elapsed().as_secs_f64() * 1000.0,
+                "mcp tool completed",
+            );
             result
         }
         .instrument(span)
