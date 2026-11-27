@@ -298,7 +298,6 @@ mod concurrency {
     #[tokio::test]
     async fn same_tenant_private_jobs_keep_their_key_without_a_default_cap() {
         let overrides = [
-            crate::requests::max_tenants(0),
             ("initializers.plan_policy_enabled", "false".into()),
             ("initializers.worker_admission.tenant_private", "1".into()),
         ];
@@ -340,6 +339,7 @@ mod concurrency {
             return;
         }
         let overrides = [
+            crate::requests::max_tenants(0),
             ("initializers.plan_policy_enabled", "false".into()),
             ("initializers.worker_admission.tenant_private", "1".into()),
         ];
@@ -379,7 +379,6 @@ mod concurrency {
     #[tokio::test]
     async fn same_tenant_shared_and_official_jobs_keep_their_keys_without_default_caps() {
         let overrides = [
-            crate::requests::max_tenants(0),
             ("initializers.plan_policy_enabled", "false".into()),
             ("initializers.worker_admission.shared", "1".into()),
             ("initializers.worker_admission.official", "1".into()),
@@ -419,6 +418,7 @@ mod concurrency {
             return;
         }
         let overrides = [
+            crate::requests::max_tenants(0),
             ("initializers.plan_policy_enabled", "false".into()),
             ("initializers.worker_admission.shared", "1".into()),
             ("initializers.worker_admission.official", "1".into()),
