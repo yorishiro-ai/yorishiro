@@ -96,18 +96,22 @@ async fn environments_follow_the_database_and_queue_kind() {
     guard.set("PORT", "5151");
     guard.set("DB_CONNECT_TIMEOUT", "5000");
     for (database, kind, queue) in [
-        ("postgres://db/app", None, "postgres://queue/app"),
         (
-            "sqlite://db.sqlite3?mode=rwc",
+            "postgres://user:o'brien@db/app",
             None,
-            "sqlite://queue.sqlite3?mode=rwc",
+            "postgres://user:o'brien@queue/app",
+        ),
+        (
+            "sqlite://owner's-db.sqlite3?mode=rwc",
+            None,
+            "sqlite://owner's-queue.sqlite3?mode=rwc",
         ),
         ("sqlite://db.sqlite3?mode=rwc", None, "sqlite::memory:"),
         ("postgres://db/app", Some("Redis"), "redis://redis:6379/15"),
         (
             "sqlite://db.sqlite3?mode=rwc",
             Some("Redis"),
-            "rediss://redis:6379/15",
+            "rediss://:o'brien@redis:6379/15",
         ),
     ] {
         match kind {
