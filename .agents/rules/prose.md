@@ -1,6 +1,6 @@
 # Prose
 
-Both rules below apply to every file in this repository: Markdown, Rust doc comments and line comments, PR bodies, and commit messages.
+Use present tense for repository prose, including Markdown, comments, PR bodies, and commit messages.
 
 ## Never join clauses with a dash
 
@@ -17,11 +17,7 @@ So does one inside a quoted error message or a URL.
 **One sentence is one line.**
 Break after a sentence-ending `.`, `?` or `!` in English, and after `。` in Japanese.
 
-The reader's viewport decides where a sentence wraps.
-A diff then shows the sentence that changed rather than the six lines that shifted under it.
-
-**The unit is the sentence, not the paragraph.**
-Folding a whole paragraph onto one line reaches 400 characters and reads worse than the wrapping it replaced.
+Let the viewport wrap the line and keep each sentence on its own line so diffs show only the sentences you edit.
 
 A `.` inside a code span, a number, a version or an abbreviation does not end a sentence.
 Neither does one inside `**bold**`: breaking there strands the closing `**` at the head of the next line, where it renders as literal asterisks.
@@ -31,13 +27,4 @@ A comment block holding a list, a table, a fence or indented code keeps its line
 `rustfmt` does not reflow a comment's interior, so a long comment line passes `cargo fmt --check` unchanged.
 `max_width` governs code, not the prose inside `//`, `///` and `//!`.
 
-## Fixing these mechanically is banned
-
-A `。` or `.` inside brackets ends no sentence, but a script matching on punctuation alone cuts the parenthetical in half there, and the same instructions reproduce the same cut wherever they run.
-Edit prose by hand, and check the shape of the result: a line whose brackets do not close is a break in the wrong place, and no whitespace-stripped comparison can see it.
-
-## The two checks feed each other
-
-Unwrapping a block joins its lines and can put two sentences on the result; splitting a sentence shortens lines and can drop a block into a wrap detector's window.
-A fix reported at one line can surface a new report elsewhere in the same file.
-That is progress, not regression.
+Edit prose by hand and check that parentheses and brackets stay intact.

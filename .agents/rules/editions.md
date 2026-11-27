@@ -16,13 +16,13 @@ Both check-all targets and CI run it, with deliberate-violation tests.
 
 ## Classification
 
-Which side a feature belongs on is decided by what the feature *is*, never by what it needs.
+Classify features by what the server does.
 
 **The server calling an LLM**, billing, external SaaS and rich UI are `ee/` by character.
 
-"The user brings their own key" does not move a feature out of `ee/`, because it changes who pays rather than what the server does. Any sentence of the form "it does not depend on X" is the wrong test.
+Using the user's key changes who pays, not what the server does.
 
-Unclear cases are a question for the user, asked as the classification itself rather than buried in the options of an implementation question.
+If the classification is unclear, ask the user which edition owns the feature.
 
 ## Composition
 
@@ -36,7 +36,8 @@ Fix the base API first, then adapt its overlay; temporary build failures during 
 The files stay at the repository root where `ee/LICENSE` scopes them while compiling into the same crate.
 The root workspace lists `"."` only; there is one binary, `yorishiro`.
 
-One crate is also what lets loco's own logging reach this application at all: its default filter is a fixed module allowlist plus exactly one `Hooks::app_name()` entry (`logger.rs:192-210`), so a second application crate would be silent unless every `config/*.yaml` named it in `override_filter`.
+Loco's default log filter allows fixed modules and one `Hooks::app_name()` entry.
+A second application crate needs an explicit `override_filter` entry in each `config/*.yaml`.
 
 **There is one `Hooks` impl, inline in `src/lib.rs`, re-exported as `yorishiro::App`.**
 It delegates base behaviour to `src/app.rs` and overlay contributions to `ee/app.rs`, using `RouteMounts`, `McpToolSet` and the worker registry.
@@ -46,30 +47,32 @@ They expose identical functions, checked by both builds.
 No wiring trait is needed for compile-time selection.
 Runtime differences use `QueuePolicy`, `Authenticator` and `WorkerClassResolver` in `shared_store`.
 
-**Workers have one registration per edition.** `src/workers/registry.rs` owns `WorkerRegistry`, a plain value whose `community()` is the baseline and whose `register::<Args, Worker>()` is how `ee/app.rs` adds `infer-fill`. A worker's tags and queue are whatever its `BackgroundWorker::tags()` and `queue()` return. `edition::workers()` composes the final registry, and Loco registration, the Redis queue configuration, and `yorishiro worker-tags` all derive from it. Do not keep a second list of tags or queues anywhere.
+`WorkerRegistry::community()` supplies the base registry, and `ee/app.rs` adds `infer-fill` through `register::<Args, Worker>()`.
+Each worker declares its tags and queue through `BackgroundWorker::tags()` and `queue()`.
+Loco registration, Redis queue configuration, and `yorishiro worker-tags` use the registry from `edition::workers()`; do not maintain separate lists.
 
-**The overlay's paths reach the base by naming, not by the base knowing them.** For example `ee/app.rs` calls `RouteMounts::guard_credentials` for its OAuth entry points, so the per-IP rate limit in `src/` applies to them without `src/` listing any overlay path.
+The overlay calls base wiring directly, as when `ee/app.rs` uses `RouteMounts::guard_credentials` to rate-limit OAuth entry points.
 
-**A table keeps its module under `src/models/` even when only `ee/` uses it.** Migrations and generated entities are one shared schema, and every generated entity needs an `ActiveModelBehavior` (and, for secret-bearing ones, a redacting `Debug`) in every build. The behaviour `ee/` owns for that table lives in `ee/models/`.
+A table keeps its module under `src/models/` even when only `ee/` uses it.
+Every build needs an `ActiveModelBehavior` for each generated entity and a redacting `Debug` for entities with secrets.
+Enterprise-specific behaviour lives in `ee/models/`.
 
 `YorishiroError` is re-exported at the crate root (`pub use error::YorishiroError;`), so `ee/` code reaches it as `crate::YorishiroError`.
 
 ## Licence gate
 
-**The licence gate is a per-request layer, not a compilation boundary.** `ee/controllers/middleware/edition.rs` verifies a signed licence key against `ee/keys/licence-public.pem`. Its `licence_gate` reads that state on every request and answers 404 on the routes it is attached to, applied through `Routes::layer` so it reaches exactly those routes and cannot leak onto the community ones.
+`ee/controllers/middleware/edition.rs` verifies licence signatures against `ee/keys/licence-public.pem`.
+Use `Routes::layer` to apply `licence_gate` only to the routes that require an active licence.
 
-Per request rather than at boot is deliberate: `LicenceState::is_active` compares `exp` against the current clock, so a key that lapses while the process runs stops unlocking enterprise features without a restart, which a route set decided once at boot could not express.
+`LicenceState::is_active` compares `exp` against the current clock so enterprise access ends at expiry without a restart.
 
 Booting with no `YORISHIRO_LICENSE_KEY` logs "no licence key configured: enterprise features are disabled" and serves every community route unchanged; booting with a valid key logs "licence key accepted: enterprise features are enabled".
 
 CE artifacts exclude the enterprise overlay; EE artifacts compile it in and apply runtime licence gates to the routes listed below.
-Artifact selection determines available code, while configuration and licence state determine which compiled capabilities are active.
 
 ## Gated routes
 
-**Which routes are gated is narrower than "everything under `ee/`".**
-
-Gated (return 404 without licence key):
+Gated (return 404 without an active licence):
 - `marketplace`
 - `stripe`
 - `oauth`
@@ -82,7 +85,9 @@ Ungated (serve regardless):
 - `worker_class`
 - `inference`'s `/workspace/llm-provider` routes
 
-**`stripe` and `oauth` are gated because billing and SSO login are enterprise-edition features.** The webhook still verifies its Stripe signature; both do nothing until their own configuration is set. The consequences are meant: a deployment that has not bought a licence cannot receive Stripe webhooks, and cannot serve OAuth login either, so anyone who signs in that way needs a password credential for `POST /auth/login` instead.
+Stripe webhooks and OAuth login require their own configuration in addition to an active licence.
+The Stripe webhook verifies its signature.
+Without OAuth login, users need password credentials for `POST /auth/login`.
 
 ## Licence tests
 

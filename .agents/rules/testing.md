@@ -7,8 +7,8 @@ Run commands from the repository root, or use `make -C /path/to/repo <target>`.
 | Command | What it does | Backend |
 |---|---|---|
 | `make test-sqlite` | SQLite-specific storage, locking, queue and request smoke tests selected by `SQLITE_TEST_FILTERS`; `EDITION=ce` selects community, the default is `ee` | SQLite |
-| `make test-valkey` | Only the Valkey queue provider tests, with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` (default: the compose `redis` service) | SQLite + Valkey |
-| `make test-postgres` | The whole suite, which is the primary one, on PostgreSQL; every test creates and drops its own database | PostgreSQL |
+| `make test-valkey` | Valkey queue tests; override the default Compose endpoint with `VALKEY_URL` | SQLite + Valkey |
+| `make test-postgres` | Full suite; request tests use disposable databases | PostgreSQL |
 | `make check-ce` | `cargo check --locked --no-default-features --features community --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
 | `make clippy-ce` | Strict Clippy for every CE target, including tests | CE |
@@ -27,7 +27,8 @@ Run commands from the repository root, or use `make -C /path/to/repo <target>`.
 | `DATABASE_URL` | `postgres://yorishiro:yorishiro@localhost:15432/yorishiro` | Target database for the test command |
 | `DB_MAX_CONNECTIONS` | `100` in CI and the PostgreSQL example | PostgreSQL pool maximum; production defaults are documented separately |
 | `DB_CONNECT_TIMEOUT` | `5000` in CI and the PostgreSQL example | PostgreSQL connection timeout |
-The backend comes from `DATABASE_URL` and the edition from the feature set; there is no other test selector.
+
+`DATABASE_URL` selects the database backend, and Cargo features select the edition.
 A Valkey (Redis-compatible) queue runs with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` naming a server; the Valkey tests skip otherwise.
 A test that needs a licensed edition calls `crate::requests::require_licence(&ctx)` after boot.
 It installs a test licence unless `YORISHIRO_LICENSE_KEY` already holds a valid key, so these tests run in every environment.
@@ -68,12 +69,12 @@ A test changes the booted app's configuration by passing overrides to `boot_requ
 ### CI
 
 CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus `make test-licence`, which verifies a signed key with the repository secret.
-The PostgreSQL job runs every test.
-The SQLite job uses the module and test-name filters in `SQLITE_TEST_FILTERS`.
+The signed licence job runs on pushes to `develop` and eligible same-repository pull requests, not on forks or merge queue refs.
+`RUST_TEST_THREADS` controls parallelism; CI limits the unlicensed EE PostgreSQL job to two threads.
 A new request test belongs to PostgreSQL unless it checks something SQLite-specific.
 The package and Docker installability checks run in `packaging.yml`, selected by its path filters on pull requests and on pushes to `develop`.
 
-The integration tests are one binary rooted at `tests/mod.rs`.
+The integration tests form one Loco test binary rooted at `tests/mod.rs`, without `#[path]` includes.
 A test file sits at the same path as the source file it covers; not every source file has tests.
 
 - `tests/controllers/`: REST handlers, MCP tools, middleware, route inventory, OpenAPI assembly
@@ -94,7 +95,8 @@ There is no `tests/lib.rs` and no `tests/test_helpers.rs`, and no Python test su
 
 Every test is under `tests/`. `src/` and `ee/` contain no `#[test]` and no `#[cfg(test)]`: CI rejects both.
 Keep items private or crate-visible unless production callers or integration tests need the public boundary.
-Test-only seams in production code are not allowed either: a dispatcher is replaced by inserting an `Arc<dyn Trait>` into `AppContext::shared_store`, the same call production makes.
+Do not add test-only seams to production code.
+To replace a dispatcher, insert an `Arc<dyn Trait>` into `AppContext::shared_store` as production code does.
 
 `tests/` builds without the enterprise feature (`--no-default-features --features community`).
 A module that needs `ee/` is declared with `#[cfg(feature = "enterprise")]`, and a test that asserts an enterprise-only behaviour is gated the same way.
@@ -122,26 +124,15 @@ Call sites:
 if !require_sqlite_backend() { return; }
 ```
 
-Files that need a specific backend guard with it:
-- `tests/models/entity_entities/sqlite.rs`: entity CRUD and FTS on SQLite
-- `tests/models/tenancy/sqlite.rs`: the SQLite tenancy cap
-- `tests/models/search.rs`: PostgreSQL-only query shapes, guarded the other way
-
-
 ## `close_app_pools` (required)
 
-**`boot_request` closes the pools itself; a test that boots an app by other means must call `close_app_pools` before it returns, or teardown panics even on a passing test.**
-
-One definition, in `tests/requests/mod.rs`. One crate means one binary, so every suite reaches it by path.
-
-`after_context` shares the application pool with identity operations and opens a separate tenant pool.
-Test teardown must explicitly close both pools before `DROP DATABASE`.
+`boot_request` gives each test a disposable SQLite file or PostgreSQL database and closes its pools before cleanup.
+If a test boots an app another way, call `close_app_pools` from `tests/requests/mod.rs` before returning so cleanup can drop the database.
 
 ## Boot failure diagnostics
 
-A boot failure that leaves a pool open surfaces as a `DROP DATABASE` panic during cleanup, not as the actual boot error. `after_context` opens the identity pool eagerly before `db::converge` runs; if `converge` then fails, that pool holds a session that blocks `DROP DATABASE`.
-
-`close_app_pools` in `tests/requests/mod.rs` closes every pool this app opens. Use it before assuming a `DROP DATABASE` panic is the actual failure.
+A `DROP DATABASE` panic can mask a boot failure if a pool still holds a session.
+Check the boot error and ensure teardown closes the pools.
 
 ## PostgreSQL requirements
 

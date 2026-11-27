@@ -6,41 +6,31 @@
 
 [インストール](#始め方) · [初回起動](https://yorishiro-ai.github.io/wiki/ja/installation/first-run/) · [ドキュメント](https://yorishiro-ai.github.io/wiki/ja/) · [リリース](https://github.com/yorishiro-ai/yorishiro/releases)
 
-**AIエージェントから読み書きできる、スキーマを自分で定義するナレッジストア。**
+**スキーマを自分で定義できる、AI エージェント向けのナレッジストア。**
 
-Yorishiroは、構造を持つデータと、そのデータ同士のつながりを保存します。
-MCPを通してスキーマを作り、データを書き込み、必要な情報を意味で検索できます。
-
-- **保存する構造を自分で決める。** エンティティの構造をスキーマで定義し、そのスキーマに沿ってデータを管理します。
-- **言葉が一致しなくても探す。** キーワードだけでなく意味でエンティティを検索できます。
-- **MCPから読み書きする。** スキーマの作成、エンティティの取得・更新、検索をMCPツールとして提供します。[ツール一覧](https://yorishiro-ai.github.io/wiki/ja/reference/mcp-tools/)
-- **データ同士のつながりも残す。** エンティティ間にリレーションを作成し、保存した関係を一覧や個別取得で参照できます。
-- **テンプレートから始める。** スキーマの構成にはテンプレートも使えます。[テンプレートガイド](https://yorishiro-ai.github.io/wiki/ja/guides/templates/)
-- **自分の環境で動かす。** SQLiteは単一テナント向け、PostgreSQLはRLSによるテナント分離に対応しています。[SQLiteの対応範囲](https://yorishiro-ai.github.io/wiki/ja/guides/sqlite/)
+[MCP ツール](https://yorishiro-ai.github.io/wiki/ja/reference/mcp-tools/)で、スキーマの定義、エンティティの読み書き、リレーションの管理、意味による検索ができます。
+[テンプレート](https://yorishiro-ai.github.io/wiki/ja/guides/templates/)をもとにスキーマを作ることもできます。
+SQLite は[単一テナント](https://yorishiro-ai.github.io/wiki/ja/guides/sqlite/)に対応し、PostgreSQL は行レベルセキュリティでテナントを分離します。
 
 ---
 
 ## 始め方
 
-サーバー、埋め込みワーカー、アプリケーションジョブ用ワーカー、スケジューラーをDocker Composeで起動します。
-[Docker Composeガイド](https://yorishiro-ai.github.io/wiki/ja/installation/docker-compose/)の構成を `compose.yml` に保存し、イメージの `<VERSION>` を使うリリースタグに置き換えてください。
-そのファイルのあるディレクトリで実行します。
+サーバー、埋め込みワーカー、アプリケーションジョブ用ワーカー、スケジューラーを Docker Compose で起動します。
+[Docker Compose ガイド](https://yorishiro-ai.github.io/wiki/ja/installation/docker-compose/)の構成を `compose.yml` に保存し、イメージの `<VERSION>` を利用するリリースタグに置き換えます。
+`compose.yml` のあるディレクトリで次のコマンドを実行します。
 
 ```bash
 docker compose up -d
 ```
 
-起動したサーバーには `http://localhost:5150` で接続できます。
-[初回起動の手順](https://yorishiro-ai.github.io/wiki/ja/installation/first-run/)で最初のアカウントと API キーを作成してください。
+`http://localhost:5150` に接続し、[初回起動の手順](https://yorishiro-ai.github.io/wiki/ja/installation/first-run/)に沿って最初のアカウントと API キーを作成します。
 
-データの保存先、埋め込みモデル、DBの選択は[Docker Composeガイド](https://yorishiro-ai.github.io/wiki/ja/installation/docker-compose/)を参照してください。
-Docker以外では、[パッケージのインストール](https://yorishiro-ai.github.io/wiki/ja/installation/packages/)と[ソースからのビルド](https://yorishiro-ai.github.io/wiki/ja/installation/build/)を案内しています。
+Docker を使わない場合は、[パッケージをインストール](https://yorishiro-ai.github.io/wiki/ja/installation/packages/)するか、[ソースからビルド](https://yorishiro-ai.github.io/wiki/ja/installation/build/)します。
 
 ## ドキュメント
 
-使い方、設定、運用手順は[Wiki](https://yorishiro-ai.github.io/wiki/ja/)にまとめています。
-
-[インストール](https://yorishiro-ai.github.io/wiki/ja/installation/) · [設定](https://yorishiro-ai.github.io/wiki/ja/configuration/) · [埋め込み](https://yorishiro-ai.github.io/wiki/ja/configuration/embedding/) · [ワーカーとキュー](https://yorishiro-ai.github.io/wiki/ja/configuration/workers-and-queues/) · [MCPツール](https://yorishiro-ai.github.io/wiki/ja/reference/mcp-tools/)
+[インストール](https://yorishiro-ai.github.io/wiki/ja/installation/) · [設定](https://yorishiro-ai.github.io/wiki/ja/configuration/) · [埋め込み](https://yorishiro-ai.github.io/wiki/ja/configuration/embedding/) · [ワーカーとキュー](https://yorishiro-ai.github.io/wiki/ja/configuration/workers-and-queues/) · [MCP ツール](https://yorishiro-ai.github.io/wiki/ja/reference/mcp-tools/)
 
 ## このリポジトリで作業するエージェントへ
 
