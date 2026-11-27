@@ -157,7 +157,7 @@ impl<'a> RequestAuth<'a> {
                 return Err(YorishiroError::Unauthenticated);
             }
         }
-        super::access_log::authenticated(&ctx);
+        super::access_log::authenticated(&ctx).await?;
         Ok(ctx)
     }
 

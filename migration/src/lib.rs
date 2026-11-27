@@ -17,6 +17,7 @@ mod m20261020_000013_queue_jobs;
 mod m20261020_000014_entity_embeddings;
 mod m20261118_000015_iam;
 mod m20261121_000016_workspace_list_rls;
+mod m20261127_000017_api_events;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -76,6 +77,7 @@ impl MigratorTrait for Migrations {
             Box::new(m20261020_000014_entity_embeddings::Migration),
             Box::new(m20261118_000015_iam::Migration),
             Box::new(m20261121_000016_workspace_list_rls::Migration),
+            Box::new(m20261127_000017_api_events::Migration),
             // inject-above (do not remove this comment)
         ]
     }

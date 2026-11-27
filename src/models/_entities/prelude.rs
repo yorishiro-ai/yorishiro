@@ -2,6 +2,7 @@
 
 pub use super::access_key_audit_log::Entity as AccessKeyAuditLog;
 pub use super::access_keys::Entity as AccessKeys;
+pub use super::api_events::Entity as ApiEvents;
 pub use super::compute_credit_ledger::Entity as ComputeCreditLedger;
 pub use super::entity_column_preferences::Entity as EntityColumnPreferences;
 pub use super::entity_embeddings::Entity as EntityEmbeddings;

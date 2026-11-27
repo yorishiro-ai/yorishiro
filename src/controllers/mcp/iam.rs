@@ -8,7 +8,8 @@ use rmcp::{tool, tool_router};
 
 use super::YorishiroMcpServer;
 use crate::dtos::iam::{
-    AuditRecord, ListAudit, SimulatePrincipalPolicyRequest, SimulatePrincipalPolicyResponse,
+    ApiEventRecord, AuditRecord, ListApiEvents, ListAudit, SimulatePrincipalPolicyRequest,
+    SimulatePrincipalPolicyResponse,
 };
 use crate::models::pagination::ListParams;
 
@@ -31,6 +32,32 @@ impl YorishiroMcpServer {
                         .map(AuditRecord::from)
                         .collect::<Vec<_>>()
                 }),
+        )
+    }
+
+    #[tool(
+        description = "List the tenant's recorded REST and MCP calls: who, when, from where, what and the outcome. Requires audit:ListApiEvents."
+    )]
+    pub(crate) async fn list_api_events(
+        &self,
+        Parameters(input): Parameters<ListApiEvents>,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let auth = verified!(self, parts);
+        render(
+            crate::models::api_events::Model::list_as(
+                &self.app_context().db,
+                &auth,
+                ListParams::from(&input),
+                input.request_id.as_deref(),
+            )
+            .await
+            .map(|events| {
+                events
+                    .into_iter()
+                    .map(ApiEventRecord::from)
+                    .collect::<Vec<_>>()
+            }),
         )
     }
 

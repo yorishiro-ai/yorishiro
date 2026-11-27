@@ -31,6 +31,9 @@ pub mod workspace_workspaces;
 pub mod access_key_audit_log;
 pub mod access_keys;
 
+// The append-only trail of every call.
+pub mod api_events;
+
 // IAM: policies, groups, roles and the checks that evaluate them.
 pub mod iam;
 pub mod iam_audit_events;

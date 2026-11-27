@@ -154,6 +154,7 @@ impl ServerHandler for YorishiroMcpServer {
         };
         access_log::track(
             call,
+            &self.ctx.db,
             self.dispatch_tool(request, context),
             |result| match result {
                 Err(error) => ("failed", Some(i64::from(error.code.0))),
@@ -161,6 +162,11 @@ impl ServerHandler for YorishiroMcpServer {
                     ("failed", None)
                 }
                 Ok(_) => ("success", None),
+            },
+            || {
+                Err(crate::error::mcp_internal(
+                    "the call could not be recorded in the audit trail",
+                ))
             },
         )
         .await

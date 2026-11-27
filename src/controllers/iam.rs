@@ -6,7 +6,8 @@ use loco_rs::app::AppContext;
 use crate::controllers::openapi::Routes;
 use crate::controllers::{ApiError, extractors::AuthContext};
 use crate::dtos::iam::{
-    AuditRecord, ListAudit, SimulatePrincipalPolicyRequest, SimulatePrincipalPolicyResponse,
+    ApiEventRecord, AuditRecord, ListApiEvents, ListAudit, SimulatePrincipalPolicyRequest,
+    SimulatePrincipalPolicyResponse,
 };
 
 async fn list_iam_audit_events(
@@ -18,6 +19,21 @@ async fn list_iam_audit_events(
         &ctx.db,
         &actor,
         crate::models::pagination::ListParams::from(&input),
+    )
+    .await?;
+    Ok(Json(events.into_iter().map(Into::into).collect()))
+}
+
+async fn list_api_events(
+    State(ctx): State<AppContext>,
+    AuthContext(actor): AuthContext,
+    axum::extract::Query(input): axum::extract::Query<ListApiEvents>,
+) -> Result<Json<Vec<ApiEventRecord>>, ApiError> {
+    let events = crate::models::api_events::Model::list_as(
+        &ctx.db,
+        &actor,
+        crate::models::pagination::ListParams::from(&input),
+        input.request_id.as_deref(),
     )
     .await?;
     Ok(Json(events.into_iter().map(Into::into).collect()))
@@ -45,6 +61,10 @@ pub(crate) fn routes() -> Routes {
         .add(
             "/api/iam-audit-events",
             aide::axum::routing::get_with(list_iam_audit_events, |op| op.id("ListIamAuditEvents")),
+        )
+        .add(
+            "/api/api-events",
+            aide::axum::routing::get_with(list_api_events, |op| op.id("ListApiEvents")),
         )
         .add(
             "/api/simulate-principal-policy",

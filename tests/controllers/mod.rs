@@ -1,4 +1,5 @@
 mod access_keys;
+mod api_events;
 mod audit_log;
 mod auth;
 mod entities;

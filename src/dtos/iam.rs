@@ -18,6 +18,68 @@ pub(crate) struct ListAudit {
     pub offset: Option<i64>,
 }
 
+#[derive(Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ListApiEvents {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    /// Only the events of this request.
+    pub request_id: Option<String>,
+}
+
+/// One recorded call: who made it, when, from where, what it was, and how it ended.
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct ApiEventRecord {
+    pub id: Uuid,
+    pub request_id: String,
+    /// `started` before a write runs, `completed` when any call ends.
+    pub phase: String,
+    pub event_time: chrono::DateTime<chrono::FixedOffset>,
+    pub transport: String,
+    /// The REST route or the MCP tool name.
+    pub event_name: String,
+    pub read_only: bool,
+    pub source_ip: Option<String>,
+    pub user_agent: String,
+    pub tenant_id: Option<Uuid>,
+    pub user_id: Option<Uuid>,
+    pub access_key_id: Option<Uuid>,
+    /// The YRN of the access key the call was made with.
+    pub caller: Option<String>,
+    pub workspace_id: Option<Uuid>,
+    /// The IAM checks that passed, each as `action target-YRN`.
+    pub permissions: serde_json::Value,
+    /// `success`, `denied` or `failed`.
+    pub outcome: Option<String>,
+    pub status_code: Option<i32>,
+    pub latency_ms: Option<i64>,
+}
+
+impl From<crate::models::api_events::Model> for ApiEventRecord {
+    fn from(event: crate::models::api_events::Model) -> Self {
+        Self {
+            id: event.id,
+            request_id: event.request_id,
+            phase: event.phase,
+            event_time: event.created_at,
+            transport: event.transport,
+            event_name: event.event_name,
+            read_only: event.read_only,
+            source_ip: event.source_ip,
+            user_agent: event.user_agent,
+            tenant_id: event.tenant_id,
+            user_id: event.user_id,
+            access_key_id: event.access_key_id,
+            caller: event.caller,
+            workspace_id: event.workspace_id,
+            permissions: event.permissions,
+            outcome: event.outcome,
+            status_code: event.status_code,
+            latency_ms: event.latency_ms,
+        }
+    }
+}
+
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct AuditRecord {
     pub id: Uuid,
@@ -86,4 +148,4 @@ impl From<crate::models::iam::access::Simulation> for SimulatePrincipalPolicyRes
     }
 }
 
-crate::dtos::common::list_params_from!(ListAudit, ListIam);
+crate::dtos::common::list_params_from!(ListAudit, ListIam, ListApiEvents);

@@ -1,0 +1,106 @@
+use sea_orm_migration::prelude::*;
+use sea_orm_migration::sea_orm::DbBackend;
+
+use crate::helpers;
+
+#[derive(DeriveMigrationName)]
+pub(crate) struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    fn use_transaction(&self) -> Option<bool> {
+        helpers::use_transaction()
+    }
+
+    /// One row per recorded call phase (`started`, `authenticated`, `completed`), written by the application and never changed or removed.
+    /// `tenant_id` has no foreign key so a retired tenant's trail survives the tenant.
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        let sqlite = manager.get_database_backend() == DbBackend::Sqlite;
+        let mut read_only = ColumnDef::new(Alias::new("read_only"));
+        read_only.boolean().not_null();
+        manager
+            .create_table(
+                Table::create()
+                    .table(Alias::new("api_events"))
+                    .col(helpers::uuidv7_pk(manager))
+                    .col(ColumnDef::new(Alias::new("request_id")).text().not_null())
+                    .col(ColumnDef::new(Alias::new("phase")).text().not_null())
+                    .col(helpers::uuid_col(manager, Alias::new("tenant_id")))
+                    .col(helpers::uuid_col(manager, Alias::new("access_key_id")))
+                    .col(helpers::uuid_col(manager, Alias::new("user_id")))
+                    .col(helpers::uuid_col(manager, Alias::new("workspace_id")))
+                    .col(ColumnDef::new(Alias::new("caller")).text())
+                    .col(ColumnDef::new(Alias::new("transport")).text().not_null())
+                    .col(ColumnDef::new(Alias::new("event_name")).text().not_null())
+                    .col(&mut read_only)
+                    .col(ColumnDef::new(Alias::new("source_ip")).text())
+                    .col(ColumnDef::new(Alias::new("user_agent")).text().not_null())
+                    .col(helpers::json_col(manager, Alias::new("permissions")).not_null())
+                    .col(ColumnDef::new(Alias::new("outcome")).text())
+                    .col(ColumnDef::new(Alias::new("status_code")).integer())
+                    .col(ColumnDef::new(Alias::new("latency_ms")).big_integer())
+                    .col(helpers::created_at(manager))
+                    .check((
+                        Alias::new("ck_api_events_phase"),
+                        Expr::cust("phase IN ('started', 'authenticated', 'completed')"),
+                    ))
+                    .check((
+                        Alias::new("ck_api_events_outcome"),
+                        Expr::cust("outcome IS NULL OR outcome IN ('success', 'denied', 'failed')"),
+                    ))
+                    .to_owned(),
+            )
+            .await?;
+        for (name, columns) in [
+            ("idx_api_events_tenant_created", ["tenant_id", "created_at"]),
+            ("idx_api_events_request", ["request_id", "created_at"]),
+        ] {
+            let mut index = Index::create();
+            index.name(name).table(Alias::new("api_events"));
+            for column in columns {
+                index.col(Alias::new(column));
+            }
+            manager.create_index(index.clone()).await?;
+        }
+        helpers::enable_rls_with_policy(
+            manager,
+            "api_events",
+            "tenant_isolation",
+            "tenant_id",
+            "app.current_tenant",
+            true,
+        )
+        .await?;
+        helpers::grant(manager, "SELECT", "api_events").await?;
+        helpers::pg_only(
+            manager,
+            "CREATE FUNCTION api_events_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN RAISE EXCEPTION 'api_events is append-only'; END $$;
+             CREATE TRIGGER api_events_append_only BEFORE UPDATE OR DELETE ON api_events
+                 FOR EACH ROW EXECUTE FUNCTION api_events_immutable();
+             CREATE TRIGGER api_events_no_truncate BEFORE TRUNCATE ON api_events
+                 FOR EACH STATEMENT EXECUTE FUNCTION api_events_immutable();",
+        )
+        .await?;
+        if sqlite {
+            for event in ["UPDATE", "DELETE"] {
+                manager
+                    .get_connection()
+                    .execute_unprepared(&format!(
+                        "CREATE TRIGGER api_events_no_{} BEFORE {event} ON api_events
+                         BEGIN SELECT RAISE(ABORT, 'api_events is append-only'); END;",
+                        event.to_lowercase()
+                    ))
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(Alias::new("api_events")).to_owned())
+            .await?;
+        helpers::pg_only(manager, "DROP FUNCTION IF EXISTS api_events_immutable();").await
+    }
+}

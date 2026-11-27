@@ -84,14 +84,19 @@ pub async fn issue_login_key(
     let key =
         crate::models::access_keys::Entity::create_login_key(&txn, tenant_id, user_id).await?;
     txn.commit().await.internal()?;
-    crate::controllers::middleware::access_log::authenticated(
+    // The key is already issued, so a trail failure here is logged and the completed row carries the identity.
+    if let Err(error) = crate::controllers::middleware::access_log::authenticated(
         &crate::models::access_keys::AuthContext {
             access_key_id: key.id,
             workspace_id: None,
             tenant_id,
             user_id: Some(user_id),
         },
-    );
+    )
+    .await
+    {
+        tracing::error!(%error, "the sign-in could not be attributed in the trail");
+    }
     Ok((key, tenant_id))
 }
 
