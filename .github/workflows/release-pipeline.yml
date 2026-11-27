@@ -147,7 +147,7 @@ jobs:
           file-version: ${{ needs.prepare.outputs.file-version }}
 
   docker:
-    needs: [prepare, package-tests]
+    needs: prepare
     strategy:
       matrix:
         include:
@@ -180,7 +180,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   docker-manifest:
-    needs: [docker, prepare]
+    needs: [docker, package-tests, prepare]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-26.04
     permissions:
