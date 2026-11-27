@@ -16,6 +16,7 @@ pub struct Model {
     pub access_key_id: Option<Uuid>,
     pub user_id: Option<Uuid>,
     pub workspace_id: Option<Uuid>,
+    pub job_id: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
     pub caller: Option<String>,
     #[sea_orm(column_type = "Text")]

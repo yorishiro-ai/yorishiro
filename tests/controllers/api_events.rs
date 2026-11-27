@@ -137,6 +137,18 @@ async fn mcp_calls_leave_the_envelope_and_the_tool_call() {
         assert_eq!(tool[0].outcome.as_deref(), Some("success"));
         assert_eq!(tool[0].tenant_id, Some(tenant.tenant_id));
         assert!(rows.iter().any(|row| row.transport == "mcp_http" && row.event_name == "POST /mcp"));
+        let listed = request
+            .post("/mcp")
+            .add_header("Accept", "application/json, text/event-stream")
+            .add_header("MCP-Session-Id", super::mcp::initialize(&request).await)
+            .add_header("MCP-Protocol-Version", "2025-03-26")
+            .add_header("x-request-id", "trail-mcp-list")
+            .json(&json!({"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}))
+            .await;
+        listed.assert_status_ok();
+        assert!(events_of(&ctx, "trail-mcp-list").await.iter().any(|row| {
+            row.transport == "mcp" && row.event_name == "tools/list" && row.read_only
+        }));
     })
     .await;
 }
@@ -299,6 +311,50 @@ async fn a_call_that_cannot_be_recorded_is_refused() {
             workspaces
                 .iter()
                 .all(|workspace| workspace["name"] != "never-created")
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_background_job_is_followed_from_its_request_to_its_end() {
+    boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let accepted = request
+            .post("/api/import-jobs")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("x-request-id", "trail-job")
+            .text("")
+            .await;
+        accepted.assert_status(StatusCode::ACCEPTED);
+        let id = accepted.json::<Value>()["import_job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        crate::requests::jobs::finish_via_api(
+            &request,
+            &ctx,
+            id,
+            &tenant.api_key,
+            &format!("/api/import-jobs/{id}"),
+        )
+        .await;
+        let rows = events_of(&ctx, "trail-job").await;
+        let job: Vec<_> = rows.iter().filter(|row| row.transport == "job").collect();
+        assert_eq!(
+            job.len(),
+            1,
+            "the request's trail ends with the job: {rows:#?}"
+        );
+        assert_eq!(job[0].job_id, Some(id));
+        assert_eq!(job[0].event_name, "import");
+        assert_eq!(job[0].tenant_id, Some(tenant.tenant_id));
+        assert_eq!(job[0].workspace_id, Some(tenant.workspace_id));
+        assert_eq!(job[0].outcome.as_deref(), Some("success"));
+        assert!(
+            rows.iter()
+                .any(|row| row.transport == "rest" && row.phase == "completed")
         );
     })
     .await;

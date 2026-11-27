@@ -126,6 +126,29 @@ impl YorishiroMcpServer {
     }
 }
 
+impl YorishiroMcpServer {
+    fn tool_listing(&self, context: &RequestContext<RoleServer>) -> ListToolsResult {
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
+        let mut tools: Vec<_> = self
+            .tool_router
+            .list_all()
+            .into_iter()
+            .map(|tool| self.advertised_tool(tool))
+            .collect();
+        tools.retain(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()));
+        ListToolsResult {
+            result_type: Some(ResultType::COMPLETE),
+            tools,
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(rmcp::model::CacheScope::Public),
+        }
+    }
+}
+
 #[tool_handler(router = self.tool_router.clone())]
 impl ServerHandler for YorishiroMcpServer {
     async fn call_tool(
@@ -133,13 +156,7 @@ impl ServerHandler for YorishiroMcpServer {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let parts = context.extensions.get::<axum::http::request::Parts>();
-        let request_id = parts
-            .and_then(|parts| parts.extensions.get::<LocoRequestId>())
-            .cloned();
-        let source_ip = parts.and_then(|parts| access_log::source_ip(&parts.extensions));
-        let user_agent =
-            parts.map_or_default(|parts| access_log::user_agent(&parts.headers).to_owned());
+        let (request_id, source_ip, user_agent) = request_source(&context);
         let tool = self
             .tool_router
             .get(&request.name)
@@ -172,29 +189,33 @@ impl ServerHandler for YorishiroMcpServer {
         .await
     }
 
-    fn list_tools(
+    async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send {
-        let supports_cache_hints = context
-            .protocol_version()
-            .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
-        let mut tools: Vec<_> = self
-            .tool_router
-            .list_all()
-            .into_iter()
-            .map(|tool| self.advertised_tool(tool))
-            .collect();
-        tools.retain(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()));
-        std::future::ready(Ok(ListToolsResult {
-            result_type: Some(ResultType::COMPLETE),
-            tools,
-            meta: None,
-            next_cursor: None,
-            ttl_ms: supports_cache_hints.then_some(0),
-            cache_scope: supports_cache_hints.then_some(rmcp::model::CacheScope::Public),
-        }))
+    ) -> Result<ListToolsResult, ErrorData> {
+        let (request_id, source_ip, user_agent) = request_source(&context);
+        let listing = self.tool_listing(&context);
+        let call = access_log::Call {
+            transport: "mcp",
+            operation: "tools/list",
+            request_id: request_id.as_ref(),
+            read_only: true,
+            source_ip,
+            user_agent: &user_agent,
+        };
+        access_log::track(
+            call,
+            &self.ctx.db,
+            std::future::ready(Ok(listing)),
+            |_| ("success", None),
+            || {
+                Err(crate::error::mcp_internal(
+                    "the call could not be recorded in the audit trail",
+                ))
+            },
+        )
+        .await
     }
 
     fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
@@ -218,4 +239,17 @@ impl ServerHandler for YorishiroMcpServer {
              Tenant root sign-in sessions have full tenant access; issued keys keep the grants of their user.",
         )
     }
+}
+
+fn request_source(
+    context: &RequestContext<RoleServer>,
+) -> (Option<LocoRequestId>, Option<std::net::IpAddr>, String) {
+    let parts = context.extensions.get::<axum::http::request::Parts>();
+    (
+        parts
+            .and_then(|parts| parts.extensions.get::<LocoRequestId>())
+            .cloned(),
+        parts.and_then(|parts| access_log::source_ip(&parts.extensions)),
+        parts.map_or_default(|parts| access_log::user_agent(&parts.headers).to_owned()),
+    )
 }

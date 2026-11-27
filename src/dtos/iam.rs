@@ -47,6 +47,8 @@ pub(crate) struct ApiEventRecord {
     /// The YRN of the access key the call was made with.
     pub caller: Option<String>,
     pub workspace_id: Option<Uuid>,
+    /// The background job this row ends, when it is not a request.
+    pub job_id: Option<Uuid>,
     /// The IAM checks that passed, each as `action target-YRN`.
     pub permissions: serde_json::Value,
     /// `success`, `denied` or `failed`.
@@ -72,6 +74,7 @@ impl From<crate::models::api_events::Model> for ApiEventRecord {
             access_key_id: event.access_key_id,
             caller: event.caller,
             workspace_id: event.workspace_id,
+            job_id: event.job_id,
             permissions: event.permissions,
             outcome: event.outcome,
             status_code: event.status_code,

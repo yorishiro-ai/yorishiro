@@ -145,6 +145,7 @@ impl Entity {
             concurrency_key: Set(enqueue.concurrency_key.map(str::to_owned)),
             concurrency_limit: Set(enqueue.concurrency_limit),
             error: Set(None),
+            request_id: Set(crate::controllers::middleware::access_log::current_request_id()),
             ..Default::default()
         }
         .insert(db)
@@ -402,7 +403,38 @@ impl Entity {
         if result.rows_affected == 0 {
             return Err(DbErr::RecordNotFound("active queue lease".into()));
         }
+        if matches!(
+            status,
+            LifecycleStatus::Completed | LifecycleStatus::Failed | LifecycleStatus::Cancelled
+        ) {
+            Self::record_outcome(db, id, status).await;
+        }
         Ok(())
+    }
+
+    /// Appends the job's end to the trail under the request that started it, so a call can be followed to its final result.
+    async fn record_outcome(db: &impl ConnectionTrait, id: Uuid, status: LifecycleStatus) {
+        let outcome = match Self::find_by_id(id).one(db).await {
+            Ok(Some(job)) => crate::models::api_events::Call::job(
+                job.request_id.unwrap_or_else(|| "req-id-none".to_owned()),
+                id,
+                job.job_name,
+                job.workspace_id,
+                match status {
+                    LifecycleStatus::Completed => "success",
+                    LifecycleStatus::Cancelled => "denied",
+                    _ => "failed",
+                },
+            )
+            .append(db)
+            .await
+            .map_err(|error| error.to_string()),
+            Ok(None) => Err("the job row is missing".to_owned()),
+            Err(error) => Err(error.to_string()),
+        };
+        if let Err(error) = outcome {
+            tracing::error!(lifecycle_id = %id, %error, "the job outcome could not be recorded in the trail");
+        }
     }
 }
 

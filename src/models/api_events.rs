@@ -124,6 +124,63 @@ impl Call {
     }
 }
 
+impl Call {
+    /// The end of a background job, recorded under the request that started it.
+    pub(crate) const fn job(
+        request_id: String,
+        job_id: Uuid,
+        job_name: String,
+        workspace_id: Option<Uuid>,
+        outcome: &'static str,
+    ) -> JobEnd {
+        JobEnd {
+            request_id,
+            job_id,
+            job_name,
+            workspace_id,
+            outcome,
+        }
+    }
+}
+
+/// How a background job ended.
+pub(crate) struct JobEnd {
+    request_id: String,
+    job_id: Uuid,
+    job_name: String,
+    workspace_id: Option<Uuid>,
+    outcome: &'static str,
+}
+
+impl JobEnd {
+    pub(crate) async fn append(self, db: &impl ConnectionTrait) -> Result<(), YorishiroError> {
+        let tenant_id = match self.workspace_id {
+            Some(workspace_id) => Some(
+                crate::models::workspace_workspaces::get_workspace_tenant(db, workspace_id).await?,
+            ),
+            None => None,
+        };
+        ActiveModel {
+            request_id: Set(self.request_id),
+            phase: Set("completed".to_owned()),
+            tenant_id: Set(tenant_id),
+            workspace_id: Set(self.workspace_id),
+            job_id: Set(Some(self.job_id)),
+            transport: Set("job".to_owned()),
+            event_name: Set(self.job_name),
+            read_only: Set(false),
+            user_agent: Set(String::new()),
+            permissions: Set(serde_json::json!([])),
+            outcome: Set(Some(self.outcome.to_owned())),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .internal()?;
+        Ok(())
+    }
+}
+
 impl Model {
     /// The tenant's trail, most recent first, optionally narrowed to one request.
     ///

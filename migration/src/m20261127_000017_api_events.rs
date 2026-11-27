@@ -29,6 +29,7 @@ impl MigrationTrait for Migration {
                     .col(helpers::uuid_col(manager, Alias::new("access_key_id")))
                     .col(helpers::uuid_col(manager, Alias::new("user_id")))
                     .col(helpers::uuid_col(manager, Alias::new("workspace_id")))
+                    .col(helpers::uuid_col(manager, Alias::new("job_id")))
                     .col(ColumnDef::new(Alias::new("caller")).text())
                     .col(ColumnDef::new(Alias::new("transport")).text().not_null())
                     .col(ColumnDef::new(Alias::new("event_name")).text().not_null())

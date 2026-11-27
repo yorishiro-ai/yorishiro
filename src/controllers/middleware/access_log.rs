@@ -21,6 +21,7 @@ use crate::models::iam::policy::{Action, Resource};
 struct Operation {
     /// Where the `authenticated` row of a write goes, until it has been written.
     pending: Option<(DatabaseConnection, api_events::Call)>,
+    request_id: String,
     caller: Option<AuthContext>,
     permissions: Vec<(Action, Resource)>,
     denied: bool,
@@ -47,6 +48,14 @@ pub(crate) async fn authenticated(actor: &AuthContext) -> Result<(), crate::Yori
         event.authenticated(&db, actor).await?;
     }
     Ok(())
+}
+
+/// The request the running code is serving, so work it starts can be traced back to it.
+pub(crate) fn current_request_id() -> Option<String> {
+    OPERATION
+        .try_with(|operation| operation.borrow().request_id.clone())
+        .ok()
+        .filter(|id| !id.is_empty())
 }
 
 pub(crate) fn authorized(action: Action, target: Resource) {
@@ -114,6 +123,7 @@ pub(crate) async fn track<T>(
     );
     let started = Instant::now();
     let operation = Operation {
+        request_id: request_id.to_owned(),
         pending: (!event.read_only).then(|| (db.clone(), event.clone())),
         ..Operation::default()
     };

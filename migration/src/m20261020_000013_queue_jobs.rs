@@ -51,6 +51,7 @@ async fn up_queue_job_lifecycles(manager: &SchemaManager<'_>) -> Result<(), DbEr
                     .col(ColumnDef::new(Alias::new("concurrency_key")).string())
                     .col(ColumnDef::new(Alias::new("concurrency_limit")).integer())
                     .col(ColumnDef::new(Alias::new("error")).text())
+                    .col(ColumnDef::new(Alias::new("request_id")).text())
                     .col(created_at)
                     .col(updated_at)
                     .check(Expr::cust("status IN ('queued', 'running', 'retrying', 'completed', 'failed', 'cancelled', 'unavailable')"))
