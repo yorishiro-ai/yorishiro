@@ -598,6 +598,8 @@ async fn proposals_can_be_listed_and_discarded() {
             serde_json::json!({"name":"list_inference_proposals","arguments":{"inference_job_id":rejected_job}})).await;
         assert_eq!(crate::controllers::mcp::tool_result_json(&mcp), proposals);
         assert_eq!(proposals.as_array().unwrap().len(), 1);
+        assert!(proposals[0]["proposal_id"].as_str().is_some());
+        assert_eq!(proposals[0]["inference_job_id"], rejected_job.to_string());
         assert_eq!(proposals[0]["status"], "pending");
         assert_eq!(proposals[0]["proposed"], "reject me");
         let unchanged = request.get(&format!("/api/inference-jobs/{discarded_job}/proposals"))
@@ -615,7 +617,9 @@ async fn proposals_can_be_listed_and_discarded() {
             "response: {:?}",
             rejected.text()
         );
-        assert_eq!(rejected.json::<serde_json::Value>()["changed"], 1);
+        let rejected: serde_json::Value = rejected.json();
+        assert_eq!(rejected["inference_job_id"], rejected_job.to_string());
+        assert_eq!(rejected["changed"], 1);
 
         let discarded = request
             .post(&format!("/api/inference-jobs/{discarded_job}/discard"))

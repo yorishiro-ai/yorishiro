@@ -17,7 +17,7 @@ async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
         let created = mcp_call(&request, &session, &tenant_admin_key, 2, "tools/call",
             json!({"name":"create_template_library_item","arguments":{"name":format!("mcp-template-{}",Uuid::now_v7()),"definition":{"name":"note","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}}}})).await;
         let created = tool_result_json(&created);
-        let id = created["id"].as_str().unwrap();
+        let id = created["template_id"].as_str().unwrap();
         let updated = mcp_call(&request, &session, &tenant_admin_key, 3, "tools/call",
             json!({"name":"update_template_library_item","arguments":{"template_id":id,"description":"updated through MCP"}})).await;
         let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {tenant_admin_key}")).await;
@@ -26,7 +26,7 @@ async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
         let fork = mcp_call(&request, &session, &tenant_admin_key, 4, "tools/call",
             json!({"name":"fork_template_library_item","arguments":{"template_id":id,"name":format!("fork-{}",Uuid::now_v7())}})).await;
         let fork = tool_result_json(&fork);
-        assert_ne!(fork["id"], created["id"]);
+        assert_ne!(fork["template_id"], created["template_id"]);
         let service = crate::requests::fixtures::create_key(&ctx.db, tenant.workspace_id, None).await.unwrap();
         let denied = mcp_call(&request, &session, &service.plaintext, 5, "tools/call",
             json!({"name":"delete_template_library_item","arguments":{"template_id":id}})).await;
@@ -36,7 +36,7 @@ async fn template_library_mutations_match_rest_and_remain_tenant_owned() {
         assert_eq!(tool_result_json(&deleted)["deleted"], true);
         let rest = request.get(&format!("/api/template-library/{id}")).add_header("Authorization", format!("Bearer {tenant_admin_key}")).await;
         rest.assert_status(StatusCode::NOT_FOUND);
-        let rest = request.get(&format!("/api/template-library/{}",fork["id"].as_str().unwrap())).add_header("Authorization", format!("Bearer {tenant_admin_key}")).await;
+        let rest = request.get(&format!("/api/template-library/{}",fork["template_id"].as_str().unwrap())).add_header("Authorization", format!("Bearer {tenant_admin_key}")).await;
         rest.assert_status_ok();
     }).await;
 }

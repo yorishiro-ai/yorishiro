@@ -22,7 +22,7 @@ async fn create_template(
         .json(&json!({ "name": "library-note", "definition": definition }))
         .await;
     response.assert_status(StatusCode::CREATED);
-    serde_json::from_value(response.json::<serde_json::Value>()["id"].clone())
+    serde_json::from_value(response.json::<serde_json::Value>()["template_id"].clone())
         .expect("created template ID")
 }
 
@@ -47,7 +47,7 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
             "response: {:?}",
             create.text()
         );
-        let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["id"]
+        let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["schema_id"]
             .as_str()
             .unwrap()
             .parse()
@@ -176,7 +176,7 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             "response: {:?}",
             local_after_publication.text()
         );
-        let schema_id: Uuid = local_after_publication.json::<serde_json::Value>()["schema"]["id"]
+        let schema_id: Uuid = local_after_publication.json::<serde_json::Value>()["schema"]["schema_id"]
             .as_str()
             .unwrap()
             .parse()
@@ -286,7 +286,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
             .json(&json!({ "template_id": template.to_string() }))
             .await;
         assert_eq!(create.status_code(), StatusCode::CREATED);
-        let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["id"]
+        let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["schema_id"]
             .as_str()
             .unwrap()
             .parse()
@@ -415,9 +415,10 @@ async fn merging_a_conflicting_field_is_refused() {
             }))
             .await;
         local.assert_status(StatusCode::CREATED);
-        let schema_id: Uuid =
-            serde_json::from_value(local.json::<serde_json::Value>()["schema"]["id"].clone())
-                .expect("active local schema ID");
+        let schema_id: Uuid = serde_json::from_value(
+            local.json::<serde_json::Value>()["schema"]["schema_id"].clone(),
+        )
+        .expect("active local schema ID");
 
         request
             .put(&format!("/api/template-library/{template}"))

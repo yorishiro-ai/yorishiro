@@ -63,6 +63,7 @@ pub(crate) async fn list_for_actor(
 
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 pub struct ForkRecord {
+    #[serde(rename = "fork_id")]
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,

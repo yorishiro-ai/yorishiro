@@ -64,7 +64,7 @@ async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
             .json(&json!({"name":format!("private-{}", Uuid::new_v4())}))
             .await;
         assert_eq!(sibling.status_code(), StatusCode::CREATED);
-        let sibling_id = sibling.json::<Value>()["id"].as_str().unwrap().to_owned();
+        let sibling_id = sibling.json::<Value>()["workspace_id"].as_str().unwrap().to_owned();
         let txn = ctx.db.begin().await.unwrap();
         let user = yorishiro::models::tenancy::register_member(
             &txn,
@@ -130,7 +130,7 @@ async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
         assert_eq!(listed.status_code(), StatusCode::OK);
         let listed = listed.json::<Value>();
         assert_eq!(listed.as_array().unwrap().len(), 1);
-        assert_eq!(listed[0]["id"], candidates[0]["workspace_id"]);
+        assert_eq!(listed[0]["workspace_id"], candidates[0]["workspace_id"]);
         request
             .get(&format!("/api/workspaces/{sibling_id}"))
             .add_header("Authorization", format!("Bearer {key}"))

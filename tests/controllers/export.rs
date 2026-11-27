@@ -55,7 +55,7 @@ async fn export_pages_all_rows_and_rejects_byte_and_record_overflow() {
             .add_header("Authorization", format!("Bearer {}", tenant.api_key))
             .json(&json!({"name":"bounded-export","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}})).await;
         response.assert_status(StatusCode::CREATED);
-        let schema_id: Uuid = serde_json::from_value(response.json::<Value>()["schema"]["id"].clone()).unwrap();
+        let schema_id: Uuid = serde_json::from_value(response.json::<Value>()["schema"]["schema_id"].clone()).unwrap();
         // Direct writes below (a): bulk rows with chosen IDs, and an oversized payload that the API would refuse.
         let make_row = |id| entity_entities::ActiveModel {
             id: Set(id), workspace_id: Set(tenant.workspace_id), schema_id: Set(schema_id),
@@ -73,7 +73,7 @@ async fn export_pages_all_rows_and_rejects_byte_and_record_overflow() {
         let rows: Vec<Value> = export.text().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
         assert_eq!(rows.len(), 66);
         assert_eq!(rows[0]["kind"], "schema");
-        let exported: Vec<Uuid> = rows.iter().skip(1).map(|row| serde_json::from_value(row["record"]["id"].clone()).unwrap()).collect();
+        let exported: Vec<Uuid> = rows.iter().skip(1).map(|row| serde_json::from_value(row["record"]["entity_id"].clone()).unwrap()).collect();
         assert_eq!(exported, ids);
         assert!(rows.iter().all(|row| row["record"]["embedding_sync_token"].is_null()));
 

@@ -147,7 +147,7 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
             .await;
         created.assert_status(StatusCode::CREATED);
         let workspace = created.json::<serde_json::Value>();
-        let workspace_id = workspace["id"].as_str().unwrap();
+        let workspace_id = workspace["workspace_id"].as_str().unwrap();
 
         // The workspace is selected per request through the header.
         let caller_identity = request

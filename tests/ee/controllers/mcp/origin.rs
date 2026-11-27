@@ -110,7 +110,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             "{}",
             template.text()
         );
-        let template_id: Uuid = template.json::<Value>()["id"]
+        let template_id: Uuid = template.json::<Value>()["template_id"]
             .as_str()
             .expect("template id")
             .parse()
@@ -127,7 +127,7 @@ async fn origin_mcp_tools_enforce_scope_and_commit_the_merge() {
             "response: {}",
             create.text()
         );
-        let schema_id: Uuid = create.json::<Value>()["schema"]["id"]
+        let schema_id: Uuid = create.json::<Value>()["schema"]["schema_id"]
             .as_str()
             .expect("schema id")
             .parse()
@@ -260,7 +260,10 @@ async fn list_upstream_changes_pages_by_limit_and_offset() {
                 }))
                 .await;
             template.assert_status(StatusCode::CREATED);
-            let template_id = template.json::<Value>()["id"].as_str().unwrap().to_owned();
+            let template_id = template.json::<Value>()["template_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
             request
                 .post("/api/schemas")
                 .add_header("Authorization", format!("Bearer {schema_key}"))

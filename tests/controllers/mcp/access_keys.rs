@@ -26,13 +26,13 @@ async fn access_key_tool_issues_tenant_scoped_keys_with_the_same_ceilings() {
         rest.assert_status(StatusCode::CREATED);
         let rest_record = rest.json::<Value>();
         assert!(rest_record["workspace_id"].is_null());
-        let updated = mcp_call(&request, &session, &issuer.plaintext, 6, "tools/call", json!({"name":"update_access_key","arguments":{"access_key_id":record["id"].as_str().unwrap(),"name":"renamed","enabled":false}})).await;
+        let updated = mcp_call(&request, &session, &issuer.plaintext, 6, "tools/call", json!({"name":"update_access_key","arguments":{"access_key_id":record["access_key_id"].as_str().unwrap(),"name":"renamed","enabled":false}})).await;
         let updated = tool_result_json(&updated);
         assert_eq!(updated["name"], "renamed");
         assert_eq!(updated["state"], "disabled");
         let listed = mcp_call(&request, &session, &issuer.plaintext, 7, "tools/call", json!({"name":"list_access_keys","arguments":{}})).await;
-        assert!(tool_result_json(&listed)["keys"].as_array().unwrap().iter().any(|key| key["id"] == record["id"]));
-        let deleted = mcp_call(&request, &session, &issuer.plaintext, 4, "tools/call", json!({"name":"delete_access_key","arguments":{"access_key_id":record["id"].as_str().unwrap()}})).await;
+        assert!(tool_result_json(&listed)["keys"].as_array().unwrap().iter().any(|key| key["access_key_id"] == record["access_key_id"]));
+        let deleted = mcp_call(&request, &session, &issuer.plaintext, 4, "tools/call", json!({"name":"delete_access_key","arguments":{"access_key_id":record["access_key_id"].as_str().unwrap()}})).await;
         assert_eq!(tool_result_json(&deleted)["deleted"], true);
         let missing = mcp_call(&request, &session, &tenant.api_key, 5, "tools/call", json!({"name":"delete_schema","arguments":{"schema_id":Uuid::new_v4()}})).await;
         assert_eq!(missing["result"]["isError"], true);
@@ -74,7 +74,7 @@ async fn expired_keys_are_rejected_over_rest_and_an_existing_mcp_session() {
                     .as_str()
                     .is_some_and(|value| value.ends_with(prefix))
             })
-            .unwrap()["id"]
+            .unwrap()["access_key_id"]
             .as_str()
             .unwrap()
             .parse()

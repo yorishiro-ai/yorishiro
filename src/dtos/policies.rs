@@ -101,6 +101,7 @@ impl From<crate::models::iam_policies::PolicyView> for PolicyRecord {
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct PolicyVersionRecord {
+    #[serde(rename = "version_id")]
     pub id: Uuid,
     pub policy_id: Uuid,
     pub version_number: i32,

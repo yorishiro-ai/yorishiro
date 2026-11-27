@@ -19,7 +19,7 @@ async fn template_update_rejects_a_revoked_previously_authenticated_actor() {
             .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({"name":format!("fenced-{}",uuid::Uuid::new_v4()),"definition":note_definition()})).await;
         created.assert_status(StatusCode::CREATED);
-        let id = created.json::<serde_json::Value>()["id"].as_str().unwrap().parse().unwrap();
+        let id = created.json::<serde_json::Value>()["template_id"].as_str().unwrap().parse().unwrap();
         let administrator = fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await;
         let key = access_keys::Entity::create_tenant_access_key(&ctx.db, tenant.tenant_id, Some(administrator), "template-admin").await.unwrap();
         let actor = access_keys::AuthContext { access_key_id:key.id, workspace_id:None,
@@ -82,7 +82,7 @@ async fn creating_or_forking_onto_a_taken_template_name_conflicts() {
         };
         let created = create().await;
         created.assert_status(StatusCode::CREATED);
-        let id = created.json::<serde_json::Value>()["id"]
+        let id = created.json::<serde_json::Value>()["template_id"]
             .as_str()
             .unwrap()
             .to_owned();

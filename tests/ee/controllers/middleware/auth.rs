@@ -78,7 +78,7 @@ async fn a_tenant_scoped_key_resolves_the_workspace_named_by_the_header() {
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
         let tenant_key = yorishiro::edition::ee::models::access_keys::CreatedTenantAccessKey {
-            id: replacement["id"].as_str().unwrap().parse().unwrap(),
+            id: replacement["access_key_id"].as_str().unwrap().parse().unwrap(),
             plaintext: replacement["access_key"].as_str().unwrap().to_owned(),
         };
 

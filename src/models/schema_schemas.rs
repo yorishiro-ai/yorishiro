@@ -256,6 +256,7 @@ async fn deletion_blockers(
 /// One version of a workspace's schema.
 #[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SchemaRecord {
+    #[serde(rename = "schema_id", alias = "id")]
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,
@@ -398,6 +399,7 @@ pub struct MergeDiffSummary {
 /// A lightweight summary that omits the `definition` body.
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 pub(crate) struct SchemaSummary {
+    #[serde(rename = "schema_id")]
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub name: String,

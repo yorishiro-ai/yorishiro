@@ -23,6 +23,7 @@ db_enum! {
 
 #[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RelationRecord {
+    #[serde(rename = "relation_id", alias = "id")]
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub source_id: Uuid,

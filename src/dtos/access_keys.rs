@@ -43,6 +43,7 @@ impl UpdateAccessKeyRequest {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct AccessKeyRecord {
+    #[serde(rename = "access_key_id")]
     pub(crate) id: Uuid,
     pub(crate) prefix: String,
     pub(crate) name: String,
@@ -54,6 +55,7 @@ pub(crate) struct AccessKeyRecord {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct CreateAccessKeyResponse {
+    #[serde(rename = "access_key_id")]
     pub(crate) id: Uuid,
     pub(crate) prefix: String,
     /// The secret is returned once.

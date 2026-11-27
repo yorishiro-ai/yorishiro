@@ -98,7 +98,7 @@ async fn unselected_search_combines_workspaces_and_explicit_selection_narrows_re
             tenant_id: first.tenant_id,
             owner_id: first.owner_id,
             api_key: key.clone(),
-            workspace_id: response.json::<serde_json::Value>()["id"]
+            workspace_id: response.json::<serde_json::Value>()["workspace_id"]
                 .as_str()
                 .unwrap()
                 .parse()
@@ -142,7 +142,8 @@ async fn unavailable_workspace_does_not_spend_the_search_budget_of_another() {
             .await;
         response.assert_status(StatusCode::CREATED);
         let unavailable: uuid::Uuid =
-            serde_json::from_value(response.json::<serde_json::Value>()["id"].clone()).unwrap();
+            serde_json::from_value(response.json::<serde_json::Value>()["workspace_id"].clone())
+                .unwrap();
         // Direct write (c): holds the workspace in the reindexing state, which a real reindex leaves as soon as it finishes.
         yorishiro::models::workspace_workspaces::ActiveModel {
             id: Set(unavailable),
@@ -265,7 +266,7 @@ async fn configured_live_provider_embeds_stores_and_searches() {
                 let mcp_hits = crate::ee::controllers::mcp::tool_result_json(&response);
                 assert_eq!(titles(&mcp_hits)[0], expected, "live MCP semantic ranking");
                 let ids = |value: &serde_json::Value| value.as_array().unwrap().iter()
-                    .map(|hit| hit["entity"]["id"].clone()).collect::<Vec<_>>();
+                    .map(|hit| hit["entity"]["entity_id"].clone()).collect::<Vec<_>>();
                 assert_eq!(ids(&mcp_hits), ids(&hits), "live transport result IDs");
                 assert!(mcp_hits.as_array().unwrap().iter().all(|hit| hit["distance"].as_f64().unwrap().is_finite()));
             }

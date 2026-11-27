@@ -240,6 +240,7 @@ pub(crate) async fn touch_content_revision(
 // Distinct from the generated `Model` because it excludes `embedding` (stored separately in `entity_embeddings`), so SQLite deserialization does not trip on the PgVector type.
 #[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult, schemars::JsonSchema)]
 pub struct EntityRecord {
+    #[serde(rename = "entity_id", alias = "id")]
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub schema_id: Uuid,

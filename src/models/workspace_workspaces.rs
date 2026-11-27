@@ -194,6 +194,7 @@ pub(crate) fn ids_for_tenant(tenant_id: Uuid) -> sea_orm::sea_query::SelectState
 /// A workspace summary returned by tenancy lookups and signup.
 #[derive(Clone, Serialize, sea_orm::FromQueryResult, schemars::JsonSchema)]
 pub struct WorkspaceSummary {
+    #[serde(rename = "workspace_id")]
     pub id: Uuid,
     pub name: String,
 }
@@ -565,6 +566,7 @@ pub(crate) async fn stamp_embedding_if_missing(
 /// API-facing workspace record with a typed status.
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 pub(crate) struct WorkspaceRecord {
+    #[serde(rename = "workspace_id")]
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,

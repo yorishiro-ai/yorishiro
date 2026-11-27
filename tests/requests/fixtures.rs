@@ -82,7 +82,7 @@ impl TestTenant {
             .await;
         workspace.assert_status(StatusCode::CREATED);
         let workspace_id: Uuid =
-            serde_json::from_value(workspace.json::<serde_json::Value>()["id"].clone())
+            serde_json::from_value(workspace.json::<serde_json::Value>()["workspace_id"].clone())
                 .expect("workspace ID");
         let key = request
             .post("/api/access-keys")
@@ -315,7 +315,7 @@ pub(crate) async fn rest_create_workspace(request: &loco_rs::TestServer, api_key
         .json(&serde_json::json!({"name": "default"}))
         .await;
     response.assert_status(StatusCode::CREATED);
-    response.json::<serde_json::Value>()["id"]
+    response.json::<serde_json::Value>()["workspace_id"]
         .as_str()
         .unwrap()
         .parse()
@@ -366,7 +366,7 @@ pub(crate) async fn rest_create_entity(request: &loco_rs::TestServer, setup: &Te
         "response: {:?}",
         create_entity.text()
     );
-    let entity_id: Uuid = create_entity.json::<serde_json::Value>()["id"]
+    let entity_id: Uuid = create_entity.json::<serde_json::Value>()["entity_id"]
         .as_str()
         .unwrap()
         .parse()

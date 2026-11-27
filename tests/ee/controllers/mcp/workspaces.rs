@@ -103,7 +103,7 @@ async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
         let invalid = request.put(&format!("/api/workspaces/{}",tenant.workspace_id)).add_header("Authorization",format!("Bearer {tenant_key}")).json(&json!({"name":"must-not-save","replace_max_entities":true,"max_entities":-1})).await;
         assert!(!invalid.status_code().is_success());
         let created = mcp_call(&request, &session, &tenant_key, 4, "tools/call", json!({"name":"create_workspace","arguments":{"name":"second"}})).await;
-        let second = tool_result_json(&created)["id"].as_str().unwrap().to_owned();
+        let second = tool_result_json(&created)["workspace_id"].as_str().unwrap().to_owned();
         let targeted = mcp_call(&request, &session, &tenant_key, 9, "tools/call", json!({"name":"update_workspace","arguments":{"workspace_id":second,"name":"targeted"}})).await;
         assert_eq!(tool_result_json(&targeted)["name"], "targeted");
         let deleted = mcp_call(&request, &session, &tenant_key, 10, "tools/call", json!({"name":"delete_workspace","arguments":{"workspace_id":second}})).await;

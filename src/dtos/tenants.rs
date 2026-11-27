@@ -21,6 +21,7 @@ pub(crate) struct UpdateTenantRequest {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct TenantRecord {
+    #[serde(rename = "tenant_id")]
     pub(crate) id: Uuid,
     pub(crate) name: String,
     pub(crate) max_workspaces: Option<i32>,

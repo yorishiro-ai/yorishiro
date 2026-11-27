@@ -29,7 +29,7 @@ async fn unselected_lists_do_not_expose_workspaces_without_iam_grants() {
                 .json(&serde_json::json!({"schema_name":"general-notes","entity_type":"note","data":{"title":title}}))
                 .await;
             response.assert_status(StatusCode::CREATED);
-            entities.push(response.json::<serde_json::Value>()["id"].clone());
+            entities.push(response.json::<serde_json::Value>()["entity_id"].clone());
         }
         request.post("/api/relations")
             .add_header("Authorization", format!("Bearer {root}"))
@@ -120,13 +120,13 @@ async fn relation_operations_resolve_the_source_and_relation_workspaces() {
             let response = request.post("/api/entities").add_header("Authorization", format!("Bearer {key}"))
                 .json(&serde_json::json!({"schema_name":"general-notes","entity_type":"note","data":{"title":title}})).await;
             response.assert_status(StatusCode::CREATED);
-            ids.push(response.json::<serde_json::Value>()["id"].clone());
+            ids.push(response.json::<serde_json::Value>()["entity_id"].clone());
         }
         fixtures::rest_create_workspace(&request, &key).await;
         let relation = request.post("/api/relations").add_header("Authorization", format!("Bearer {key}"))
             .json(&serde_json::json!({"source_id":ids[0],"target_id":ids[1],"relation_type":"references","properties":{}})).await;
         relation.assert_status(StatusCode::CREATED);
-        let id = relation.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
+        let id = relation.json::<serde_json::Value>()["relation_id"].as_str().unwrap().to_owned();
         let path = format!("/api/relations/{id}");
         request.get(&path).add_header("Authorization", format!("Bearer {key}")).await.assert_status_ok();
         request.patch(&path).add_header("Authorization", format!("Bearer {key}"))
@@ -150,7 +150,7 @@ async fn schema_ids_resolve_the_workspace_and_creation_refuses_ambiguity() {
             .json(&serde_json::json!({"template_id":"general-notes"}))
             .await;
         created.assert_status(StatusCode::CREATED);
-        let id = created.json::<serde_json::Value>()["schema"]["id"]
+        let id = created.json::<serde_json::Value>()["schema"]["schema_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -249,7 +249,7 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
             .json(&serde_json::json!({"name":"root-created"}))
             .await;
         response.assert_status(StatusCode::CREATED);
-        let workspace = response.json::<serde_json::Value>()["id"]
+        let workspace = response.json::<serde_json::Value>()["workspace_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -321,7 +321,7 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
             .await;
         response.assert_status_ok();
         assert_eq!(response.json::<Vec<serde_json::Value>>().len(), 1);
-        let id = response.json::<Vec<serde_json::Value>>()[0]["id"].as_str().unwrap().to_owned();
+        let id = response.json::<Vec<serde_json::Value>>()[0]["entity_id"].as_str().unwrap().to_owned();
         request.get(&format!("/api/entities/{id}"))
             .add_header("Authorization", format!("Bearer {delegated}"))
             .await.assert_status_ok();

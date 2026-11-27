@@ -30,6 +30,7 @@ pub(crate) struct ListApiEvents {
 /// One recorded call: who made it, when, from where, what it was, and how it ended.
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct ApiEventRecord {
+    #[serde(rename = "api_event_id")]
     pub id: Uuid,
     pub request_id: String,
     /// `started` before a write runs, `completed` when any call ends.
@@ -85,6 +86,7 @@ impl From<crate::models::api_events::Model> for ApiEventRecord {
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct AuditRecord {
+    #[serde(rename = "audit_event_id")]
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub user_id: Option<Uuid>,

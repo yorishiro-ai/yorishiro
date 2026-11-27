@@ -80,7 +80,7 @@ async fn mcp_manages_users_groups_and_policies_by_id() {
             )
             .await,
         );
-        let version_id = version["id"].as_str().unwrap().to_owned();
+        let version_id = version["version_id"].as_str().unwrap().to_owned();
         assert_eq!(version["version_number"], 2);
         let versions = tool_result_json(&call(&request, &session, &key, "list_policy_versions", json!({"policy_id":policy_id})).await);
         assert_eq!(versions.as_array().unwrap().len(), 2);
@@ -89,7 +89,7 @@ async fn mcp_manages_users_groups_and_policies_by_id() {
         );
         assert_eq!(switched["is_default"], true);
         let read = tool_result_json(&call(&request, &session, &key, "get_policy_version", json!({"policy_id":policy_id,"version_id":version_id})).await);
-        assert_eq!(read["id"], version_id);
+        assert_eq!(read["version_id"], version_id);
         let got = tool_result_json(&call(&request, &session, &key, "get_policy", json!({"policy_id":policy_id})).await);
         assert_eq!(got["default_version_id"], version_id);
         let policies = tool_result_json(&call(&request, &session, &key, "list_policies", json!({})).await);

@@ -23,7 +23,7 @@ async fn create_schema_version(
         .json(definition)
         .await;
     response.assert_status(StatusCode::CREATED);
-    response.json::<serde_json::Value>()["schema"]["id"]
+    response.json::<serde_json::Value>()["schema"]["schema_id"]
         .as_str()
         .unwrap()
         .to_owned()
@@ -126,7 +126,7 @@ async fn schema_deletion_refuses_active_versions_and_references() {
             }))
             .await;
         entity.assert_status(StatusCode::CREATED);
-        let entity_id = entity.json::<serde_json::Value>()["id"]
+        let entity_id = entity.json::<serde_json::Value>()["entity_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -230,7 +230,7 @@ async fn list_templates_and_get_template_over_rest() {
             .as_array()
             .unwrap()
             .iter()
-            .map(|t| t["id"].as_str().unwrap())
+            .map(|t| t["template_id"].as_str().unwrap())
             .collect();
         assert_eq!(
             ids,
@@ -294,7 +294,7 @@ async fn create_schema_from_a_library_template_links_the_origin() {
             }))
             .await;
         assert_eq!(response.status_code(), StatusCode::CREATED);
-        let template_id = response.json::<serde_json::Value>()["id"]
+        let template_id = response.json::<serde_json::Value>()["template_id"]
             .as_str()
             .expect("created template ID")
             .to_owned();
@@ -347,7 +347,7 @@ async fn a_second_version_with_no_origin_inherits_the_first_versions_link() {
             }))
             .await;
         assert_eq!(response.status_code(), StatusCode::CREATED);
-        let template_id = response.json::<serde_json::Value>()["id"]
+        let template_id = response.json::<serde_json::Value>()["template_id"]
             .as_str()
             .expect("created template ID")
             .to_owned();

@@ -31,6 +31,7 @@ impl ActiveModelBehavior for ActiveModel {
 /// A row from the tenant's DB-backed template library, with `definition` parsed.
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct TemplateRecord {
+    #[serde(rename = "template_id")]
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,

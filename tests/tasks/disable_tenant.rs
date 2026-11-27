@@ -33,32 +33,32 @@ async fn populated_tenant_cleanup_removes_schema_forks_entities_and_templates() 
             .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&json!({"name":"retirement-notes", "definition":yorishiro::data::templates::get_template("general-notes").unwrap()})).await;
         assert_eq!(created.status_code(), StatusCode::CREATED, "{}", created.text());
-        let template_id: uuid::Uuid = created.json::<Value>()["id"].as_str().unwrap().parse().unwrap();
+        let template_id: uuid::Uuid = created.json::<Value>()["template_id"].as_str().unwrap().parse().unwrap();
         let mut schemas = Vec::new();
         for tenant in [&target, &other] {
             let created = request.post("/api/schemas")
                 .add_header("Authorization", format!("Bearer {}", tenant.api_key))
                 .json(&json!({"template_id":"task-management"})).await;
             assert_eq!(created.status_code(), StatusCode::CREATED, "{}", created.text());
-            schemas.push(created.json::<Value>()["schema"]["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap());
+            schemas.push(created.json::<Value>()["schema"]["schema_id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap());
         }
         let workspace = request.post("/api/workspaces")
             .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&json!({"name":format!("retirement-fork-{}", uuid::Uuid::new_v4())})).await;
         assert_eq!(workspace.status_code(), StatusCode::CREATED);
-        let workspace_id = workspace.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
+        let workspace_id = workspace.json::<Value>()["workspace_id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
         let fork_key = crate::requests::fixtures::issue_access_key(&ctx, workspace_id, target.owner_id).await;
         let fork = request.post("/api/schema-forks").add_header("Authorization", format!("Bearer {fork_key}"))
             .add_header("x-workspace-id", workspace_id.to_string())
             .json(&json!({"source_workspace_id":target.workspace_id,"source_schema_id":schemas[0]})).await;
         assert_eq!(fork.status_code(), StatusCode::CREATED, "{}", fork.text());
-        let fork_id = fork.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
+        let fork_id = fork.json::<Value>()["fork_id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
         let entity = request.post("/api/entities")
             .add_header("Authorization", format!("Bearer {}", target.api_key))
             .add_header("x-workspace-id", target.workspace_id.to_string())
             .json(&json!({"schema_name":"task-management", "entity_type":"task", "data":{"title":"retire me"}})).await;
         assert_eq!(entity.status_code(), StatusCode::CREATED, "{}", entity.text());
-        let entity_id = entity.json::<Value>()["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
+        let entity_id = entity.json::<Value>()["entity_id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap();
         retirement::disable_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await.unwrap();
         retirement::delete_by_operator(&ctx.db, target.tenant_id, target.tenant_id).await.unwrap();
         assert!(template_templates::Entity::find_by_id(template_id).one(&ctx.db).await.unwrap().is_none());

@@ -47,6 +47,7 @@ pub const TEMPLATES: &[BuiltinTemplate] = &[
 /// Summary of a built-in schema template, returned by `list_templates` so a caller can pick a `template_id` without first fetching every template's full definition.
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 pub struct TemplateSummary {
+    #[serde(rename = "template_id")]
     pub id: String,
     pub name: String,
     pub description: Option<String>,

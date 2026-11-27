@@ -162,7 +162,7 @@ async fn publish_list_fork_and_review_round_trip() {
             "response: {:?}",
             create_template.text()
         );
-        let template_id: Uuid = create_template.json::<serde_json::Value>()["id"]
+        let template_id: Uuid = create_template.json::<serde_json::Value>()["template_id"]
             .as_str()
             .unwrap()
             .parse()
@@ -501,12 +501,12 @@ async fn publish_list_fork_and_review_round_trip() {
         let detail = request.get(&listing_path).add_header("Authorization", &foreign_auth).await;
         detail.assert_status_ok();
         assert_eq!(&detail.json::<serde_json::Value>(), listed);
-        let published_id = versions[0]["id"].as_str().unwrap();
+        let published_id = versions[0]["version_id"].as_str().unwrap();
         let published = request.get(&format!("{listing_path}/versions/{published_id}"))
             .add_header("Authorization", &foreign_auth).await;
         published.assert_status_ok();
         assert_eq!(published.json::<serde_json::Value>(), versions[0]);
-        let draft_id = versions[3]["id"].as_str().unwrap();
+        let draft_id = versions[3]["version_id"].as_str().unwrap();
         request.get(&format!("{listing_path}/versions/{draft_id}"))
             .add_header("Authorization", &foreign_auth).await.assert_status(StatusCode::NOT_FOUND);
 
@@ -605,7 +605,7 @@ async fn another_tenant_cannot_manage_a_template_it_does_not_own() {
             .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"name": "private-one", "definition": note_definition()}))
             .await;
-        let template_id: Uuid = create_template.json::<serde_json::Value>()["id"]
+        let template_id: Uuid = create_template.json::<serde_json::Value>()["template_id"]
             .as_str()
             .unwrap()
             .parse()
@@ -662,7 +662,7 @@ async fn a_rating_outside_the_range_is_rejected() {
             .add_header("Authorization", format!("Bearer {}", owner.api_key))
             .json(&json!({"name": "reviewable", "definition": note_definition()}))
             .await;
-        let template_id: Uuid = create_template.json::<serde_json::Value>()["id"]
+        let template_id: Uuid = create_template.json::<serde_json::Value>()["template_id"]
             .as_str()
             .unwrap()
             .parse()

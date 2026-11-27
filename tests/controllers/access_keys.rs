@@ -72,7 +72,7 @@ async fn delegated_expiry_cannot_outlive_the_issuing_key() {
             .await.assert_status(StatusCode::CREATED);
         let key = request.post("/api/access-keys").add_header("Authorization",&owner).add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .json(&serde_json::json!({"name":"unlimited-target"})).await.json::<Value>();
-        request.patch(&format!("/api/access-keys/{}",key["id"].as_str().unwrap()))
+        request.patch(&format!("/api/access-keys/{}",key["access_key_id"].as_str().unwrap()))
             .add_header("Authorization",&auth).json(&serde_json::json!({"replace_expires_at":true})).await.assert_status(StatusCode::FORBIDDEN);
     }).await;
 }
@@ -112,7 +112,7 @@ async fn access_key_lifecycle_is_admin_only_and_secret_is_one_time() {
         assert_eq!(created_body["identity_kind"], "user");
         assert!(created_body["access_key"].as_str().is_some());
         assert!(created_body["prefix"].as_str().unwrap().starts_with("ysr_"));
-        assert!(created_body["id"].as_str().is_some());
+        assert!(created_body["access_key_id"].as_str().is_some());
         assert!(created_body["created_at"].as_str().is_some());
         let created_at =
             chrono::DateTime::parse_from_rfc3339(created_body["created_at"].as_str().unwrap())
@@ -169,7 +169,7 @@ async fn access_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|record| record["id"] == created_body["id"])
+            .find(|record| record["access_key_id"] == created_body["access_key_id"])
             .unwrap();
         assert_eq!(record["identity_kind"], created_body["identity_kind"]);
         assert_eq!(record["workspace_id"], created_body["workspace_id"]);
@@ -197,7 +197,11 @@ async fn access_key_lifecycle_is_admin_only_and_secret_is_one_time() {
             .await;
         assert_eq!(authenticated.status_code(), StatusCode::OK);
 
-        let access_key_id: Uuid = created_body["id"].as_str().unwrap().parse().unwrap();
+        let access_key_id: Uuid = created_body["access_key_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
         let revoked = request
             .delete(&format!("/api/access-keys/{access_key_id}"))
             .add_header("Authorization", format!("Bearer {owner_key}"))
@@ -356,7 +360,7 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
             .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await.json::<Value>();
         assert!(listed["keys"].as_array().unwrap().iter()
-            .any(|key| key["id"] == member_tenant_key.id.to_string()));
+            .any(|key| key["access_key_id"] == member_tenant_key.id.to_string()));
 
         // The new key names its workspace per request and appears in the listing.
         let full_key = record["access_key"].as_str().unwrap().to_owned();
@@ -386,10 +390,10 @@ async fn tenant_scoped_issuance_keeps_binding_and_admin_ceiling() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|key| key["id"] == record["id"])
+                .any(|key| key["access_key_id"] == record["access_key_id"])
         );
         request
-            .delete(&format!("/api/access-keys/{}", record["id"].as_str().unwrap()))
+            .delete(&format!("/api/access-keys/{}", record["access_key_id"].as_str().unwrap()))
             .add_header("Authorization", format!("Bearer {}", issuer.plaintext))
             .add_header(WORKSPACE_HEADER, tenant.workspace_id.to_string())
             .await
@@ -417,7 +421,7 @@ async fn update_changes_name_expiry_and_enabled_flag() {
             .await;
         created.assert_status(StatusCode::CREATED);
         let created: Value = created.json();
-        let path = format!("/api/access-keys/{}", created["id"].as_str().unwrap());
+        let path = format!("/api/access-keys/{}", created["access_key_id"].as_str().unwrap());
         let secret = format!("Bearer {}", created["access_key"].as_str().unwrap());
 
         let expiry = chrono::Utc::now() + chrono::Duration::hours(2);
@@ -484,7 +488,7 @@ async fn update_changes_name_expiry_and_enabled_flag() {
         events.assert_status_ok();
         let events = events.json::<Vec<Value>>();
         let actions: Vec<_> = events.iter()
-            .filter(|event| event["detail"]["access_key_id"] == created["id"])
+            .filter(|event| event["detail"]["access_key_id"] == created["access_key_id"])
             .map(|event| event["action"].as_str().unwrap())
             .collect();
         assert_eq!(actions, ["DeleteAccessKey", "UpdateAccessKey", "UpdateAccessKey", "UpdateAccessKey", "CreateAccessKey"]);

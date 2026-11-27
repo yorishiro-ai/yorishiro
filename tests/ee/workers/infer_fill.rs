@@ -455,7 +455,7 @@ async fn schema_change_during_llm_call_rejects_the_old_schema_proposal() {
             }))
             .await;
         assert_eq!(entity.status_code(), 201, "{}", entity.text());
-        let _entity_id: Uuid = entity.json::<serde_json::Value>()["id"]
+        let _entity_id: Uuid = entity.json::<serde_json::Value>()["entity_id"]
             .as_str()
             .expect("entity id")
             .parse()

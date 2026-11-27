@@ -167,7 +167,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
         assert_eq!(schema_response.status_code(), StatusCode::CREATED);
-        let schema_id = schema_response.json::<serde_json::Value>()["schema"]["id"]
+        let schema_id = schema_response.json::<serde_json::Value>()["schema"]["schema_id"]
             .as_str()
             .expect("schema id")
             .to_string();

@@ -158,6 +158,7 @@ pub struct MarketplaceListing {
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct TemplateVersionRecord {
+    #[serde(rename = "version_id")]
     pub id: Uuid,
     pub template_id: Uuid,
     pub version: i32,
@@ -292,6 +293,7 @@ impl TryFrom<crate::models::_entities::template_versions::Model> for TemplateVer
 
 #[derive(Serialize, FromQueryResult, schemars::JsonSchema)]
 pub struct TemplateReviewRecord {
+    #[serde(rename = "review_id")]
     pub id: Uuid,
     pub template_id: Uuid,
     pub tenant_id: Uuid,

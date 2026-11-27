@@ -56,7 +56,11 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
             .await;
         assert_eq!(schema_response.status_code(), StatusCode::CREATED);
         let schema: serde_json::Value = schema_response.json();
-        let source_schema_id: Uuid = schema["schema"]["id"].as_str().unwrap().parse().unwrap();
+        let source_schema_id: Uuid = schema["schema"]["schema_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
 
         let target = fixtures::create_workspace(&ctx, tenant_id, "target").await;
         let target_key = fixtures::issue_access_key(&ctx, target.id, owner_id).await;
@@ -101,7 +105,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         assert_eq!(fork["customized"], false);
         assert_eq!(fork["source_schema_version"], schema["schema"]["version"]);
         assert_eq!(fork["definition"], schema["schema"]["definition"]);
-        let fork_id = fork["id"].as_str().unwrap().to_owned();
+        let fork_id = fork["fork_id"].as_str().unwrap().to_owned();
         let original_head_id: Uuid = fork["fork_schema_id"].as_str().unwrap().parse().unwrap();
         let original_head_version =
             i32::try_from(fork["fork_schema_version"].as_i64().unwrap()).unwrap();
@@ -129,7 +133,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         assert_eq!(listed.status_code(), StatusCode::OK);
         let listed: serde_json::Value = listed.json();
         assert_eq!(listed.as_array().unwrap().len(), 1);
-        assert_eq!(listed[0]["id"], fork["id"]);
+        assert_eq!(listed[0]["fork_id"], fork["fork_id"]);
 
         let fetched = request
             .get(&format!("/api/schema-forks/{fork_id}"))
@@ -246,7 +250,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
             source_v2.text()
         );
         let source_v2: serde_json::Value = source_v2.json();
-        let source_v2_id = source_v2["schema"]["id"].as_str().unwrap();
+        let source_v2_id = source_v2["schema"]["schema_id"].as_str().unwrap();
 
         let before_follow_get = request
             .get(&format!("/api/schema-forks/{fork_id}"))
@@ -363,7 +367,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         assert_eq!(
             workspace_schema_fork_heads::Entity::find()
                 .filter(
-                    workspace_schema_fork_heads::Column::ForkId.eq(fork["id"]
+                    workspace_schema_fork_heads::Column::ForkId.eq(fork["fork_id"]
                         .as_str()
                         .unwrap()
                         .parse::<Uuid>()
@@ -387,7 +391,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
                 preserved.text()
             );
             assert_eq!(
-                preserved.json::<serde_json::Value>()["id"],
+                preserved.json::<serde_json::Value>()["schema_id"],
                 head_id.to_string()
             );
         }
@@ -428,7 +432,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
             .await;
         assert_eq!(source_response.status_code(), StatusCode::CREATED);
         let source: serde_json::Value = source_response.json();
-        let source_schema_id = source["schema"]["id"].as_str().unwrap();
+        let source_schema_id = source["schema"]["schema_id"].as_str().unwrap();
         let target = fixtures::create_workspace(&ctx, tenant_a, "fork-http-target").await;
         let target_key = fixtures::issue_access_key(&ctx, target.id, owner_a).await;
         let created = request
@@ -447,7 +451,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
             created.text()
         );
         let fork: serde_json::Value = created.json();
-        let fork_id = fork["id"].as_str().unwrap();
+        let fork_id = fork["fork_id"].as_str().unwrap();
 
         let TestTenant {
             workspace_id: workspace_b,
@@ -552,7 +556,7 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
             );
             let body: serde_json::Value = response.json();
             schemas.push(
-                body["schema"]["id"]
+                body["schema"]["schema_id"]
                     .as_str()
                     .unwrap()
                     .parse::<Uuid>()
@@ -643,7 +647,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
         let source: serde_json::Value = source_response.json();
-        let source_schema_id = source["schema"]["id"].as_str().unwrap();
+        let source_schema_id = source["schema"]["schema_id"].as_str().unwrap();
         let target = fixtures::create_workspace(&ctx, tenant_a, "target-a").await;
         let target_key = fixtures::issue_access_key(&ctx, target.id, owner_a).await;
         let created = request
@@ -662,7 +666,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
             created.text()
         );
         let fork: serde_json::Value = created.json();
-        let fork_id = fork["id"].as_str().unwrap().parse::<Uuid>().unwrap();
+        let fork_id = fork["fork_id"].as_str().unwrap().parse::<Uuid>().unwrap();
 
         let TestTenant {
             tenant_id: tenant_b,
@@ -769,7 +773,7 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
             .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "source_workspace_id": source_workspace,
-                "source_schema_id": source["schema"]["id"]
+                "source_schema_id": source["schema"]["schema_id"]
             }))
             .await;
         assert_eq!(
@@ -779,7 +783,7 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
             created.text()
         );
         let fork: serde_json::Value = created.json();
-        let fork_id = fork["id"].as_str().unwrap().parse::<Uuid>().unwrap();
+        let fork_id = fork["fork_id"].as_str().unwrap().parse::<Uuid>().unwrap();
         let original = workspace_schema_forks::Entity::find_by_id(fork_id)
             .one(&ctx.db)
             .await

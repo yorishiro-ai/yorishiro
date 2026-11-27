@@ -20,15 +20,15 @@ async fn schema_fork_tools_match_rest_and_enforce_workspace_scope() {
         let target = request.post("/api/workspaces").add_header("Authorization", format!("Bearer {tenant_admin_key}")).json(&json!({"name":"fork target"})).await;
         target.assert_status(StatusCode::CREATED);
         let target: Value = target.json();
-        let workspace_id = target["id"].as_str().unwrap().parse().unwrap();
+        let workspace_id = target["workspace_id"].as_str().unwrap().parse().unwrap();
         let key = issue_access_key(&ctx, workspace_id, tenant.owner_id).await;
         let read_key = issue_access_key(&ctx, workspace_id, crate::requests::fixtures::create_iam_reader(&ctx, tenant.tenant_id).await).await;
-        let input = json!({"workspace_id":workspace_id,"source_workspace_id":tenant.workspace_id,"source_schema_id":source["schema"]["id"]});
+        let input = json!({"workspace_id":workspace_id,"source_workspace_id":tenant.workspace_id,"source_schema_id":source["schema"]["schema_id"]});
         let denied = mcp_call(&request, &session, &read_key, 2, "tools/call", json!({"name":"create_schema_fork","arguments":input})).await;
         assert_eq!(denied["result"]["isError"], true);
         let created = mcp_call(&request, &session, &key, 3, "tools/call", json!({"name":"create_schema_fork","arguments":input})).await;
         let fork = tool_result_json(&created);
-        let id = fork["id"].as_str().unwrap();
+        let id = fork["fork_id"].as_str().unwrap();
         let rest = request.get(&format!("/api/schema-forks/{id}")).add_header("Authorization", format!("Bearer {key}")).add_header("x-workspace-id", workspace_id.to_string()).await;
         rest.assert_status_ok();
         assert_eq!(fork, rest.json::<Value>());
@@ -37,12 +37,12 @@ async fn schema_fork_tools_match_rest_and_enforce_workspace_scope() {
         let stale = mcp_call(&request, &session, &key, 6, "tools/call", json!({"name":"update_schema_fork","arguments":{"workspace_id":workspace_id,"fork_id":id,"definition":fork["definition"],"expected_fork_schema_id":Uuid::new_v4()}})).await;
         assert_eq!(stale["result"]["isError"], true);
         let updated = mcp_call(&request, &session, &key, 7, "tools/call", json!({"name":"update_schema_fork","arguments":{"workspace_id":workspace_id,"fork_id":id,"definition":fork["definition"],"expected_fork_schema_id":fork["fork_schema_id"]}})).await;
-        assert_eq!(tool_result_json(&updated)["id"], fork["id"]);
+        assert_eq!(tool_result_json(&updated)["fork_id"], fork["fork_id"]);
         let denied = mcp_call(&request, &session, &read_key, 8, "tools/call", json!({"name":"delete_schema_fork","arguments":{"workspace_id":workspace_id,"fork_id":id}})).await;
         assert_eq!(denied["result"]["isError"], true);
         let deleted = mcp_call(&request, &session, &key, 9, "tools/call", json!({"name":"delete_schema_fork","arguments":{"workspace_id":workspace_id,"fork_id":id}})).await;
         assert_eq!(tool_result_json(&deleted)["deleted"], true);
         request.get(&format!("/api/schema-forks/{id}")).add_header("Authorization", format!("Bearer {key}")).add_header("x-workspace-id", workspace_id.to_string()).await.assert_status(StatusCode::NOT_FOUND);
-        request.get(&format!("/api/schemas/{}", source["schema"]["id"].as_str().unwrap())).add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status_ok();
+        request.get(&format!("/api/schemas/{}", source["schema"]["schema_id"].as_str().unwrap())).add_header("Authorization", format!("Bearer {}", tenant.api_key)).await.assert_status_ok();
     }).await;
 }

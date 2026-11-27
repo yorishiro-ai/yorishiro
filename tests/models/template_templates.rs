@@ -95,7 +95,7 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
                 .await;
             assert_eq!(response.status_code(), 201, "{}", response.text());
             let body: serde_json::Value = response.json();
-            ids.push(Uuid::parse_str(body["id"].as_str().unwrap()).unwrap());
+            ids.push(Uuid::parse_str(body["template_id"].as_str().unwrap()).unwrap());
         }
         let [private, community, hidden]: [Uuid; 3] = ids.try_into().unwrap();
 

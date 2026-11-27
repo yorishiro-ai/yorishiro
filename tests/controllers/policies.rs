@@ -88,7 +88,7 @@ async fn policies_are_named_and_versioned_and_evaluate_their_default_version() {
         let second = second.json::<Value>();
         assert_eq!(second["version_number"], 2);
         assert_eq!(second["is_default"], false);
-        let second_id = second["id"].as_str().unwrap().to_owned();
+        let second_id = second["version_id"].as_str().unwrap().to_owned();
         assert_eq!(can_list_groups().await, StatusCode::OK);
 
         let switched = request
@@ -217,7 +217,7 @@ async fn managed_policies_have_one_generated_version_and_cannot_be_changed() {
             .await
             .json::<Vec<Value>>();
         assert_eq!(versions.len(), 1);
-        assert_eq!(versions[0]["id"], administrator["default_version_id"]);
+        assert_eq!(versions[0]["version_id"], administrator["default_version_id"]);
         request
             .get(&format!(
                 "/api/policies/{policy_id}/versions/{}",

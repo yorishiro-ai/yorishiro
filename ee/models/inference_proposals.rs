@@ -63,7 +63,9 @@ crate::models::db_enum::db_enum! {
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 #[schemars(rename = "InferenceProposalResponse")]
 pub struct ProposalRecord {
+    #[serde(rename = "proposal_id")]
     pub id: Uuid,
+    #[serde(rename = "inference_job_id")]
     pub job_id: Uuid,
     pub workspace_id: Uuid,
     pub entity_id: Uuid,
@@ -107,6 +109,7 @@ pub struct ConfirmReport {
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 #[schemars(rename = "ProposalActionResponse")]
 pub struct ProposalActionReport {
+    #[serde(rename = "inference_job_id")]
     pub job_id: Uuid,
     pub changed: i64,
 }

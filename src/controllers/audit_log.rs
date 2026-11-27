@@ -10,6 +10,7 @@ use crate::controllers::openapi::Routes;
 
 #[derive(serde::Serialize, schemars::JsonSchema)]
 pub struct AuditLogRecord {
+    #[serde(rename = "audit_event_id")]
     pub id: uuid::Uuid,
     pub workspace_id: uuid::Uuid,
     pub tenant_id: uuid::Uuid,

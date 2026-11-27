@@ -14,6 +14,7 @@ pub(crate) struct CreateWorkspaceRequest {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct WorkspaceDetail {
+    #[serde(rename = "workspace_id")]
     pub(crate) id: Uuid,
     pub(crate) tenant_id: Uuid,
     pub(crate) name: String,

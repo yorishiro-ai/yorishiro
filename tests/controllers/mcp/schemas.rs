@@ -17,10 +17,10 @@ async fn schema_archive_preserves_history_and_version_sequence() {
         let created = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
         created.assert_status(StatusCode::CREATED);
         let schema = created.json::<Value>()["schema"].clone();
-        let id = schema["id"].as_str().unwrap();
+        let id = schema["schema_id"].as_str().unwrap();
         let entity = request.post("/api/entities").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&json!({"schema_name":"archive-history","entity_type":"note","data":{"title":"retained"}})).await;
         entity.assert_status(StatusCode::CREATED);
-        let entity_id = entity.json::<Value>()["id"].as_str().unwrap().to_owned();
+        let entity_id = entity.json::<Value>()["entity_id"].as_str().unwrap().to_owned();
         let read_key = issue_access_key(&ctx, tenant.workspace_id, crate::requests::fixtures::create_iam_reader(&ctx, tenant.tenant_id).await).await;
         let denied = mcp_call(&request, &session, &read_key, 2, "tools/call", json!({"name":"archive_schema","arguments":{"schema_id":id}})).await;
         assert_eq!(denied["result"]["isError"], true);
@@ -50,10 +50,10 @@ async fn delete_schema_tool_enforces_scope_and_removes_an_archived_version() {
         let definition = json!({"name":"delete-history","entity_types":{"note":{"fields":{"title":{"type":"string"}}}}});
         let v1 = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
         v1.assert_status(StatusCode::CREATED);
-        let v1_id = v1.json::<Value>()["schema"]["id"].as_str().unwrap().to_owned();
+        let v1_id = v1.json::<Value>()["schema"]["schema_id"].as_str().unwrap().to_owned();
         let v2 = request.post("/api/schemas").add_header("Authorization", format!("Bearer {}", tenant.api_key)).json(&definition).await;
         v2.assert_status(StatusCode::CREATED);
-        let v2_id = v2.json::<Value>()["schema"]["id"].as_str().unwrap().to_owned();
+        let v2_id = v2.json::<Value>()["schema"]["schema_id"].as_str().unwrap().to_owned();
         let read_key = issue_access_key(&ctx, tenant.workspace_id, crate::requests::fixtures::create_iam_reader(&ctx, tenant.tenant_id).await).await;
         let denied = mcp_call(&request, &session, &read_key, 2, "tools/call", json!({"name":"delete_schema","arguments":{"schema_id":v1_id}})).await;
         assert_eq!(denied["result"]["isError"], true);

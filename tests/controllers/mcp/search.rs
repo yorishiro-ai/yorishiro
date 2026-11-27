@@ -130,7 +130,7 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
             let hits = rest.json::<Value>();
             assert_eq!(hits.as_array().unwrap().len(), 10);
             assert_eq!(
-                hits[0]["entity"]["id"],
+                hits[0]["entity"]["entity_id"],
                 nearest.id.to_string(),
                 "phase {phase}: {hits}"
             );
@@ -249,7 +249,10 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
         assert_eq!(filtered["result"]["isError"], false, "{filtered}");
         let filtered_hits = tool_result_json(&filtered);
         assert_eq!(filtered_hits.as_array().unwrap().len(), 1);
-        assert_eq!(filtered_hits[0]["entity"]["id"], candidates[0].to_string());
+        assert_eq!(
+            filtered_hits[0]["entity"]["entity_id"],
+            candidates[0].to_string()
+        );
         rest.assert_status(StatusCode::OK);
         assert_eq!(
             rest.json::<Value>(),

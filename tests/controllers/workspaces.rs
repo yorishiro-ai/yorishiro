@@ -123,7 +123,7 @@ async fn owner_can_create_list_view_and_delete_workspaces() {
         let body: serde_json::Value = response.json();
         assert_eq!(body["name"], "staging");
         assert_eq!(body["tenant_id"], tenant_id.to_string());
-        let staging_id = body["id"].as_str().unwrap().to_string();
+        let staging_id = body["workspace_id"].as_str().unwrap().to_string();
 
         let response = request
             .get("/api/workspaces")
@@ -398,7 +398,7 @@ async fn a_new_workspace_becomes_active_on_first_schema() {
         let row = listed
             .json::<Vec<Value>>()
             .into_iter()
-            .find(|workspace| workspace["id"] == serde_json::json!(tenant.workspace_id))
+            .find(|workspace| workspace["workspace_id"] == serde_json::json!(tenant.workspace_id))
             .expect("the new workspace is listed");
         assert_eq!(row["status"], "schema_pending", "row: {row:?}");
         assert!(row["schema_id"].is_null(), "row: {row:?}");
@@ -415,7 +415,7 @@ async fn a_new_workspace_becomes_active_on_first_schema() {
             .json(&definition)
             .await;
         created.assert_status(StatusCode::CREATED);
-        let schema_id = created.json::<Value>()["schema"]["id"]
+        let schema_id = created.json::<Value>()["schema"]["schema_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -435,7 +435,7 @@ async fn a_new_workspace_becomes_active_on_first_schema() {
         let row = listed
             .json::<Vec<Value>>()
             .into_iter()
-            .find(|workspace| workspace["id"] == serde_json::json!(tenant.workspace_id))
+            .find(|workspace| workspace["workspace_id"] == serde_json::json!(tenant.workspace_id))
             .expect("the new workspace is listed");
         assert_eq!(row["status"], "active", "row: {row:?}");
         assert_eq!(row["schema_id"], schema_id, "row: {row:?}");
@@ -461,7 +461,7 @@ async fn duplicate_workspace_names_conflict_instead_of_failing_internally() {
         create("demo").await.assert_status(StatusCode::CREATED);
         let other = create("other").await;
         other.assert_status(StatusCode::CREATED);
-        let other_id = other.json::<serde_json::Value>()["id"]
+        let other_id = other.json::<serde_json::Value>()["workspace_id"]
             .as_str()
             .unwrap()
             .to_owned();

@@ -311,7 +311,7 @@ async fn entity_update_refuses_a_stale_expected_updated_at() {
             .await;
         created.assert_status(StatusCode::CREATED);
         let record = created.json::<serde_json::Value>();
-        let id = record["id"].as_str().unwrap().to_owned();
+        let id = record["entity_id"].as_str().unwrap().to_owned();
         let first_updated = record["updated_at"].as_str().unwrap().to_owned();
 
         // A matching token passes and moves the timestamp.
