@@ -282,11 +282,15 @@ async fn postgres_workspace_hnsw_promotion_and_cleanup() {
         tokio::time::timeout(std::time::Duration::from_secs(5), entity_embeddings::maintain_workspace_indexes(&ctx.db)).await.unwrap().unwrap();
         let present: Option<String> = sea_orm::sqlx::query_scalar("SELECT to_regclass($1)::text").bind(&index).fetch_one(&mut lock).await.unwrap();
         assert!(present.is_none(), "a competing maintenance session must not create the index");
+        // Wait for PostgreSQL to confirm the unlock before asking another session to take it.
+        let released: bool = sea_orm::sqlx::query_scalar("SELECT pg_advisory_unlock(hashtextextended('embedding-index-maintenance',0))")
+            .fetch_one(&mut lock).await.unwrap();
+        assert!(released, "the competing session must still hold the maintenance lock");
         lock.close().await.unwrap();
         entity_embeddings::maintain_workspace_indexes(&ctx.db).await.unwrap();
         let exists = |name: String| ConnectionTrait::query_one_raw(&ctx.db, Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Postgres, "SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass($1)", [name.into()]));
-        assert!(exists(index.clone()).await.unwrap().unwrap().try_get::<bool>("","indisvalid").unwrap());
+        assert!(exists(index.clone()).await.unwrap().expect("maintenance must create the workspace index").try_get::<bool>("","indisvalid").unwrap());
         // Execute and EXPLAIN the same production candidate builder without forcing an ANN plan.
         let txn = yorishiro::db::begin_workspace(&ctx, fixture.tenant_id, fixture.workspace_id).await.unwrap();
         let role = txn.query_one_raw(Statement::from_string(sea_orm::DatabaseBackend::Postgres,
