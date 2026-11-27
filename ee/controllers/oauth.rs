@@ -161,6 +161,7 @@ fn login_failure_redirect(clear_cookie: String) -> Response {
 
 pub fn routes() -> Routes {
     Routes::new()
+        .licensed()
         .tag("enterprise")
         .prefix("auth/oauth")
         .add("/status", aide::axum::routing::get(status))

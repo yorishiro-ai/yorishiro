@@ -89,7 +89,8 @@ pub(crate) async fn after_context(ctx: AppContext) -> Result<AppContext> {
 /// An edition mounts its own route groups after the base ones, so it adds paths rather than replacing any.
 pub(crate) struct RouteMounts {
     app_routes: AppRoutes,
-    api: aide::openapi::OpenApi,
+    api: aide::axum::ApiRouter<AppContext>,
+    action_paths: Vec<(String, String)>,
     credential_paths: Vec<&'static str>,
 }
 
@@ -102,7 +103,8 @@ impl RouteMounts {
     pub(crate) fn community() -> Self {
         let mut mounts = Self {
             app_routes: AppRoutes::with_default_routes(),
-            api: aide::openapi::OpenApi::default(),
+            api: aide::axum::ApiRouter::new(),
+            action_paths: Vec::new(),
             credential_paths: Vec::new(),
         };
         mounts
@@ -136,9 +138,13 @@ impl RouteMounts {
     /// Registers a route group with Loco and merges its generated operations into the document.
     pub(crate) fn mount(&mut self, routes: controllers::openapi::Routes) -> &mut Self {
         let controllers::openapi::Routes {
-            loco: routes, api, ..
+            loco: routes,
+            api,
+            action_paths,
+            ..
         } = routes;
-        controllers::openapi::merge_api(&mut self.api, api);
+        self.api = std::mem::replace(&mut self.api, aide::axum::ApiRouter::new()).merge(api);
+        self.action_paths.extend(action_paths);
         let current = std::mem::replace(&mut self.app_routes, AppRoutes::empty());
         self.app_routes = current.add_route(routes);
         self
@@ -151,9 +157,15 @@ impl RouteMounts {
     }
 
     /// Publishes the document and credential paths to the shared store, and returns the route tree.
-    pub(crate) fn finish(mut self, ctx: &AppContext) -> AppRoutes {
-        controllers::openapi::assert_unique_operation_ids(&mut self.api);
-        ctx.shared_store.insert(self.api);
+    pub(crate) fn finish(self, ctx: &AppContext) -> AppRoutes {
+        let mut api = aide::openapi::OpenApi::default();
+        let _ = self.api.finish_api_with(&mut api, |mut transform| {
+            let api = transform.inner_mut();
+            controllers::openapi::document_action_paths(api, self.action_paths);
+            controllers::openapi::finalize_operation_ids(api);
+            controllers::openapi::swagger::describe(transform)
+        });
+        ctx.shared_store.insert(api);
         ctx.shared_store
             .insert(CredentialPaths(self.credential_paths));
         self.app_routes
@@ -174,7 +186,7 @@ pub(crate) fn after_routes(
         .shared_store
         .get::<aide::openapi::OpenApi>()
         .ok_or_else(|| loco_rs::Error::Message("OpenAPI document missing".into()))?;
-    let router = controllers::openapi::swagger::mount(router, &api);
+    let router = controllers::openapi::swagger::mount(router, api);
     let router = controllers::mcp::mount(router, ctx, move |ctx| tools.server(ctx));
     let credential_paths = ctx
         .shared_store

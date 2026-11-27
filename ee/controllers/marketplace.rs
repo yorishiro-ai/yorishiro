@@ -136,6 +136,7 @@ async fn set_visibility(
 
 pub fn routes() -> Routes {
     Routes::new()
+        .licensed()
         .tag("enterprise")
         .prefix("api/marketplace")
         .add(

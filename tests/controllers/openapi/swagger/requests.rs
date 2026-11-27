@@ -47,6 +47,12 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
                 ["application/json"]["schema"]["type"],
             "string"
         );
+        assert_eq!(
+            document["paths"]["/api/stripe/webhook"]["post"]["x-yorishiro-licence-required"],
+            true
+        );
+        assert!(document["paths"]["/api/workspace/llm-provider"]["put"]
+            ["x-yorishiro-licence-required"].is_null());
         assert!(document["paths"]["/api/stripe/webhook"]["post"]["responses"]["500"]["content"]
             .is_null());
         assert_eq!(
@@ -66,6 +72,8 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
             assert_eq!(document["paths"][path]["post"]["operationId"], id);
             assert!(document["paths"][path.split_once(':').unwrap().0]["post"].is_null());
         }
+        assert_eq!(document["paths"]["/api/schemas/{schema_id}"]["get"]["operationId"], "GetSchema");
+        assert_eq!(document["paths"]["/api/schemas/{schema_id}"]["delete"]["operationId"], "DeleteSchema");
         assert_eq!(
             document["paths"]["/api/entities"]["post"]["security"][0]["bearer_auth"],
             serde_json::json!([])

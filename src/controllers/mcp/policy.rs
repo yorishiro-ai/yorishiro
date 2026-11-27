@@ -1,5 +1,9 @@
 //! Which tools an MCP server exposes and which of them a request may see or call.
 
+use std::{collections::HashSet, sync::LazyLock};
+
+use crate::models::iam::policy::{AccessLevel, Action};
+
 use super::{
     AppContext, Arc, ToolRouter, YorishiroMcpServer, community_tool_router, compose_tool_routers,
 };
@@ -111,49 +115,22 @@ impl McpToolSet {
 }
 
 // Unknown tools fail closed in read-only mode; scope alone cannot distinguish reads from IAM writes.
-pub(crate) fn read_only_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "get_caller_identity"
-            | "discover_workspaces"
-            | "export_workspace"
-            | "get_active_schema"
-            | "get_entity"
-            | "get_entity_drift"
-            | "get_entity_type_json_schema"
-            | "get_group"
-            | "get_policy"
-            | "get_policy_version"
-            | "get_relation"
-            | "get_schema"
-            | "get_builtin_template"
-            | "get_template_library_item"
-            | "get_tenant"
-            | "get_user"
-            | "get_workspace"
-            | "get_import_job"
-            | "get_migration_job"
-            | "preview_migration"
-            | "list_access_keys"
-            | "list_workspace_audit_events"
-            | "list_attached_group_policies"
-            | "list_attached_user_policies"
-            | "list_entities"
-            | "list_groups"
-            | "list_groups_for_user"
-            | "list_iam_audit_events"
-            | "list_api_events"
-            | "list_policies"
-            | "list_policy_versions"
-            | "list_relations"
-            | "list_schemas"
-            | "list_template_library_items"
-            | "list_builtin_templates"
-            | "list_users"
-            | "list_workspaces"
-            | "recall_entity_context"
-            | "search_entities"
-            | "simulate_principal_policy"
-            | "get_tenant_retirement_inventory"
-    )
+fn read_only_tool(name: &str) -> bool {
+    static READS: LazyLock<HashSet<String>> = LazyLock::new(|| {
+        Action::ALL
+            .iter()
+            .filter(|action| matches!(action.access_level(), AccessLevel::List | AccessLevel::Read))
+            .map(|action| {
+                let mut name = String::new();
+                for ch in action.name().chars() {
+                    if ch.is_ascii_uppercase() && !name.is_empty() {
+                        name.push('_');
+                    }
+                    name.push(ch.to_ascii_lowercase());
+                }
+                name
+            })
+            .collect()
+    });
+    name == "get_caller_identity" || READS.contains(name)
 }

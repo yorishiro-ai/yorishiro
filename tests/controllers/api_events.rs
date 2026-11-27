@@ -119,21 +119,23 @@ async fn unauthenticated_and_denied_calls_are_recorded_without_secrets() {
 async fn mcp_calls_leave_the_envelope_and_the_tool_call() {
     boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key = root_key(&ctx, &tenant).await;
         let session = super::mcp::initialize(&request).await;
         let called = request
             .post("/mcp")
             .add_header("Accept", "application/json, text/event-stream")
             .add_header("MCP-Session-Id", session)
             .add_header("MCP-Protocol-Version", "2025-03-26")
-            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("Authorization", format!("Bearer {key}"))
             .add_header("x-request-id", "trail-mcp")
-            .json(&json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_caller_identity","arguments":{}}}))
+            .json(&json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_workspaces","arguments":{}}}))
             .await;
         called.assert_status_ok();
         let rows = events_of(&ctx, "trail-mcp").await;
         let tool: Vec<_> = rows.iter().filter(|row| row.transport == "mcp").collect();
         assert_eq!(tool.len(), 1);
-        assert_eq!(tool[0].event_name, "get_caller_identity");
+        assert_eq!(tool[0].event_name, "list_workspaces");
+        assert!(tool[0].read_only);
         assert_eq!(tool[0].outcome.as_deref(), Some("success"));
         assert_eq!(tool[0].tenant_id, Some(tenant.tenant_id));
         assert!(rows.iter().any(|row| row.transport == "mcp_http" && row.event_name == "POST /mcp"));

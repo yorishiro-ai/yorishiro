@@ -31,11 +31,24 @@ pub(crate) fn error_responses(
 }
 
 /// Keeps Loco's route groups and aide's inferred contract in one registration.
-#[derive(Default)]
 pub struct Routes {
     pub(crate) loco: loco_rs::controller::Routes,
-    pub(crate) api: OpenApi,
+    pub(crate) api: ApiRouter<AppContext>,
+    pub(crate) action_paths: Vec<(String, String)>,
     tag: Option<&'static str>,
+    licensed: bool,
+}
+
+impl Default for Routes {
+    fn default() -> Self {
+        Self {
+            loco: loco_rs::controller::Routes::new(),
+            api: ApiRouter::new(),
+            action_paths: Vec::new(),
+            tag: None,
+            licensed: false,
+        }
+    }
 }
 
 impl Routes {
@@ -85,34 +98,33 @@ impl Routes {
         } else {
             path.trim_end_matches('/')
         };
-        let mut api = OpenApi::default();
-        let _ = ApiRouter::new()
-            .api_route(path, method.clone())
-            .finish_api(&mut api);
-        if !suffix.is_empty()
-            && let Some(paths) = &mut api.paths
-            && let Some(item) = paths.paths.shift_remove(path)
-        {
-            paths.paths.insert(format!("{path}{suffix}"), item);
+        if !suffix.is_empty() {
+            self.action_paths
+                .push((path.to_owned(), format!("{path}{suffix}")));
         }
-        for (path, method, operation) in operations_mut(&mut api) {
-            if operation.operation_id.is_none() {
-                operation.operation_id = Some(operation_id(method, path));
+        self.api = self.api.api_route_with(path, method.clone(), |mut item| {
+            if let Some(tag) = self.tag {
+                item = item.tag(tag);
             }
-            operation.tags.extend(self.tag.map(Into::into));
-        }
-        merge_api(&mut self.api, api);
+            if self.licensed {
+                for operation in
+                    path_operations_mut(item.inner_mut()).map(|(_, operation)| operation)
+                {
+                    operation
+                        .extensions
+                        .insert("x-yorishiro-licence-required".into(), true.into());
+                }
+            }
+            item
+        });
         self.loco = self.loco.add(uri, method.into());
         self
     }
 
+    /// Marks subsequently registered operations as requiring a licence.
     #[must_use]
-    pub fn licensed(mut self) -> Self {
-        for (_, _, operation) in operations_mut(&mut self.api) {
-            operation
-                .extensions
-                .insert("x-yorishiro-licence-required".into(), true.into());
-        }
+    pub const fn licensed(mut self) -> Self {
+        self.licensed = true;
         self
     }
 
@@ -130,31 +142,44 @@ impl Routes {
     }
 }
 
-pub(crate) fn merge_api(target: &mut OpenApi, source: OpenApi) {
-    if let Some(paths) = source.paths {
-        let target = &mut target.paths.get_or_insert_with(Default::default).paths;
-        for (path, item) in paths.paths {
-            let item = item.into_item().expect("generated path is inline");
-            if let Some(existing) = target.get_mut(&path).and_then(|item| item.as_item_mut()) {
-                for (method, _) in item.iter() {
-                    assert!(
-                        existing.iter().all(|(taken, _)| taken != method),
-                        "duplicate route: {method} {path}"
-                    );
-                }
-                existing.merge_with(item);
-            } else {
-                target.insert(path, aide::openapi::ReferenceOr::Item(item));
-            }
+pub(crate) fn document_action_paths(api: &mut OpenApi, action_paths: Vec<(String, String)>) {
+    let Some(paths) = &mut api.paths else { return };
+    for (path, action_path) in action_paths {
+        let item = paths
+            .paths
+            .get_mut(&path)
+            .and_then(|item| item.as_item_mut())
+            .expect("action route is registered");
+        let post = item.post.take().expect("action routes use POST");
+        if item.iter().next().is_none() {
+            paths.paths.shift_remove(&path);
         }
+        let previous = paths.paths.insert(
+            action_path,
+            aide::openapi::ReferenceOr::Item(aide::openapi::PathItem {
+                post: Some(post),
+                ..Default::default()
+            }),
+        );
+        assert!(previous.is_none(), "duplicate action path");
     }
-    if let Some(components) = source.components {
-        target
-            .components
-            .get_or_insert_with(Default::default)
-            .schemas
-            .extend(components.schemas);
-    }
+}
+
+fn path_operations_mut(
+    item: &mut aide::openapi::PathItem,
+) -> impl Iterator<Item = (&'static str, &mut aide::openapi::Operation)> {
+    [
+        ("get", &mut item.get),
+        ("post", &mut item.post),
+        ("put", &mut item.put),
+        ("delete", &mut item.delete),
+        ("patch", &mut item.patch),
+        ("head", &mut item.head),
+        ("options", &mut item.options),
+        ("trace", &mut item.trace),
+    ]
+    .into_iter()
+    .filter_map(|(method, operation)| Some((method, operation.as_mut()?)))
 }
 
 /// Every operation with its path and lowercase method.
@@ -166,15 +191,7 @@ pub(crate) fn operations_mut(
         .flat_map(|paths| paths.paths.iter_mut())
         .filter_map(|(path, item)| Some((path.as_str(), item.as_item_mut()?)))
         .flat_map(|(path, item)| {
-            [
-                ("get", &mut item.get),
-                ("post", &mut item.post),
-                ("put", &mut item.put),
-                ("delete", &mut item.delete),
-                ("patch", &mut item.patch),
-            ]
-            .into_iter()
-            .filter_map(move |(method, operation)| Some((path, method, operation.as_mut()?)))
+            path_operations_mut(item).map(move |(method, operation)| (path, method, operation))
         })
 }
 
@@ -182,10 +199,12 @@ pub(crate) fn operations_mut(
 ///
 /// # Panics
 /// Panics naming the colliding ID.
-pub(crate) fn assert_unique_operation_ids(api: &mut OpenApi) {
+pub(crate) fn finalize_operation_ids(api: &mut OpenApi) {
     let mut seen = std::collections::HashSet::new();
     for (path, method, operation) in operations_mut(api) {
-        let id = operation.operation_id.as_deref().unwrap_or_default();
+        let id = operation
+            .operation_id
+            .get_or_insert_with(|| operation_id(method, path));
         assert!(
             seen.insert(id.to_owned()),
             "duplicate operation id {id}: {method} {path}"

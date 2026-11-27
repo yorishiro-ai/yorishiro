@@ -119,7 +119,7 @@ async fn stripe_webhook(
 /// # Panics
 /// Panics if the static webhook metadata is invalid.
 pub fn routes() -> Routes {
-    Routes::new().tag("enterprise").prefix("api/stripe").add(
+    Routes::new().licensed().tag("enterprise").prefix("api/stripe").add(
         "/webhook",
         aide::axum::routing::post_with(stripe_webhook, |op| {
             op

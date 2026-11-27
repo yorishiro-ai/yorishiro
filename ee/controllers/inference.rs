@@ -107,10 +107,14 @@ pub fn routes() -> Routes {
 /// The route this module's licence gate covers: the server calls an LLM here, which is what makes
 /// it an enterprise feature. See [`routes`] for why the two groups are separate.
 pub fn gated_routes() -> Routes {
-    Routes::new().tag("enterprise").prefix("api/schemas").add(
-        "/active/{schema_name}/infer-fill",
-        aide::axum::routing::post_with(infer_fill, |op| op.id("CreateInferenceJob")),
-    )
+    Routes::new()
+        .licensed()
+        .tag("enterprise")
+        .prefix("api/schemas")
+        .add(
+            "/active/{schema_name}/infer-fill",
+            aide::axum::routing::post_with(infer_fill, |op| op.id("CreateInferenceJob")),
+        )
 }
 
 /// `GET /api/inference-jobs/{inference_job_id}`
@@ -119,6 +123,7 @@ pub fn gated_routes() -> Routes {
 /// It sits under the licence gate because results include counts that reveal whether a workspace has data to infer.
 pub fn inference_job_status_routes() -> Routes {
     Routes::new()
+        .licensed()
         .tag("enterprise")
         .prefix("api/inference-jobs")
         .add(

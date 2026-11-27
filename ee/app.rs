@@ -125,29 +125,17 @@ pub(crate) fn mount_routes(mounts: &mut RouteMounts, ctx: &AppContext) {
     mounts.mount(controllers::embedding::routes());
     mounts.mount(controllers::entity_columns::routes());
     mounts.mount(controllers::inference::routes());
-    mounts.mount(
-        controllers::inference::gated_routes()
-            .licensed()
-            .layer(gate.clone()),
-    );
-    mounts.mount(
-        controllers::inference::inference_job_status_routes()
-            .licensed()
-            .layer(gate.clone()),
-    );
-    mounts.mount(
-        controllers::marketplace::routes()
-            .licensed()
-            .layer(gate.clone()),
-    );
+    mounts.mount(controllers::inference::gated_routes().layer(gate.clone()));
+    mounts.mount(controllers::inference::inference_job_status_routes().layer(gate.clone()));
+    mounts.mount(controllers::marketplace::routes().layer(gate.clone()));
     // OAuth status shares the licence gate with login entry points, including when OAuth is unconfigured.
     mounts
-        .mount(controllers::oauth::routes().licensed().layer(gate.clone()))
+        .mount(controllers::oauth::routes().layer(gate.clone()))
         .guard_credentials("/auth/oauth/authorize")
         .guard_credentials("/auth/oauth/callback");
     mounts.mount(controllers::origin::routes());
     mounts.mount(controllers::schema_forks::routes());
-    mounts.mount(controllers::stripe::routes().licensed().layer(gate));
+    mounts.mount(controllers::stripe::routes().layer(gate));
     mounts.mount(controllers::worker_class::routes());
 }
 
