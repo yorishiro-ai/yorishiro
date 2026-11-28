@@ -52,3 +52,26 @@ fn rest_and_loco_boundaries_do_not_expose_internal_details() {
     assert_eq!(loco_status, status);
     assert_eq!(detail.errors, Some(body));
 }
+
+#[test]
+fn a_missing_row_is_not_found_and_other_database_errors_stay_internal() {
+    use sea_orm::DbErr;
+    use yorishiro::error::YorishiroError;
+
+    for missing in [DbErr::RecordNotFound("row".into()), DbErr::RecordNotUpdated] {
+        assert!(matches!(
+            YorishiroError::not_found_on_missing(missing, "gone"),
+            YorishiroError::NotFound { message } if message == "gone"
+        ));
+    }
+    let other = || DbErr::Custom("boom".into());
+    assert!(matches!(
+        YorishiroError::not_found_on_missing(other(), "gone"),
+        YorishiroError::Internal(_)
+    ));
+    assert!(matches!(
+        YorishiroError::conflict_on_fk(other(), "referenced"),
+        YorishiroError::Internal(_)
+    ));
+    assert!(!YorishiroError::is_foreign_key_violation(&other()));
+}

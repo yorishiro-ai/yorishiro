@@ -156,7 +156,9 @@ impl Entity {
             }
             active.expires_at = ActiveValue::Set(expires_at);
         }
-        let updated = active.update(&txn).await.internal()?;
+        let updated = active.update(&txn).await.map_err(|error| {
+            YorishiroError::not_found_on_missing(error, "access key was not found")
+        })?;
         let grant = updated.grant_metadata();
         crate::models::api_events::record(
             &txn,

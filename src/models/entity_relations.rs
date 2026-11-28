@@ -2,7 +2,7 @@
 
 use crate::error::OptionExt;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, SqlErr, Statement};
+use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -172,24 +172,20 @@ pub async fn create(
         .insert(conn)
         .await
         .map_err(|err| {
-            if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-                YorishiroError::Conflict {
-                    message: format!(
-                        "relation '{}' between '{}' and '{}' already exists",
-                        input.relation_type, input.source_id, input.target_id
-                    ),
-                }
-            } else if matches!(
-                err.sql_err(),
-                Some(SqlErr::ForeignKeyConstraintViolation(_))
-            ) {
+            if YorishiroError::is_foreign_key_violation(&err) {
                 // Another transaction deleted an endpoint between the existence check and the insert.
                 YorishiroError::not_found(format!(
                     "source '{}' or target '{}' no longer exists",
                     input.source_id, input.target_id
                 ))
             } else {
-                YorishiroError::Internal(err.into())
+                YorishiroError::conflict_on_unique(
+                    err,
+                    format!(
+                        "relation '{}' between '{}' and '{}' already exists",
+                        input.relation_type, input.source_id, input.target_id
+                    ),
+                )
             }
         })
         .and_then(TryInto::try_into)
@@ -233,11 +229,11 @@ pub(crate) async fn set_status(
     active
         .update(conn)
         .await
-        .map_err(|err| match err {
-            DbErr::RecordNotUpdated => {
-                YorishiroError::not_found(format!("relation '{}' was not found", input.id))
-            }
-            err => YorishiroError::Internal(err.into()),
+        .map_err(|err| {
+            YorishiroError::not_found_on_missing(
+                err,
+                format!("relation '{}' was not found", input.id),
+            )
         })
         .and_then(TryInto::try_into)
 }

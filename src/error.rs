@@ -514,6 +514,53 @@ pub struct ValidationDetail {
 }
 
 impl YorishiroError {
+    /// Whether the database refused a write because a row it references is missing or still referenced.
+    /// `sea_orm` does not report PostgreSQL `restrict_violation` or a SQLite `RESTRICT` foreign key, so those are matched by code.
+    #[must_use]
+    pub fn is_foreign_key_violation(error: &sea_orm::DbErr) -> bool {
+        use sea_orm::{DbErr, RuntimeErr};
+        matches!(
+            error,
+            DbErr::Exec(RuntimeErr::SqlxError(sqlx_error))
+                if sqlx_error.as_database_error().is_some_and(|database| {
+                    database.code().as_deref() == Some("23001")
+                        || (database.code().as_deref() == Some("1811")
+                            && database.message() == "FOREIGN KEY constraint failed")
+                })
+        ) || matches!(
+            error.sql_err(),
+            Some(sea_orm::SqlErr::ForeignKeyConstraintViolation(_))
+        )
+    }
+
+    /// A row that is gone (`RecordNotFound`, or `RecordNotUpdated` after a concurrent delete) becomes a not-found with `message`; any other database error is internal.
+    /// Use it only where the missing row is what the caller named, never for an internal invariant such as a lost lease.
+    #[must_use]
+    pub fn not_found_on_missing(error: sea_orm::DbErr, message: impl Into<String>) -> Self {
+        if matches!(
+            error,
+            sea_orm::DbErr::RecordNotFound(_) | sea_orm::DbErr::RecordNotUpdated
+        ) {
+            Self::NotFound {
+                message: message.into(),
+            }
+        } else {
+            Self::Internal(error.into())
+        }
+    }
+
+    /// A foreign-key violation becomes a conflict with `message`; any other database error is internal.
+    #[must_use]
+    pub fn conflict_on_fk(error: sea_orm::DbErr, message: impl Into<String>) -> Self {
+        if Self::is_foreign_key_violation(&error) {
+            Self::Conflict {
+                message: message.into(),
+            }
+        } else {
+            Self::Internal(error.into())
+        }
+    }
+
     /// A unique-constraint violation becomes a conflict with `message`; any other database error is internal.
     pub(crate) fn conflict_on_unique(error: sea_orm::DbErr, message: impl Into<String>) -> Self {
         if matches!(

@@ -1,6 +1,6 @@
 //! Builds the text to embed from an entity and syncs its vector, checking the workspace's provider assignment and concurrency token.
 
-use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -154,11 +154,11 @@ pub async fn sync_embedding_for_record(
 ) -> Result<(), YorishiroError> {
     let snapshot = entity_entities::get_with_token(conn, workspace_id, record.id)
         .await
-        .map_err(|error| match error {
-            DbErr::RecordNotFound(_) => {
-                YorishiroError::not_found(format!("entity '{}' was not found", record.id))
-            }
-            other => YorishiroError::Internal(other.into()),
+        .map_err(|error| {
+            YorishiroError::not_found_on_missing(
+                error,
+                format!("entity '{}' was not found", record.id),
+            )
         })?;
 
     sync_embedding_for_snapshot(conn, workspace_id, &snapshot, provider)

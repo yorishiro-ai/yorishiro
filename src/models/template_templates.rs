@@ -437,7 +437,11 @@ pub async fn update_template(
         active.locale = ActiveValue::Set(Some(locale));
     }
 
-    let record = active.update(conn).await.internal()?.try_into()?;
+    let record = active
+        .update(conn)
+        .await
+        .map_err(|error| YorishiroError::not_found_on_missing(error, "template was not found"))?
+        .try_into()?;
 
     // Following schemas learn of the upstream edit through a pending origin mark.
     if definition_changed {

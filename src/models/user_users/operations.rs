@@ -80,7 +80,10 @@ pub async fn reset_root_password_by_operator(
     }
     let mut active: ActiveModel = user.into();
     active.password_hash = ActiveValue::Set(Some(hash_blocking(password).await?));
-    active.update(&txn).await.internal()?;
+    active
+        .update(&txn)
+        .await
+        .map_err(|error| YorishiroError::not_found_on_missing(error, "user was not found"))?;
     crate::models::access_keys::Entity::revoke_matching(
         &txn,
         Condition::all().add(crate::models::_entities::access_keys::Column::UserId.eq(user_id)),
@@ -207,7 +210,10 @@ pub(crate) async fn update_display_name(
     let user = find_in_tenant(conn, tenant_id, user_id).await?;
     let mut active: ActiveModel = user.into();
     active.display_name = ActiveValue::Set(display_name);
-    active.update(conn).await.internal()
+    active
+        .update(conn)
+        .await
+        .map_err(|error| YorishiroError::not_found_on_missing(error, "user was not found"))
 }
 
 /// Finds a user that belongs to `tenant_id`, whether bound to it or its root user.
@@ -409,7 +415,10 @@ pub(crate) async fn reset_tenant_password(
         .or_not_found("user was not found")?;
     let mut active: ActiveModel = user.into();
     active.password_hash = ActiveValue::Set(Some(hash_blocking(password).await?));
-    active.update(conn).await.internal()?;
+    active
+        .update(conn)
+        .await
+        .map_err(|error| YorishiroError::not_found_on_missing(error, "user was not found"))?;
     crate::models::access_keys::Entity::revoke_matching(
         conn,
         Condition::all()

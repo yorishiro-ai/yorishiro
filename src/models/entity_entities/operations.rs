@@ -211,7 +211,11 @@ pub async fn update(
                 ),
             });
     }
-    active.update(conn).await.internal().map(EntityRecord::from)
+    active
+        .update(conn)
+        .await
+        .map_err(|error| YorishiroError::not_found_on_missing(error, "entity was not found"))
+        .map(EntityRecord::from)
 }
 
 /// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`.

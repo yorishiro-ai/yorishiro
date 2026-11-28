@@ -75,7 +75,10 @@ pub(crate) async fn update_as(
     if input.replace_max_workspaces {
         tenant.max_workspaces = sea_orm::ActiveValue::Set(input.max_workspaces);
     }
-    let updated = tenant.update(&txn).await.internal()?;
+    let updated = tenant
+        .update(&txn)
+        .await
+        .map_err(|error| YorishiroError::not_found_on_missing(error, "tenant was not found"))?;
     crate::models::api_events::record(
         &txn,
         actor,

@@ -2,8 +2,7 @@
 
 use crate::error::OptionExt;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, PaginatorTrait,
-    QueryFilter, RuntimeErr, SqlErr,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
 };
 use uuid::Uuid;
 
@@ -75,24 +74,10 @@ pub(crate) async fn delete_workspace(
         .await
         .map_err(|err| {
             // The foreign key fences concurrent fork creation, so no preflight count is needed.
-            // SeaORM does not map PostgreSQL restrict_violation or SQLite RESTRICT foreign keys.
-            let restricted_foreign_key = matches!(
-                &err,
-                DbErr::Exec(RuntimeErr::SqlxError(error))
-                    if error.as_database_error().is_some_and(|error|
-                        error.code().as_deref() == Some("23001")
-                            || (error.code().as_deref() == Some("1811")
-                                && error.message() == "FOREIGN KEY constraint failed"))
-            );
-            if restricted_foreign_key
-                || matches!(err.sql_err(), Some(SqlErr::ForeignKeyConstraintViolation(_)))
-            {
-                YorishiroError::Conflict {
-                    message: "workspace is still referenced by schema forks; remove those forks before deleting it".into(),
-                }
-            } else {
-                YorishiroError::Internal(err.into())
-            }
+            YorishiroError::conflict_on_fk(
+                err,
+                "workspace is still referenced by schema forks; remove those forks before deleting it",
+            )
         })?;
     Ok(())
 }

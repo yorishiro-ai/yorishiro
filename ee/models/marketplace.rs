@@ -912,6 +912,8 @@ pub(crate) async fn update_visibility(
         visibility: sea_orm::ActiveValue::Set(visibility.as_db_str().to_string()),
         ..Default::default()
     };
-    active.update(conn).await.internal()?;
+    active.update(conn).await.map_err(|error| {
+        YorishiroError::not_found_on_missing(error, "template version was not found")
+    })?;
     Ok(())
 }
