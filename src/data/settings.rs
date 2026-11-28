@@ -1,6 +1,7 @@
 //! The application's typed `settings` section and the operator-tunable defaults nested in it.
 
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Selects the handlers and resources a queue consumer owns.
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -109,6 +110,32 @@ pub(crate) struct HttpTimeouts {
     pub(crate) inference_request_seconds: u64,
     /// One OIDC discovery or token call.
     pub(crate) oauth_discovery_seconds: u64,
+}
+
+impl HttpTimeouts {
+    /// One embedding request to an OpenAI-compatible provider.
+    #[must_use]
+    pub(crate) const fn embedding_request(self) -> Duration {
+        Duration::from_secs(self.embedding_request_seconds)
+    }
+
+    /// One batch through the in-process local embedding model.
+    #[must_use]
+    pub(crate) const fn local_embedding(self) -> Duration {
+        Duration::from_secs(self.local_embedding_seconds)
+    }
+
+    /// Connecting to the host that serves the local model files.
+    #[must_use]
+    pub(crate) const fn model_fetch_connect(self) -> Duration {
+        Duration::from_secs(self.model_fetch_connect_seconds)
+    }
+
+    /// Reading from it.
+    #[must_use]
+    pub(crate) const fn model_fetch_read(self) -> Duration {
+        Duration::from_secs(self.model_fetch_read_seconds)
+    }
 }
 
 impl Default for HttpTimeouts {

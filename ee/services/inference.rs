@@ -51,10 +51,7 @@ impl InferenceClient {
         timeouts: crate::data::settings::HttpTimeouts,
     ) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(crate::data::http_timeouts::deadline_for(
-                crate::data::http_timeouts::HttpTimeout::InferenceRequest,
-                timeouts,
-            ))
+            .timeout(std::time::Duration::from_secs(timeouts.inference_request_seconds))
             // No redirects: a workspace sets `base_url` freely, and this request carries that workspace's bearer key, so following a redirect would re-send it to a host nobody configured.
             // This does not make the destination safe: `base_url` itself is still unrestricted, which is a policy question about what a tenant may point the server at.
             .redirect(reqwest::redirect::Policy::none())

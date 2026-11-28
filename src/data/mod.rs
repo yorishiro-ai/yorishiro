@@ -2,7 +2,6 @@
 
 pub mod config;
 pub(crate) mod env;
-pub mod http_timeouts;
 pub(crate) mod quotas;
 pub mod settings;
 pub mod templates;

@@ -352,10 +352,7 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
             .await
             .map_err(|err| internal(format!("embedding task panicked: {err}")))?
         };
-        let timeout = crate::data::http_timeouts::deadline_for(
-            crate::data::http_timeouts::HttpTimeout::LocalEmbedding,
-            self.timeouts,
-        );
+        let timeout = (self.timeouts).local_embedding();
         tokio::time::timeout(timeout, task).await.map_err(|_| {
             internal(format!(
                 "embedding timed out after {}s (inference queue congested?)",
