@@ -16,44 +16,41 @@ pub type BoxResult<T> = Result<T, BoxError>;
 /// arm in `YorishiroErrorCode::from_variant`.  A new variant without a code
 /// fails to compile.
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum YorishiroError {
     /// The request body or parameters do not conform to the expected schema.
     /// Includes per-field [`ValidationDetail`] so clients can render precise
     /// messages.
+    #[error("validation failed: {message}")]
     ValidationFailed {
         message: String,
         details: Vec<ValidationDetail>,
         hint: String,
     },
 
-    WorkspaceSelectionRequired {
-        workspaces: Vec<uuid::Uuid>,
-    },
+    #[error("multiple workspaces permit this operation")]
+    WorkspaceSelectionRequired { workspaces: Vec<uuid::Uuid> },
+    #[error("no workspace permits this operation")]
     WorkspaceAccessDenied,
 
     /// The requested resource does not exist.
-    NotFound {
-        message: String,
-    },
+    #[error("not found: {message}")]
+    NotFound { message: String },
 
     /// The authenticated principal does not have permission for the operation.
-    AccessDenied {
-        message: String,
-        hint: String,
-    },
+    #[error("access denied: {message}")]
+    AccessDenied { message: String, hint: String },
 
     /// The request would create a duplicate or contradict an existing resource.
-    Conflict {
-        message: String,
-    },
+    #[error("conflict: {message}")]
+    Conflict { message: String },
 
     /// The relation type does not match the expected category.
-    RelationTypeMismatch {
-        message: String,
-    },
+    #[error("relation type mismatch: {message}")]
+    RelationTypeMismatch { message: String },
 
     /// No valid authentication credentials were provided.
+    #[error("unauthenticated")]
     Unauthenticated,
 
     /// The deployment is in maintenance mode.
@@ -61,6 +58,7 @@ pub enum YorishiroError {
     /// `read_only` refuses writes (423), `full_lock` refuses everything (503);
     /// `retry_after` is seconds, and reaches the caller as a header as well as
     /// in the body, since agents retry on the header.
+    #[error("maintenance: {message}")]
     Maintenance {
         message: String,
         read_only: bool,
@@ -68,21 +66,19 @@ pub enum YorishiroError {
     },
 
     /// The backend provider (e.g. LLM, embedding) responded with a busy / retry-after signal.
+    #[error("provider busy: {message}")]
     ProviderBusy {
         message: String,
         retry_after: std::time::Duration,
     },
 
     /// The provider HTTP endpoint is unreachable or does not respond as expected.
-    ProviderUnreachable {
-        url: String,
-        message: String,
-    },
+    #[error("provider unreachable at {url}: {message}")]
+    ProviderUnreachable { url: String, message: String },
 
     /// The requested feature is not supported on the current backend.
-    BackendUnsupported {
-        message: String,
-    },
+    #[error("not implemented for backend: {message}")]
+    BackendUnsupported { message: String },
 
     /// A required backend component (queue provider, embedding provider) is not configured.
     ///
@@ -90,58 +86,12 @@ pub enum YorishiroError {
     /// `ProviderBusy` (503, provider is busy): this variant covers the "not
     /// configured at all" case where no backend component exists to contact or
     /// wait for.
-    BackendUnavailable {
-        message: String,
-    },
+    #[error("backend unavailable: {message}")]
+    BackendUnavailable { message: String },
 
     /// An unexpected internal error occurred.
-    Internal(BoxError),
-}
-
-impl std::fmt::Display for YorishiroError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ValidationFailed { message, .. } => {
-                write!(formatter, "validation failed: {message}")
-            }
-            Self::WorkspaceSelectionRequired { .. } => {
-                formatter.write_str("multiple workspaces permit this operation")
-            }
-            Self::WorkspaceAccessDenied => {
-                formatter.write_str("no workspace permits this operation")
-            }
-            Self::NotFound { message } => write!(formatter, "not found: {message}"),
-            Self::AccessDenied { message, .. } => {
-                write!(formatter, "access denied: {message}")
-            }
-            Self::Conflict { message } => write!(formatter, "conflict: {message}"),
-            Self::RelationTypeMismatch { message } => {
-                write!(formatter, "relation type mismatch: {message}")
-            }
-            Self::Unauthenticated => formatter.write_str("unauthenticated"),
-            Self::Maintenance { message, .. } => write!(formatter, "maintenance: {message}"),
-            Self::ProviderBusy { message, .. } => write!(formatter, "provider busy: {message}"),
-            Self::ProviderUnreachable { url, message } => {
-                write!(formatter, "provider unreachable at {url}: {message}")
-            }
-            Self::BackendUnsupported { message } => {
-                write!(formatter, "not implemented for backend: {message}")
-            }
-            Self::BackendUnavailable { message } => {
-                write!(formatter, "backend unavailable: {message}")
-            }
-            Self::Internal(error) => write!(formatter, "internal error: {error}"),
-        }
-    }
-}
-
-impl std::error::Error for YorishiroError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Internal(error) => Some(&**error),
-            _ => None,
-        }
-    }
+    #[error("internal error: {0}")]
+    Internal(#[source] BoxError),
 }
 
 impl From<BoxError> for YorishiroError {
