@@ -47,13 +47,23 @@ pub(crate) struct ApiEventRecord {
     pub access_key_id: Option<Uuid>,
     /// The YRN of the access key the call was made with.
     pub caller: Option<String>,
+    /// `anonymous`, `access_key`, `service` or `operator`.
+    pub identity_type: String,
+    /// Ties together the rows of one operation; a request's own request ID, or the one a job inherits.
+    pub correlation_id: String,
+    /// The YRNs the event touched.
+    pub resources: serde_json::Value,
     pub workspace_id: Option<Uuid>,
     /// The background job this row ends, when it is not a request.
     pub job_id: Option<Uuid>,
     /// The IAM checks that passed, each as `action target-YRN`.
     pub permissions: serde_json::Value,
-    /// `success`, `denied` or `failed`.
+    /// `success`, `denied`, `failed`, `cancelled` or `unavailable`.
     pub outcome: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    /// The attempt a job row ends.
+    pub attempt: Option<i32>,
     pub status_code: Option<i32>,
     pub latency_ms: Option<i64>,
 }
@@ -74,10 +84,16 @@ impl From<crate::models::api_events::Model> for ApiEventRecord {
             user_id: event.user_id,
             access_key_id: event.access_key_id,
             caller: event.caller,
+            identity_type: event.identity_type,
+            correlation_id: event.correlation_id,
+            resources: event.resources,
             workspace_id: event.workspace_id,
             job_id: event.job_id,
             permissions: event.permissions,
             outcome: event.outcome,
+            error_code: event.error_code,
+            error_message: event.error_message,
+            attempt: event.attempt,
             status_code: event.status_code,
             latency_ms: event.latency_ms,
         }

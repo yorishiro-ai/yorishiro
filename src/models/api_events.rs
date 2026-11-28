@@ -57,6 +57,9 @@ impl Call {
             read_only: Set(self.read_only),
             source_ip: Set(self.source_ip.clone()),
             user_agent: Set(self.user_agent.chars().take(256).collect()),
+            identity_type: Set("anonymous".to_owned()),
+            correlation_id: Set(self.request_id.clone()),
+            resources: Set(serde_json::json!([])),
             permissions: Set(serde_json::json!([])),
             ..Default::default()
         }
@@ -87,6 +90,7 @@ impl Call {
             user_id: Set(actor.user_id),
             workspace_id: Set(actor.workspace_id),
             caller: Set(Some(actor.yrn())),
+            identity_type: Set("access_key".to_owned()),
             ..self.active()
         }
         .insert(db)
@@ -109,6 +113,12 @@ impl Call {
             user_id: Set(caller.and_then(|actor| actor.user_id)),
             workspace_id: Set(caller.and_then(|actor| actor.workspace_id)),
             caller: Set(caller.map(AuthContext::yrn)),
+            identity_type: Set(if caller.is_some() {
+                "access_key"
+            } else {
+                "anonymous"
+            }
+            .to_owned()),
             permissions: Set(serde_json::json!(completion.permissions)),
             outcome: Set(Some(completion.outcome.to_owned())),
             status_code: Set(completion
@@ -132,6 +142,7 @@ impl Call {
         job_name: String,
         workspace_id: Option<Uuid>,
         outcome: &'static str,
+        attempt: i32,
     ) -> JobEnd {
         JobEnd {
             request_id,
@@ -139,6 +150,7 @@ impl Call {
             job_name,
             workspace_id,
             outcome,
+            attempt,
         }
     }
 }
@@ -150,6 +162,7 @@ pub(crate) struct JobEnd {
     job_name: String,
     workspace_id: Option<Uuid>,
     outcome: &'static str,
+    attempt: i32,
 }
 
 impl JobEnd {
@@ -161,8 +174,14 @@ impl JobEnd {
             None => None,
         };
         ActiveModel {
+            correlation_id: Set(self.request_id.clone()),
             request_id: Set(self.request_id),
             phase: Set("completed".to_owned()),
+            identity_type: Set("service".to_owned()),
+            caller: Set(Some(format!("yrn:yorishiro:service/{}", self.job_name))),
+            resources: Set(serde_json::json!([])),
+            attempt: Set(Some(self.attempt)),
+            error_code: Set((self.outcome != "success").then(|| self.outcome.to_owned())),
             tenant_id: Set(tenant_id),
             workspace_id: Set(self.workspace_id),
             job_id: Set(Some(self.job_id)),

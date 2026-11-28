@@ -35,7 +35,13 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Alias::new("source_ip")).text())
                     .col(ColumnDef::new(Alias::new("user_agent")).text().not_null())
                     .col(helpers::json_col(manager, Alias::new("permissions")).not_null())
+                    .col(ColumnDef::new(Alias::new("identity_type")).text().not_null())
+                    .col(ColumnDef::new(Alias::new("correlation_id")).text().not_null())
+                    .col(helpers::json_col(manager, Alias::new("resources")).not_null())
                     .col(ColumnDef::new(Alias::new("outcome")).text())
+                    .col(ColumnDef::new(Alias::new("error_code")).text())
+                    .col(ColumnDef::new(Alias::new("error_message")).text())
+                    .col(ColumnDef::new(Alias::new("attempt")).integer())
                     .col(ColumnDef::new(Alias::new("status_code")).integer())
                     .col(ColumnDef::new(Alias::new("latency_ms")).big_integer())
                     .col(helpers::created_at(manager))
@@ -45,7 +51,13 @@ impl MigrationTrait for Migration {
                     ))
                     .check((
                         Alias::new("ck_api_events_outcome"),
-                        Expr::cust("outcome IS NULL OR outcome IN ('success', 'denied', 'failed')"),
+                        Expr::cust(
+                            "outcome IS NULL OR outcome IN ('success', 'denied', 'failed', 'cancelled', 'unavailable')",
+                        ),
+                    ))
+                    .check((
+                        Alias::new("ck_api_events_identity_type"),
+                        Expr::cust("identity_type IN ('anonymous', 'access_key', 'service', 'operator')"),
                     ))
                     .to_owned(),
             )
@@ -53,6 +65,10 @@ impl MigrationTrait for Migration {
         for (name, columns) in [
             ("idx_api_events_tenant_created", ["tenant_id", "created_at"]),
             ("idx_api_events_request", ["request_id", "created_at"]),
+            (
+                "idx_api_events_correlation",
+                ["correlation_id", "created_at"],
+            ),
         ] {
             let mut index = Index::create();
             index.name(name).table(Alias::new("api_events"));

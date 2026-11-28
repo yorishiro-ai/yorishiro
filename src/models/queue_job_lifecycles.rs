@@ -434,7 +434,10 @@ impl Entity {
         }
         if matches!(
             status,
-            LifecycleStatus::Completed | LifecycleStatus::Failed | LifecycleStatus::Cancelled
+            LifecycleStatus::Completed
+                | LifecycleStatus::Failed
+                | LifecycleStatus::Cancelled
+                | LifecycleStatus::Unavailable
         ) {
             Self::record_outcome(db, id, status).await;
         }
@@ -451,9 +454,11 @@ impl Entity {
                 job.workspace_id,
                 match status {
                     LifecycleStatus::Completed => "success",
-                    LifecycleStatus::Cancelled => "denied",
+                    LifecycleStatus::Cancelled => "cancelled",
+                    LifecycleStatus::Unavailable => "unavailable",
                     _ => "failed",
                 },
+                job.attempt,
             )
             .append(db)
             .await

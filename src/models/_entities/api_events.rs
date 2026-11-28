@@ -30,8 +30,19 @@ pub struct Model {
     pub user_agent: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub permissions: Json,
+    #[sea_orm(column_type = "Text")]
+    pub identity_type: String,
+    #[sea_orm(column_type = "Text")]
+    pub correlation_id: String,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub resources: Json,
     #[sea_orm(column_type = "Text", nullable)]
     pub outcome: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub error_code: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub error_message: Option<String>,
+    pub attempt: Option<i32>,
     pub status_code: Option<i32>,
     pub latency_ms: Option<i64>,
     pub created_at: DateTimeWithTimeZone,
