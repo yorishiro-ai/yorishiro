@@ -283,6 +283,17 @@ async fn a_background_job_is_followed_from_its_request_to_its_end() {
             1,
             "the request's trail ends with the job: {rows:#?}"
         );
+        let caller = rows
+            .iter()
+            .find(|row| row.transport == "rest")
+            .and_then(|row| row.caller.clone());
+        assert!(caller.is_some());
+        assert!(
+            rows.iter()
+                .filter(|row| row.transport == "job")
+                .all(|row| row.invoked_by == caller && row.identity_type == "service"),
+            "a job row names the caller of its request: {rows:#?}"
+        );
         assert!(
             rows.iter().any(|row| row.transport == "job"
                 && row.phase == "started"
@@ -382,6 +393,93 @@ async fn the_trail_keeps_identifiers_and_paging_but_never_content() {
         assert_eq!(params["workspace_id"], tenant.workspace_id.to_string());
         assert_eq!(params["limit"], 3);
         assert!(!params.to_string().contains("private words"), "{params}");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_failure_records_its_code_and_a_description_that_repeats_no_input() {
+    boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let missing = uuid::Uuid::new_v4();
+        request
+            .get(&format!("/api/migration-jobs/{missing}"))
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("x-request-id", "trail-404")
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        let row = &events_of(&ctx, "trail-404").await[0];
+        assert_eq!(row.outcome.as_deref(), Some("failed"));
+        assert_eq!(row.error_code.as_deref(), Some("not_found"));
+        assert_eq!(
+            row.error_message.as_deref(),
+            Some("The requested resource does not exist")
+        );
+
+        let session = crate::controllers::mcp::initialize(&request).await;
+        crate::controllers::mcp::call_tool(
+            &request,
+            &session,
+            &tenant.api_key,
+            "get_migration_job",
+            json!({"migration_job_id": missing}),
+        )
+        .await;
+        let mcp = Entity::find()
+            .filter(
+                yorishiro::models::_entities::api_events::Column::EventName.eq("get_migration_job"),
+            )
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(mcp.error_code.as_deref(), Some("not_found"));
+        assert_eq!(mcp.status_code, Some(404));
+        assert!(
+            !mcp.error_message
+                .unwrap_or_default()
+                .contains(&missing.to_string())
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_failed_import_names_its_error_code_in_the_job_row() {
+    boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let accepted = request
+            .post("/api/import-jobs")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .add_header("x-request-id", "trail-bad-import")
+            .text("{\"kind\":\"entity\",\"record\":{\"leaked\":\"private-value\"}}\n")
+            .await;
+        accepted.assert_status(StatusCode::ACCEPTED);
+        let id = accepted.json::<Value>()["import_job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        crate::requests::jobs::finish_job(
+            &ctx,
+            id,
+            "failed",
+            Some((&request, &tenant.api_key, &format!("/api/import-jobs/{id}"))),
+        )
+        .await;
+        let rows = events_of(&ctx, "trail-bad-import").await;
+        let end = rows
+            .iter()
+            .find(|row| row.transport == "job" && row.phase == "completed")
+            .expect("the job's end row");
+        assert_eq!(end.outcome.as_deref(), Some("failed"));
+        assert_eq!(end.error_code.as_deref(), Some("validation_failed"));
+        assert!(
+            !end.error_message
+                .clone()
+                .unwrap_or_default()
+                .contains("private-value")
+        );
     })
     .await;
 }

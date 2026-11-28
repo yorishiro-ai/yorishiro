@@ -128,7 +128,7 @@ pub(crate) async fn migration_job_status(
 ///
 /// Reindex is a migration operation (replacing vectors from an old model with a new one), authorized by its own IAM action.
 ///
-/// `POST /api/migration-jobs/reindex` returns 202 with the job ID, and a background worker reindexes under an advisory lock.
+/// `POST /api/migration-jobs/reindex` returns 200 with the job ID, and a background worker reindexes under an advisory lock.
 /// A second request for the same workspace while the first runs enqueues another job that waits on the same lock.
 ///
 /// Returns 503 when no queue provider is configured, because `perform_later` would otherwise return a job ID and discard the job.

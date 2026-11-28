@@ -57,6 +57,8 @@ pub(crate) struct Completion {
     pub status_code: Option<i64>,
     pub latency_ms: i64,
     pub resources: Vec<serde_json::Value>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
 }
 
 impl Call {
@@ -120,6 +122,8 @@ impl Call {
             }
             .to_owned()),
             resources: Set(serde_json::json!(completion.resources)),
+            error_code: Set(completion.error_code.clone()),
+            error_message: Set(completion.error_message.clone()),
             permissions: Set(serde_json::json!(completion.permissions)),
             outcome: Set(Some(completion.outcome.to_owned())),
             status_code: Set(completion
@@ -153,6 +157,7 @@ impl Call {
             outcome,
             attempt,
             resources: serde_json::json!([]),
+            error: None,
         }
     }
 }
@@ -167,9 +172,16 @@ pub(crate) struct JobEnd {
     outcome: Option<&'static str>,
     attempt: i32,
     resources: serde_json::Value,
+    error: Option<(String, String)>,
 }
 
 impl JobEnd {
+    /// The code and fixed description of the error the attempt ended with.
+    pub(crate) fn with_error(mut self, error: Option<(String, String)>) -> Self {
+        self.error = error;
+        self
+    }
+
     /// Names the YRNs or identifiers the row is about, such as the entities a job failed on.
     pub(crate) fn with_resources(mut self, resources: serde_json::Value) -> Self {
         self.resources = resources;
@@ -183,7 +195,9 @@ impl JobEnd {
             ),
             None => None,
         };
+        let invoked_by = invoking_caller(db, &self.request_id).await;
         ActiveModel {
+            invoked_by: Set(invoked_by),
             correlation_id: Set(self.request_id.clone()),
             request_id: Set(self.request_id),
             phase: Set(if self.outcome.is_some() {
@@ -198,9 +212,15 @@ impl JobEnd {
             request_parameters: Set(serde_json::json!({})),
             attempt: Set(Some(self.attempt)),
             error_code: Set(self
-                .outcome
-                .filter(|outcome| *outcome != "success")
-                .map(str::to_owned)),
+                .error
+                .as_ref()
+                .map(|error| error.0.clone())
+                .or_else(|| {
+                    self.outcome
+                        .filter(|outcome| *outcome != "success")
+                        .map(str::to_owned)
+                })),
+            error_message: Set(self.error.map(|error| error.1)),
             tenant_id: Set(tenant_id),
             workspace_id: Set(self.workspace_id),
             job_id: Set(Some(self.job_id)),
@@ -370,4 +390,23 @@ pub(crate) fn identifiers<'a>(
         .map(|(key, value)| (key.to_owned(), value.clone()))
         .collect::<serde_json::Map<_, _>>();
     serde_json::Value::Object(kept)
+}
+
+/// Who started the request a job belongs to: the caller on that request's first row that has one.
+/// A job a scheduler or another job started has no such request, so its `invoked_by` stays empty.
+async fn invoking_caller(db: &impl ConnectionTrait, request_id: &str) -> Option<String> {
+    use crate::models::_entities::api_events::Column;
+    Entity::find()
+        .select_only()
+        .column(Column::Caller)
+        .filter(Column::RequestId.eq(request_id))
+        .filter(Column::Transport.ne("job"))
+        .filter(Column::Caller.is_not_null())
+        .order_by_asc(Column::CreatedAt)
+        .order_by_asc(Column::Id)
+        .into_tuple::<String>()
+        .one(db)
+        .await
+        .ok()
+        .flatten()
 }

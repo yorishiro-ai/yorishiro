@@ -30,6 +30,8 @@ pub struct Model {
     pub user_agent: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub permissions: Json,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub invoked_by: Option<String>,
     #[sea_orm(column_type = "Text")]
     pub identity_type: String,
     #[sea_orm(column_type = "Text")]

@@ -35,6 +35,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Alias::new("source_ip")).text())
                     .col(ColumnDef::new(Alias::new("user_agent")).text().not_null())
                     .col(helpers::json_col(manager, Alias::new("permissions")).not_null())
+                    .col(ColumnDef::new(Alias::new("invoked_by")).text())
                     .col(ColumnDef::new(Alias::new("identity_type")).text().not_null())
                     .col(ColumnDef::new(Alias::new("correlation_id")).text().not_null())
                     .col(helpers::json_col(manager, Alias::new("resources")).not_null())

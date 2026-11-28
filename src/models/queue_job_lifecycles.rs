@@ -429,6 +429,21 @@ impl Entity {
         status: LifecycleStatus,
         error: Option<&str>,
     ) -> Result<(), DbErr> {
+        Self::finish_with_trail(db, id, attempt, status, error, TrailNote::default()).await
+    }
+
+    /// Like [`Self::finish`], and names in the trail row what the attempt touched and why it failed.
+    ///
+    /// # Errors
+    /// Returns an error if the operation cannot be completed.
+    pub async fn finish_with_trail(
+        db: &impl ConnectionTrait,
+        id: Uuid,
+        attempt: Option<i32>,
+        status: LifecycleStatus,
+        error: Option<&str>,
+        note: TrailNote,
+    ) -> Result<(), DbErr> {
         let now = crate::data::time::now();
         let mut update = Self::update_many()
             .col_expr(Column::Status, Expr::value(status.as_db_str()))
@@ -470,7 +485,7 @@ impl Entity {
                 | LifecycleStatus::Cancelled
                 | LifecycleStatus::Unavailable
         ) {
-            Self::record_outcome(db, id, status).await;
+            Self::record_outcome(db, id, status, note).await;
         }
         Ok(())
     }
@@ -509,7 +524,12 @@ impl Entity {
     }
 
     /// Appends the job's end to the trail under the request that started it, so a call can be followed to its final result.
-    async fn record_outcome(db: &impl ConnectionTrait, id: Uuid, status: LifecycleStatus) {
+    async fn record_outcome(
+        db: &impl ConnectionTrait,
+        id: Uuid,
+        status: LifecycleStatus,
+        note: TrailNote,
+    ) {
         let outcome = match Self::find_by_id(id).one(db).await {
             Ok(Some(job)) => crate::models::api_events::Call::job(
                 job.request_id.unwrap_or_else(|| "req-id-none".to_owned()),
@@ -524,6 +544,8 @@ impl Entity {
                 }),
                 job.attempt,
             )
+            .with_resources(serde_json::Value::Array(note.resources))
+            .with_error(note.error)
             .append(db)
             .await
             .map_err(|error| error.to_string()),
@@ -643,6 +665,14 @@ async fn in_flight(
         .filter(Column::Id.ne(except))
         .count(db)
         .await
+}
+
+/// What an attempt adds to its trail row: what it touched and why it failed.
+#[derive(Default)]
+pub struct TrailNote {
+    pub resources: Vec<serde_json::Value>,
+    /// The error code and a description that never repeats input.
+    pub error: Option<(String, String)>,
 }
 
 /// The attempts a job may start before it stays failed.

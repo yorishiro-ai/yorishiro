@@ -26,6 +26,8 @@ struct Operation {
     permissions: Vec<(Action, Resource)>,
     /// What the call changed, noted by the model that changed it.
     resources: Vec<serde_json::Value>,
+    /// The code, fixed description and HTTP status of the error the call ended with.
+    error: Option<(String, String, u16)>,
     denied: bool,
 }
 
@@ -61,16 +63,36 @@ pub(crate) fn current_request_id() -> Option<String> {
 }
 
 /// Runs background work under the request that started it, so jobs it enqueues keep that request's ID.
-pub(crate) async fn within_request<T>(request_id: String, work: impl Future<Output = T>) -> T {
+/// Returns what the work noted alongside its result.
+pub(crate) async fn within_request<T>(
+    request_id: String,
+    work: impl Future<Output = T>,
+) -> (T, Vec<serde_json::Value>) {
     OPERATION
         .scope(
             RefCell::new(Operation {
                 request_id,
                 ..Operation::default()
             }),
-            work,
+            async {
+                let result = work.await;
+                let notes = OPERATION
+                    .with(|operation| std::mem::take(&mut operation.borrow_mut().resources));
+                (result, notes)
+            },
         )
         .await
+}
+
+/// Notes the error a call ends with, so its completed row says why it failed.
+pub(crate) fn failed(error: &crate::YorishiroError) {
+    let _ = OPERATION.try_with(|operation| {
+        operation.borrow_mut().error = Some((
+            error.trail_code().to_owned(),
+            error.trail_message(),
+            error.trail_status(),
+        ));
+    });
 }
 
 pub(crate) fn authorized(action: Action, target: Resource) {
@@ -174,7 +196,10 @@ pub(crate) async fn track<T>(
                     } else {
                         outcome
                     },
-                    status_code: code,
+                    status_code: code
+                        .or_else(|| record.error.as_ref().map(|error| i64::from(error.2))),
+                    error_code: record.error.as_ref().map(|error| error.0.clone()),
+                    error_message: record.error.as_ref().map(|error| error.1.clone()),
                     latency_ms: i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
                     caller: record.caller,
                     resources: record.resources,

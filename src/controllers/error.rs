@@ -15,6 +15,7 @@ impl From<YorishiroError> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        crate::controllers::middleware::access_log::failed(&self.0);
         let (status, body) = self.0.into_http_parts();
         (status, Json(body)).into_response()
     }

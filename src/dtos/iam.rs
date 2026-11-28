@@ -44,6 +44,8 @@ pub(crate) struct ApiEventRecord {
     pub access_key_id: Option<Uuid>,
     /// The YRN of the access key the call was made with.
     pub caller: Option<String>,
+    /// For a job row, the caller of the request that started it.
+    pub invoked_by: Option<String>,
     /// `anonymous`, `access_key`, `service` or `operator`.
     pub identity_type: String,
     /// Ties together the rows of one operation; a request's own request ID, or the one a job inherits.
@@ -83,6 +85,7 @@ impl From<crate::models::api_events::Model> for ApiEventRecord {
             user_id: event.user_id,
             access_key_id: event.access_key_id,
             caller: event.caller,
+            invoked_by: event.invoked_by,
             identity_type: event.identity_type,
             correlation_id: event.correlation_id,
             resources: event.resources,

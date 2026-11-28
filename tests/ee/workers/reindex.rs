@@ -117,6 +117,12 @@ async fn reindex_retries_when_the_provider_is_removed_during_embedding() {
         let workspace = workspace_workspaces::Entity::find_by_id(setup.workspace_id)
             .one(&ctx.db).await.unwrap().unwrap();
         assert_eq!(workspace.embedding_model.as_deref(), Some("fallback"));
+        // The row that ends the job names the index it published.
+        let end = yorishiro::models::api_events::Entity::find()
+            .filter(yorishiro::models::_entities::api_events::Column::JobId.eq(id))
+            .filter(yorishiro::models::_entities::api_events::Column::Phase.eq("completed"))
+            .one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!(end.resources[0]["detail"]["embedding_revision"], workspace.embedding_revision);
         assert!(!workspace.embedding_reindexing);
     }).await;
 }

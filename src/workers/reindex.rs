@@ -153,6 +153,13 @@ async fn reindex_current_assignment(
         });
     }
 
+    // The row that ends the job names the index it published.
+    let embedding_revision =
+        crate::models::workspace_workspaces::embedding_revision(&ctx.db, args.workspace_id).await?;
+    crate::controllers::middleware::access_log::noted(
+        crate::models::iam::policy::Action::ReindexWorkspace,
+        &serde_json::json!({"workspace_id": args.workspace_id, "embedding_revision": embedding_revision}),
+    );
     Ok(())
 }
 

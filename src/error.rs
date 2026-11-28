@@ -303,6 +303,38 @@ impl YorishiroError {
         }
     }
 
+    /// The classification the audit trail keeps: the error's code, or `internal` for an unexpected failure.
+    #[must_use]
+    pub const fn trail_code(&self) -> &'static str {
+        match self.code() {
+            Some(code) => code.as_str(),
+            None => "internal",
+        }
+    }
+
+    /// A description that never repeats input: the code's fixed text, plus the names of the fields a validation refused.
+    #[must_use]
+    pub fn trail_message(&self) -> String {
+        match (self, self.code()) {
+            (Self::ValidationFailed { details, .. }, Some(code)) if !details.is_empty() => {
+                let fields: Vec<&str> =
+                    details.iter().map(|detail| detail.field.as_str()).collect();
+                format!("{}: {}", code.description(), fields.join(", "))
+            }
+            (_, Some(code)) => code.description().to_owned(),
+            (_, None) => "internal error".to_owned(),
+        }
+    }
+
+    /// The HTTP status the error maps to, so a transport without one can still report it.
+    #[must_use]
+    pub const fn trail_status(&self) -> u16 {
+        match self.code() {
+            Some(code) => code.http_status().as_u16(),
+            None => 500,
+        }
+    }
+
     /// Returns the [`YorishiroErrorCode`] for this error variant.
     ///
     /// `Internal` has no code (it is not listed in `YorishiroErrorCode`),
@@ -578,5 +610,28 @@ impl<T> OptionExt<T> for Option<T> {
 
     fn or_internal(self, message: &'static str) -> Result<T, YorishiroError> {
         self.ok_or_else(|| YorishiroError::Internal(message.into()))
+    }
+}
+
+/// The trail's classification of an error that crossed into a Loco-owned path, such as a job failure.
+///
+/// Only the code and a fixed description are kept: the error's own text can repeat what the caller sent.
+#[must_use]
+pub(crate) fn describe_loco(error: &loco_rs::Error) -> (String, String) {
+    let internal = || ("internal".to_owned(), "internal error".to_owned());
+    match error {
+        loco_rs::Error::Any(inner) => inner
+            .downcast_ref::<YorishiroError>()
+            .map_or_else(internal, |error| {
+                (error.trail_code().to_owned(), error.trail_message())
+            }),
+        loco_rs::Error::CustomError(_, detail) => detail
+            .errors
+            .as_ref()
+            .and_then(|body| body["error"]["code"].as_str())
+            .map_or_else(internal, |code| {
+                (code.to_owned(), detail.error.clone().unwrap_or_default())
+            }),
+        _ => internal(),
     }
 }
