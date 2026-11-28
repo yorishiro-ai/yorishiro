@@ -109,7 +109,7 @@ impl Model {
             .await?
             .or_not_found("IAM group was not found")?;
         Self::rename(&txn, actor.tenant_id, id, name.clone()).await?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             Action::UpdateGroup,
@@ -158,7 +158,7 @@ impl Model {
             });
         }
         Self::delete(&txn, actor.tenant_id, id).await?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             Action::DeleteGroup,
@@ -186,7 +186,7 @@ impl Model {
         .await?;
         names::validate_name("group", &name, names::MAX_GROUP_NAME_CHARS)?;
         let group = Self::create(&txn, actor.tenant_id, name).await?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             Action::CreateGroup,

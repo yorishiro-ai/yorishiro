@@ -90,7 +90,7 @@ impl Entity {
         .await?;
         Self::management_target(&txn, actor, access_key_id).await?;
         Self::delete_for_tenant(&txn, actor.tenant_id, access_key_id).await?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             crate::models::iam::policy::Action::DeleteAccessKey,
@@ -158,7 +158,7 @@ impl Entity {
         }
         let updated = active.update(&txn).await.internal()?;
         let grant = updated.grant_metadata();
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             crate::models::iam::policy::Action::UpdateAccessKey,

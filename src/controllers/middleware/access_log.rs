@@ -24,6 +24,8 @@ struct Operation {
     request_id: String,
     caller: Option<AuthContext>,
     permissions: Vec<(Action, Resource)>,
+    /// What the call changed, noted by the model that changed it.
+    resources: Vec<serde_json::Value>,
     denied: bool,
 }
 
@@ -64,6 +66,16 @@ pub(crate) fn authorized(action: Action, target: Resource) {
         if !operation.permissions.contains(&(action, target)) {
             operation.permissions.push((action, target));
         }
+    });
+}
+
+/// Notes a change the call made, as its action and the identifiers it touched.
+pub(crate) fn changed(action: Action, detail: &serde_json::Value) {
+    let _ = OPERATION.try_with(|operation| {
+        operation
+            .borrow_mut()
+            .resources
+            .push(serde_json::json!({"action": action.qualified(), "detail": detail}));
     });
 }
 
@@ -155,6 +167,7 @@ pub(crate) async fn track<T>(
                     status_code: code,
                     latency_ms: i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
                     caller: record.caller,
+                    resources: record.resources,
                 };
                 let caller = completion.caller.as_ref();
                 tracing::info!(

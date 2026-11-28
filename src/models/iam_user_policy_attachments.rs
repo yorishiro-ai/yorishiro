@@ -83,7 +83,7 @@ impl Model {
             crate::models::iam::access::require_administrator(&txn, actor).await?;
         }
         Self::add(&txn, actor.tenant_id, user_id, policy_id).await?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             crate::models::iam::policy::Action::AttachUserPolicy,
@@ -119,7 +119,7 @@ impl Model {
                 "user policy attachment was not found",
             ));
         }
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             Action::DetachUserPolicy,

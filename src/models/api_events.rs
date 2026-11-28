@@ -46,6 +46,7 @@ pub(crate) struct Completion {
     pub outcome: &'static str,
     pub status_code: Option<i64>,
     pub latency_ms: i64,
+    pub resources: Vec<serde_json::Value>,
 }
 
 impl Call {
@@ -119,6 +120,7 @@ impl Call {
                 "anonymous"
             }
             .to_owned()),
+            resources: Set(serde_json::json!(completion.resources)),
             permissions: Set(serde_json::json!(completion.permissions)),
             outcome: Set(Some(completion.outcome.to_owned())),
             status_code: Set(completion
@@ -241,4 +243,23 @@ impl Model {
         txn.commit().await.internal()?;
         Ok(events)
     }
+}
+
+/// Notes an IAM or tenant change on the call that made it, so its completed row names what changed.
+///
+/// # Errors
+/// Rejects a caller that is not a user, because a change must be attributable to one.
+#[expect(
+    clippy::unused_async,
+    reason = "call sites keep the transaction-bound shape the audit table had"
+)]
+pub(crate) async fn record(
+    _txn: &sea_orm::DatabaseTransaction,
+    actor: &AuthContext,
+    action: crate::models::iam::policy::Action,
+    detail: serde_json::Value,
+) -> Result<(), YorishiroError> {
+    actor.user_id.ok_or(YorishiroError::Unauthenticated)?;
+    crate::controllers::middleware::access_log::changed(action, &detail);
+    Ok(())
 }

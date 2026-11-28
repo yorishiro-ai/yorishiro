@@ -168,7 +168,6 @@ actions! {
     UpdateAccessKey: Iam, Write, Tenant;
     DeleteAccessKey: Iam, Write, Tenant;
     SimulatePrincipalPolicy: Iam, Read, Tenant;
-    ListIamAuditEvents: Audit, List, Tenant;
     ListApiEvents: Audit, List, Tenant;
     ListWorkspaceAuditEvents: Audit, List, Workspace;
     GetTenant: Tenant, Read, Tenant;

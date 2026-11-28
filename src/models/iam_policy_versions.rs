@@ -199,7 +199,7 @@ impl Model {
         .await?;
         let policy = Self::require_stored_policy(&txn, actor.tenant_id, policy_id).await?;
         let version = Self::add(&txn, actor.tenant_id, policy_id, document, set_as_default).await?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             Action::CreatePolicyVersion,
@@ -316,7 +316,7 @@ impl Model {
         let version = Self::find(&txn, actor.tenant_id, policy_id, version_id)
             .await?
             .or_not_found("IAM policy version was not found")?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             Action::SetDefaultPolicyVersion,
@@ -361,7 +361,7 @@ impl Model {
             .exec(&txn)
             .await
             .internal()?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             Action::DeletePolicyVersion,

@@ -81,7 +81,7 @@ pub(crate) async fn create_as(
         display_name,
     )
     .await?;
-    crate::models::iam_audit_events::record(
+    crate::models::api_events::record(
         &txn,
         actor,
         Action::CreateUser,
@@ -112,7 +112,7 @@ pub(crate) async fn update_as(
     .await?;
     let user =
         user_users::update_display_name(&txn, actor.tenant_id, user_id, display_name).await?;
-    crate::models::iam_audit_events::record(
+    crate::models::api_events::record(
         &txn,
         actor,
         Action::UpdateUser,
@@ -143,7 +143,7 @@ pub(crate) async fn delete_as(
     let user = user_users::find_in_tenant(&txn, actor.tenant_id, user_id).await?;
     crate::models::tenant_memberships::remove_member_in_transaction(&txn, actor.tenant_id, user_id)
         .await?;
-    crate::models::iam_audit_events::record(
+    crate::models::api_events::record(
         &txn,
         actor,
         Action::DeleteUser,
@@ -178,7 +178,7 @@ pub(crate) async fn update_login_profile_as(
         });
     }
     user_users::reset_tenant_password(&txn, actor.tenant_id, user_id, password).await?;
-    crate::models::iam_audit_events::record(
+    crate::models::api_events::record(
         &txn,
         actor,
         Action::UpdateLoginProfile,

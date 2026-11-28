@@ -33,7 +33,7 @@ For installation without Docker, see [packages](https://yorishiro-ai.github.io/w
 
 [Installation](https://yorishiro-ai.github.io/wiki/installation/) · [Configuration](https://yorishiro-ai.github.io/wiki/configuration/) · [Embeddings](https://yorishiro-ai.github.io/wiki/configuration/embedding/) · [Workers and queues](https://yorishiro-ai.github.io/wiki/configuration/workers-and-queues/) · [MCP tools](https://yorishiro-ai.github.io/wiki/reference/mcp-tools/)
 
-The `PowerUserAccess` managed policy excludes IAM and tenant administration and includes read access to IAM audit events and the API activity trail.
+The `PowerUserAccess` managed policy excludes IAM and tenant administration and includes read access to the API activity trail, where IAM changes appear as the resources of the request that made them.
 Use `WorkspaceViewerAccess` or `WorkspaceContributorAccess` for workspace data access without tenant audit access.
 
 Yorishiro sends the embedded text of each entity to the provider whole and does not truncate it.

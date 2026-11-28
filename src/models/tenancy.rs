@@ -441,7 +441,7 @@ pub(crate) async fn create_workspace_in_context(
     let workspace =
         create_workspace_with_quota(&txn, actor.tenant_id, name, max_entities, quota.workspaces)
             .await?;
-    crate::models::iam_audit_events::record(
+    crate::models::api_events::record(
         &txn,
         actor,
         crate::models::iam::policy::Action::CreateWorkspace,
@@ -479,7 +479,7 @@ pub async fn delete_workspace_as(
     )
     .await?;
     crate::models::workspace_workspaces::delete_workspace(&txn, workspace_id).await?;
-    crate::models::iam_audit_events::record(
+    crate::models::api_events::record(
         &txn,
         actor,
         crate::models::iam::policy::Action::DeleteWorkspace,

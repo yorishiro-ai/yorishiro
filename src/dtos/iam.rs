@@ -13,13 +13,6 @@ pub(crate) struct ListIam {
 
 #[derive(Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ListAudit {
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
-
-#[derive(Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct ListApiEvents {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
@@ -100,33 +93,6 @@ impl From<crate::models::api_events::Model> for ApiEventRecord {
     }
 }
 
-#[derive(Serialize, JsonSchema)]
-pub(crate) struct AuditRecord {
-    #[serde(rename = "audit_event_id")]
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub user_id: Option<Uuid>,
-    pub access_key_id: Uuid,
-    /// The action name, such as `CreateGroup`.
-    pub action: String,
-    pub detail: serde_json::Value,
-    pub created_at: chrono::DateTime<chrono::FixedOffset>,
-}
-
-impl From<crate::models::iam_audit_events::Model> for AuditRecord {
-    fn from(event: crate::models::iam_audit_events::Model) -> Self {
-        Self {
-            id: event.id,
-            tenant_id: event.tenant_id,
-            user_id: event.user_id,
-            access_key_id: event.access_key_id,
-            action: event.action,
-            detail: event.detail,
-            created_at: event.created_at,
-        }
-    }
-}
-
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SimulatePrincipalPolicyRequest {
@@ -169,4 +135,4 @@ impl From<crate::models::iam::access::Simulation> for SimulatePrincipalPolicyRes
     }
 }
 
-crate::dtos::common::list_params_from!(ListAudit, ListIam, ListApiEvents);
+crate::dtos::common::list_params_from!(ListIam, ListApiEvents);

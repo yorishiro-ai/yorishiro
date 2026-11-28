@@ -164,6 +164,7 @@ async fn removed_tools_are_not_listed_and_new_ones_are() {
             "create_iam_group",
             "create_iam_policy",
             "list_iam_audit",
+            "list_iam_audit_events",
         ] {
             assert!(!names.contains(&gone), "{gone} is still listed");
         }
@@ -198,7 +199,6 @@ async fn removed_tools_are_not_listed_and_new_ones_are() {
             "set_default_policy_version",
             "delete_policy_version",
             "simulate_principal_policy",
-            "list_iam_audit_events",
         ] {
             assert!(names.contains(&present), "{present} is missing");
         }

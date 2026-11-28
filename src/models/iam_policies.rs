@@ -227,7 +227,7 @@ impl Model {
             });
         }
         Self::delete(&txn, actor.tenant_id, id).await?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             Action::DeletePolicy,
@@ -265,7 +265,7 @@ impl Model {
             });
         }
         let policy = Self::create(&txn, actor.tenant_id, name, document.clone()).await?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             Action::CreatePolicy,

@@ -199,39 +199,8 @@ impl MigrationTrait for Migration {
                 )
                 .await?;
         }
-        manager
-            .create_table(
-                Table::create()
-                    .table(Alias::new("iam_audit_events"))
-                    .col(helpers::uuidv7_pk(manager))
-                    .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
-                    .col(helpers::uuid_col(manager, Alias::new("user_id")))
-                    .col(helpers::uuid_col(manager, Alias::new("access_key_id")).not_null())
-                    .col(ColumnDef::new(Alias::new("action")).text().not_null())
-                    .col(helpers::json_col(manager, Alias::new("detail")).not_null())
-                    .col(helpers::created_at(manager))
-                    .foreign_key(
-                        ForeignKey::create()
-                            .from(Alias::new("iam_audit_events"), Alias::new("tenant_id"))
-                            .to(Alias::new("tenant_tenants"), Alias::new("id"))
-                            .on_delete(ForeignKeyAction::Cascade),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_iam_audit_events_tenant_created")
-                    .table(Alias::new("iam_audit_events"))
-                    .col(Alias::new("tenant_id"))
-                    .col(Alias::new("created_at"))
-                    .to_owned(),
-            )
-            .await?;
         for (table, privileges) in [
             ("iam_tenant_roots", APPEND_ONLY),
-            ("iam_audit_events", APPEND_ONLY),
             ("iam_groups", MUTABLE),
             ("iam_policies", MUTABLE),
             ("iam_policy_versions", MUTABLE),
@@ -255,7 +224,6 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         for table in [
-            "iam_audit_events",
             "iam_group_policy_attachments",
             "iam_user_policy_attachments",
             "iam_group_memberships",

@@ -337,160 +337,77 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
 }
 
 #[tokio::test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one tenant history compares audit reads over REST and MCP with rolled-back and committed writes"
-)]
-async fn iam_writes_are_audited_with_the_action_name_and_roll_back_with_their_audit_event() {
+async fn iam_writes_are_noted_with_their_action_on_the_completed_request_row() {
     use crate::requests::fixtures;
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    use yorishiro::models::_entities::iam_audit_events::Column as AuditColumn;
-    let overrides = [crate::requests::max_tenants(1)];
-    boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
-        let tenant =
-            fixtures::TestTenant::create(&request, &ctx, fixtures::TenantArgs::default()).await;
-        let root = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let auth = format!("Bearer {root}");
-        request
-            .post("/api/groups")
-            .add_header("Authorization", &auth)
-            .json(&serde_json::json!({"name": "operators"}))
-            .await
-            .assert_status(StatusCode::CREATED);
-        request
-            .post("/api/groups")
-            .json(&serde_json::json!({"name": "unauthorized"}))
-            .await
-            .assert_status(StatusCode::UNAUTHORIZED);
-        let events = yorishiro::models::iam_audit_events::Entity::find()
-            .filter(AuditColumn::Action.eq("CreateGroup"))
-            .all(&ctx.db)
-            .await
-            .unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].action, "CreateGroup");
-
-        let audit_key = yorishiro::models::access_keys::Entity::create_tenant_access_key(
-            &ctx.db,
-            tenant.tenant_id,
-            Some(fixtures::create_iam_administrator(&ctx, tenant.tenant_id).await),
-            "iam-audit",
-        )
-        .await
-        .unwrap();
-        let no_audit_key = yorishiro::models::access_keys::Entity::create_tenant_access_key(
-            &ctx.db,
-            tenant.tenant_id,
-            None,
-            "without-audit",
-        )
-        .await
-        .unwrap();
-        request
-            .get("/api/iam-audit-events")
-            .add_header(
-                "Authorization",
-                format!("Bearer {}", no_audit_key.plaintext),
-            )
-            .await
-            .assert_status(StatusCode::UNAUTHORIZED);
-        let audit_rest = request
-            .get("/api/iam-audit-events?limit=1")
-            .add_header("Authorization", format!("Bearer {}", audit_key.plaintext))
-            .await;
-        audit_rest.assert_status_ok();
-        assert_eq!(
-            audit_rest.json::<serde_json::Value>()[0]["action"],
-            "CreateGroup"
-        );
-        let session = crate::controllers::mcp::initialize(&request).await;
-        let audit_mcp = crate::controllers::mcp::call_tool(
-            &request,
-            &session,
-            &audit_key.plaintext,
-            "list_iam_audit_events",
-            serde_json::json!({"limit":1}),
-        )
-        .await;
-        assert_eq!(
-            crate::controllers::mcp::tool_result_json(&audit_mcp),
-            audit_rest.json::<serde_json::Value>()
-        );
-
-        // Fault injection: the audit insert fails, so the group insert rolls back with it.
-        fixtures::rename_table(&ctx.db, "iam_audit_events", "unavailable_iam_audit_events").await;
-        let failed_rest = request
-            .post("/api/groups")
-            .add_header("Authorization", &auth)
-            .json(&serde_json::json!({"name":"rest-rollback"}))
-            .await;
-        let failed_mcp = crate::controllers::mcp::call_tool(
-            &request,
-            &session,
-            &root,
-            "create_group",
-            serde_json::json!({"name":"mcp-rollback"}),
-        )
-        .await;
-        fixtures::rename_table(&ctx.db, "unavailable_iam_audit_events", "iam_audit_events").await;
-        failed_rest.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(failed_mcp["result"]["isError"], true, "{failed_mcp}");
-        let groups = yorishiro::models::iam_groups::Entity::find()
-            .all(&ctx.db)
-            .await
-            .unwrap();
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].name, "operators");
-
-        // Every kind of IAM write records its action name.
-        let group_id = groups[0].id;
-        let policy_id = fixtures::create_policy(
-            &request,
-            &auth,
-            "audited",
-            &fixtures::policy_document("Allow", &["iam:ListGroups"], &["*".to_owned()]),
-        )
-        .await;
-        request
-            .patch(&format!("/api/groups/{group_id}"))
-            .add_header("Authorization", &auth)
-            .json(&serde_json::json!({"name":"renamed"}))
-            .await
-            .assert_status_ok();
-        request
-            .put(&format!("/api/groups/{group_id}/policies/{policy_id}"))
-            .add_header("Authorization", &auth)
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-        request
-            .delete(&format!("/api/groups/{group_id}/policies/{policy_id}"))
-            .add_header("Authorization", &auth)
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-        request
-            .delete(&format!("/api/groups/{group_id}"))
-            .add_header("Authorization", &auth)
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-        let actions: std::collections::HashSet<String> =
-            yorishiro::models::iam_audit_events::Entity::find()
-                .all(&ctx.db)
-                .await
+    use sea_orm::EntityTrait;
+    boot_request_with::<App, _, _>(
+        &[crate::requests::max_tenants(1)],
+        |request, ctx| async move {
+            let tenant =
+                fixtures::TestTenant::create(&request, &ctx, fixtures::TenantArgs::default()).await;
+            let root = fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
+            let auth = format!("Bearer {root}");
+            let group = request
+                .post("/api/groups")
+                .add_header("Authorization", &auth)
+                .json(&serde_json::json!({"name": "operators"}))
+                .await;
+            group.assert_status(StatusCode::CREATED);
+            let group_id = group.json::<serde_json::Value>()["group_id"]
+                .as_str()
                 .unwrap()
-                .into_iter()
-                .map(|event| event.action)
-                .collect();
-        for expected in [
-            "CreateGroup",
-            "CreatePolicy",
-            "UpdateGroup",
-            "AttachGroupPolicy",
-            "DetachGroupPolicy",
-            "DeleteGroup",
-        ] {
-            assert!(actions.contains(expected), "{expected} in {actions:?}");
-        }
-    })
+                .to_owned();
+            let policy_id = fixtures::create_policy(
+                &request,
+                &auth,
+                "audited",
+                &fixtures::policy_document("Allow", &["iam:ListGroups"], &["*".to_owned()]),
+            )
+            .await;
+            request
+                .patch(&format!("/api/groups/{group_id}"))
+                .add_header("Authorization", &auth)
+                .json(&serde_json::json!({"name":"renamed"}))
+                .await
+                .assert_status_ok();
+            request
+                .put(&format!("/api/groups/{group_id}/policies/{policy_id}"))
+                .add_header("Authorization", &auth)
+                .await
+                .assert_status(StatusCode::NO_CONTENT);
+            request
+                .delete(&format!("/api/groups/{group_id}/policies/{policy_id}"))
+                .add_header("Authorization", &auth)
+                .await
+                .assert_status(StatusCode::NO_CONTENT);
+            request
+                .delete(&format!("/api/groups/{group_id}"))
+                .add_header("Authorization", &auth)
+                .await
+                .assert_status(StatusCode::NO_CONTENT);
+
+            let actions: std::collections::HashSet<String> =
+                yorishiro::models::api_events::Entity::find()
+                    .all(&ctx.db)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .filter(|event| event.phase == "completed")
+                    .flat_map(|event| event.resources.as_array().cloned().unwrap_or_default())
+                    .filter_map(|resource| resource["action"].as_str().map(str::to_owned))
+                    .collect();
+            for expected in [
+                "iam:CreateGroup",
+                "iam:CreatePolicy",
+                "iam:UpdateGroup",
+                "iam:AttachGroupPolicy",
+                "iam:DetachGroupPolicy",
+                "iam:DeleteGroup",
+            ] {
+                assert!(actions.contains(expected), "{expected} in {actions:?}");
+            }
+        },
+    )
     .await;
 }
 

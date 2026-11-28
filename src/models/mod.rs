@@ -35,7 +35,6 @@ pub mod api_events;
 
 // IAM: policies, groups, roles and the checks that evaluate them.
 pub mod iam;
-pub mod iam_audit_events;
 pub mod iam_group_memberships;
 pub mod iam_group_policy_attachments;
 pub mod iam_groups;

@@ -1,5 +1,6 @@
 use axum::http::StatusCode;
 use chrono::{Offset, TimeZone};
+use sea_orm::{EntityTrait, QueryOrder};
 use serde_json::Value;
 use uuid::Uuid;
 use yorishiro::App;
@@ -484,14 +485,18 @@ async fn update_changes_name_expiry_and_enabled_flag() {
             .assert_status(StatusCode::NOT_FOUND);
         request.delete(&path).add_header("Authorization", &auth)
             .await.assert_status(StatusCode::NO_CONTENT);
-        let events = request.get("/api/iam-audit-events").add_header("Authorization", &auth).await;
-        events.assert_status_ok();
-        let events = events.json::<Vec<Value>>();
-        let actions: Vec<_> = events.iter()
-            .filter(|event| event["detail"]["access_key_id"] == created["access_key_id"])
-            .map(|event| event["action"].as_str().unwrap())
+        let actions: Vec<String> = yorishiro::models::api_events::Entity::find()
+            .order_by_asc(yorishiro::models::_entities::api_events::Column::CreatedAt)
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.phase == "completed")
+            .flat_map(|event| event.resources.as_array().cloned().unwrap_or_default())
+            .filter(|resource| resource["detail"]["access_key_id"] == created["access_key_id"])
+            .filter_map(|resource| resource["action"].as_str().map(str::to_owned))
             .collect();
-        assert_eq!(actions, ["DeleteAccessKey", "UpdateAccessKey", "UpdateAccessKey", "UpdateAccessKey", "CreateAccessKey"]);
+        assert_eq!(actions, ["iam:CreateAccessKey", "iam:UpdateAccessKey", "iam:UpdateAccessKey", "iam:UpdateAccessKey", "iam:DeleteAccessKey"]);
     })
     .await;
 }

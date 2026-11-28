@@ -143,7 +143,7 @@ impl Entity {
         .await
         .internal()?;
         let grant = inserted.grant_metadata();
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             issuer,
             crate::models::iam::policy::Action::CreateAccessKey,

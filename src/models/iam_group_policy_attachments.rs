@@ -129,7 +129,7 @@ impl Model {
             crate::models::iam::access::require_administrator(&txn, actor).await?;
         }
         Self::add(&txn, actor.tenant_id, group_id, policy_id).await?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             Action::AttachGroupPolicy,
@@ -163,7 +163,7 @@ impl Model {
         if !Self::remove(&txn, actor.tenant_id, group_id, policy_id).await? {
             return Err(YorishiroError::not_found("group association was not found"));
         }
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
             Action::DetachGroupPolicy,

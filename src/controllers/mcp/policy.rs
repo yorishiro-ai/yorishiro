@@ -48,7 +48,6 @@ pub(crate) fn workspace_selection_tool(name: &str) -> bool {
             | "list_entities"
             | "list_groups"
             | "list_groups_for_user"
-            | "list_iam_audit_events"
             | "list_api_events"
             | "list_policies"
             | "list_policy_versions"

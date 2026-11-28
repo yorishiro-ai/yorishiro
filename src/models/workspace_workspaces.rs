@@ -488,7 +488,7 @@ pub(crate) async fn update_as(
     let saved = active.update(&txn).await.map_err(|error| {
         YorishiroError::conflict_on_unique(error, "a workspace with this name already exists")
     })?;
-    crate::models::iam_audit_events::record(
+    crate::models::api_events::record(
         &txn,
         actor,
         crate::models::iam::policy::Action::UpdateWorkspace,

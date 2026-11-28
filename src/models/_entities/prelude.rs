@@ -9,7 +9,6 @@ pub use super::entity_embeddings::Entity as EntityEmbeddings;
 pub use super::entity_entities::Entity as EntityEntities;
 pub use super::entity_relations::Entity as EntityRelations;
 pub use super::entity_snapshots::Entity as EntitySnapshots;
-pub use super::iam_audit_events::Entity as IamAuditEvents;
 pub use super::iam_group_memberships::Entity as IamGroupMemberships;
 pub use super::iam_group_policy_attachments::Entity as IamGroupPolicyAttachments;
 pub use super::iam_groups::Entity as IamGroups;
