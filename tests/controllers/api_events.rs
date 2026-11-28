@@ -292,3 +292,45 @@ async fn a_background_job_is_followed_from_its_request_to_its_end() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn the_trail_can_be_filtered_by_a_resource_and_a_correlation() {
+    boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let bearer = format!("Bearer {}", root_key(&ctx, &tenant).await);
+        let group = request
+            .post("/api/groups")
+            .add_header("Authorization", &bearer)
+            .add_header("x-request-id", "trail-group")
+            .json(&json!({"name": "filtered"}))
+            .await;
+        group.assert_status(StatusCode::CREATED);
+        let group_id = group.json::<Value>()["group_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let by_resource = request
+            .get(&format!("/api/api-events?resource={group_id}"))
+            .add_header("Authorization", &bearer)
+            .await;
+        by_resource.assert_status_ok();
+        let rows = by_resource.json::<Vec<Value>>();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["request_id"], "trail-group");
+        assert_eq!(rows[0]["correlation_id"], "trail-group");
+        let other = request
+            .get(&format!(
+                "/api/api-events?resource={}",
+                uuid::Uuid::new_v4()
+            ))
+            .add_header("Authorization", &bearer)
+            .await;
+        assert_eq!(other.json::<Vec<Value>>(), Vec::<Value>::new());
+        let by_correlation = request
+            .get("/api/api-events?correlation_id=trail-group")
+            .add_header("Authorization", &bearer)
+            .await;
+        assert_ne!(by_correlation.json::<Vec<Value>>(), Vec::<Value>::new());
+    })
+    .await;
+}

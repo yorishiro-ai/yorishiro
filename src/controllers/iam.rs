@@ -18,7 +18,11 @@ async fn list_api_events(
         &ctx.db,
         &actor,
         crate::models::pagination::ListParams::from(&input),
-        input.request_id.as_deref(),
+        crate::models::api_events::Filter {
+            request_id: input.request_id.as_deref(),
+            correlation_id: input.correlation_id.as_deref(),
+            resource: input.resource.as_deref(),
+        },
     )
     .await?;
     Ok(Json(events.into_iter().map(Into::into).collect()))

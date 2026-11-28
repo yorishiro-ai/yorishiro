@@ -28,7 +28,11 @@ impl YorishiroMcpServer {
                 &self.app_context().db,
                 &auth,
                 ListParams::from(&input),
-                input.request_id.as_deref(),
+                crate::models::api_events::Filter {
+                    request_id: input.request_id.as_deref(),
+                    correlation_id: input.correlation_id.as_deref(),
+                    resource: input.resource.as_deref(),
+                },
             )
             .await
             .map(|events| {

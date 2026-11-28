@@ -18,6 +18,10 @@ pub(crate) struct ListApiEvents {
     pub offset: Option<i64>,
     /// Only the events of this request.
     pub request_id: Option<String>,
+    /// Only the events of this operation: a request and the jobs it started share one.
+    pub correlation_id: Option<String>,
+    /// Only the events whose resources mention this identifier, such as a policy or access key ID.
+    pub resource: Option<String>,
 }
 
 /// One recorded call: who made it, when, from where, what it was, and how it ended.

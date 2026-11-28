@@ -296,3 +296,73 @@ fn configure_deployment_metadata(ctx: &mut loco_rs::app::AppContext) {
     value["embedding"]["model"] = serde_json::json!("test-deployment-model");
     ctx.config.settings = Some(value);
 }
+
+#[tokio::test]
+async fn the_scan_waits_after_a_failed_scheduled_reindex() {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        use yorishiro::models::queue_job_lifecycles as lifecycles;
+        let mut ctx = ctx;
+        configure_deployment_metadata(&mut ctx);
+        let fixture = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
+        stamp_workspace(&ctx, fixture.workspace_id, "previous-model", 1).await;
+        let task = yorishiro::tasks::reindex_scheduler::ReindexScheduler;
+        let count = || async {
+            lifecycles::Entity::find()
+                .filter(lifecycles::Column::WorkspaceId.eq(fixture.workspace_id))
+                .filter(lifecycles::Column::JobName.eq("startup_reindex"))
+                .count(&ctx.db)
+                .await
+                .unwrap()
+        };
+        task.run(&ctx, &loco_rs::task::Vars::default())
+            .await
+            .unwrap();
+        assert_eq!(count().await, 1);
+        let job = lifecycles::Entity::find()
+            .filter(lifecycles::Column::WorkspaceId.eq(fixture.workspace_id))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        // Direct write (c): the failure a worker records after its attempts, at a chosen time.
+        let fail_at = |at: chrono::DateTime<chrono::Utc>| {
+            let id = job.id;
+            let db = ctx.db.clone();
+            async move {
+                lifecycles::Entity::update_many()
+                    .col_expr(
+                        lifecycles::Column::Status,
+                        sea_orm::sea_query::Expr::value("failed"),
+                    )
+                    .col_expr(
+                        lifecycles::Column::FailedAt,
+                        sea_orm::sea_query::Expr::value(at.fixed_offset()),
+                    )
+                    .filter(lifecycles::Column::Id.eq(id))
+                    .exec(&db)
+                    .await
+                    .unwrap();
+            }
+        };
+        fail_at(chrono::Utc::now()).await;
+        task.run(&ctx, &loco_rs::task::Vars::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            count().await,
+            1,
+            "a recent failure keeps the scan from retrying"
+        );
+        fail_at(chrono::Utc::now() - chrono::Duration::hours(2)).await;
+        task.run(&ctx, &loco_rs::task::Vars::default())
+            .await
+            .unwrap();
+        assert_eq!(count().await, 2, "an old failure no longer holds it back");
+    })
+    .await;
+}

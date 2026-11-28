@@ -162,7 +162,7 @@ async fn enqueue_metadata_reindex(
     ctx: &AppContext,
     workspace_id: uuid::Uuid,
 ) -> loco_rs::Result<()> {
-    if active_reindex_exists(ctx, workspace_id).await? {
+    if scan_should_skip(ctx, workspace_id).await? {
         return Ok(());
     }
     let worker_class = crate::workers::target::resolve_worker_class(ctx, workspace_id)
@@ -181,18 +181,26 @@ async fn enqueue_metadata_reindex(
         .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))
 }
 
-async fn active_reindex_exists(
-    ctx: &AppContext,
-    workspace_id: uuid::Uuid,
-) -> loco_rs::Result<bool> {
+async fn scan_should_skip(ctx: &AppContext, workspace_id: uuid::Uuid) -> loco_rs::Result<bool> {
     let tenant = crate::models::workspace_workspaces::get_workspace_tenant(&ctx.db, workspace_id)
         .await
         .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))?;
     let txn = crate::db::begin_workspace(ctx, tenant, workspace_id)
         .await
         .map_err(|error| loco_rs::Error::Message(format!("workspace {workspace_id}: {error}")))?;
+    // A scan that failed an hour ago would fail the same way again, so the scan waits; an explicit request and a provider change do not.
+    let since = (crate::data::time::now() - chrono::Duration::hours(1)).fixed_offset();
     let exists =
         crate::models::queue_job_lifecycles::Entity::has_active_reindex(&txn, workspace_id)
+            .await
+            .map_err(|error| {
+                loco_rs::Error::Message(format!("workspace {workspace_id}: {error}"))
+            })?
+            || crate::models::queue_job_lifecycles::Entity::startup_reindex_failed_since(
+                &txn,
+                workspace_id,
+                since,
+            )
             .await
             .map_err(|error| {
                 loco_rs::Error::Message(format!("workspace {workspace_id}: {error}"))

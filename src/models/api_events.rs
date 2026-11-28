@@ -8,8 +8,8 @@
 
 pub use crate::models::_entities::api_events::{ActiveModel, Entity, Model};
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, entity::prelude::*,
+    ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, ExprTrait, QueryFilter,
+    QueryOrder, QuerySelect, entity::prelude::*,
 };
 
 use crate::error::{ResultExt, YorishiroError};
@@ -26,6 +26,14 @@ impl ActiveModelBehavior for ActiveModel {
         this.created_at = crate::db::stamped_created_at(insert, this.created_at);
         Ok(this)
     }
+}
+
+/// What narrows a listing of the trail.
+#[derive(Default)]
+pub(crate) struct Filter<'a> {
+    pub request_id: Option<&'a str>,
+    pub correlation_id: Option<&'a str>,
+    pub resource: Option<&'a str>,
 }
 
 /// What a call is, known before it is authenticated.
@@ -211,7 +219,7 @@ impl Model {
         db: &DatabaseConnection,
         actor: &AuthContext,
         params: crate::models::pagination::ListParams,
-        request_id: Option<&str>,
+        filter: Filter<'_>,
     ) -> Result<Vec<Self>, YorishiroError> {
         use crate::models::_entities::api_events::Column;
         use crate::models::iam::{
@@ -229,8 +237,19 @@ impl Model {
         )
         .await?;
         let mut query = Entity::find().filter(Column::TenantId.eq(actor.tenant_id));
-        if let Some(request_id) = request_id {
+        if let Some(request_id) = filter.request_id {
             query = query.filter(Column::RequestId.eq(request_id));
+        }
+        if let Some(correlation_id) = filter.correlation_id {
+            query = query.filter(Column::CorrelationId.eq(correlation_id));
+        }
+        if let Some(resource) = filter.resource {
+            // The resources column holds identifiers only, so a substring match finds the one that is named.
+            query = query.filter(
+                Expr::col(Column::Resources)
+                    .cast_as(sea_orm::sea_query::Alias::new("text"))
+                    .like(format!("%{}%", resource.replace(['%', '_'], ""))),
+            );
         }
         let events = query
             .order_by_desc(Column::CreatedAt)

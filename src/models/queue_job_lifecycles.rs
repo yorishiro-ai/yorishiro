@@ -226,6 +226,25 @@ impl Entity {
             > 0)
     }
 
+    /// Whether a scheduled reindex of the workspace failed since `since`.
+    ///
+    /// # Errors
+    /// Returns an error if the lifecycle lookup fails.
+    pub async fn startup_reindex_failed_since(
+        db: &impl ConnectionTrait,
+        workspace_id: Uuid,
+        since: DateTimeWithTimeZone,
+    ) -> Result<bool, DbErr> {
+        Ok(Self::find()
+            .filter(Column::JobName.eq(crate::workers::reindex::ReindexArgs::STARTUP_JOB_NAME))
+            .filter(Column::WorkspaceId.eq(workspace_id))
+            .filter(Column::Status.eq(LifecycleStatus::Failed.as_db_str()))
+            .filter(Column::FailedAt.gt(since))
+            .count(db)
+            .await?
+            > 0)
+    }
+
     /// Puts a queued, retrying or running attempt back to `retrying`, due now.
     ///
     /// # Errors
