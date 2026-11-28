@@ -149,3 +149,24 @@ async fn viewer_discovery_agrees_across_login_rest_and_mcp() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn an_object_result_is_structured_content_and_a_list_stays_text() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let key = issue_access_key(&ctx, tenant.workspace_id, tenant.owner_id).await;
+        let session = initialize(&request).await;
+        let identity = call_tool(&request, &session, &key, "get_caller_identity", json!({})).await;
+        assert_eq!(
+            identity["result"]["structuredContent"]["tenant_id"],
+            tenant.tenant_id.to_string(),
+            "{identity}"
+        );
+        assert!(identity["result"]["content"][0]["text"].is_string());
+        let list = call_tool(&request, &session, &key, "list_schemas", json!({})).await;
+        assert_ne!(list["result"]["isError"], true, "{list}");
+        assert!(list["result"].get("structuredContent").is_none(), "{list}");
+        assert!(list["result"]["content"][0]["text"].is_string());
+    })
+    .await;
+}

@@ -155,7 +155,13 @@ pub(crate) fn render<T: serde::Serialize>(
     result.map_or_else(|error| Ok(err_to_tool_result(error)), ok_json)
 }
 
+/// An object result also travels as `structuredContent`, so a client reads fields without parsing text.
+/// Any other value (a list, a scalar) stays a text block, as MCP requires `structuredContent` to be an object.
 pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData> {
+    let value = serde_json::to_value(&value).map_err(crate::error::mcp_internal)?;
+    if value.is_object() {
+        return Ok(CallToolResult::structured(value));
+    }
     let text = serde_json::to_string(&value).map_err(crate::error::mcp_internal)?;
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }
