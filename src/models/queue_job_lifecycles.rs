@@ -412,6 +412,9 @@ impl Entity {
             }
             _ => txn.rollback().await?,
         }
+        if let Admission::Started { attempt } | Admission::Recovered { attempt } = admission {
+            Self::record_attempt(db, id, attempt).await;
+        }
         Ok(admission)
     }
 
@@ -472,6 +475,39 @@ impl Entity {
         Ok(())
     }
 
+    /// The request that enqueued the job, when it was enqueued by one.
+    ///
+    /// # Errors
+    /// Returns an error if the lookup fails.
+    pub async fn request_id(db: &impl ConnectionTrait, id: Uuid) -> Result<Option<String>, DbErr> {
+        Ok(Self::find_by_id(id)
+            .one(db)
+            .await?
+            .and_then(|job| job.request_id))
+    }
+
+    /// Appends a row that marks one attempt starting, so retries and reclaimed leases show in the trail.
+    async fn record_attempt(db: &impl ConnectionTrait, id: Uuid, attempt: i32) {
+        let recorded = match Self::find_by_id(id).one(db).await {
+            Ok(Some(job)) => crate::models::api_events::Call::job(
+                job.request_id.unwrap_or_else(|| "req-id-none".to_owned()),
+                id,
+                job.job_name,
+                job.workspace_id,
+                None,
+                attempt,
+            )
+            .append(db)
+            .await
+            .map_err(|error| error.to_string()),
+            Ok(None) => Err("the job row is missing".to_owned()),
+            Err(error) => Err(error.to_string()),
+        };
+        if let Err(error) = recorded {
+            tracing::error!(lifecycle_id = %id, %error, "the job start could not be recorded in the trail");
+        }
+    }
+
     /// Appends the job's end to the trail under the request that started it, so a call can be followed to its final result.
     async fn record_outcome(db: &impl ConnectionTrait, id: Uuid, status: LifecycleStatus) {
         let outcome = match Self::find_by_id(id).one(db).await {
@@ -480,12 +516,12 @@ impl Entity {
                 id,
                 job.job_name,
                 job.workspace_id,
-                match status {
+                Some(match status {
                     LifecycleStatus::Completed => "success",
                     LifecycleStatus::Cancelled => "cancelled",
                     LifecycleStatus::Unavailable => "unavailable",
                     _ => "failed",
-                },
+                }),
                 job.attempt,
             )
             .append(db)

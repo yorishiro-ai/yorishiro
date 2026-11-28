@@ -137,6 +137,7 @@ async fn reindex_current_assignment(
                 "reindex could not prepare an entity embedding"
             );
         }
+        record_failed_entities(ctx, args, &outcome).await;
         tracing::warn!(
             workspace_id = %args.workspace_id,
             total = outcome.total,
@@ -302,4 +303,42 @@ pub(crate) async fn enqueue_requested(
         authorization.commit().await.internal()?;
     }
     Ok(id)
+}
+
+/// Leaves one trail row naming every entity the reindex could not prepare, with each one's error code.
+async fn record_failed_entities(
+    ctx: &AppContext,
+    args: &ReindexArgs,
+    outcome: &crate::models::entity_embeddings::ReindexOutcome,
+) {
+    let Some(lifecycle_id) = args.lifecycle_id else {
+        return;
+    };
+    let request_id = crate::models::queue_job_lifecycles::Entity::request_id(&ctx.db, lifecycle_id)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "req-id-none".to_owned());
+    let failed: Vec<_> = outcome
+        .failures
+        .iter()
+        .map(|failure| {
+            serde_json::json!({
+                "entity_id": failure.entity_id,
+                "error_code": failure.error.code().map_or("internal", |code| code.as_str()),
+            })
+        })
+        .collect();
+    let row = crate::models::api_events::Call::job(
+        request_id,
+        lifecycle_id,
+        format!("{}.entities", args.job_name()),
+        Some(args.workspace_id),
+        Some("failed"),
+        0,
+    )
+    .with_resources(serde_json::Value::Array(failed));
+    if let Err(error) = row.append(&ctx.db).await {
+        tracing::error!(%lifecycle_id, %error, "the failed entities could not be recorded in the trail");
+    }
 }

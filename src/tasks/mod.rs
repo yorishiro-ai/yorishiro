@@ -13,6 +13,7 @@ pub(crate) mod reset_root_password;
 // Embeddings and the queue.
 pub(crate) mod embedding_index_maintenance;
 pub mod purge_audit_events;
+pub mod read_audit_events;
 pub(crate) mod recover_worker_dispatches;
 pub mod reindex_scheduler;
 pub(crate) mod resync_embeddings;
@@ -80,7 +81,7 @@ impl<T: loco_rs::task::Task> loco_rs::task::Task for Audited<T> {
     ) -> loco_rs::Result<()> {
         let started = std::time::Instant::now();
         let result = self.task.run(ctx, vars).await;
-        crate::models::api_events::record_task(
+        let recorded = crate::models::api_events::record_task(
             &ctx.db,
             &self.task.task().name,
             self.identity_type,
@@ -89,6 +90,7 @@ impl<T: loco_rs::task::Task> loco_rs::task::Task for Audited<T> {
             i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
         )
         .await;
-        result
+        // A run the trail cannot show is an error, even when the task itself succeeded.
+        result.and_then(|()| recorded.map_err(loco_rs::Error::wrap))
     }
 }

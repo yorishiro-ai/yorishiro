@@ -332,3 +332,70 @@ async fn a_job_that_used_every_attempt_stays_failed() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn cancelled_and_refused_jobs_reach_the_trail_with_their_attempt() {
+    use yorishiro::models::_entities::api_events;
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+        let db = ctx.db.clone();
+        for (status, outcome) in [
+            (LifecycleStatus::Cancelled, "cancelled"),
+            (LifecycleStatus::Unavailable, "unavailable"),
+            (LifecycleStatus::Failed, "failed"),
+        ] {
+            let id = uuid::Uuid::now_v7();
+            enqueue(&db, id, None, &uuid::Uuid::now_v7().to_string()).await;
+            let now = Utc.timestamp_opt(7_000, 0).single().unwrap().fixed_offset();
+            Entity::start_at(&db, id, now).await.unwrap();
+            Entity::finish(&db, id, Some(1), status, Some("stopped"))
+                .await
+                .unwrap();
+            let row = api_events::Entity::find()
+                .filter(api_events::Column::JobId.eq(id))
+                .filter(api_events::Column::Phase.eq("completed"))
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap_or_else(|| panic!("no trail row for {outcome}"));
+            assert_eq!(row.outcome.as_deref(), Some(outcome));
+            assert_eq!(row.attempt, Some(1));
+            assert_eq!(row.identity_type, "service");
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn every_started_attempt_leaves_a_row_in_the_trail() {
+    use sea_orm::QueryOrder;
+    use yorishiro::models::_entities::api_events;
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+        let db = ctx.db.clone();
+        let id = uuid::Uuid::now_v7();
+        enqueue(&db, id, None, &uuid::Uuid::now_v7().to_string()).await;
+        let first = Utc.timestamp_opt(8_000, 0).single().unwrap().fixed_offset();
+        Entity::start_at(&db, id, first).await.unwrap();
+        Entity::start_at(
+            &db,
+            id,
+            first + lease_duration() + chrono::Duration::seconds(1),
+        )
+        .await
+        .unwrap();
+        let rows = api_events::Entity::find()
+            .filter(api_events::Column::JobId.eq(id))
+            .order_by_asc(api_events::Column::Id)
+            .all(&db)
+            .await
+            .unwrap();
+        let attempts: Vec<_> = rows
+            .iter()
+            .map(|row| (row.phase.as_str(), row.attempt, row.outcome.clone()))
+            .collect();
+        assert_eq!(
+            attempts,
+            [("started", Some(1), None), ("started", Some(2), None)]
+        );
+    })
+    .await;
+}

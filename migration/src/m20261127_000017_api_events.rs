@@ -11,7 +11,7 @@ impl MigrationTrait for Migration {
         helpers::use_transaction()
     }
 
-    /// One row per recorded call phase (`started`, `authenticated`, `completed`); the application only appends and reads.
+    /// One row per recorded call phase (`started`, `completed`); the application only appends and reads.
     /// `tenant_id` has no foreign key so a retired tenant's trail survives the tenant.
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let mut read_only = ColumnDef::new(Alias::new("read_only"));
@@ -38,6 +38,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Alias::new("identity_type")).text().not_null())
                     .col(ColumnDef::new(Alias::new("correlation_id")).text().not_null())
                     .col(helpers::json_col(manager, Alias::new("resources")).not_null())
+                    .col(helpers::json_col(manager, Alias::new("request_parameters")).not_null())
                     .col(ColumnDef::new(Alias::new("outcome")).text())
                     .col(ColumnDef::new(Alias::new("error_code")).text())
                     .col(ColumnDef::new(Alias::new("error_message")).text())
@@ -47,7 +48,7 @@ impl MigrationTrait for Migration {
                     .col(helpers::created_at(manager))
                     .check((
                         Alias::new("ck_api_events_phase"),
-                        Expr::cust("phase IN ('started', 'authenticated', 'completed')"),
+                        Expr::cust("phase IN ('started', 'completed')"),
                     ))
                     .check((
                         Alias::new("ck_api_events_outcome"),

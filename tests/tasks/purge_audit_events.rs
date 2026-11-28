@@ -16,6 +16,7 @@ async fn insert(db: &sea_orm::DatabaseConnection, age_days: i64) -> uuid::Uuid {
         identity_type: Set("anonymous".into()),
         correlation_id: Set("purge-test".into()),
         resources: Set(serde_json::json!([])),
+        request_parameters: Set(serde_json::json!({})),
         permissions: Set(serde_json::json!([])),
         created_at: Set((chrono::Utc::now() - chrono::Duration::days(age_days)).fixed_offset()),
         ..Default::default()
@@ -85,6 +86,45 @@ async fn a_registered_task_run_leaves_one_row_in_the_trail() {
         let status = find("maintenance_status");
         assert_eq!(status.identity_type, "operator");
         assert!(status.read_only);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_operator_reads_rows_no_tenant_owns() {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        request
+            .get("/api/workspaces")
+            .add_header("x-request-id", "no-tenant")
+            .await
+            .assert_status(axum::http::StatusCode::UNAUTHORIZED);
+        let rows = yorishiro::tasks::read_audit_events::rows(&ctx.db, "none", 10)
+            .await
+            .unwrap();
+        assert!(
+            rows.iter()
+                .any(|row| row.request_id == "no-tenant" && row.caller.is_none())
+        );
+        let tenant = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
+        let owned =
+            yorishiro::tasks::read_audit_events::rows(&ctx.db, &tenant.tenant_id.to_string(), 50)
+                .await
+                .unwrap();
+        assert!(
+            owned
+                .iter()
+                .all(|row| row.tenant_id == Some(tenant.tenant_id))
+        );
+        assert!(
+            yorishiro::tasks::read_audit_events::rows(&ctx.db, "x", 1)
+                .await
+                .is_err()
+        );
     })
     .await;
 }

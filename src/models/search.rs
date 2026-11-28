@@ -61,6 +61,13 @@ pub(crate) async fn ensure_available(
     if super::workspace_workspaces::embedding_reindexing(db, workspace_id).await? {
         return Err(search_generation_changed());
     }
+    // The trail keeps which published index the search ran against, never the query or the hits.
+    let embedding_revision =
+        super::workspace_workspaces::embedding_revision(db, workspace_id).await?;
+    crate::controllers::middleware::access_log::noted(
+        crate::models::iam::policy::Action::SearchEntities,
+        &serde_json::json!({"workspace_id": workspace_id, "embedding_revision": embedding_revision}),
+    );
     Ok(())
 }
 

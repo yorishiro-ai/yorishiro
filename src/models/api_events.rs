@@ -1,8 +1,8 @@
 //! The durable, append-only trail of every REST request and MCP call.
 //!
-//! A call that can change something leaves a `started` row before it runs and an `authenticated` row once it has an identity.
+//! A write leaves a `started` row once it has an identity, before it runs.
 //! Every call leaves a `completed` row when it ends. The rows of one call share a `request_id`.
-//! An `authenticated` row with no `completed` row marks a write that was interrupted, and whose it was.
+//! A `started` row with no `completed` row marks a write that was interrupted, and whose it was.
 //! The application only appends and lists rows.
 //! They hold identifiers and outcomes only: no credentials, bodies, query values or tool arguments.
 
@@ -45,6 +45,8 @@ pub(crate) struct Call {
     pub read_only: bool,
     pub source_ip: Option<String>,
     pub user_agent: String,
+    /// What the call named, already reduced to identifiers and paging numbers by [`identifiers`].
+    pub parameters: serde_json::Value,
 }
 
 /// How a call ended, with whoever it was authenticated as.
@@ -69,31 +71,20 @@ impl Call {
             identity_type: Set("anonymous".to_owned()),
             correlation_id: Set(self.request_id.clone()),
             resources: Set(serde_json::json!([])),
+            request_parameters: Set(self.parameters.clone()),
             permissions: Set(serde_json::json!([])),
             ..Default::default()
         }
     }
 
-    /// Records that the call is about to run.
-    pub(crate) async fn start(&self, db: &DatabaseConnection) -> Result<(), YorishiroError> {
-        ActiveModel {
-            phase: Set("started".to_owned()),
-            ..self.active()
-        }
-        .insert(db)
-        .await
-        .internal()?;
-        Ok(())
-    }
-
-    /// Records who the call turned out to be, so an interrupted write still belongs to a tenant.
+    /// Records that an authenticated write is about to run, so an interrupted write still belongs to a tenant.
     pub(crate) async fn authenticated(
         &self,
         db: &DatabaseConnection,
         actor: &AuthContext,
     ) -> Result<(), YorishiroError> {
         ActiveModel {
-            phase: Set("authenticated".to_owned()),
+            phase: Set("started".to_owned()),
             tenant_id: Set(Some(actor.tenant_id)),
             access_key_id: Set(Some(actor.access_key_id)),
             user_id: Set(actor.user_id),
@@ -151,7 +142,7 @@ impl Call {
         job_id: Uuid,
         job_name: String,
         workspace_id: Option<Uuid>,
-        outcome: &'static str,
+        outcome: Option<&'static str>,
         attempt: i32,
     ) -> JobEnd {
         JobEnd {
@@ -161,6 +152,7 @@ impl Call {
             workspace_id,
             outcome,
             attempt,
+            resources: serde_json::json!([]),
         }
     }
 }
@@ -171,11 +163,19 @@ pub(crate) struct JobEnd {
     job_id: Uuid,
     job_name: String,
     workspace_id: Option<Uuid>,
-    outcome: &'static str,
+    /// `None` for the row that marks an attempt starting.
+    outcome: Option<&'static str>,
     attempt: i32,
+    resources: serde_json::Value,
 }
 
 impl JobEnd {
+    /// Names the YRNs or identifiers the row is about, such as the entities a job failed on.
+    pub(crate) fn with_resources(mut self, resources: serde_json::Value) -> Self {
+        self.resources = resources;
+        self
+    }
+
     pub(crate) async fn append(self, db: &impl ConnectionTrait) -> Result<(), YorishiroError> {
         let tenant_id = match self.workspace_id {
             Some(workspace_id) => Some(
@@ -186,12 +186,21 @@ impl JobEnd {
         ActiveModel {
             correlation_id: Set(self.request_id.clone()),
             request_id: Set(self.request_id),
-            phase: Set("completed".to_owned()),
+            phase: Set(if self.outcome.is_some() {
+                "completed"
+            } else {
+                "started"
+            }
+            .to_owned()),
             identity_type: Set("service".to_owned()),
             caller: Set(Some(format!("yrn:yorishiro:service/{}", self.job_name))),
-            resources: Set(serde_json::json!([])),
+            resources: Set(self.resources),
+            request_parameters: Set(serde_json::json!({})),
             attempt: Set(Some(self.attempt)),
-            error_code: Set((self.outcome != "success").then(|| self.outcome.to_owned())),
+            error_code: Set(self
+                .outcome
+                .filter(|outcome| *outcome != "success")
+                .map(str::to_owned)),
             tenant_id: Set(tenant_id),
             workspace_id: Set(self.workspace_id),
             job_id: Set(Some(self.job_id)),
@@ -200,7 +209,7 @@ impl JobEnd {
             read_only: Set(false),
             user_agent: Set(String::new()),
             permissions: Set(serde_json::json!([])),
-            outcome: Set(Some(self.outcome.to_owned())),
+            outcome: Set(self.outcome.map(str::to_owned)),
             ..Default::default()
         }
         .insert(db)
@@ -279,7 +288,7 @@ pub(crate) async fn record(
     detail: serde_json::Value,
 ) -> Result<(), YorishiroError> {
     actor.user_id.ok_or(YorishiroError::Unauthenticated)?;
-    crate::controllers::middleware::access_log::changed(action, &detail);
+    crate::controllers::middleware::access_log::noted(action, &detail);
     Ok(())
 }
 
@@ -308,7 +317,7 @@ pub(crate) async fn record_task(
     read_only: bool,
     failure: Option<&loco_rs::Error>,
     latency_ms: i64,
-) {
+) -> Result<(), DbErr> {
     let request_id = Uuid::now_v7().to_string();
     let caller = if identity_type == "operator" {
         format!("yrn:yorishiro:operator/{}", crate::data::env::operator())
@@ -326,6 +335,7 @@ pub(crate) async fn record_task(
         identity_type: Set(identity_type.to_owned()),
         caller: Set(Some(caller)),
         resources: Set(serde_json::json!([])),
+        request_parameters: Set(serde_json::json!({})),
         permissions: Set(serde_json::json!([])),
         outcome: Set(Some(
             if failure.is_none() {
@@ -340,7 +350,24 @@ pub(crate) async fn record_task(
         latency_ms: Set(Some(latency_ms)),
         ..Default::default()
     };
-    if let Err(error) = row.insert(db).await {
-        tracing::error!(%error, task = name, "the task run could not be recorded in the trail");
-    }
+    row.insert(db).await.map(|_| ())
+}
+
+/// Reduces named values to what the trail may keep: UUIDs under `*_id` keys and the paging numbers.
+/// Everything else, such as entity data, query text, names and definitions, is dropped, so the trail cannot hold content.
+pub(crate) fn identifiers<'a>(
+    pairs: impl IntoIterator<Item = (&'a str, &'a serde_json::Value)>,
+) -> serde_json::Value {
+    let kept = pairs
+        .into_iter()
+        .filter(|(key, value)| match *key {
+            "limit" | "offset" => value.is_u64(),
+            key if key.ends_with("_id") => value
+                .as_str()
+                .is_some_and(|text| Uuid::parse_str(text).is_ok()),
+            _ => false,
+        })
+        .map(|(key, value)| (key.to_owned(), value.clone()))
+        .collect::<serde_json::Map<_, _>>();
+    serde_json::Value::Object(kept)
 }

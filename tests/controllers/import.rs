@@ -298,3 +298,63 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn embedding_jobs_of_an_import_keep_the_request_that_started_it() {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::models::queue_job_lifecycles as lifecycles;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let auth = format!("Bearer {}", tenant.api_key);
+        let schema = request
+            .post("/api/schemas")
+            .add_header("Authorization", auth.clone())
+            .json(&serde_json::json!({ "template_id": "task-management" }))
+            .await;
+        let schema_id = schema.json::<serde_json::Value>()["schema"]["schema_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let line = serde_json::json!({"kind": "entity", "record": {
+            "id": uuid::Uuid::new_v4(), "workspace_id": uuid::Uuid::new_v4(),
+            "schema_id": schema_id, "schema_version": 1, "entity_type": "project",
+            "data": { "title": "child", "status": "active" },
+            "created_at": chrono::Utc::now(), "updated_at": chrono::Utc::now(),
+            "created_by": null, "updated_by": null,
+        }});
+        let accepted = request
+            .post("/api/import-jobs")
+            .add_header("Authorization", auth.clone())
+            .add_header("x-request-id", "import-parent")
+            .text(format!("{line}\n"))
+            .await;
+        accepted.assert_status(StatusCode::ACCEPTED);
+        let id = accepted.json::<serde_json::Value>()["import_job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        crate::requests::jobs::finish_via_api(
+            &request,
+            &ctx,
+            id,
+            &tenant.api_key,
+            &format!("/api/import-jobs/{id}"),
+        )
+        .await;
+        let children = lifecycles::Entity::find()
+            .filter(lifecycles::Column::WorkspaceId.eq(tenant.workspace_id))
+            .filter(lifecycles::Column::JobName.eq("embedding_sync"))
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert!(!children.is_empty(), "the import enqueued an embedding job");
+        assert!(
+            children
+                .iter()
+                .all(|job| job.request_id.as_deref() == Some("import-parent")),
+            "{children:?}"
+        );
+    })
+    .await;
+}

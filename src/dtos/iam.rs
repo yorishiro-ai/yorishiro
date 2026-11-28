@@ -50,6 +50,8 @@ pub(crate) struct ApiEventRecord {
     pub correlation_id: String,
     /// The YRNs the event touched.
     pub resources: serde_json::Value,
+    /// The identifiers and paging numbers the call named; never entry content, query text or definitions.
+    pub request_parameters: serde_json::Value,
     pub workspace_id: Option<Uuid>,
     /// The background job this row ends, when it is not a request.
     pub job_id: Option<Uuid>,
@@ -84,6 +86,7 @@ impl From<crate::models::api_events::Model> for ApiEventRecord {
             identity_type: event.identity_type,
             correlation_id: event.correlation_id,
             resources: event.resources,
+            request_parameters: event.request_parameters,
             workspace_id: event.workspace_id,
             job_id: event.job_id,
             permissions: event.permissions,

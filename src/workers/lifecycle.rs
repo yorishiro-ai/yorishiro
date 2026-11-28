@@ -6,6 +6,7 @@
 use std::future::Future;
 
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker};
+use sea_orm::EntityTrait;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -70,7 +71,18 @@ where
         workspace_id = %workspace_id,
         worker_class = class.as_db_str(),
     );
-    let result = tracing::Instrument::instrument(work(), span).await;
+    let work = tracing::Instrument::instrument(work(), span);
+    // Jobs this attempt enqueues keep the request ID of the request that started it.
+    let result = match Entity::find_by_id(id).one(&ctx.db).await {
+        Ok(Some(row)) if row.request_id.is_some() => {
+            crate::controllers::middleware::access_log::within_request(
+                row.request_id.unwrap_or_default(),
+                work,
+            )
+            .await
+        }
+        _ => work.await,
+    };
     heartbeat.abort();
     match result {
         Ok(()) => {

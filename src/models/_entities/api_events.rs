@@ -36,6 +36,8 @@ pub struct Model {
     pub correlation_id: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub resources: Json,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub request_parameters: Json,
     #[sea_orm(column_type = "Text", nullable)]
     pub outcome: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]

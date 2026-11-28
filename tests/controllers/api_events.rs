@@ -60,20 +60,20 @@ async fn a_read_and_a_write_record_who_when_where_what_and_the_outcome() {
         let phases: Vec<_> = write.iter().map(|row| row.phase.as_str()).collect();
         assert_eq!(
             phases,
-            ["started", "authenticated", "completed"],
+            ["started", "completed"],
             "a write is recorded before it runs, once it has an identity, and when it ends"
         );
-        assert_eq!(write[0].tenant_id, None);
+        assert_eq!(write[0].tenant_id, Some(tenant.tenant_id));
         assert_eq!(write[1].tenant_id, Some(tenant.tenant_id));
-        assert_eq!(write[1].caller, write[2].caller);
+        assert_eq!(write[0].caller, write[1].caller);
         assert!(write.iter().all(|row| !row.read_only));
-        assert!(write[..2].iter().all(|row| row.outcome.is_none()));
+        assert!(write[..1].iter().all(|row| row.outcome.is_none()));
         assert_eq!(
-            write[2].status_code,
+            write[1].status_code,
             Some(i32::from(created.status_code().as_u16()))
         );
         assert!(
-            write[2]
+            write[1]
                 .permissions
                 .as_array()
                 .unwrap()
@@ -274,11 +274,20 @@ async fn a_background_job_is_followed_from_its_request_to_its_end() {
         )
         .await;
         let rows = events_of(&ctx, "trail-job").await;
-        let job: Vec<_> = rows.iter().filter(|row| row.transport == "job").collect();
+        let job: Vec<_> = rows
+            .iter()
+            .filter(|row| row.transport == "job" && row.phase == "completed")
+            .collect();
         assert_eq!(
             job.len(),
             1,
             "the request's trail ends with the job: {rows:#?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.transport == "job"
+                && row.phase == "started"
+                && row.attempt == Some(1)),
+            "the attempt that ran the job is in the trail: {rows:#?}"
         );
         assert_eq!(job[0].job_id, Some(id));
         assert_eq!(job[0].event_name, "import");
@@ -331,6 +340,48 @@ async fn the_trail_can_be_filtered_by_a_resource_and_a_correlation() {
             .add_header("Authorization", &bearer)
             .await;
         assert_ne!(by_correlation.json::<Vec<Value>>(), Vec::<Value>::new());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_trail_keeps_identifiers_and_paging_but_never_content() {
+    boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let bearer = format!("Bearer {}", root_key(&ctx, &tenant).await);
+        request
+            .get(&format!(
+                "/api/workspaces/{}?limit=5&name=secret-name&entity_id={}",
+                tenant.workspace_id,
+                uuid::Uuid::nil()
+            ))
+            .add_header("Authorization", &bearer)
+            .add_header("x-request-id", "trail-params")
+            .await;
+        let rest = &events_of(&ctx, "trail-params").await[0];
+        assert_eq!(
+            rest.request_parameters,
+            json!({"limit": 5, "entity_id": uuid::Uuid::nil().to_string(), "path": [tenant.workspace_id.to_string()]})
+        );
+
+        let session = crate::controllers::mcp::initialize(&request).await;
+        crate::controllers::mcp::call_tool(
+            &request,
+            &session,
+            &root_key(&ctx, &tenant).await,
+            "search_entities",
+            json!({"query_text": "private words", "workspace_id": tenant.workspace_id, "limit": 3}),
+        )
+        .await;
+        let rows = Entity::find()
+            .filter(yorishiro::models::_entities::api_events::Column::EventName.eq("search_entities"))
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        let params = &rows[0].request_parameters;
+        assert_eq!(params["workspace_id"], tenant.workspace_id.to_string());
+        assert_eq!(params["limit"], 3);
+        assert!(!params.to_string().contains("private words"), "{params}");
     })
     .await;
 }

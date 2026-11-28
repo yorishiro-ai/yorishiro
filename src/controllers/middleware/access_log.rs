@@ -19,7 +19,7 @@ use crate::models::iam::policy::{Action, Resource};
 
 #[derive(Default)]
 struct Operation {
-    /// Where the `authenticated` row of a write goes, until it has been written.
+    /// Where the `started` row of a write goes, until it has been written.
     pending: Option<(DatabaseConnection, api_events::Call)>,
     request_id: String,
     caller: Option<AuthContext>,
@@ -60,6 +60,19 @@ pub(crate) fn current_request_id() -> Option<String> {
         .filter(|id| !id.is_empty())
 }
 
+/// Runs background work under the request that started it, so jobs it enqueues keep that request's ID.
+pub(crate) async fn within_request<T>(request_id: String, work: impl Future<Output = T>) -> T {
+    OPERATION
+        .scope(
+            RefCell::new(Operation {
+                request_id,
+                ..Operation::default()
+            }),
+            work,
+        )
+        .await
+}
+
 pub(crate) fn authorized(action: Action, target: Resource) {
     let _ = OPERATION.try_with(|operation| {
         let mut operation = operation.borrow_mut();
@@ -70,12 +83,13 @@ pub(crate) fn authorized(action: Action, target: Resource) {
 }
 
 /// Notes a change the call made, as its action and the identifiers it touched.
-pub(crate) fn changed(action: Action, detail: &serde_json::Value) {
+pub(crate) fn noted(action: Action, detail: &serde_json::Value) {
     let _ = OPERATION.try_with(|operation| {
-        operation
-            .borrow_mut()
-            .resources
-            .push(serde_json::json!({"action": action.qualified(), "detail": detail}));
+        let note = serde_json::json!({"action": action.qualified(), "detail": detail});
+        let mut operation = operation.borrow_mut();
+        if !operation.resources.contains(&note) {
+            operation.resources.push(note);
+        }
     });
 }
 
@@ -91,6 +105,7 @@ pub(crate) struct Call<'a> {
     pub read_only: bool,
     pub source_ip: Option<std::net::IpAddr>,
     pub user_agent: &'a str,
+    pub parameters: serde_json::Value,
 }
 
 pub(crate) fn source_ip(extensions: &axum::http::Extensions) -> Option<std::net::IpAddr> {
@@ -126,6 +141,7 @@ pub(crate) async fn track<T>(
         read_only: call.read_only,
         source_ip: call.source_ip.map(|address| address.to_string()),
         user_agent: call.user_agent.to_owned(),
+        parameters: call.parameters,
     };
     let span = tracing::error_span!(
         "request",
@@ -143,12 +159,6 @@ pub(crate) async fn track<T>(
         .scope(
             RefCell::new(operation),
             async move {
-                if !event.read_only
-                    && let Err(error) = event.start(db).await
-                {
-                    tracing::error!(%error, "refused: the call could not be recorded");
-                    return unavailable();
-                }
                 let response = run.await;
                 let (outcome, code) = classify(&response);
                 let record = OPERATION.with(RefCell::take);
@@ -243,6 +253,7 @@ async fn log_request(
     let operation = format!("{} {route}", request.method());
     let request_id = request.extensions().get::<LocoRequestId>().cloned();
     let user_agent = user_agent(request.headers()).to_owned();
+    let parameters = rest_parameters(request.uri());
     let call = Call {
         transport: if is_mcp { "mcp_http" } else { "rest" },
         operation: &operation,
@@ -250,6 +261,7 @@ async fn log_request(
         read_only: is_mcp || matches!(request.method().as_str(), "GET" | "HEAD"),
         source_ip: source_ip(request.extensions()),
         user_agent: &user_agent,
+        parameters,
     };
     track(
         call,
@@ -278,4 +290,32 @@ async fn log_request(
 
 pub(crate) const fn is_denial(status: axum::http::StatusCode) -> bool {
     matches!(status.as_u16(), 401 | 403 | 423 | 429)
+}
+
+/// The identifiers and paging numbers a REST request names: UUID path segments and allow-listed query values.
+fn rest_parameters(uri: &axum::http::Uri) -> serde_json::Value {
+    let path: Vec<serde_json::Value> = uri
+        .path()
+        .split('/')
+        .filter(|segment| uuid::Uuid::parse_str(segment).is_ok())
+        .map(serde_json::Value::from)
+        .collect();
+    let query: Vec<(String, serde_json::Value)> = uri
+        .query()
+        .into_iter()
+        .flat_map(|query| query.split('&'))
+        .filter_map(|pair| pair.split_once('='))
+        .map(|(key, value)| {
+            let value = value
+                .parse::<u64>()
+                .map_or_else(|_| serde_json::Value::from(value), serde_json::Value::from);
+            (key.to_owned(), value)
+        })
+        .collect();
+    let mut parameters =
+        api_events::identifiers(query.iter().map(|(key, value)| (key.as_str(), value)));
+    if !path.is_empty() {
+        parameters["path"] = path.into();
+    }
+    parameters
 }

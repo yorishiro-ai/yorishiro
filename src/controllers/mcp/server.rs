@@ -161,6 +161,14 @@ impl ServerHandler for YorishiroMcpServer {
             .tool_router
             .get(&request.name)
             .map_or_else(|| "<unknown tool>".to_owned(), |tool| tool.name.to_string());
+        let parameters = request.arguments.as_ref().map_or_else(
+            || serde_json::json!({}),
+            |arguments| {
+                crate::models::api_events::identifiers(
+                    arguments.iter().map(|(key, value)| (key.as_str(), value)),
+                )
+            },
+        );
         let call = access_log::Call {
             transport: "mcp",
             operation: &tool,
@@ -168,6 +176,7 @@ impl ServerHandler for YorishiroMcpServer {
             read_only: self.tool_policy.read_only(&tool),
             source_ip,
             user_agent: &user_agent,
+            parameters,
         };
         access_log::track(
             call,
@@ -203,6 +212,7 @@ impl ServerHandler for YorishiroMcpServer {
             read_only: true,
             source_ip,
             user_agent: &user_agent,
+            parameters: serde_json::json!({}),
         };
         access_log::track(
             call,

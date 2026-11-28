@@ -310,3 +310,59 @@ async fn workspace_provider_honors_the_configured_embedding_timeout() {
         },
     ).await;
 }
+
+#[tokio::test]
+async fn a_failed_reindex_names_every_entity_it_could_not_prepare_in_the_trail() {
+    use axum::{Json, Router, http::StatusCode, routing::post};
+    use loco_rs::bgworker::BackgroundWorker;
+    use serde_json::{Value, json};
+    use yorishiro::workers::reindex::{ReindexArgs, ReindexWorker};
+
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        let setup = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        ).await;
+        let auth = format!("Bearer {}", setup.api_key);
+        request.post("/api/schemas").add_header("Authorization", &auth)
+            .json(&json!({"name":"failing","entity_types":{"note":{"fields":{
+                "title":{"type":"string","x-embed":true}
+            }}}})).await.assert_status(StatusCode::CREATED);
+        let mut entities = Vec::new();
+        for title in ["fine", "too long"] {
+            let created = request.post("/api/entities").add_header("Authorization", &auth)
+                .json(&json!({"schema_name":"failing","entity_type":"note","data":{"title":title}}))
+                .await;
+            created.assert_status(StatusCode::CREATED);
+            entities.push((title, created.json::<Value>()["entity_id"].as_str().unwrap().to_owned()));
+        }
+        // The provider check passes; the entity titled "too long" is refused as above the token limit.
+        let endpoint = crate::http_stub::HttpStub::start(Router::new().route("/embeddings", post(
+            |Json(body): Json<Value>| async move {
+                if body["input"][0].as_str().is_some_and(|text| text.contains("too long")) {
+                    return (StatusCode::BAD_REQUEST, Json(json!({"error":"input too long"})));
+                }
+                (StatusCode::OK, Json(json!({"data":[{"index":0,"embedding":[1.0,0.0,0.0,0.0]}]})))
+            },
+        ))).await;
+        request.put("/api/workspace/embedding-provider").add_header("Authorization", &auth)
+            .json(&json!({"base_url":endpoint.url,"model":"limited","api_key":"test-key","dimensions":4}))
+            .await.assert_status(StatusCode::NO_CONTENT);
+        let job = request.post("/api/migration-jobs/reindex").add_header("Authorization", &auth).await;
+        let id = job.json::<Value>()["migration_job_id"].as_str().unwrap().parse::<Uuid>().unwrap();
+        let dispatch = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
+            .one(&ctx.db).await.unwrap().unwrap();
+        let args: ReindexArgs = serde_json::from_value(dispatch.payload).unwrap();
+        assert!(ReindexWorker::build(&ctx).perform(args).await.is_err());
+
+        let row = yorishiro::models::api_events::Entity::find()
+            .filter(yorishiro::models::_entities::api_events::Column::EventName.eq("reindex.entities"))
+            .one(&ctx.db).await.unwrap().expect("a row naming the failed entities");
+        assert_eq!(row.job_id, Some(id));
+        let failed = row.resources.as_array().unwrap();
+        assert_eq!(failed.len(), 1, "{failed:?}");
+        assert_eq!(failed[0]["entity_id"], entities[1].1);
+        assert!(failed[0]["error_code"].is_string());
+    }).await;
+}

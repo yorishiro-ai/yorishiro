@@ -6,6 +6,7 @@ use crate::workers::query_embedding::harness::{
     boot_with_query_worker, boot_with_query_worker_and_drain,
 };
 use axum::http::StatusCode;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use std::time::Duration;
 use yorishiro::App;
@@ -121,6 +122,27 @@ async fn unselected_search_combines_workspaces_and_explicit_selection_narrows_re
             .await;
         response.assert_status_ok();
         assert_eq!(titles(&response.json()), ["alpha second"]);
+
+        // The trail names the index each search ran against, and nothing of the query or the hits.
+        let rows = yorishiro::models::api_events::Entity::find()
+            .filter(yorishiro::models::_entities::api_events::Column::Phase.eq("completed"))
+            .filter(
+                yorishiro::models::_entities::api_events::Column::EventName.eq("GET /api/search"),
+            )
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        let revisions = rows
+            .iter()
+            .flat_map(|row| row.resources.as_array().cloned().unwrap_or_default())
+            .filter(|resource| resource["detail"]["embedding_revision"].is_i64())
+            .count();
+        assert_eq!(revisions, 3, "one per workspace searched: {rows:?}");
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.resources.to_string().contains("alpha"))
+        );
     })
     .await;
 }
