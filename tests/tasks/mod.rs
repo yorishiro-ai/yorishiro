@@ -1,3 +1,4 @@
+mod purge_audit_events;
 mod reindex_scheduler;
 mod resync_embeddings;
 

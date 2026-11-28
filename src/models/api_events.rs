@@ -263,3 +263,65 @@ pub(crate) async fn record(
     crate::controllers::middleware::access_log::changed(action, &detail);
     Ok(())
 }
+
+/// Deletes the trail rows older than `cutoff` and returns how many went.
+///
+/// # Errors
+/// Returns an error when the delete fails.
+pub(crate) async fn purge_before(
+    db: &DatabaseConnection,
+    cutoff: chrono::DateTime<chrono::FixedOffset>,
+) -> Result<u64, YorishiroError> {
+    use crate::models::_entities::api_events::Column;
+    Ok(Entity::delete_many()
+        .filter(Column::CreatedAt.lt(cutoff))
+        .exec(db)
+        .await
+        .internal()?
+        .rows_affected)
+}
+
+/// Records one task run as a single completed row: who ran it, what ran and how it ended.
+pub(crate) async fn record_task(
+    db: &DatabaseConnection,
+    name: &str,
+    identity_type: &'static str,
+    read_only: bool,
+    failure: Option<&loco_rs::Error>,
+    latency_ms: i64,
+) {
+    let request_id = Uuid::now_v7().to_string();
+    let caller = if identity_type == "operator" {
+        format!("yrn:yorishiro:operator/{}", crate::data::env::operator())
+    } else {
+        format!("yrn:yorishiro:service/{name}")
+    };
+    let row = ActiveModel {
+        correlation_id: Set(request_id.clone()),
+        request_id: Set(request_id),
+        phase: Set("completed".to_owned()),
+        transport: Set("task".to_owned()),
+        event_name: Set(name.to_owned()),
+        read_only: Set(read_only),
+        user_agent: Set(String::new()),
+        identity_type: Set(identity_type.to_owned()),
+        caller: Set(Some(caller)),
+        resources: Set(serde_json::json!([])),
+        permissions: Set(serde_json::json!([])),
+        outcome: Set(Some(
+            if failure.is_none() {
+                "success"
+            } else {
+                "failed"
+            }
+            .to_owned(),
+        )),
+        // The task's own message can carry what it was given, so the trail keeps only that it failed.
+        error_code: Set(failure.map(|_| "task_failed".to_owned())),
+        latency_ms: Set(Some(latency_ms)),
+        ..Default::default()
+    };
+    if let Err(error) = row.insert(db).await {
+        tracing::error!(%error, task = name, "the task run could not be recorded in the trail");
+    }
+}

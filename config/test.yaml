@@ -49,6 +49,10 @@ scheduler:
       run: "delete_due_tenants"
       schedule: "0 0 * * * *"
       run_on_start: true
+    purge_audit_events:
+      run: "purge_audit_events"
+      schedule: "0 30 3 * * *"
+      run_on_start: false
 
 # Run HTTP and worker processes separately. Start a worker with an explicit target, such as
 # --worker=worker-target:shared. Official and tenant workers need their own selected targets.

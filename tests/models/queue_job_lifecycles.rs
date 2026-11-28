@@ -309,3 +309,26 @@ async fn live_attempt_failure_defers_without_changing_attempt() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn a_job_that_used_every_attempt_stays_failed() {
+    crate::requests::boot_request::<yorishiro::App, _, _>(|_request, ctx| async move {
+        let db = ctx.db.clone();
+        let id = uuid::Uuid::now_v7();
+        enqueue(&db, id, None, &uuid::Uuid::now_v7().to_string()).await;
+        let mut now = Utc.timestamp_opt(5_000, 0).single().unwrap().fixed_offset();
+        for attempt in 1..=yorishiro::models::queue_job_lifecycles::MAX_ATTEMPTS {
+            let admission = Entity::start_at(&db, id, now).await.unwrap();
+            assert!(
+                matches!(admission, Admission::Started { attempt: n } | Admission::Recovered { attempt: n } if n == attempt),
+                "{admission:?}"
+            );
+            now += lease_duration() + chrono::Duration::seconds(1);
+        }
+        assert_eq!(Entity::start_at(&db, id, now).await.unwrap(), Admission::Terminal);
+        let row = Entity::find_by_id(id).one(&db).await.unwrap().unwrap();
+        assert_eq!(row.status, "failed");
+        assert_eq!(row.error.as_deref(), Some("attempt limit reached"));
+    })
+    .await;
+}

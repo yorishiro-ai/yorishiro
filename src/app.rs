@@ -256,19 +256,35 @@ pub(crate) async fn connect_workers(
 }
 
 pub(crate) fn register_tasks(tasks: &mut Tasks) {
-    tasks.register(tasks::inspect_tenant_retirement::InspectTenantRetirement);
-    tasks.register(tasks::disable_tenant::DisableTenant);
-    tasks.register(tasks::delete_tenant::DeleteTenant);
-    tasks.register(tasks::delete_due_tenants::DeleteDueTenants);
-    tasks.register(tasks::reset_root_password::ResetRootPassword);
+    use tasks::Audited;
+    tasks.register(
+        Audited::operator(tasks::inspect_tenant_retirement::InspectTenantRetirement).reading(),
+    );
+    tasks.register(Audited::operator(tasks::disable_tenant::DisableTenant));
+    tasks.register(Audited::operator(tasks::delete_tenant::DeleteTenant));
+    tasks.register(Audited::service(
+        tasks::delete_due_tenants::DeleteDueTenants,
+    ));
+    tasks.register(Audited::service(
+        tasks::purge_audit_events::PurgeAuditEvents,
+    ));
+    tasks.register(Audited::operator(
+        tasks::reset_root_password::ResetRootPassword,
+    ));
     // tasks-inject
-    tasks.register(tasks::delete_user::DeleteUser);
-    tasks.register(tasks::resync_embeddings::ResyncEmbeddings);
-    tasks.register(tasks::embedding_index_maintenance::EmbeddingIndexMaintenance);
-    tasks.register(tasks::maintenance::Maintenance);
-    tasks.register(tasks::maintenance_status::MaintenanceStatus);
-    tasks.register(tasks::recover_worker_dispatches::RecoverWorkerDispatches);
-    tasks.register(tasks::reindex_scheduler::ReindexScheduler);
+    tasks.register(Audited::operator(tasks::delete_user::DeleteUser));
+    tasks.register(Audited::operator(
+        tasks::resync_embeddings::ResyncEmbeddings,
+    ));
+    tasks.register(Audited::service(
+        tasks::embedding_index_maintenance::EmbeddingIndexMaintenance,
+    ));
+    tasks.register(Audited::operator(tasks::maintenance::Maintenance));
+    tasks.register(Audited::operator(tasks::maintenance_status::MaintenanceStatus).reading());
+    tasks.register(Audited::service(
+        tasks::recover_worker_dispatches::RecoverWorkerDispatches,
+    ));
+    tasks.register(Audited::service(tasks::reindex_scheduler::ReindexScheduler));
     tasks.register(tasks::db_load_guard::DbLoadGuard);
 }
 

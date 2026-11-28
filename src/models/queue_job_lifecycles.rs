@@ -381,7 +381,10 @@ impl Entity {
         let txn = crate::db::begin_write(db).await?;
         let admission = admit(&txn, id, now).await?;
         match admission {
-            Admission::Started { .. } | Admission::Recovered { .. } => txn.commit().await?,
+            // A terminal admission may have just failed a job that used every attempt.
+            Admission::Started { .. } | Admission::Recovered { .. } | Admission::Terminal => {
+                txn.commit().await?;
+            }
             _ => txn.rollback().await?,
         }
         Ok(admission)
@@ -498,6 +501,26 @@ async fn admit(
         }
         _ => {}
     }
+    if row.attempt >= MAX_ATTEMPTS {
+        // The job has used every attempt: it stays failed instead of being claimed again.
+        Entity::update_many()
+            .col_expr(
+                Column::Status,
+                Expr::value(LifecycleStatus::Failed.as_db_str()),
+            )
+            .col_expr(Column::FailedAt, Expr::value(now))
+            .col_expr(Column::UpdatedAt, Expr::value(now))
+            .col_expr(Column::Error, Expr::value("attempt limit reached"))
+            .col_expr(
+                Column::LeaseUntil,
+                Expr::value(Option::<DateTimeWithTimeZone>::None),
+            )
+            .filter(Column::Id.eq(id))
+            .filter(Column::Status.ne(LifecycleStatus::Failed.as_db_str()))
+            .exec(txn)
+            .await?;
+        return Ok(Admission::Terminal);
+    }
     let recovered = status == LifecycleStatus::Running;
 
     let in_flight = match (&row.concurrency_key, row.concurrency_limit) {
@@ -560,6 +583,9 @@ async fn in_flight(
         .count(db)
         .await
 }
+
+/// The attempts a job may start before it stays failed.
+pub const MAX_ATTEMPTS: i32 = 5;
 
 /// Moves the row to `running` for a new attempt and returns how many rows that changed.
 /// Reclaiming an expired lease may only take a row that is still running; a fresh claim may only take one that is waiting.

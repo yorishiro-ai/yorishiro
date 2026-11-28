@@ -75,12 +75,15 @@ impl Default for Dispatch {
 pub(crate) struct Limits {
     /// `Retry-After` advertised while maintenance is on, when the caller does not name one.
     pub(crate) maintenance_retry_after_seconds: u32,
+    /// How long the API trail keeps a row before the scheduler deletes it.
+    pub(crate) audit_retention_days: u32,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
             maintenance_retry_after_seconds: 300,
+            audit_retention_days: 365,
         }
     }
 }
