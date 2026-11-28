@@ -36,7 +36,7 @@ impl aide::OperationOutput for ApiError {
     }
 }
 
-/// A JSON body with a fixed success status, in the response and in the OpenAPI document.
+/// A JSON body with a fixed success status, in the response and in the `OpenAPI` document.
 macro_rules! json_with_status {
     ($(#[$doc:meta])* $name:ident, $status:ident, $code:literal) => {
         $(#[$doc])*
