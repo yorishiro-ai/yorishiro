@@ -74,8 +74,6 @@ db_enum! {
     pub enum AuditAction {
         /// `entity_entities::undo_job`: a batch undo, restoring every entity a job's snapshots cover.
         UndoMigrationJob = "undo_migration_job",
-        /// `system_maintenance::set`: a maintenance mode change.
-        SetMaintenance = "set_maintenance",
         /// `embedding::reindex_workspace`: an embedding reindex, replacing all vectors in a workspace with those from a new model.
         ReindexEmbeddings = "reindex_embeddings",
         /// `entity_entities::fill_defaults`: a batch fill of absent required fields.

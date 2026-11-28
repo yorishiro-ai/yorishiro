@@ -165,7 +165,7 @@ async fn up_access_key_audit_log(manager: &SchemaManager<'_>) -> Result<(), DbEr
         table,
         &[(
             "access_key_audit_log_action_check",
-            "action IN ('undo_migration_job', 'set_maintenance', 'reindex_embeddings', 'fill_defaults', 'background_job_completed')",
+            "action IN ('undo_migration_job', 'reindex_embeddings', 'fill_defaults', 'background_job_completed')",
         )],
     )
     .await?;
