@@ -1,5 +1,6 @@
 //! Subscription tiers and licence-dependent plan-policy eligibility.
 
+use crate::error::OptionExt;
 use serde::{Deserialize, Serialize};
 
 /// Whether plan rules may be applied to the current operation.
@@ -25,7 +26,7 @@ impl PlanPolicy {
         let setting = ctx
             .shared_store
             .get::<Arc<PlanPolicySetting>>()
-            .ok_or_else(|| crate::YorishiroError::Internal("plan policy missing".into()))?;
+            .or_internal("plan policy missing")?;
         let licence = ctx.shared_store.get::<Arc<LicenceState>>();
         Ok(Self::resolve(
             setting.enabled,

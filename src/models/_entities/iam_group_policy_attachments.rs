@@ -27,24 +27,10 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     IamGroups,
-    #[sea_orm(
-        belongs_to = "super::iam_policies::Entity",
-        from = "(Column::TenantId, Column::PolicyId)",
-        to = "(super::iam_policies::Column::Id, super::iam_policies::Column::TenantId, super::iam_policies::Column::Id, super::iam_policies::Column::TenantId)",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    IamPolicies,
 }
 
 impl Related<super::iam_groups::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IamGroups.def()
-    }
-}
-
-impl Related<super::iam_policies::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::IamPolicies.def()
     }
 }

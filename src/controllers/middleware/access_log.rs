@@ -1,12 +1,244 @@
-use std::time::Instant;
+use std::{cell::RefCell, time::Instant};
 
-use axum::{extract::Request, middleware::Next, response::Response};
-use loco_rs::{
-    controller::middleware::{MiddlewareLayer, logger},
-    environment::Environment,
+use axum::{
+    extract::{MatchedPath, Request},
+    middleware::Next,
+    response::{IntoResponse, Response},
 };
-use serde::Serialize;
+use loco_rs::{
+    app::AppContext,
+    controller::middleware::request_id::{LocoRequestId, request_id_middleware},
+};
 use tracing::Instrument;
+
+use sea_orm::DatabaseConnection;
+
+use crate::models::access_keys::AuthContext;
+use crate::models::api_events;
+use crate::models::iam::policy::{Action, Resource};
+
+#[derive(Default)]
+struct Operation {
+    /// Where the `started` row of a write goes, until it has been written.
+    pending: Option<(DatabaseConnection, api_events::Call)>,
+    request_id: String,
+    caller: Option<AuthContext>,
+    permissions: Vec<(Action, Resource)>,
+    /// What the call changed, noted by the model that changed it.
+    resources: Vec<serde_json::Value>,
+    /// The code, fixed description and HTTP status of the error the call ended with.
+    error: Option<(String, String, u16)>,
+    denied: bool,
+}
+
+tokio::task_local! {
+    static OPERATION: RefCell<Operation>;
+}
+
+/// Notes who the call is, and for a write records it before the call goes on.
+///
+/// # Errors
+/// Returns an error when the write cannot be attributed in the trail, so the call is refused.
+pub(crate) async fn authenticated(actor: &AuthContext) -> Result<(), crate::YorishiroError> {
+    let pending = OPERATION
+        .try_with(|operation| {
+            let mut operation = operation.borrow_mut();
+            operation.caller = Some(actor.clone());
+            operation.pending.take()
+        })
+        .ok()
+        .flatten();
+    if let Some((db, event)) = pending {
+        event.authenticated(&db, actor).await?;
+    }
+    Ok(())
+}
+
+/// The request the running code is serving, so work it starts can be traced back to it.
+pub(crate) fn current_request_id() -> Option<String> {
+    OPERATION
+        .try_with(|operation| operation.borrow().request_id.clone())
+        .ok()
+        .filter(|id| !id.is_empty())
+}
+
+/// Runs background work under the request that started it, so jobs it enqueues keep that request's ID.
+/// Returns what the work noted alongside its result.
+pub(crate) async fn within_request<T>(
+    request_id: String,
+    work: impl Future<Output = T>,
+) -> (T, Vec<serde_json::Value>) {
+    OPERATION
+        .scope(
+            RefCell::new(Operation {
+                request_id,
+                ..Operation::default()
+            }),
+            async {
+                let result = work.await;
+                let notes = OPERATION
+                    .with(|operation| std::mem::take(&mut operation.borrow_mut().resources));
+                (result, notes)
+            },
+        )
+        .await
+}
+
+/// Notes the error a call ends with, so its completed row says why it failed.
+pub(crate) fn failed(error: &crate::YorishiroError) {
+    let _ = OPERATION.try_with(|operation| {
+        operation.borrow_mut().error = Some((
+            error.trail_code().to_owned(),
+            error.trail_message(),
+            error.trail_status(),
+        ));
+    });
+}
+
+pub(crate) fn authorized(action: Action, target: Resource) {
+    let _ = OPERATION.try_with(|operation| {
+        let mut operation = operation.borrow_mut();
+        if !operation.permissions.contains(&(action, target)) {
+            operation.permissions.push((action, target));
+        }
+    });
+}
+
+/// Notes a change the call made, as its action and the identifiers it touched.
+pub(crate) fn noted(action: Action, detail: &serde_json::Value) {
+    let _ = OPERATION.try_with(|operation| {
+        let note = serde_json::json!({"action": action.qualified(), "detail": detail});
+        let mut operation = operation.borrow_mut();
+        if !operation.resources.contains(&note) {
+            operation.resources.push(note);
+        }
+    });
+}
+
+pub(crate) fn denied() {
+    let _ = OPERATION.try_with(|operation| operation.borrow_mut().denied = true);
+}
+
+/// What identifies one call before it is authenticated: where it came from and whether it can change anything.
+pub(crate) struct Call<'a> {
+    pub transport: &'static str,
+    pub operation: &'a str,
+    pub request_id: Option<&'a LocoRequestId>,
+    pub read_only: bool,
+    pub source_ip: Option<std::net::IpAddr>,
+    pub user_agent: &'a str,
+    pub parameters: serde_json::Value,
+}
+
+pub(crate) fn source_ip(extensions: &axum::http::Extensions) -> Option<std::net::IpAddr> {
+    extensions
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|axum::extract::ConnectInfo(address)| address.ip())
+}
+
+pub(crate) fn user_agent(headers: &axum::http::HeaderMap) -> &str {
+    headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+}
+
+/// Runs one call and records it in the durable trail and in the log.
+///
+/// A call that can change something is refused, before it runs, when its start cannot be recorded.
+/// A read is refused, before its data is returned, when its completion cannot be recorded.
+/// A write that already took effect keeps its response when only its completion is lost: the `started` row marks it and the full record goes to the error log.
+pub(crate) async fn track<T>(
+    call: Call<'_>,
+    db: &DatabaseConnection,
+    run: impl Future<Output = T>,
+    classify: impl FnOnce(&T) -> (&'static str, Option<i64>),
+    unavailable: impl FnOnce() -> T,
+) -> T {
+    let request_id = call.request_id.map_or("req-id-none", LocoRequestId::get);
+    let event = api_events::Call {
+        request_id: request_id.to_owned(),
+        transport: call.transport,
+        event_name: call.operation.to_owned(),
+        read_only: call.read_only,
+        source_ip: call.source_ip.map(|address| address.to_string()),
+        user_agent: call.user_agent.to_owned(),
+        parameters: call.parameters,
+    };
+    let span = tracing::error_span!(
+        "request",
+        transport = call.transport,
+        operation = call.operation,
+        request_id
+    );
+    let started = Instant::now();
+    let operation = Operation {
+        request_id: request_id.to_owned(),
+        pending: (!event.read_only).then(|| (db.clone(), event.clone())),
+        ..Operation::default()
+    };
+    OPERATION
+        .scope(
+            RefCell::new(operation),
+            async move {
+                let response = run.await;
+                let (outcome, code) = classify(&response);
+                let record = OPERATION.with(RefCell::take);
+                let permissions: Vec<String> = record
+                    .permissions
+                    .iter()
+                    .map(|(action, target)| format!("{} {}", action.qualified(), target.yrn()))
+                    .collect();
+                let completion = api_events::Completion {
+                    permissions,
+                    outcome: if record.denied && outcome != "success" {
+                        "denied"
+                    } else {
+                        outcome
+                    },
+                    status_code: code
+                        .or_else(|| record.error.as_ref().map(|error| i64::from(error.2))),
+                    error_code: record.error.as_ref().map(|error| error.0.clone()),
+                    error_message: record.error.as_ref().map(|error| error.1.clone()),
+                    latency_ms: i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
+                    caller: record.caller,
+                    resources: record.resources,
+                };
+                let caller = completion.caller.as_ref();
+                tracing::info!(
+                    transport = event.transport,
+                    operation = event.event_name,
+                    request_id,
+                    read_only = event.read_only,
+                    source_ip = event.source_ip,
+                    user_agent = event.user_agent,
+                    caller = caller
+                        .map(AuthContext::yrn)
+                        .as_deref()
+                        .unwrap_or("unauthenticated"),
+                    tenant_id = caller.map(|actor| tracing::field::display(actor.tenant_id)),
+                    user_id = caller
+                        .and_then(|actor| actor.user_id)
+                        .map(tracing::field::display),
+                    workspace = caller.and_then(AuthContext::workspace_yrn).as_deref(),
+                    outcome = completion.outcome,
+                    code,
+                    permissions = ?completion.permissions,
+                    latency_ms = completion.latency_ms,
+                    "request completed",
+                );
+                if let Err(error) = event.finish(db, &completion).await {
+                    tracing::error!(%error, "the completed call could not be recorded");
+                    if event.read_only {
+                        return unavailable();
+                    }
+                }
+                response
+            }
+            .instrument(span),
+        )
+        .await
+}
 
 /// The request target used by the access log.
 /// Query strings are deliberately excluded because callback parameters can carry codes, state, and provider error details.
@@ -14,83 +246,99 @@ pub fn path_only(uri: &axum::http::Uri) -> &str {
     uri.path()
 }
 
-#[derive(Clone, Serialize)]
-pub struct Middleware {
-    enable: bool,
-    environment: Environment,
+pub(crate) fn layer(mut router: axum::Router, ctx: &AppContext) -> axum::Router {
+    let config = &ctx.config.server.middlewares;
+    if config.logger.as_ref().is_none_or(|logger| logger.enable) {
+        router = router.layer(axum::middleware::from_fn_with_state(
+            ctx.db.clone(),
+            log_request,
+        ));
+    }
+    if config.request_id.as_ref().is_none_or(|id| id.enable) {
+        router = router.layer(axum::middleware::from_fn(request_id_middleware));
+    }
+    router
 }
 
-impl Middleware {
-    #[must_use]
-    pub fn new(config: &logger::Config, environment: &Environment) -> Self {
-        Self {
-            enable: config.enable,
-            environment: environment.clone(),
-        }
+async fn log_request(
+    axum::extract::State(db): axum::extract::State<DatabaseConnection>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if request.method() == axum::http::Method::OPTIONS
+        || matches!(request.uri().path(), "/_ping" | "/_health" | "/_readiness")
+    {
+        return next.run(request).await;
     }
-}
-
-impl MiddlewareLayer for Middleware {
-    fn name(&self) -> &'static str {
-        "logger"
-    }
-
-    fn is_enabled(&self) -> bool {
-        self.enable
-    }
-
-    fn config(&self) -> serde_json::Result<serde_json::Value> {
-        serde_json::to_value(self)
-    }
-
-    fn apply(
-        &self,
-        app: axum::Router<loco_rs::app::AppContext>,
-    ) -> loco_rs::Result<axum::Router<loco_rs::app::AppContext>> {
-        Ok(app
-            .layer(axum::middleware::from_fn(log_request))
-            .layer(axum::Extension(self.environment.clone())))
-    }
-}
-
-async fn log_request(request: Request, next: Next) -> Response {
-    let method = request.method().clone();
-    let path = path_only(request.uri()).to_owned();
-    let version = request.version();
-    let user_agent = request
-        .headers()
-        .get(axum::http::header::USER_AGENT)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default()
-        .to_owned();
-    let request_id = request
-        .extensions()
-        .get::<loco_rs::controller::middleware::request_id::LocoRequestId>()
-        .map_or_else(|| "req-id-none".to_string(), |id| id.get().to_string());
-    let environment = request
-        .extensions()
-        .get::<Environment>()
-        .map_or_default(ToString::to_string);
-    let started = Instant::now();
-    let span = tracing::error_span!(
-        "http-request",
-        "http.method" = tracing::field::display(&method),
-        "http.uri" = tracing::field::display(&path),
-        "http.version" = tracing::field::debug(version),
-        "http.user_agent" = tracing::field::display(&user_agent),
-        "environment" = tracing::field::display(&environment),
-        request_id = tracing::field::display(&request_id),
+    let is_mcp = path_only(request.uri()) == "/mcp";
+    let route = request.extensions().get::<MatchedPath>().map_or(
+        if is_mcp { "/mcp" } else { "<unmatched>" },
+        MatchedPath::as_str,
     );
-    let response = next.run(request).instrument(span).await;
-    tracing::info!(
-        http_method = %method,
-        http_uri = %path,
-        http_status = response.status().as_u16(),
-        latency_ms = started.elapsed().as_secs_f64() * 1000.0,
-        user_agent = %user_agent,
-        environment = %environment,
-        request_id = %request_id,
-        "http request completed",
-    );
-    response
+    let operation = format!("{} {route}", request.method());
+    let request_id = request.extensions().get::<LocoRequestId>().cloned();
+    let user_agent = user_agent(request.headers()).to_owned();
+    let parameters = rest_parameters(request.uri());
+    let call = Call {
+        transport: if is_mcp { "mcp_http" } else { "rest" },
+        operation: &operation,
+        request_id: request_id.as_ref(),
+        read_only: is_mcp || matches!(request.method().as_str(), "GET" | "HEAD"),
+        source_ip: source_ip(request.extensions()),
+        user_agent: &user_agent,
+        parameters,
+    };
+    track(
+        call,
+        &db,
+        next.run(request),
+        |response: &Response| {
+            let status = response.status();
+            let outcome = if is_denial(status) {
+                "denied"
+            } else if status.is_client_error() || status.is_server_error() {
+                "failed"
+            } else {
+                "success"
+            };
+            (outcome, Some(i64::from(status.as_u16())))
+        },
+        || {
+            crate::controllers::ApiError::from(crate::YorishiroError::BackendUnavailable {
+                message: "the call could not be recorded in the audit trail".into(),
+            })
+            .into_response()
+        },
+    )
+    .await
+}
+
+pub(crate) const fn is_denial(status: axum::http::StatusCode) -> bool {
+    matches!(status.as_u16(), 401 | 403 | 423 | 429)
+}
+
+/// The identifiers and paging numbers a REST request names: UUID path segments and allow-listed query values.
+fn rest_parameters(uri: &axum::http::Uri) -> serde_json::Value {
+    let path: Vec<serde_json::Value> = uri
+        .path()
+        .split('/')
+        .filter(|segment| uuid::Uuid::parse_str(segment).is_ok())
+        .map(serde_json::Value::from)
+        .collect();
+    let query: Vec<(String, serde_json::Value)> =
+        form_urlencoded::parse(uri.query().unwrap_or("").as_bytes())
+            .map(|(key, value)| {
+                let value = value.parse::<u64>().map_or_else(
+                    |_| serde_json::Value::from(value.as_ref()),
+                    serde_json::Value::from,
+                );
+                (key.into_owned(), value)
+            })
+            .collect();
+    let mut parameters =
+        api_events::identifiers(query.iter().map(|(key, value)| (key.as_str(), value)));
+    if !path.is_empty() {
+        parameters["path"] = path.into();
+    }
+    parameters
 }

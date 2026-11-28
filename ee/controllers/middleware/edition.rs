@@ -86,13 +86,15 @@ impl LicenceState {
             Some(serde_json::Value::String(token)) => Some(token.as_str()),
             Some(_) => {
                 tracing::warn!(
-                    "invalid initializers.licence_key: enterprise features are disabled"
+                    "invalid initializers.licence_key: features that require a licence are unavailable"
                 );
                 return Self::default();
             }
         };
         let Some(token) = token.filter(|value| !value.is_empty()) else {
-            tracing::info!("no licence key configured: enterprise features are disabled");
+            tracing::info!(
+                "no licence key configured: features that require a licence are unavailable"
+            );
             return Self::default();
         };
 
@@ -101,14 +103,14 @@ impl LicenceState {
             tracing::info!(
                 plan = %claims.plan,
                 expires_at = claims.exp,
-                "licence key accepted: enterprise features are enabled"
+                "licence key accepted"
             );
             Self {
                 claims: Some(claims),
             }
         } else {
             tracing::warn!(
-                "licence key was set but did not verify: enterprise features are disabled"
+                "licence key does not verify: features that require a licence are unavailable"
             );
             Self::default()
         }

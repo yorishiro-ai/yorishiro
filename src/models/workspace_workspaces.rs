@@ -1,5 +1,6 @@
 //! Workspace model: lifecycle in `operations`, plus the embedding provider assignment and the revision fence that guards vector publication.
 
+use crate::error::OptionExt;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ExprTrait, QuerySelect};
 use serde::Serialize;
@@ -88,7 +89,7 @@ pub(crate) async fn embedding_revision(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))
+        .or_not_found(format!("workspace {workspace_id} not found"))
 }
 
 pub(crate) async fn embedding_content_revision(
@@ -103,7 +104,7 @@ pub(crate) async fn embedding_content_revision(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))
+        .or_not_found(format!("workspace {workspace_id} not found"))
 }
 
 /// Locks the workspace generation for a short publication transaction.
@@ -145,7 +146,7 @@ pub(crate) async fn embedding_provider(
 ) -> Result<Option<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>, YorishiroError>
 {
     let revision = embedding_revision(&ctx.db, workspace_id).await?;
-    let provider = crate::workspace_embedding_provider(&ctx.db, workspace_id)
+    let provider = crate::workspace_embedding_provider(ctx, workspace_id)
         .await?
         .or_else(|| {
             ctx.shared_store
@@ -162,7 +163,7 @@ pub(crate) async fn embedding_provider(
     }))
 }
 
-/// Resolves effective workspace/deployment embedding identity without constructing a provider.
+/// Resolves the effective workspace or deployment embedding identity without constructing a provider.
 pub(crate) async fn effective_embedding_metadata(
     ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
@@ -193,19 +194,21 @@ pub(crate) fn ids_for_tenant(tenant_id: Uuid) -> sea_orm::sea_query::SelectState
 /// A workspace summary returned by tenancy lookups and signup.
 #[derive(Clone, Serialize, sea_orm::FromQueryResult, schemars::JsonSchema)]
 pub struct WorkspaceSummary {
+    #[serde(rename = "workspace_id")]
     pub id: Uuid,
     pub name: String,
 }
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(mut self, db: &C, _insert: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
-        self.id = crate::db::sqlite_generated_id(db, self.id);
-        Ok(self)
+        let mut this = self;
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        Ok(this)
     }
 }
 
@@ -297,16 +300,27 @@ pub(crate) async fn embedding_reindexing(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
+        .or_not_found(format!("workspace {workspace_id} not found"))?;
     Ok(row)
 }
 
 pub(crate) async fn stamped_for_reindex(
     conn: &impl ConnectionTrait,
 ) -> Result<Vec<StartupReindexRow>, YorishiroError> {
+    use crate::models::_entities::tenant_tenants as tenants;
     use crate::models::_entities::workspace_workspaces::Column;
+    use sea_orm::QueryTrait;
 
     startup_reindex_rows()
+        .filter(
+            Column::TenantId.in_subquery(
+                tenants::Entity::find()
+                    .select_only()
+                    .column(tenants::Column::Id)
+                    .filter(tenants::Column::DisabledAt.is_null())
+                    .into_query(),
+            ),
+        )
         .filter(
             Column::EmbeddingModel
                 .is_not_null()
@@ -331,7 +345,7 @@ pub(crate) async fn startup_reindex_needed(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("workspace {workspace_id} not found")))?;
+        .or_not_found(format!("workspace {workspace_id} not found"))?;
     Ok(row.needs_reindex(
         &provider.model_name(),
         provider.dimensions(),
@@ -353,14 +367,14 @@ fn startup_reindex_rows() -> Select<Entity> {
 
 pub(crate) async fn list_for_actor(
     conn: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
 ) -> Result<Vec<WorkspaceRecord>, YorishiroError> {
     use crate::models::iam::policy::{Action, Resource};
     let txn = crate::db::begin_write(conn).await.internal()?;
     let evaluation = crate::models::iam::access::IamEvaluation::load(&txn, actor).await?;
     evaluation
         .require(
-            Action::WorkspaceList,
+            Action::ListWorkspaces,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
@@ -377,7 +391,7 @@ pub(crate) async fn list_for_actor(
     for workspace in candidates {
         match evaluation
             .require(
-                Action::WorkspaceGet,
+                Action::GetWorkspace,
                 Resource::Workspace {
                     tenant_id: actor.tenant_id,
                     workspace_id: workspace.id,
@@ -386,7 +400,7 @@ pub(crate) async fn list_for_actor(
             .await
         {
             Ok(()) => records.push(WorkspaceRecord::try_from(workspace)?),
-            Err(YorishiroError::ScopeInsufficient { .. }) => {}
+            Err(YorishiroError::AccessDenied { .. }) => {}
             Err(error) => return Err(error),
         }
     }
@@ -396,41 +410,41 @@ pub(crate) async fn list_for_actor(
 
 pub(crate) async fn get_for_actor(
     conn: &sea_orm::DatabaseTransaction,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     workspace_id: Uuid,
 ) -> Result<Model, YorishiroError> {
-    let workspace = get_workspace(conn, workspace_id).await?;
-    if workspace.tenant_id != actor.tenant_id {
-        return Err(YorishiroError::not_found("workspace not found"));
-    }
+    crate::models::iam::access::check_workspace_target(conn, actor, workspace_id).await?;
     crate::models::iam::access::require_iam_action(
         conn,
         actor,
-        crate::models::iam::policy::Action::WorkspaceGet,
+        crate::models::iam::policy::Action::GetWorkspace,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id,
         },
     )
     .await
-    .map_err(|error| {
-        crate::models::iam::access::hide_inferred_resource(actor.workspace_id.is_none(), error)
-    })?;
-    Ok(workspace)
+    .map_err(|error| crate::models::iam::access::hide_inferred_resource(true, error))?;
+    get_workspace(conn, workspace_id)
+        .await
+        .map_err(|error| crate::models::iam::access::hide_inferred_resource(true, error))
 }
 
 pub(crate) async fn update_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
     input: crate::dtos::workspaces::UpdateWorkspaceRequest,
 ) -> Result<WorkspaceRecord, YorishiroError> {
     use sea_orm::ActiveValue::Set;
     let txn = crate::db::begin_write(db).await.internal()?;
+    if get_workspace_tenant(&txn, id).await? != actor.tenant_id {
+        return Err(YorishiroError::not_found("workspace not found"));
+    }
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::WorkspaceUpdate,
+        crate::models::iam::policy::Action::UpdateWorkspace,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id: id,
@@ -463,7 +477,7 @@ pub(crate) async fn update_as(
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::iam::policy::Action::TenantUpdate,
+            crate::models::iam::policy::Action::UpdateTenant,
             crate::models::iam::policy::Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
@@ -474,13 +488,23 @@ pub(crate) async fn update_as(
     let saved = active.update(&txn).await.map_err(|error| {
         YorishiroError::conflict_on_unique(error, "a workspace with this name already exists")
     })?;
+    crate::models::api_events::record(
+        &txn,
+        actor,
+        crate::models::iam::policy::Action::UpdateWorkspace,
+        serde_json::json!({"target": crate::models::iam::policy::Resource::Workspace {
+            tenant_id: actor.tenant_id,
+            workspace_id: id,
+        }.yrn()}),
+    )
+    .await?;
     txn.commit().await.internal()?;
     WorkspaceRecord::try_from(saved)
 }
 
 pub(crate) async fn detail_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<crate::dtos::workspaces::WorkspaceDetail, YorishiroError> {
     let authorization = crate::db::begin_write(&ctx.db).await.internal()?;
@@ -542,6 +566,7 @@ pub(crate) async fn stamp_embedding_if_missing(
 /// API-facing workspace record with a typed status.
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 pub(crate) struct WorkspaceRecord {
+    #[serde(rename = "workspace_id")]
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,
@@ -583,8 +608,6 @@ db_enum! {
 }
 
 /// Whether the workspace is still waiting for its first schema.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
 pub(crate) async fn is_schema_pending(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -600,9 +623,8 @@ pub(crate) async fn is_schema_pending(
 
 /// Marks a workspace active and records its first schema, idempotently.
 ///
-/// One statement (`COALESCE(schema_id, $new)`), not a read-then-write: two concurrent schema creations must not both see `schema_id` as `NULL` and overwrite each other's write.
-///
-/// This single-statement write uses `COALESCE(...)` and touches exactly the two columns allowed by `yorishiro_app`'s column-level UPDATE grant; a read followed by `ActiveModel` would overwrite concurrent changes.
+/// One statement (`COALESCE(schema_id, $new)`), not a read-then-write: two concurrent schema creations must not both see `schema_id` as `NULL` and overwrite each other.
+/// It touches only the two columns `yorishiro_app`'s column-level UPDATE grant allows.
 pub(crate) async fn mark_active(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

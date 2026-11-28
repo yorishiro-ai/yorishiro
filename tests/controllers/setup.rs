@@ -96,7 +96,7 @@ async fn setup_uses_the_single_tenant_source_default() {
     .await;
 }
 
-/// `POST /setup` creates the first tenant and owner without a workspace and returns a working API key.
+/// `POST /setup` creates the first tenant and owner without a workspace and returns a working access key.
 /// A second call must be refused with 409 rather than creating a second tenant, and `GET /setup/status` must report `setup_required: false` once the first call has landed.
 #[tokio::test]
 async fn setup_bootstraps_once_and_refuses_a_second_call() {
@@ -128,7 +128,7 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
                 .expect("setup creates a tenant root");
             assert_eq!(root.user_id.to_string(), body["user_id"].as_str().unwrap());
         }
-        let auth = format!("Bearer {}", body["api_key"].as_str().unwrap());
+        let auth = format!("Bearer {}", body["access_key"].as_str().unwrap());
 
         assert!(body.get("workspace_id").is_none());
         let workspaces = request
@@ -147,27 +147,18 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
             .await;
         created.assert_status(StatusCode::CREATED);
         let workspace = created.json::<serde_json::Value>();
-        let workspace_id = workspace["id"].as_str().unwrap();
+        let workspace_id = workspace["workspace_id"].as_str().unwrap();
 
-        // Tenant-scoped keys select an explicitly created workspace through the header.
-        let whoami = request
-            .get("/api/whoami")
+        // The workspace is selected per request through the header.
+        let caller_identity = request
+            .get("/api/caller-identity")
             .add_header("Authorization", &auth)
             .add_header("x-workspace-id", workspace_id)
             .await;
-        assert_eq!(whoami.status_code(), StatusCode::OK);
-        let identity: serde_json::Value = whoami.json();
+        assert_eq!(caller_identity.status_code(), StatusCode::OK);
+        let identity: serde_json::Value = caller_identity.json();
         assert_eq!(identity["workspace_id"], workspace_id);
-        assert_eq!(identity["audit"], true);
         assert_eq!(identity["identity_kind"], "user");
-        assert!(identity["bound_workspace_id"].is_null());
-        let audit_log = request
-            .get("/api/audit-log")
-            .add_header("Authorization", &auth)
-            .add_header("x-workspace-id", workspace_id)
-            .await;
-        audit_log.assert_status_ok();
-
         let status = request.get("/setup/status").await;
         let body: serde_json::Value = status.json();
         assert_eq!(

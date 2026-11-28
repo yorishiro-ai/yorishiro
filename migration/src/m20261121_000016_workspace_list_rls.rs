@@ -9,7 +9,7 @@ const TABLES: [&str; 6] = [
     "entity_entities",
     "entity_relations",
     "schema_schemas",
-    "api_key_audit_log",
+    "job_results",
     "entity_column_preferences",
     "workspace_schema_forks",
 ];
@@ -40,7 +40,7 @@ impl MigrationTrait for Migration {
         for table in TABLES {
             helpers::pg_only(
                 manager,
-                &format!("DROP POLICY IF EXISTS authorized_workspace_list ON {table};"),
+                &format!("DROP POLICY authorized_workspace_list ON {table};"),
             )
             .await?;
         }

@@ -1,7 +1,8 @@
 //! Relation model: records and operations, with each relation type validated against the schema of its source entity.
 
+use crate::error::OptionExt;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, SqlErr, Statement};
+use sea_orm::{ActiveValue, FromQueryResult, QueryOrder, QuerySelect, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -22,6 +23,7 @@ db_enum! {
 
 #[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RelationRecord {
+    #[serde(rename = "relation_id", alias = "id")]
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub source_id: Uuid,
@@ -54,27 +56,27 @@ impl TryFrom<Model> for RelationRecord {
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(self, db: &C, _insert: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
         let mut this = self;
-        this.id = crate::db::sqlite_generated_id(db, this.id);
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
         Ok(this)
     }
 }
 
 pub(crate) async fn workspace_for_actor(
     db: &impl ConnectionTrait,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
     let record = Entity::find_by_id(id)
         .one(db)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("relation was not found"))?;
+        .or_not_found("relation was not found")?;
     crate::models::iam::access::check_workspace_target(db, actor, record.workspace_id).await
 }
 
@@ -170,25 +172,20 @@ pub async fn create(
         .insert(conn)
         .await
         .map_err(|err| {
-            if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) {
-                YorishiroError::Conflict {
-                    message: format!(
-                        "relation '{}' between '{}' and '{}' already exists",
-                        input.relation_type, input.source_id, input.target_id
-                    ),
-                }
-            } else if matches!(
-                err.sql_err(),
-                Some(SqlErr::ForeignKeyConstraintViolation(_))
-            ) {
-                // A TOCTOU window between checking source/target existence and the INSERT, during which another transaction could delete the entity.
-                // Treated as NotFound, same as the upfront check.
+            if YorishiroError::is_foreign_key_violation(&err) {
+                // Another transaction deleted an endpoint between the existence check and the insert.
                 YorishiroError::not_found(format!(
                     "source '{}' or target '{}' no longer exists",
                     input.source_id, input.target_id
                 ))
             } else {
-                YorishiroError::Internal(err.into())
+                YorishiroError::conflict_on_unique(
+                    err,
+                    format!(
+                        "relation '{}' between '{}' and '{}' already exists",
+                        input.relation_type, input.source_id, input.target_id
+                    ),
+                )
             }
         })
         .and_then(TryInto::try_into)
@@ -208,7 +205,7 @@ pub(crate) async fn get(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("relation '{id}' was not found")))
+        .or_not_found(format!("relation '{id}' was not found"))
         .and_then(TryInto::try_into)
 }
 
@@ -228,16 +225,15 @@ pub(crate) async fn set_status(
         status: ActiveValue::Set(input.status.as_db_str().to_string()),
         ..Default::default()
     };
-    // A concurrent delete between `get` above and this update surfaces as `DbErr::RecordNotUpdated`, not a row.
-    // Map it to the same 404 the upfront `get` would have returned had it lost the race instead, rather than letting `.internal()` turn it into a 500.
+    // A delete between `get` and this update surfaces as `RecordNotUpdated`, which maps to the same 404 as `get`.
     active
         .update(conn)
         .await
-        .map_err(|err| match err {
-            DbErr::RecordNotUpdated => {
-                YorishiroError::not_found(format!("relation '{}' was not found", input.id))
-            }
-            err => YorishiroError::Internal(err.into()),
+        .map_err(|err| {
+            YorishiroError::not_found_on_missing(
+                err,
+                format!("relation '{}' was not found", input.id),
+            )
         })
         .and_then(TryInto::try_into)
 }
@@ -271,11 +267,11 @@ pub async fn delete(
 
 pub(crate) async fn list_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     query: ListRelationsQuery,
 ) -> Result<Vec<RelationRecord>, YorishiroError> {
     use crate::models::iam::{access::read_workspaces, policy::Action};
-    let workspaces = read_workspaces(&ctx.db, actor, Action::RelationList).await?;
+    let workspaces = read_workspaces(&ctx.db, actor, Action::ListRelations).await?;
     let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
     let records = list_workspaces(&txn, &workspaces, actor.tenant_id, query).await?;
     txn.commit().await.internal()?;
@@ -570,7 +566,7 @@ async fn neighbor_rows(
 /// Returns the session, authorization or insert error.
 pub(crate) async fn create_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     input: CreateRelationInput,
 ) -> Result<RelationRecord, YorishiroError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
@@ -580,7 +576,7 @@ pub(crate) async fn create_for_actor(
         ctx,
         actor,
         target,
-        Some(crate::models::iam::policy::Action::RelationCreate),
+        Some(crate::models::iam::policy::Action::CreateRelation),
         async |session| create(session.txn(), session.workspace_id()?, input).await,
     )
     .await
@@ -592,14 +588,14 @@ pub(crate) async fn create_for_actor(
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn get_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<RelationRecord, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Relation(id),
-        crate::models::iam::policy::Action::RelationGet,
+        crate::models::iam::policy::Action::GetRelation,
         async |session| get(session.txn(), session.workspace_id()?, id).await,
     )
     .await
@@ -611,14 +607,14 @@ pub(crate) async fn get_for_actor(
 /// Returns the session, authorization or delete error.
 pub(crate) async fn delete_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<(), YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Relation(id),
-        Some(crate::models::iam::policy::Action::RelationDelete),
+        Some(crate::models::iam::policy::Action::DeleteRelation),
         async |session| delete(session.txn(), session.workspace_id()?, id).await,
     )
     .await
@@ -630,7 +626,7 @@ pub(crate) async fn delete_for_actor(
 /// Returns the session, authorization or update error.
 pub(crate) async fn set_status_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     input: SetRelationStatusInput,
 ) -> Result<RelationRecord, YorishiroError> {
     let id = input.id;
@@ -638,7 +634,7 @@ pub(crate) async fn set_status_for_actor(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Relation(id),
-        Some(crate::models::iam::policy::Action::RelationUpdate),
+        Some(crate::models::iam::policy::Action::UpdateRelation),
         async |session| set_status(session.txn(), session.workspace_id()?, input).await,
     )
     .await

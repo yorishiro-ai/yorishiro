@@ -6,6 +6,7 @@ use crate::workers::query_embedding::harness::{
     boot_with_query_worker, boot_with_query_worker_and_drain,
 };
 use axum::http::StatusCode;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use std::time::Duration;
 use yorishiro::App;
@@ -98,7 +99,7 @@ async fn unselected_search_combines_workspaces_and_explicit_selection_narrows_re
             tenant_id: first.tenant_id,
             owner_id: first.owner_id,
             api_key: key.clone(),
-            workspace_id: response.json::<serde_json::Value>()["id"]
+            workspace_id: response.json::<serde_json::Value>()["workspace_id"]
                 .as_str()
                 .unwrap()
                 .parse()
@@ -121,6 +122,27 @@ async fn unselected_search_combines_workspaces_and_explicit_selection_narrows_re
             .await;
         response.assert_status_ok();
         assert_eq!(titles(&response.json()), ["alpha second"]);
+
+        // The trail names the index each search ran against, and nothing of the query or the hits.
+        let rows = yorishiro::models::api_events::Entity::find()
+            .filter(yorishiro::models::_entities::api_events::Column::Phase.eq("completed"))
+            .filter(
+                yorishiro::models::_entities::api_events::Column::EventName.eq("GET /api/search"),
+            )
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        let revisions = rows
+            .iter()
+            .flat_map(|row| row.resources.as_array().cloned().unwrap_or_default())
+            .filter(|resource| resource["detail"]["embedding_revision"].is_i64())
+            .count();
+        assert_eq!(revisions, 3, "one per workspace searched: {rows:?}");
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.resources.to_string().contains("alpha"))
+        );
     })
     .await;
 }
@@ -142,7 +164,8 @@ async fn unavailable_workspace_does_not_spend_the_search_budget_of_another() {
             .await;
         response.assert_status(StatusCode::CREATED);
         let unavailable: uuid::Uuid =
-            serde_json::from_value(response.json::<serde_json::Value>()["id"].clone()).unwrap();
+            serde_json::from_value(response.json::<serde_json::Value>()["workspace_id"].clone())
+                .unwrap();
         // Direct write (c): holds the workspace in the reindexing state, which a real reindex leaves as soon as it finishes.
         yorishiro::models::workspace_workspaces::ActiveModel {
             id: Set(unavailable),
@@ -157,7 +180,11 @@ async fn unavailable_workspace_does_not_spend_the_search_budget_of_another() {
             .add_header("Authorization", format!("Bearer {root}"))
             .await;
         response.assert_status(StatusCode::SERVICE_UNAVAILABLE);
-        assert!(response.text().contains("reindexed"));
+        assert!(
+            response
+                .text()
+                .contains("workspace embeddings are changing")
+        );
         let response = request
             .get("/api/search?query_text=abc")
             .add_header("Authorization", format!("Bearer {root}"))
@@ -261,7 +288,7 @@ async fn configured_live_provider_embeds_stores_and_searches() {
                 let mcp_hits = crate::ee::controllers::mcp::tool_result_json(&response);
                 assert_eq!(titles(&mcp_hits)[0], expected, "live MCP semantic ranking");
                 let ids = |value: &serde_json::Value| value.as_array().unwrap().iter()
-                    .map(|hit| hit["entity"]["id"].clone()).collect::<Vec<_>>();
+                    .map(|hit| hit["entity"]["entity_id"].clone()).collect::<Vec<_>>();
                 assert_eq!(ids(&mcp_hits), ids(&hits), "live transport result IDs");
                 assert!(mcp_hits.as_array().unwrap().iter().all(|hit| hit["distance"].as_f64().unwrap().is_finite()));
             }
@@ -329,7 +356,7 @@ async fn search_asks_a_worker_to_embed_the_query_and_ranks_by_the_result() {
     .await;
 }
 
-/// With no worker running the search must fail, loudly and boundedly: a lexical fallback would return results the caller did not ask for.
+/// With no worker running the search must fail, loudly and boundedly.
 #[tokio::test]
 async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fallback() {
     let overrides = [
@@ -338,7 +365,6 @@ async fn search_without_a_worker_times_out_as_service_unavailable_without_a_fall
     ];
     boot_request_with::<App, _, _>(&overrides, |request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        // An entity whose text matches the query literally, so a lexical fallback would find it.
         let (provider, _server, _) = keyword_provider(768).await;
         embedded_notes(&ctx, &setup, provider.as_ref(), &["alpha plan"]).await;
 

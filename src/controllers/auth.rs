@@ -1,8 +1,9 @@
-//! Public account registration and credential-based API key issuance.
+//! Public account registration and credential-based access key issuance.
 //!
 //! Both run on `ctx.db` (Loco's own connection, migration role, no RLS scope), same as the admin CLI tasks: no tenant/workspace context exists yet for RLS to scope by.
 
 use crate::controllers::Created;
+use crate::error::OptionExt;
 use axum::Json;
 use axum::extract::State;
 use loco_rs::app::AppContext;
@@ -15,12 +16,7 @@ use crate::dtos::auth::{
 use crate::error::YorishiroError;
 use crate::models::{tenancy, user_users};
 
-/// Creates a brand-new tenant whose root is the caller; there is no workspace yet.
-///
-/// The new tenant can be managed using a tenant-scoped login key.
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Creates a new tenant whose root is the caller, with no workspace yet.
 async fn signup(
     State(ctx): State<AppContext>,
     Json(body): Json<SignupRequest>,
@@ -28,7 +24,7 @@ async fn signup(
     let max_tenants = ctx
         .shared_store
         .get::<crate::data::tenant_policy::TenantCap>()
-        .ok_or_else(|| YorishiroError::Internal("tenant cap policy missing".into()))?
+        .or_internal("tenant cap policy missing")?
         .resolve();
     let (user, tenant_id) = tenancy::signup_account(
         &ctx.db,
@@ -43,7 +39,6 @@ async fn signup(
         user_id: user.id,
         email: user.root_email(),
         tenant_id,
-        workspaces: vec![],
     }))
 }
 
@@ -80,8 +75,8 @@ async fn finish_login(
     let (created, tenant_id) =
         tenancy::issue_login_key(&ctx.db, user.id, Some(hash), expected_tenant).await?;
     Ok(Json(LoginResponse {
-        api_key: created.plaintext,
-        api_key_id: created.id,
+        access_key: created.plaintext,
+        access_key_id: created.id,
         tenant_id,
         user_id: user.id,
     }))

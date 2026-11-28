@@ -45,22 +45,13 @@ Run the local development stack with `docker compose -f docker-compose.dev.yaml 
 The Makefile starts only test dependencies from `docker-compose.test.yaml` when using the default local URLs.
 The separate `docker-compose.yaml` deploys published images and requires a release `TAG` and a production `DATABASE_URL`.
 
-Use `make test-sqlite` or `make test-postgres` locally; `EDITION=ce` selects the community edition.
-The backend comes from `DATABASE_URL` and the edition from the feature set; there is no other test selector.
-`RUST_TEST_THREADS` controls test parallelism; CI limits the unlicensed EE PostgreSQL job to two threads.
+Use `make test-postgres` or `make test-sqlite` to run the suite against either backend; `EDITION=ce` selects the community edition.
+See the [testing guide](.agents/rules/testing.md) for database requirements, request teardown, and licence checks.
 
-Request tests boot through `boot_request`: SQLite gets its own database file and PostgreSQL its own throwaway database per test, both torn down with the test.
-An app booted by other means must call `close_app_pools` before it returns, or teardown panics even on a passing test.
-
-Licensed tests install a test licence when `YORISHIRO_LICENSE_KEY` is unset, and the E5 model tests skip without `models/multilingual-e5-base/`.
 Stripe tests run in the ordinary EE suite, install their own test licence state and require no Stripe account.
-`make test-python` runs the Python checks, and `make test-contract` runs the real-binary public contracts described in `tests/contract/README.md`.
 Run the optional SQLite search benchmark with `cargo bench --bench sqlite_ann -- sqlite:///path/to/database.sqlite3 WORKSPACE_UUID`; it opens the database read-only.
 Run the PostgreSQL benchmark with `cargo bench --bench postgres_search -- DATABASE_URL TENANT_UUID WORKSPACE_UUID QUERY_VECTOR_FILE`, using a JSON file of vector coordinates and an existing populated workspace.
 The connection role must be allowed to assume `yorishiro_app`; the benchmark applies that restricted role and transaction-local tenant/workspace scope inside a read-only transaction.
-
-Licensed checks run on trusted same-repository pull requests and pushes to `develop`, not fork pull requests or merge queue refs.
-If an external run cannot restore the verified E5 model cache, it still runs the tests that do not require the model.
 
 ## Before you push
 
@@ -72,17 +63,17 @@ $ make check-all
 $ make check-all-ee
 ```
 
-Tests need PostgreSQL with `vector` and `pg_trgm` in `template1`, and a non-superuser role.
-
 ## Git workflow
 
 Branch from `develop`.
 For an independent change, open a single pull request against `develop`.
 For dependent changes in this repository, prefer a [stack of small pull requests](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs).
 GitHub does not support cross-fork stacks, so a regular pull request from a fork is welcome.
-Merge commits preferred.
-User-facing documentation lives in the [wiki](https://github.com/yorishiro-ai/wiki) and is managed separately from code changes.
+See the [Git workflow](.agents/rules/git-workflow.md) for CI and merge rules.
+Manage user documentation separately in the [wiki repository](https://github.com/yorishiro-ai/wiki).
 
-## Rules
+## Release recovery
 
-Rules for code style live at `.agents/rules/`.
+If publishing fails after the workflow pushes the release tag, address the cause and rerun the failed jobs from the original Actions run while its artifacts are available.
+The publish job resumes image and release publication only if the tag points to the verified commit.
+A rerun reuses the original artifacts, image digests, and workflow revision, so changes after dispatch do not apply.

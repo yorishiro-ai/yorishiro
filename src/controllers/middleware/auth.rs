@@ -1,8 +1,9 @@
 //! The authentication guard every entry point (REST, MCP) resolves a request through.
 //!
-//! Persistence of keys lives on `models::api_keys`; this module turns a presented credential into an authorized, tenant-scoped transaction.
+//! Persistence of keys lives on `models::access_keys`; this module turns a presented credential into an [`AuthContext`] for one tenant and, when selected, one workspace.
 //! [`Authenticator`] is the seam an edition replaces, so a new authenticated entry point must go through it rather than calling `Entity::authenticate` directly.
 
+use crate::error::OptionExt;
 use std::sync::Arc;
 
 use axum::http::HeaderMap;
@@ -11,7 +12,7 @@ use loco_rs::prelude::async_trait;
 
 use crate::db::{DbHandle, is_sqlite};
 use crate::error::YorishiroError;
-use crate::models::api_keys::{AuthContext, Entity, WORKSPACE_HEADER};
+use crate::models::access_keys::{AuthContext, Entity, WORKSPACE_HEADER};
 use uuid::Uuid;
 
 /// Copies readable request headers into the authenticator input shape.
@@ -42,7 +43,7 @@ pub(crate) fn extract_bearer_key(headers: &HeaderMap) -> Option<&str> {
     )
 }
 
-/// Extracts the API key from an `Authorization` header value, or `None` if the header is absent, is not a `Bearer` credential, or carries an empty one.
+/// Extracts the access key from an `Authorization` header value, or `None` if the header is absent, is not a `Bearer` credential, or carries an empty one.
 ///
 /// Every adapter that authenticates a request routes through here, so `Authorization: Bearer ` with nothing after it gets the same answer everywhere.
 #[must_use]
@@ -52,16 +53,16 @@ pub fn bearer_credential(header_value: Option<&str>) -> Option<&str> {
         .filter(|token| !token.is_empty())
 }
 
-/// Resolves a presented API key into an [`AuthContext`].
+/// Resolves a presented access key into an [`AuthContext`].
 ///
-/// A seam: a deployment can replace this rule (a key that names its workspace per request, a key issued by an external identity system) without touching the routes that call it.
+/// A seam: a deployment can replace this rule (a key issued by an external identity system, for example) without touching the routes that call it.
 /// `DefaultAuthenticator` is the behaviour of every deployment that does not replace it.
 ///
 /// # Contract
 ///
 /// - **must** reject a key it cannot verify, by returning [`YorishiroError::Unauthenticated`].
-/// - **must** return a context whose `tenant_id` owns its `workspace_id`.
-///   The RLS session variables are set from both, so a mismatched pair silently produces a session that can see one tenant's workspace under another tenant's policies.
+/// - **must** return a context whose `tenant_id` owns its `workspace_id`, when it has one.
+///   The RLS session variables are set from both, so a mismatched pair would let a session see one tenant's workspace under another tenant's policies.
 /// - **may** read `headers` for anything the key itself does not carry.
 #[async_trait]
 pub trait Authenticator: Send + Sync {
@@ -73,12 +74,12 @@ pub trait Authenticator: Send + Sync {
     ) -> Result<AuthContext, YorishiroError>;
 }
 
-/// Authentication preserves a key's binding or the requested workspace.
-/// When neither is set, each operation decides whether to span or infer workspaces.
+/// Authentication resolves the workspace from the request, or from the tenant's only workspace.
+/// When neither applies, each operation decides whether to span workspaces or ask for a selection.
 pub(crate) struct DefaultAuthenticator;
 
-/// Reads the workspace a request asks a tenant-scoped key to act on.
-/// A present-but-unparseable value is a validation error, never "not sent": treating it as absent would send a request meant for one workspace to whichever one the key happens to resolve to.
+/// Reads the workspace a request asks to act on.
+/// A present but unparseable value is a validation error, never "not sent": treating it as absent would send a request meant for one workspace to another.
 fn requested_workspace(headers: &[(String, String)]) -> Result<Option<Uuid>, YorishiroError> {
     let mut requested = None;
     for (_, value) in headers.iter().filter(|(name, _)| name == WORKSPACE_HEADER) {
@@ -124,8 +125,6 @@ pub fn default_authenticator() -> Arc<dyn Authenticator> {
     Arc::new(DefaultAuthenticator)
 }
 
-pub use crate::models::iam::access::require_audit;
-
 /// Request authentication shared by transport adapters through the installed policy.
 pub(crate) struct RequestAuth<'a> {
     app: &'a AppContext,
@@ -145,7 +144,7 @@ impl<'a> RequestAuth<'a> {
             .app
             .shared_store
             .get::<Arc<dyn Authenticator>>()
-            .ok_or_else(|| YorishiroError::Internal("Authenticator missing".into()))?;
+            .or_internal("Authenticator missing")?;
         let ctx = authenticator.authenticate(self.app, key, headers).await?;
         for (_, value) in headers.iter().filter(|(name, _)| name == "x-tenant-id") {
             let tenant_id =
@@ -158,6 +157,7 @@ impl<'a> RequestAuth<'a> {
                 return Err(YorishiroError::Unauthenticated);
             }
         }
+        super::access_log::authenticated(&ctx).await?;
         Ok(ctx)
     }
 
@@ -167,27 +167,6 @@ impl<'a> RequestAuth<'a> {
         headers: &[(String, String)],
     ) -> Result<AuthContext, YorishiroError> {
         let ctx = self.resolve(key, headers).await?;
-        Entity::touch_authenticated(self.app, &ctx).await?;
-        Ok(ctx)
-    }
-
-    pub(crate) async fn verify(
-        &self,
-        key: &str,
-        headers: &[(String, String)],
-    ) -> Result<AuthContext, YorishiroError> {
-        let ctx = self.resolve(key, headers).await?;
-        Entity::touch_authenticated(self.app, &ctx).await?;
-        Ok(ctx)
-    }
-
-    pub(crate) async fn verify_audit(
-        &self,
-        key: &str,
-        headers: &[(String, String)],
-    ) -> Result<AuthContext, YorishiroError> {
-        let ctx = self.resolve(key, headers).await?;
-        require_audit(&ctx)?;
         Entity::touch_authenticated(self.app, &ctx).await?;
         Ok(ctx)
     }

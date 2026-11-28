@@ -2,7 +2,7 @@
 
 ## Repository overview
 
-This repository is a [Loco](https://loco.rs) 1.3.1 application with a Laravel-like design: thin entry points, fat models, transport DTOs, jobs, and providers.
+Yorishiro uses [Loco](https://loco.rs) 1.3.1.
 
 ## Repository layout
 
@@ -10,21 +10,19 @@ Root crate + `migration/` crate + `ee/` module, assembled in `src/lib.rs`.
 `ee/` is an overlay on `src/`: it mirrors CE's folder hierarchy and file names, so a CE path tells you where its enterprise counterpart lives.
 CE therefore follows Loco's generator layout exactly; a directory Loco does not generate needs a written reason below.
 
-| Directory | Role | Laravel counterpart |
-|---|---|---|
-| `src/controllers/` | Entry points: REST handlers, MCP tools (`controllers/mcp/`), request middleware (`controllers/middleware/`), extractors | Controllers, Middleware |
-| `src/tasks/` | Entry point: the CLI | Console commands |
-| `src/dtos/` | Request and response transport types (`dtos/<plural>.rs`) | Resources, Form requests |
-| `src/models/` | Tables (`<table>.rs`), `_entities/` (generated), cross-table facades | Eloquent models |
-| `src/workers/` | Background jobs, and the runtime (targets, dispatch, queue policy) that routes them; `workers/mod.rs` separates the two | Jobs |
-| `src/initializers/` | Process-lifetime wiring | Service providers |
-| `src/data/` | Typed settings and static data | Config |
-| `src/services/` | **External clients only** (embedding providers). Loco has no equivalent, and nothing else may live here | Services |
-| `src/app.rs` | The community wiring, one function per `Hooks` method, plus the edition-neutral inputs an overlay extends it with (`RouteMounts`, `WorkerRegistry`, `McpToolSet`) | Application bootstrap |
-| `src/lib.rs` | Crate-root assembly and the only `Hooks` implementation, delegating to base and overlay wiring | Service container |
-| `src/templates/` | Built-in JSON template assets embedded by `src/data/templates.rs` | Static data |
-| `.github/packaging/` | Package definitions, service units, install hooks and package verification | Distribution |
-| `src/db.rs`, `src/error.rs` | Cross-cutting infrastructure Loco leaves to the application | Exception handler, DB config |
+| Path | Role |
+|---|---|
+| `src/controllers/` | REST and MCP handlers, request middleware, and extractors |
+| `src/tasks/` | CLI commands |
+| `src/dtos/` | Request and response types (`dtos/<plural>.rs`) |
+| `src/models/` | Table modules, generated entities, and cross-table operations |
+| `src/workers/` | Background jobs and runtime routing |
+| `src/initializers/` | Process-lifetime wiring |
+| `src/data/` | Typed settings and static data |
+| `src/services/` | External clients only, such as embedding providers |
+| `src/app.rs` | Community hooks and edition-neutral wiring |
+| `src/lib.rs` | Crate assembly and sole `Hooks` implementation |
+| `.github/packaging/` | Package definitions, service units, install hooks, and checks |
 
 Every entry point (REST, MCP, CLI) authenticates, parses input, calls model operations, and renders.
 None of them owns domain logic or builds ordinary queries.
@@ -32,14 +30,7 @@ None of them owns domain logic or builds ordinary queries.
 ### Edition boundary
 
 `src/` is the community base; only `src/lib.rs` assembles the enterprise overlay.
-Other source modules contain no `cfg(feature = "enterprise")`, no `cfg(not(feature = "enterprise"))`, no `crate::ee`, and no overlay names, queues, branches, or registrations.
-`make edition-boundary-check` (part of `make check-all` and `make check-all-ee`) enforces this outside `src/lib.rs`, including aliases and paths split across spaces or lines.
-
-`src/lib.rs` declares `ee/` behind the `enterprise` feature and implements `Hooks` once by delegating to `src/app.rs` and the active edition.
-The inline `edition` module preserves public paths; there is no separate composition directory.
-`ee/app.rs` and the inline community contribution expose the same functions; each build checks their signatures.
-Worker tags, Redis queues, and Loco registration derive from one composed `WorkerRegistry`.
-A trait is for a behaviour that really varies at runtime, such as `QueuePolicy` or `Authenticator`, and not for wiring one overlay.
+Follow the [edition rules](.agents/rules/editions.md) when changing base or overlay wiring.
 
 The base still names a few things only the overlay uses, because they belong to the shared schema and to stored data, not to behaviour:
 - the table modules for overlay-only tables (see Model ownership);
@@ -47,7 +38,6 @@ The base still names a few things only the overlay uses, because they belong to 
 - tenant retirement, which deletes the rows of every tenant-scoped table in the schema, including the schema-fork tables, so a retired tenant leaves nothing behind.
 
 None of these is a branch: the base never calls into the overlay for them.
-Behaviour that differs by edition still goes through a trait.
 
 ### Model ownership
 
@@ -58,7 +48,7 @@ Credential verification and table persistence remain in their table-owned models
 Cross-table IAM operations live under `src/models/iam/`, and the shared JSONL import and export format lives under `src/models/transfer/`.
 
 - One table has one application-owned extension at `src/models/<table>.rs`, matching Loco's generator layout.
-- `src/models/_entities/` is auto-generated by `cargo loco db entities`. Never edit it by hand.
+- Regenerate `src/models/_entities/` with `make entities`; never edit it by hand.
 - Finders and table-owned persistence live in that table's extension module. Do not add a repository layer.
 - `src/models/mod.rs` is the module entry point; keep domain logic out of it.
 - A large model may keep private implementation modules under `src/models/<table>/`, declared by `src/models/<table>.rs`.
@@ -75,7 +65,7 @@ Cross-table IAM operations live under `src/models/iam/`, and the shared JSONL im
 
 SeaORM is the default. Raw SQL requires an explicit reason:
 - JSONB containment (`data @> filter`)
-- pgvector similarity search (`vec_distance_cosine`)
+- Vector similarity search with pgvector or sqlite-vec
 - Advisory locks
 - Query shapes that SeaORM cannot express without obscuring their semantics
 - Writes whose correctness depends on executing as a single statement
@@ -83,7 +73,7 @@ SeaORM is the default. Raw SQL requires an explicit reason:
 
 Examples:
 - `src/db.rs`: connection primitives (`SET ROLE`, `RESET`, advisory locks)
-- `src/models/api_keys/authenticate.rs`: `authenticate_api_key($1)` — the SECURITY DEFINER function that bypasses RLS
+- `src/models/access_keys/authenticate.rs`: `authenticate_access_key($1)`, a SECURITY DEFINER function that bypasses RLS
 - `src/models/entity_embeddings/` and `src/tasks/resync_embeddings.rs`: pgvector `embedding` column operations
 
 ### MCP placement
@@ -98,31 +88,39 @@ Each tool authenticates, parses its arguments, calls a model operation, and rend
 - Two connection pools: `identity` (control plane, migration-role) and `tenant` (RLS-scoped). See `src/db.rs`.
 - Entity API is the default path for reads and writes.
 
-## SQLite
+## Database backends
 
-- Single-tenant only. No RLS.
-- `src/db.rs::require_min_sqlite_connections(2)` — minimum 2 connections.
-- Vector search via sqlite-vec (BLOB storage).
-- ID generation: `before_save` hook calls `db::sqlite_generated_id()`.
-- Embedding column lives in `entity_embeddings` on both backends, with a `(workspace_id, entity_id)` primary key.
+- SQLite supports a single tenant without RLS.
+- `src/db.rs::require_min_sqlite_connections(2)` requires at least 2 connections.
+- Vector search uses sqlite-vec (BLOB storage).
+- Models create ids and timestamps on both backends through `db::generated_id` and `db::stamped_*`; no database default or trigger supplies them.
+- The embedding sync token and the template origin detach are application code, not triggers.
+- The embedding column lives in `entity_embeddings` on both backends, with a `(workspace_id, entity_id)` primary key.
 - PostgreSQL uses 64 workspace hash partitions, tenant RLS, and scheduled workspace-specific HNSW promotion starting at 2,000 vectors.
 - Each promoted workspace has one partial pgvector HNSW index: up to 2,000 dimensions on `embedding::vector(N)`, 2,001 through 4,000 on the normalized `halfvec(N)`, and 4,001 through 4,096 on the normalized first 4,000 dimensions as `halfvec(4000)`.
 - Every search takes at most 1,000 index candidates and reranks them in original full-precision coordinates; the `embedding_index_maintenance` scheduler job builds and retires the indexes.
-- FTS5 with `tokenize='trigram'` for fuzzy text search (pg_trgm equivalent on PostgreSQL).
+- Search ranks by cosine distance on both backends.
+- PostgreSQL HNSW can select different candidates from SQLite's exact scan.
+
+### Database-owned behaviour
+
+PostgreSQL owns RLS policies, per-table grants, `authenticate_access_key`, partitions, and fork read functions.
+Both backends enforce fork integrity with triggers.
 
 ### Migration helpers (`migration/src/helpers.rs`)
 
-- `use_transaction()` — forces transaction on every backend.
-- `uuidv7_pk(manager)` — `UUID PRIMARY KEY DEFAULT uuidv7()` on PG, `BLOB PRIMARY KEY` on SQLite.
-- `uuid_col(manager, name)` — `UUID` on PG, `BLOB` on SQLite.
-- `json_col(manager, name)` — `JSONB` on PG, `TEXT` on SQLite (sqlite-vec lacks `jsonb_text` type).
-- `ts_tz_col(manager, name)` — `TIMESTAMPTZ` on PG, `TEXT` on SQLite.
-- `timestamps(manager)` — returns `[created_at, updated_at]` column defs.
-- `create_table_with_checks()` — creates table + CHECK constraints, backend-bridged.
-- `enable_rls_with_policy()` — raw SQL for RLS. No-op on SQLite.
-- `grant()` — per-table GRANT to `yorishiro_app`. No-op on SQLite.
-- `pg_only(sql)` — PostgreSQL-only raw SQL. No-op on SQLite.
-- `sqlite_only(sql)` — SQLite-only raw SQL. No-op on PostgreSQL.
+- `use_transaction()` forces a transaction on every backend.
+- `uuidv7_pk(manager)` is the `id` column: `UUID PRIMARY KEY` on PG, `BLOB PRIMARY KEY` on SQLite, with no default.
+- `uuid_col(manager, name)` is `UUID` on PG, `BLOB` on SQLite.
+- `json_col(manager, name)` is `JSONB` on PG, `TEXT` on SQLite.
+- `ts_tz_col(manager, name)` is `TIMESTAMPTZ` on PG, `TEXT` on SQLite.
+- `created_at(manager)` and `timestamps(manager)` build the application-stamped timestamp columns, without defaults.
+- `create_table_with_checks()` creates a table with CHECK constraints on both backends.
+- `enable_rls_with_policy()` enables RLS with a strict or lenient policy. No-op on SQLite.
+- `grant()` is a per-table GRANT to `yorishiro_app`. No-op on SQLite.
+- `pg_only(sql)` runs PostgreSQL-only raw SQL.
+- `sqlite_only(sql)` runs SQLite-only raw SQL.
+- `by_backend(manager, postgres, sqlite)` picks a value per backend.
 
 ## Error handling
 
@@ -136,30 +134,11 @@ Each tool authenticates, parses its arguments, calls a model operation, and rend
 - `use axum::http::StatusCode;` (never fully-qualified).
 - Group order: std → external → workspace → crate-internal.
 
-## Testing
-
-- `tests/` is a plain Loco integration-test crate (one binary, no `#[path]` includes).
-- `tests/requests/mod.rs` owns `close_app_pools`.
-- Request tests boot through `boot_request`: SQLite gets its own file and PostgreSQL its own throwaway database per test.
-- `make test-sqlite` and `make test-postgres` run the whole suite (`EDITION=ce|ee`); there is no per-test assignment or registration.
-- Licensed tests install a test licence when `YORISHIRO_LICENSE_KEY` is unset, and the E5 model tests skip without the model files.
-- Tests need PostgreSQL with `vector` and `pg_trgm` in `template1` (not just the deployment database). Loco's harness creates each test database via `CREATE DATABASE`, which copies `template1`.
-- Tests need a non-superuser role (superuser bypasses RLS regardless of `FORCE`).
-
-## Git workflow
-
-- Branch from latest `develop`. Merge commits preferred.
-- Run `make check-all` for CE changes and `make check-all-ee` for EE changes or shared API compatibility.
-- Run the PostgreSQL or SQLite suites relevant to the change before pushing.
-- User-facing documentation lives in the wiki (`yorishiro-ai/wiki`) and is managed separately from code changes.
-
 ## Rules
-
-Detailed project rules live under `.agents/rules/`.
 
 Read and follow the applicable rule files before making changes:
 
-- `.agents/rules/editions.md` — `ee/` boundary, BUSL-1.1 vs. `ee/LICENSE`, edition decisions, licence gate
-- `.agents/rules/testing.md` — integration-test pattern, pool-closing, race-gate pitfalls
-- `.agents/rules/git-workflow.md` — branching, PR checklist, versioning, releases
-- `.agents/rules/prose.md` — dashes, one sentence per line, in Markdown and comments
+- [Editions](.agents/rules/editions.md): edition boundaries, licensing, and overlay wiring.
+- [Testing](.agents/rules/testing.md): test commands, backend requirements, and request teardown.
+- [Git workflow](.agents/rules/git-workflow.md): branches, PRs, CI checks, and releases.
+- [Prose](.agents/rules/prose.md): Markdown, comments, commit messages, and PR text.

@@ -12,6 +12,7 @@ use crate::error::{ResultExt, YorishiroError};
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(5);
 const MAX_RETRY_AFTER_SECONDS: u64 = 60;
 
+#[derive(Clone)]
 pub struct OpenAiCompatibleConfig {
     /// Example: `http://localhost:11434`
     pub base_url: String,
@@ -56,10 +57,7 @@ impl OpenAiCompatibleProvider {
         timeouts: crate::data::settings::HttpTimeouts,
     ) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(crate::data::http_timeouts::deadline_for(
-                crate::data::http_timeouts::HttpTimeout::EmbeddingRequest,
-                timeouts,
-            ))
+            .timeout((timeouts).embedding_request())
             .build()
             .expect("reqwest client configuration is static and always valid");
 
@@ -138,13 +136,17 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
             })
             .send()
             .await
-            .map_err(|err| YorishiroError::ProviderUnreachable {
-                url: self.base_url.clone(),
-                message: redact(&err.to_string(), &self.api_key),
+            .map_err(|err| {
+                tracing::warn!(provider_host = self.host(), model = %self.model, "embedding provider is unreachable");
+                YorishiroError::ProviderUnreachable {
+                    url: self.base_url.clone(),
+                    message: redact(&err.to_string(), &self.api_key),
+                }
             })?;
 
         let status = response.status();
         if !status.is_success() {
+            tracing::warn!(provider_host = self.host(), model = %self.model, status = status.as_u16(), "embedding provider rejected a request");
             // A provider saying "too many requests" or "temporarily unavailable" is saying to come back, different from a request it will never accept.
             // Told apart here so the caller can wait instead of dropping the work.
             if let Some(after) = retry_after(status.as_u16(), response.headers()) {
@@ -203,6 +205,16 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
         }
 
         Ok(vectors)
+    }
+}
+
+impl OpenAiCompatibleProvider {
+    /// The provider's host for logs: never the path, query or credentials of its URL.
+    fn host(&self) -> String {
+        reqwest::Url::parse(&self.base_url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .unwrap_or_default()
     }
 }
 

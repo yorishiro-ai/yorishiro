@@ -19,12 +19,12 @@ use crate::models::entity_relations::{self, RelationStatus, SetRelationStatusInp
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct GetRelationArgs {
-    pub id: Uuid,
+    pub relation_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct DeleteRelationArgs {
-    pub id: Uuid,
+    pub relation_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -43,8 +43,8 @@ pub struct ListRelationsArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub(crate) struct SetRelationStatusArgs {
-    pub id: Uuid,
+pub(crate) struct UpdateRelationArgs {
+    pub relation_id: Uuid,
     #[schemars(with = "RelationStatus")]
     pub status: String,
 }
@@ -81,12 +81,10 @@ impl TryFrom<ListRelationsArgs> for entity_relations::ListRelationsQuery {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_relations)]
 impl YorishiroMcpServer {
-    #[tool(
-        description = "Create a relation between two entities (requires relation_create IAM permission). \
+    #[tool(description = "Create a relation between two entities. \
                            Properties cannot be edited in place; to change them, delete the \
                            relation and recreate it. To retire a relation without losing the \
-                           record that it existed, use set_relation_status instead of deleting."
-    )]
+                           record that it existed, use update_relation instead of deleting.")]
     pub async fn create_relation(
         &self,
         Parameters(args): Parameters<CreateRelationRequest>,
@@ -96,28 +94,30 @@ impl YorishiroMcpServer {
         render(entity_relations::create_for_actor(self.app_context(), actor, args.into()).await)
     }
 
-    #[tool(description = "Get a single relation by ID (requires relation_get IAM permission)")]
+    #[tool(description = "Get a relation by ID.")]
     pub async fn get_relation(
         &self,
         Parameters(args): Parameters<GetRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts);
-        render(entity_relations::get_for_actor(self.app_context(), actor, args.id).await)
+        render(entity_relations::get_for_actor(self.app_context(), actor, args.relation_id).await)
     }
 
-    #[tool(description = "Delete a relation (requires relation_delete IAM permission)")]
+    #[tool(description = "Delete a relation.")]
     pub(crate) async fn delete_relation(
         &self,
         Parameters(args): Parameters<DeleteRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts);
-        try_tool!(entity_relations::delete_for_actor(self.app_context(), actor, args.id).await);
+        try_tool!(
+            entity_relations::delete_for_actor(self.app_context(), actor, args.relation_id).await
+        );
         ok_json(serde_json::json!({ "deleted": true }))
     }
 
-    #[tool(description = "List relations (requires relation_list IAM permission)")]
+    #[tool(description = "List relations.")]
     pub async fn list_relations(
         &self,
         Parameters(args): Parameters<ListRelationsArgs>,
@@ -134,13 +134,13 @@ impl YorishiroMcpServer {
 
     #[tool(
         description = "Set a relation's status to active, deprecated or archived \
-                           (requires relation_update IAM permission). Retiring a relation this way keeps the record \
+                           (requires the entity:UpdateRelation action). Retiring a relation this way keeps the record \
                            that it existed, which delete_relation does not; graph traversal \
                            follows active relations only."
     )]
-    pub async fn set_relation_status(
+    pub async fn update_relation(
         &self,
-        Parameters(args): Parameters<SetRelationStatusArgs>,
+        Parameters(args): Parameters<UpdateRelationArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts);
@@ -149,7 +149,7 @@ impl YorishiroMcpServer {
                 self.app_context(),
                 actor,
                 SetRelationStatusInput {
-                    id: args.id,
+                    id: args.relation_id,
                     status: try_tool!(parse_status(&args.status)),
                 },
             )

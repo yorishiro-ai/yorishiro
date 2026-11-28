@@ -112,14 +112,8 @@ pub(crate) fn configured_client(
     timeouts: &crate::data::settings::HttpTimeouts,
 ) -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
-        .connect_timeout(crate::data::http_timeouts::deadline_for(
-            crate::data::http_timeouts::HttpTimeout::ModelFetchConnect,
-            *timeouts,
-        ))
-        .read_timeout(crate::data::http_timeouts::deadline_for(
-            crate::data::http_timeouts::HttpTimeout::ModelFetchRead,
-            *timeouts,
-        ))
+        .connect_timeout((*timeouts).model_fetch_connect())
+        .read_timeout((*timeouts).model_fetch_read())
         .build()
 }
 

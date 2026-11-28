@@ -25,12 +25,12 @@ pub(crate) struct FillDefaultsRequest {
 #[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct FillDefaultsResponse {
     pub(crate) schema_name: String,
-    pub(crate) job_id: Uuid,
+    pub(crate) migration_job_id: Uuid,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct UndoResponse {
-    pub(crate) job_id: Uuid,
+    pub(crate) migration_job_id: Uuid,
     pub(crate) snapshot_job_id: Uuid,
 }
 
@@ -79,5 +79,5 @@ impl TryFrom<ListEntitiesParams> for entity_entities::ListEntitiesQuery {
 #[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct ReindexResponse {
     /// The job ID assigned by the queue provider.
-    pub(crate) job_id: String,
+    pub(crate) migration_job_id: String,
 }

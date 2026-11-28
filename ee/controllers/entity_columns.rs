@@ -58,29 +58,16 @@ pub fn routes() -> Routes {
         .prefix("api/workspace")
         .add(
             "/entity-columns",
-            aide::axum::routing::get_with(list_columns, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["entity_columns_get"]),
-                ))
-            }),
+            aide::axum::routing::get_with(list_columns, |op| op.id("ListWorkspaceEntityColumns")),
         )
         .add(
             "/entity-columns/{entity_type}",
-            aide::axum::routing::put_with(set_columns, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["entity_columns_update"]),
-                ))
-            }),
+            aide::axum::routing::put_with(set_columns, |op| op.id("UpdateWorkspaceEntityColumns")),
         )
         .add(
             "/entity-columns/{entity_type}",
             aide::axum::routing::delete_with(reset_columns, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["entity_columns_delete"]),
-                ))
+                op.id("DeleteWorkspaceEntityColumns")
             }),
         )
 }

@@ -22,7 +22,7 @@ async fn assert_disabled_creation_rejected(ctx: &loco_rs::app::AppContext, tenan
         .unwrap();
     let txn = ctx.db.begin().await.unwrap();
     let workspace_error =
-        yorishiro::models::tenancy::create_workspace(&txn, tenant_id, "must-not-exist", None, None)
+        yorishiro::models::tenancy::create_workspace(&txn, tenant_id, "must-not-exist", None)
             .await
             .unwrap_err();
     txn.rollback().await.unwrap();
@@ -45,8 +45,7 @@ async fn delete_task_requires_confirmation_and_disablement_and_supports_retry() 
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert!(run(&ctx, vec![]).await.is_err());
@@ -117,7 +116,7 @@ async fn delete_task_requires_confirmation_and_disablement_and_supports_retry() 
             1
         );
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", other.api_key))
             .await
             .assert_status(axum::http::StatusCode::OK);
@@ -145,7 +144,7 @@ async fn sqlite_retirement_retains_quota_until_deletion_and_preserves_identities
             .await
             .unwrap();
         assert!(inventory.disabled_at.is_some());
-        assert_eq!(inventory.api_keys, 0);
+        assert_eq!(inventory.access_keys, 0);
         assert!(inventory.workspace_ids.contains(&target.workspace_id));
         assert_disabled_creation_rejected(&ctx, target.tenant_id).await;
         let txn = ctx.db.begin().await.unwrap();

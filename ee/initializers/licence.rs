@@ -1,6 +1,6 @@
 //! Licence state, composed after the base installer.
 //!
-//! Authentication is edition-neutral: key resolution, including tenant-scoped keys, is the base `DefaultAuthenticator`.
+//! Authentication is edition-neutral: key resolution is the base `DefaultAuthenticator`.
 
 use std::sync::Arc;
 

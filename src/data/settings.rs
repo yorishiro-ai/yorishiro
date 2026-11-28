@@ -1,6 +1,7 @@
 //! The application's typed `settings` section and the operator-tunable defaults nested in it.
 
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Selects the handlers and resources a queue consumer owns.
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -69,18 +70,21 @@ impl Default for Dispatch {
 }
 
 /// Operator-tunable deployment limits.
-/// Every field has a default so a configuration file written before this section existed keeps loading.
+/// Every field has a default.
 #[derive(Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Limits {
     /// `Retry-After` advertised while maintenance is on, when the caller does not name one.
     pub(crate) maintenance_retry_after_seconds: u32,
+    /// How long the API trail keeps a row before the scheduler deletes it.
+    pub(crate) audit_retention_days: u32,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
             maintenance_retry_after_seconds: 300,
+            audit_retention_days: 365,
         }
     }
 }
@@ -108,6 +112,32 @@ pub(crate) struct HttpTimeouts {
     pub(crate) oauth_discovery_seconds: u64,
 }
 
+impl HttpTimeouts {
+    /// One embedding request to an OpenAI-compatible provider.
+    #[must_use]
+    pub(crate) const fn embedding_request(self) -> Duration {
+        Duration::from_secs(self.embedding_request_seconds)
+    }
+
+    /// One batch through the in-process local embedding model.
+    #[must_use]
+    pub(crate) const fn local_embedding(self) -> Duration {
+        Duration::from_secs(self.local_embedding_seconds)
+    }
+
+    /// Connecting to the host that serves the local model files.
+    #[must_use]
+    pub(crate) const fn model_fetch_connect(self) -> Duration {
+        Duration::from_secs(self.model_fetch_connect_seconds)
+    }
+
+    /// Reading from it.
+    #[must_use]
+    pub(crate) const fn model_fetch_read(self) -> Duration {
+        Duration::from_secs(self.model_fetch_read_seconds)
+    }
+}
+
 impl Default for HttpTimeouts {
     fn default() -> Self {
         Self {
@@ -126,7 +156,7 @@ fn default_timezone() -> String {
 }
 
 const fn default_max_tenants() -> i32 {
-    1
+    super::tenant_policy::DEFAULT_TENANT_CAP
 }
 
 #[derive(Clone, Deserialize, Default)]
@@ -139,7 +169,7 @@ pub(crate) struct Mcp {
 /// How the API and MCP server waits for a worker to embed a search query.
 ///
 /// The server holds no embedding model: it enqueues a request and polls for the result, so these three values bound that wait.
-/// The section is optional so a configuration file written before it existed keeps loading with the defaults.
+/// The section is optional and falls back to the defaults.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct QueryEmbedding {

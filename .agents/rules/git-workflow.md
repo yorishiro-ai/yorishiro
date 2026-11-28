@@ -19,23 +19,21 @@ Confirm the relevant backend suites pass before pushing.
 
 ## Before merging
 
-1. Verify all CI checks passed on the latest commit.
+1. Verify that all CI checks pass on the latest commit.
 2. If behind develop, rebase first: `git fetch origin develop && git rebase origin/develop`
 
 ## CI
 
-Wait for PR/CI events using `gh-wait` (`gh extension install k1LoW/gh-wait`):
-
-Use `gh wait`, not `gh run watch`, `gh pr checks --watch`, or an agent polling loop.
+Install `gh-wait` with `gh extension install k1LoW/gh-wait` and use it instead of `gh run watch`, `gh pr checks --watch`, or a polling loop.
 After pushing, identify the workflow run whose `headSha` matches the pushed commit and register one completion rule:
 
 ```bash
 gh wait workflow <run-id> --repo yorishiro-ai/yorishiro --completed
 ```
 
-The command registers a background server rule and returns; returning does not mean CI completed.
+The command returns after it registers a background rule, without waiting for CI.
 Do other independent work or yield until a completion event arrives, without repeated status checks, duplicate rules, or repeated waiting replies.
-After completion, inspect `gh run view <run-id>` and failed logs before reporting success.
+After completion, inspect `gh run view <run-id>` and check the logs for any failures.
 
 **Wait for CI completion:**
 
@@ -82,17 +80,15 @@ For full workflow reference, see `.github/workflows/`.
 
 ## Merge strategy
 
-Merge commit is the usual strategy, not squash. PRs that carry an empirical record (actual run's numbers, a confirmed CI log) merge with a merge commit so the record stays in `develop`'s history. Squash for a single mechanical edit (a dependency bump, swapping one CI action).
-
-When unclear, prefer a merge commit: losing an empirical record is the more expensive mistake.
+Prefer a merge commit to keep measurements and CI evidence in `develop`'s history.
+Squash a single mechanical change, such as a dependency bump or a CI action update.
 
 ## Versioning
 
 - The root `Cargo.toml` package version is the source of truth.
 - 0.x: minor bump = breaking change, patch bump = compatible addition/fix.
-- Tag format: `YYYYMMDD-N` (e.g. `20260830-1`), always a prerelease.
-- The `Release (prerelease)` workflow takes only a `dry_run` boolean and publishes date-based `YYYYMMDD-N` tags as prereleases.
-- The separate `Release` workflow creates SemVer `vX.Y.Z` releases and uses the version bump prepared by its release branch.
-- Nothing in the prerelease workflow edits `Cargo.toml` or commits to `develop`: a date tag is not a SemVer version, and cargo rejects `20260830-1` outright.
-- `develop` stays at its SemVer position in the manifest for prereleases; `yorishiro version` answers with both versions.
+- Prerelease tags and asset filenames use `pre-YYYYMMDD-N` (e.g. `pre-20260830-1`).
+- The `Release (prerelease)` workflow takes only a `dry_run` boolean.
+- `Release (SemVer)` creates `vX.Y.Z` releases and pushes the verified version bump and tag together.
+- Prereleases leave `Cargo.toml` unchanged; `yorishiro version` reports both the SemVer version and the prerelease tag.
 - Do not hand-edit the version or create the tag locally.

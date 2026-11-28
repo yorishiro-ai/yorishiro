@@ -125,13 +125,16 @@ sea-orm = { version = "2.0.4", features = [
   "postgres-vector",
 ] }
 uuid = { version = "1.29.0", features = ["v4", "v7", "serde"] }
-redis = { version = "1.8.2", features = ["aio", "tokio-comp"] }
+redis = { version = "1.8.3", features = ["aio", "tokio-comp"] }
 
 [dependencies]
 loco-rs = { workspace = true }
 migration = { path = "migration" }
 serde.workspace = true
 serde_json.workspace = true
+thiserror = "2"
+form_urlencoded = "1"
+tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "time", "macros", "sync", "fs", "io-util"] }
 futures = "0.3.34"
 hex = "0.4.3"
@@ -143,8 +146,8 @@ chrono-tz.workspace = true
 uuid.workspace = true
 aws-lc-rs = "1.19.0"
 ipnet = { version = "2.12.2", features = ["serde"] }
-jsonschema = { version = "0.61.2" }
-rmcp = { version = "3.9.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+jsonschema = { version = "0.63.2" }
+rmcp = { version = "3.12.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
 schemars = { version = "1.2.3", features = ["uuid1", "chrono04"] }
 # OpenAI-compatible embedding and inference clients use HTTP.
 reqwest.workspace = true

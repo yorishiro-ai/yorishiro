@@ -1,4 +1,4 @@
-//! MCP tools for workspaces and their members.
+//! MCP tools for workspaces.
 
 use crate::controllers::mcp::{render, verified};
 use axum::http::request::Parts;
@@ -33,9 +33,7 @@ pub(crate) struct UpdateWorkspaceArgs {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_workspaces)]
 impl YorishiroMcpServer {
-    #[tool(
-        description = "List current-tenant workspaces allowed by workspace_get IAM permission (requires workspace_list IAM permission and a tenant-scoped credential)"
-    )]
+    #[tool(description = "List workspaces in the current tenant that the caller can read.")]
     pub(crate) async fn list_workspaces(
         &self,
         Extension(parts): Extension<Parts>,
@@ -60,7 +58,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Get workspace details, counts and effective entity cap with workspace_get IAM permission; cannot retarget a selected or credential-bound workspace"
+        description = "Get workspace details, counts and effective entity cap (requires the workspace:GetWorkspace action)"
     )]
     pub(crate) async fn get_workspace(
         &self,
@@ -75,7 +73,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Create a workspace in the current tenant without retargeting the current credential (requires a tenant-scoped credential and workspace_create IAM permission)"
+        description = "Create a workspace in the current tenant (requires the workspace:CreateWorkspace action)."
     )]
     pub(crate) async fn create_workspace(
         &self,
@@ -88,7 +86,6 @@ impl YorishiroMcpServer {
             &auth,
             &args.name,
             args.max_entities,
-            args.schema_id,
         )
         .await
         {
@@ -98,7 +95,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Update a workspace name with workspace_update IAM permission; replacing or clearing its manual entity cap also requires tenant_update and a tenant-scoped credential; schema binding is immutable here"
+        description = "Update a workspace name (requires the workspace:UpdateWorkspace action); replacing or clearing its manual entity cap also requires permission to update the tenant; schema binding is immutable here"
     )]
     pub(crate) async fn update_workspace(
         &self,
@@ -122,7 +119,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Permanently delete a current-tenant workspace and its data; the last workspace is protected (requires workspace_delete IAM permission within the credential workspace binding)"
+        description = "Permanently delete a workspace and its data. The tenant's last workspace cannot be deleted."
     )]
     pub(crate) async fn delete_workspace(
         &self,

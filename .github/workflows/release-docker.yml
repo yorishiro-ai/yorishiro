@@ -1,0 +1,53 @@
+name: Build release images
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        type: string
+        required: true
+      ref:
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+      source:
+        type: string
+        required: true
+      version:
+        type: string
+        default: ''
+      push:
+        type: boolean
+        required: true
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-26.04
+            arch: amd64
+          - os: ubuntu-26.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/prepare-stable-source
+        if: inputs.version != ''
+        with:
+          version: ${{ inputs.version }}
+
+      - uses: ./.github/actions/build-docker
+        with:
+          image: ${{ inputs.image }}
+          tag: ${{ inputs.tag }}
+          source: ${{ inputs.source }}
+          arch: ${{ matrix.arch }}
+          push: ${{ inputs.push }}
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,5 +1,6 @@
 //! Bulk import and embedding dispatch commit together on a Loco worker.
 
+use crate::error::OptionExt;
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker, prelude::async_trait};
 use sea_orm::DatabaseTransaction;
 use serde::{Deserialize, Serialize};
@@ -11,8 +12,8 @@ use super::{
 };
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::{
-    api_key_audit_log::{self, AuditAction, AuditActor},
-    api_keys::AuthContext,
+    access_keys::AuthContext,
+    job_results::{self, JobActor, JobKind},
 };
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -20,9 +21,10 @@ pub(crate) struct ImportArgs {
     lifecycle_id: Option<Uuid>,
     tenant_id: Uuid,
     workspace_id: Uuid,
-    api_key_id: Uuid,
+    access_key_id: Uuid,
     user_id: Option<Uuid>,
-    jsonl: String,
+    /// The `import_staging` row that holds the body.
+    staging_id: Uuid,
     worker_class: WorkerClass,
 }
 
@@ -51,9 +53,7 @@ impl BackgroundWorker<ImportArgs> for ImportWorker {
 
 impl ImportWorker {
     async fn import(&self, args: &ImportArgs) -> Result<(), YorishiroError> {
-        let id = args
-            .lifecycle_id
-            .ok_or_else(|| YorishiroError::Internal("import lifecycle missing".into()))?;
+        let id = args.lifecycle_id.or_internal("import lifecycle missing")?;
         // Hold control-plane permission stable until the workspace write commits.
         let authorization = crate::db::begin_authorization(&self.ctx.db)
             .await
@@ -63,37 +63,34 @@ impl ImportWorker {
         crate::db::lock_for_update(&txn, &format!("import:{id}"))
             .await
             .internal()?;
-        if !api_key_audit_log::job_completed(
-            &txn,
-            args.workspace_id,
-            id,
-            AuditAction::BackgroundJobCompleted,
-        )
-        .await?
+        if !job_results::job_completed(&txn, args.workspace_id, id, JobKind::BackgroundJobCompleted)
+            .await?
         {
             crate::models::iam::access::require_iam_action(
                 authorization.as_ref().unwrap_or(&txn),
                 &AuthContext {
                     tenant_id: args.tenant_id,
                     workspace_id: Some(args.workspace_id),
-                    api_key_id: args.api_key_id,
+                    access_key_id: args.access_key_id,
                     user_id: args.user_id,
-                    audit: false,
                 },
-                crate::models::iam::policy::Action::ImportCreate,
+                crate::models::iam::policy::Action::CreateImportJob,
                 crate::models::iam::policy::Resource::Workspace {
                     tenant_id: args.tenant_id,
                     workspace_id: args.workspace_id,
                 },
             )
             .await?;
+            let body = crate::models::import_staging::body(&txn, args.staging_id)
+                .await?
+                .or_internal("the import body is missing")?;
             let quotas = crate::data::quotas::for_tenant(&self.ctx, args.tenant_id).await?;
             let result = crate::models::transfer::import::import_with_quota(
                 &txn,
                 args.tenant_id,
                 args.workspace_id,
                 args.user_id,
-                args.jsonl.as_bytes(),
+                body.as_bytes(),
                 quotas.entities,
             )
             .await?;
@@ -106,10 +103,11 @@ impl ImportWorker {
                 )
                 .await?;
             }
-            api_key_audit_log::record(&txn, AuditActor {
+            crate::models::import_staging::remove(&txn, args.staging_id).await?;
+            job_results::record(&txn, JobActor {
                 tenant_id: args.tenant_id, workspace_id: args.workspace_id,
-                api_key_id: args.api_key_id, user_id: args.user_id,
-            }, AuditAction::BackgroundJobCompleted, serde_json::json!({"job_id": id, "schemas": result.schemas, "entities": result.entities, "relations": result.relations})).await?;
+                access_key_id: args.access_key_id, user_id: args.user_id,
+            }, JobKind::BackgroundJobCompleted, serde_json::json!({"job_id": id, "schemas": result.schemas, "entities": result.entities, "relations": result.relations})).await?;
         }
         txn.commit().await.internal()?;
         if let Some(authorization) = authorization {
@@ -132,7 +130,7 @@ pub(crate) async fn enqueue_for_actor(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::ImportCreate,
+            crate::models::iam::policy::Action::CreateImportJob,
         ),
         None,
         async |session| enqueue(ctx, session.txn(), &session.ctx, jsonl).await,
@@ -150,7 +148,7 @@ pub(crate) async fn enqueue(
     crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         auth,
-        crate::models::iam::policy::Action::ImportCreate,
+        crate::models::iam::policy::Action::CreateImportJob,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: auth.tenant_id,
             workspace_id: auth.require_workspace()?,
@@ -159,13 +157,16 @@ pub(crate) async fn enqueue(
     .await?;
     let worker_class =
         crate::workers::target::resolve_worker_class(ctx, auth.require_workspace()?).await?;
+    let workspace_id = auth.require_workspace()?;
+    let staging_id =
+        crate::models::import_staging::stage(txn, auth.tenant_id, workspace_id, jsonl).await?;
     let args = ImportArgs {
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
         workspace_id: auth.require_workspace()?,
-        api_key_id: auth.api_key_id,
+        access_key_id: auth.access_key_id,
         user_id: auth.user_id,
-        jsonl,
+        staging_id,
         worker_class,
     };
     let id = dispatch_job(

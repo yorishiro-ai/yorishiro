@@ -12,9 +12,11 @@ pub(crate) mod reset_root_password;
 
 // Embeddings and the queue.
 pub(crate) mod embedding_index_maintenance;
+pub mod purge_audit_events;
+pub mod read_audit_events;
 pub(crate) mod recover_worker_dispatches;
+pub mod reindex_scheduler;
 pub(crate) mod resync_embeddings;
-pub mod tenant_reindex_scheduler;
 
 // Database and system maintenance.
 pub(crate) mod db_load_guard;
@@ -34,4 +36,61 @@ fn tenant_confirmation(vars: &loco_rs::task::Vars) -> loco_rs::Result<(uuid::Uui
         })
     };
     Ok((parse("tenant_id")?, parse("confirmed_tenant_id")?))
+}
+
+/// Runs a task and records the run in the trail, as the service that schedules it or the operator who typed it.
+pub(crate) struct Audited<T> {
+    task: T,
+    identity_type: &'static str,
+    read_only: bool,
+}
+
+impl<T> Audited<T> {
+    pub(crate) const fn service(task: T) -> Self {
+        Self {
+            task,
+            identity_type: "service",
+            read_only: false,
+        }
+    }
+
+    pub(crate) const fn operator(task: T) -> Self {
+        Self {
+            task,
+            identity_type: "operator",
+            read_only: false,
+        }
+    }
+
+    pub(crate) const fn reading(mut self) -> Self {
+        self.read_only = true;
+        self
+    }
+}
+
+#[loco_rs::prelude::async_trait]
+impl<T: loco_rs::task::Task> loco_rs::task::Task for Audited<T> {
+    fn task(&self) -> loco_rs::task::TaskInfo {
+        self.task.task()
+    }
+
+    async fn run(
+        &self,
+        ctx: &loco_rs::app::AppContext,
+        vars: &loco_rs::task::Vars,
+    ) -> loco_rs::Result<()> {
+        let started = std::time::Instant::now();
+        let result = self.task.run(ctx, vars).await;
+        let recorded = crate::models::api_events::record_task(
+            &ctx.db,
+            &self.task.task().name,
+            self.identity_type,
+            self.read_only,
+            result.as_ref().err(),
+            i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
+        )
+        .await;
+        // A run the trail cannot show is an error, even when the task itself succeeded.
+        result.and_then(|()| recorded.map_err(loco_rs::Error::wrap))
+    }
 }

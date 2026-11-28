@@ -1,10 +1,11 @@
 //! Three-way comparison of metaschema definitions.
 //!
 //! A workspace's schema is a copy of a template, and both sides can move after the copy is taken.
-//! Comparing against the base (the template as it stood when copied), not just upstream vs. local, is what tells an upstream addition apart from a local one: with only two sides both look like "present there, absent here", and following the template would silently delete the workspace's own fields.
+//! Comparing against the base (the template as it stood when copied) tells an upstream addition apart from a local one.
+//! With only two sides both look like "present there, absent here", and following the template would delete the workspace's own fields.
 //!
-//! This module classifies.
-//! It does not apply anything: a conflict is a question for a person, and answering it by picking a side would invalidate whichever entities were written against the losing definition.
+//! This module classifies fields and builds the merged definition, and stores nothing.
+//! A conflict is a question for a person: picking a side would invalidate entities written against the losing definition.
 
 use std::collections::BTreeSet;
 
@@ -195,13 +196,13 @@ fn classify(
 }
 
 /// Whether two optional field definitions are the same.
-/// Compared by their serialised form: `FieldDef` carries unknown `x-` attributes in a flattened map, and a comparison that only looked at the named fields would call two definitions equal while an extension differed.
+/// Compared by their serialised form, because `FieldDef` carries unknown attributes in a flattened map that a field-wise comparison would miss.
 fn same(a: Option<&FieldDef>, b: Option<&FieldDef>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => match (serde_json::to_value(a), serde_json::to_value(b)) {
             (Ok(a), Ok(b)) => a == b,
-            // Not `.ok() == .ok()`, which maps two *failures* to `None == None` and calls them equal, and "equal" here means the field never enters the plan, so a genuine upstream change would be neither reported nor applied.
+            // A serialisation failure must not count as equal, or a real upstream change would drop out of the plan.
             _ => false,
         },
         _ => false,
@@ -231,11 +232,9 @@ fn type_name(field: &FieldDef) -> String {
 
 /// Produces the definition a plan describes: upstream's version of everything it changed alone, the workspace's version of everything it changed alone.
 ///
-/// Refuses a plan with conflicts.
-/// There is no answer to apply for those (that is what a conflict means), and applying the rest would leave a definition that is neither what the merge produced nor what was there before, with no record of which fields were skipped.
+/// Refuses a plan with conflicts, since a partial merge leaves a definition neither side asked for.
 ///
 /// The result is a definition, not a stored schema.
-/// Whether writing it mints a new version is a separate decision, and one this function deliberately does not make.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -269,8 +268,7 @@ pub fn apply_plan(
         });
     }
 
-    // Start from the workspace's own definition: everything it holds stays unless the plan says upstream changed that field alone.
-    // Starting from upstream instead would silently drop every local addition, which is the failure the base exists to prevent.
+    // Start from the workspace's own definition so local additions survive.
     let mut merged = local.clone();
 
     for field in &plan.fields {

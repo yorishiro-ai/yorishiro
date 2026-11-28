@@ -78,37 +78,14 @@ async fn development_uses_loco_environment_config_and_typed_settings() {
     assert_eq!(settings["embedding"]["provider"], "none");
 }
 
+/// All environments select the SQL backend and queue provider the same way.
 #[tokio::test]
 #[serial(process_environment)]
 #[expect(
     clippy::significant_drop_tightening,
     reason = "environment overrides remain active until this scope ends"
 )]
-async fn sqlite_test_config_preserves_loco_application_pragmas() {
-    let guard = EnvGuard::capture(&["DATABASE_URL", "QUEUE_URL", "YORISHIRO_QUEUE_KIND"]);
-    guard.set("DATABASE_URL", "sqlite:///tmp/config-load.sqlite3?mode=rwc");
-    guard.set(
-        "QUEUE_URL",
-        "sqlite:///tmp/config-load-queue.sqlite3?mode=rwc",
-    );
-    guard.remove("YORISHIRO_QUEUE_KIND");
-    let config = load(&Environment::Test).unwrap();
-    assert_eq!(
-        config.database.run_on_start.as_deref(),
-        Some(
-            "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA mmap_size = 134217728; PRAGMA journal_size_limit = 67108864; PRAGMA cache_size = 2000; PRAGMA busy_timeout = 5000;"
-        )
-    );
-}
-
-/// The test environment follows `DATABASE_URL`'s scheme, and the queue follows the database unless `YORISHIRO_QUEUE_KIND` names a provider.
-#[tokio::test]
-#[serial(process_environment)]
-#[expect(
-    clippy::significant_drop_tightening,
-    reason = "environment overrides remain active until this scope ends"
-)]
-async fn the_test_environment_follows_the_database_and_queue_kind() {
+async fn environments_follow_the_database_and_queue_kind() {
     let guard = EnvGuard::capture(&[
         "DATABASE_URL",
         "QUEUE_URL",
@@ -119,17 +96,22 @@ async fn the_test_environment_follows_the_database_and_queue_kind() {
     guard.set("PORT", "5151");
     guard.set("DB_CONNECT_TIMEOUT", "5000");
     for (database, kind, queue) in [
-        ("postgres://db/app", None, "postgres://queue/app"),
         (
-            "sqlite://db.sqlite3?mode=rwc",
+            "postgres://user:o'brien@db/app",
             None,
-            "sqlite://queue.sqlite3?mode=rwc",
+            "postgres://user:o'brien@queue/app",
         ),
+        (
+            "sqlite://owner's-db.sqlite3?mode=rwc",
+            None,
+            "sqlite://owner's-queue.sqlite3?mode=rwc",
+        ),
+        ("sqlite://db.sqlite3?mode=rwc", None, "sqlite::memory:"),
         ("postgres://db/app", Some("Redis"), "redis://redis:6379/15"),
         (
             "sqlite://db.sqlite3?mode=rwc",
             Some("Redis"),
-            "rediss://redis:6379/15",
+            "rediss://:o'brien@redis:6379/15",
         ),
     ] {
         match kind {
@@ -138,25 +120,33 @@ async fn the_test_environment_follows_the_database_and_queue_kind() {
         }
         guard.set("DATABASE_URL", database);
         guard.set("QUEUE_URL", queue);
-        let config = load(&Environment::Test).unwrap();
-        assert_eq!(config.database.uri, database);
-        assert_eq!(config.server.port, 5151);
-        match config.queue.unwrap() {
-            QueueConfig::Postgres(actual) => {
-                assert!(database.starts_with("postgres") && kind.is_none());
-                assert_eq!(actual.uri, queue);
-                assert_eq!(actual.connect_timeout, config.database.connect_timeout);
-                assert_eq!(actual.max_connections, config.database.max_connections);
+        for environment in [
+            Environment::Production,
+            Environment::Development,
+            Environment::Test,
+        ] {
+            let config = load(&environment).unwrap();
+            assert_eq!(config.database.uri, database);
+            assert_eq!(config.server.port, 5151);
+            match config.queue.unwrap() {
+                QueueConfig::Postgres(actual) => {
+                    assert!(database.starts_with("postgres") && kind.is_none());
+                    assert_eq!(actual.uri, queue);
+                    assert_eq!(actual.connect_timeout, config.database.connect_timeout);
+                    assert_eq!(actual.max_connections, config.database.max_connections);
+                }
+                QueueConfig::Sqlite(actual) => {
+                    assert!(database.starts_with("sqlite") && kind.is_none());
+                    assert_eq!(actual.uri, queue);
+                    assert_eq!(actual.connect_timeout, config.database.connect_timeout);
+                    assert_eq!(actual.max_connections, config.database.max_connections);
+                }
+                QueueConfig::Redis(actual) => {
+                    assert!(kind.is_some());
+                    assert_eq!(actual.uri, queue);
+                }
+                other => panic!("unexpected queue provider: {other:?}"),
             }
-            QueueConfig::Sqlite(actual) => {
-                assert!(database.starts_with("sqlite") && kind.is_none());
-                assert_eq!(actual.uri, queue);
-            }
-            QueueConfig::Redis(actual) => {
-                assert!(kind.is_some());
-                assert_eq!(actual.uri, queue);
-            }
-            other => panic!("unexpected queue provider: {other:?}"),
         }
     }
 }

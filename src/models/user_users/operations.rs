@@ -1,5 +1,6 @@
 //! User creation, self-service profiles and authentication lookups.
 
+use crate::error::OptionExt;
 use loco_rs::hash;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
@@ -71,7 +72,7 @@ pub async fn reset_root_password_by_operator(
         .one(&txn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("user not found"))?;
+        .or_not_found("user not found")?;
     if user.tenant_id.is_some() || user.password_hash.is_none() {
         return Err(YorishiroError::Conflict {
             message: "password recovery requires an existing password-bearing root account".into(),
@@ -79,10 +80,13 @@ pub async fn reset_root_password_by_operator(
     }
     let mut active: ActiveModel = user.into();
     active.password_hash = ActiveValue::Set(Some(hash_blocking(password).await?));
-    active.update(&txn).await.internal()?;
-    crate::models::api_keys::Entity::revoke_matching(
+    active
+        .update(&txn)
+        .await
+        .map_err(|error| YorishiroError::not_found_on_missing(error, "user was not found"))?;
+    crate::models::access_keys::Entity::revoke_matching(
         &txn,
-        Condition::all().add(crate::models::_entities::api_keys::Column::UserId.eq(user_id)),
+        Condition::all().add(crate::models::_entities::access_keys::Column::UserId.eq(user_id)),
     )
     .await?;
     txn.commit().await.internal()?;
@@ -139,7 +143,7 @@ pub async fn delete_by_operator(
         .one(&txn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("user not found"))?;
+        .or_not_found("user not found")?;
     let membership = memberships::Entity::find()
         .filter(memberships::Column::UserId.eq(user_id))
         .one(&txn)
@@ -147,9 +151,9 @@ pub async fn delete_by_operator(
         .internal()?;
     let Some(membership) = membership else {
         // Revoke before ON DELETE SET NULL can detach user attribution from authenticating keys.
-        crate::models::api_keys::Entity::revoke_matching(
+        crate::models::access_keys::Entity::revoke_matching(
             &txn,
-            Condition::all().add(crate::models::_entities::api_keys::Column::UserId.eq(user_id)),
+            Condition::all().add(crate::models::_entities::access_keys::Column::UserId.eq(user_id)),
         )
         .await?;
         Entity::delete_by_id(user_id).exec(&txn).await.internal()?;
@@ -172,9 +176,9 @@ pub async fn delete_by_operator(
     let outcome =
         crate::models::tenant_tenants::retirement::root_deleted(&txn, tenant_id, user_id).await?;
     // Revoke before ON DELETE SET NULL can detach user attribution from authenticating keys.
-    crate::models::api_keys::Entity::revoke_matching(
+    crate::models::access_keys::Entity::revoke_matching(
         &txn,
-        Condition::all().add(crate::models::_entities::api_keys::Column::UserId.eq(user_id)),
+        Condition::all().add(crate::models::_entities::access_keys::Column::UserId.eq(user_id)),
     )
     .await?;
     Entity::delete_by_id(user_id).exec(&txn).await.internal()?;
@@ -182,48 +186,60 @@ pub async fn delete_by_operator(
     Ok(outcome)
 }
 
-pub(crate) async fn current_profile(
+/// Changes the display name of a user of `tenant_id`, or clears it with `None`.
+///
+/// # Errors
+/// Rejects an invalid display name and users outside the tenant.
+pub(crate) async fn update_display_name(
     conn: &impl ConnectionTrait,
-    actor: &crate::models::api_keys::AuthContext,
-) -> Result<Model, YorishiroError> {
-    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
-    let user_id = current
-        .user_id
-        .ok_or_else(|| YorishiroError::ScopeInsufficient {
-            message: "service credentials have no user profile".into(),
-            hint: "use a user-attributed credential".into(),
-        })?;
-    Entity::find_by_id(user_id)
-        .one(conn)
-        .await
-        .internal()?
-        .ok_or(YorishiroError::Unauthenticated)
-}
-
-pub(crate) async fn update_profile(
-    db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    tenant_id: uuid::Uuid,
+    user_id: uuid::Uuid,
     display_name: Option<String>,
 ) -> Result<Model, YorishiroError> {
-    let txn = crate::db::begin_write(db).await.internal()?;
-    crate::db::lock_for_update(&txn, &format!("tenant-membership:{}", actor.tenant_id))
-        .await
-        .internal()?;
-    let user = current_profile(&txn, actor).await?;
     let display_name = display_name.map(|name| name.trim().to_owned());
     if display_name
         .as_ref()
         .is_some_and(|name| name.is_empty() || name.chars().count() > 100)
     {
-        return Err(YorishiroError::Conflict {
+        return Err(YorishiroError::ValidationFailed {
             message: "display name must contain 1 to 100 characters, or be null".into(),
+            details: vec![],
+            hint: "provide a shorter display name or null to clear it".into(),
         });
     }
+    let user = find_in_tenant(conn, tenant_id, user_id).await?;
     let mut active: ActiveModel = user.into();
     active.display_name = ActiveValue::Set(display_name);
-    let user = active.update(&txn).await.internal()?;
-    txn.commit().await.internal()?;
-    Ok(user)
+    active
+        .update(conn)
+        .await
+        .map_err(|error| YorishiroError::not_found_on_missing(error, "user was not found"))
+}
+
+/// Finds a user that belongs to `tenant_id`, whether bound to it or its root user.
+///
+/// # Errors
+/// Returns not found for a user outside the tenant.
+pub(crate) async fn find_in_tenant(
+    conn: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+) -> Result<Model, YorishiroError> {
+    if memberships::Entity::find()
+        .filter(memberships::Column::TenantId.eq(tenant_id))
+        .filter(memberships::Column::UserId.eq(user_id))
+        .one(conn)
+        .await
+        .internal()?
+        .is_none()
+    {
+        return Err(YorishiroError::not_found("user was not found"));
+    }
+    Entity::find_by_id(user_id)
+        .one(conn)
+        .await
+        .internal()?
+        .or_not_found("user was not found")
 }
 
 /// Creates a human user account.
@@ -270,7 +286,7 @@ pub async fn create_user(
 }
 
 /// Verifies an email/password pair against the stored Argon2id hash, returning the matching root user on success.
-/// A passwordless account (`password_hash = NULL`) never matches, same as a wrong password: `loco_rs::hash::verify_password` needs a hash to compare against.
+/// A passwordless account never matches, the same as a wrong password.
 pub(crate) async fn verify_login(
     conn: &impl ConnectionTrait,
     email: &str,
@@ -294,7 +310,7 @@ pub(crate) async fn verify_tenant_login(
 ) -> Result<Option<Model>, YorishiroError> {
     let user = Entity::find()
         .filter(Column::TenantId.eq(tenant_id))
-        .filter(Column::UserName.eq(user_name))
+        .filter(Column::UserNameKey.eq(crate::models::iam::names::name_key(user_name)))
         .one(conn)
         .await
         .internal()?;
@@ -320,26 +336,24 @@ async fn check_password(
 }
 
 const MIN_TENANT_PASSWORD_CHARS: usize = 12;
-const MAX_USER_NAME_CHARS: usize = 64;
 
 fn validate_tenant_credentials(user_name: &str, password: &str) -> Result<(), YorishiroError> {
-    if user_name.is_empty()
-        || user_name.chars().count() > MAX_USER_NAME_CHARS
-        || !user_name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-    {
-        return Err(YorishiroError::Conflict {
-            message: format!(
-                "user_name must contain 1 to {MAX_USER_NAME_CHARS} letters, digits, '.', '_' or '-'"
-            ),
-        });
-    }
+    crate::models::iam::names::validate_name(
+        "user",
+        user_name,
+        crate::models::iam::names::MAX_USER_NAME_CHARS,
+    )?;
+    validate_password(password)
+}
+
+fn validate_password(password: &str) -> Result<(), YorishiroError> {
     if password.chars().count() < MIN_TENANT_PASSWORD_CHARS {
-        return Err(YorishiroError::Conflict {
+        return Err(YorishiroError::ValidationFailed {
             message: format!(
                 "password must contain at least {MIN_TENANT_PASSWORD_CHARS} characters"
             ),
+            details: vec![],
+            hint: "choose a longer password".into(),
         });
     }
     Ok(())
@@ -369,6 +383,7 @@ pub(crate) async fn create_tenant_user(
     let active = ActiveModel {
         tenant_id: ActiveValue::Set(Some(tenant_id)),
         user_name: ActiveValue::Set(Some(user_name.to_string())),
+        user_name_key: ActiveValue::Set(Some(crate::models::iam::names::name_key(user_name))),
         password_hash: ActiveValue::Set(Some(hash_blocking(password).await?)),
         display_name: ActiveValue::Set(display_name.map(str::to_string)),
         ..Default::default()
@@ -391,27 +406,24 @@ pub(crate) async fn reset_tenant_password(
     user_id: uuid::Uuid,
     password: &str,
 ) -> Result<(), YorishiroError> {
-    if password.chars().count() < MIN_TENANT_PASSWORD_CHARS {
-        return Err(YorishiroError::Conflict {
-            message: format!(
-                "password must contain at least {MIN_TENANT_PASSWORD_CHARS} characters"
-            ),
-        });
-    }
+    validate_password(password)?;
     let user = Entity::find_by_id(user_id)
         .filter(Column::TenantId.eq(tenant_id))
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("tenant user not found"))?;
+        .or_not_found("user was not found")?;
     let mut active: ActiveModel = user.into();
     active.password_hash = ActiveValue::Set(Some(hash_blocking(password).await?));
-    active.update(conn).await.internal()?;
-    crate::models::api_keys::Entity::revoke_matching(
+    active
+        .update(conn)
+        .await
+        .map_err(|error| YorishiroError::not_found_on_missing(error, "user was not found"))?;
+    crate::models::access_keys::Entity::revoke_matching(
         conn,
         Condition::all()
-            .add(crate::models::_entities::api_keys::Column::TenantId.eq(tenant_id))
-            .add(crate::models::_entities::api_keys::Column::UserId.eq(user_id)),
+            .add(crate::models::_entities::access_keys::Column::TenantId.eq(tenant_id))
+            .add(crate::models::_entities::access_keys::Column::UserId.eq(user_id)),
     )
     .await
 }

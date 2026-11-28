@@ -34,7 +34,7 @@ pub(crate) struct UpdateForkArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_schema_forks)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "List schema forks across permitted workspaces, or narrow to a selected workspace (requires schema_fork_list IAM permission)"
+        description = "List schema forks across permitted workspaces, or narrow to a selected workspace (requires the schema:ListSchemaForks action)"
     )]
     pub(crate) async fn list_schema_forks(
         &self,
@@ -53,7 +53,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Read a schema fork owned by the selected workspace, including its immutable current head (requires schema_fork_get IAM permission)"
+        description = "Read a schema fork owned by the selected workspace, including its immutable current head (requires the schema:GetSchemaFork action)"
     )]
     pub(crate) async fn get_schema_fork(
         &self,
@@ -65,7 +65,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Create a workspace-owned fork of a same-tenant source schema (requires schema_fork_create IAM permission); validates source identity and workspace cycles without modifying the source"
+        description = "Create a workspace-owned fork of a same-tenant source schema (requires the schema:CreateSchemaFork action); validates source identity and workspace cycles without modifying the source"
     )]
     pub(crate) async fn create_schema_fork(
         &self,
@@ -77,7 +77,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Update a selected-workspace schema fork with a definition or action=follow using the REST model's history and expected-head guards (requires schema_fork_update IAM permission); force is required to discard local edits"
+        description = "Update a selected-workspace schema fork with a definition or action=follow using the REST model's history and expected-head guards (requires the schema:UpdateSchemaFork action); force is required to discard local edits"
     )]
     pub(crate) async fn update_schema_fork(
         &self,
@@ -101,7 +101,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Delete a selected-workspace fork association using the REST reference-preserving model (requires schema_fork_delete IAM permission); does not delete the source schema"
+        description = "Delete a selected-workspace fork association using the REST reference-preserving model (requires the schema:DeleteSchemaFork action); does not delete the source schema"
     )]
     pub(crate) async fn delete_schema_fork(
         &self,

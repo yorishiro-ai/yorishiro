@@ -10,7 +10,7 @@ async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
     use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter};
     use yorishiro::models::_entities::tenant_retirement_events::Column as EventColumn;
     use yorishiro::models::{
-        api_keys, query_embedding_requests as queries, queue_job_lifecycles as jobs,
+        access_keys, query_embedding_requests as queries, queue_job_lifecycles as jobs,
         tenant_retirement_events, tenant_tenants,
     };
 
@@ -23,9 +23,9 @@ async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
         let (key, _) = yorishiro::models::tenancy::issue_login_key(
             &ctx.db, target.owner_id, None, Some(target.tenant_id),
         ).await.unwrap();
-        let actor = api_keys::AuthContext {
-            api_key_id: key.id, workspace_id: None, tenant_id: target.tenant_id,
-            user_id: Some(target.owner_id), audit: false,
+        let actor = access_keys::AuthContext {
+            access_key_id: key.id, workspace_id: None, tenant_id: target.tenant_id,
+            user_id: Some(target.owner_id),
         };
         let job_id = uuid::Uuid::now_v7();
         jobs::Entity::record_enqueue(&ctx.db, jobs::Enqueue {
@@ -41,19 +41,19 @@ async fn retirement_audit_failure_rolls_back_disablement_and_allows_retry() {
         let error = retirement::disable_as(&ctx.db, &actor, target.tenant_id).await.unwrap_err();
         assert!(error.to_string().contains("reject_retirement_audit"), "{error}");
         assert!(tenant_tenants::Model::find_by_id(&ctx.db, target.tenant_id).await.unwrap().disabled_at.is_none());
-        assert_eq!(retirement::inventory(&ctx.db, target.tenant_id).await.unwrap().api_keys, before.api_keys);
+        assert_eq!(retirement::inventory(&ctx.db, target.tenant_id).await.unwrap().access_keys, before.access_keys);
         assert_eq!(jobs::Entity::find_by_id(job_id).one(&ctx.db).await.unwrap().unwrap().status, "queued");
         assert_eq!(queries::Entity::find_by_id(query_id).one(&ctx.db).await.unwrap().unwrap().status, "pending");
         assert_eq!(tenant_retirement_events::Entity::find().filter(EventColumn::TenantId.eq(target.tenant_id))
             .count(&ctx.db).await.unwrap(), 0);
-        request.get("/api/whoami").add_header("Authorization", format!("Bearer {}", key.plaintext))
+        request.get("/api/caller-identity").add_header("Authorization", format!("Bearer {}", key.plaintext))
             .await.assert_status(axum::http::StatusCode::OK);
         ctx.db.execute_unprepared("ALTER TABLE tenant_retirement_events DROP CONSTRAINT reject_retirement_audit")
             .await.unwrap();
         retirement::disable_as(&ctx.db, &actor, target.tenant_id).await.unwrap();
         assert_eq!(jobs::Entity::find_by_id(job_id).one(&ctx.db).await.unwrap().unwrap().status, "cancelled");
         assert_eq!(queries::Entity::find_by_id(query_id).one(&ctx.db).await.unwrap().unwrap().status, "failed");
-        assert_eq!(retirement::inventory(&ctx.db, target.tenant_id).await.unwrap().api_keys, 0);
+        assert_eq!(retirement::inventory(&ctx.db, target.tenant_id).await.unwrap().access_keys, 0);
         assert_eq!(tenant_retirement_events::Entity::find().filter(EventColumn::TenantId.eq(target.tenant_id))
             .count(&ctx.db).await.unwrap(), 1);
     }).await;
@@ -67,8 +67,7 @@ async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let mut ids = Vec::new();
@@ -164,32 +163,30 @@ async fn retirement_cancellation_is_targeted_idempotent_and_terminal() {
 #[tokio::test]
 #[cfg(feature = "enterprise")]
 async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
-    use yorishiro::models::{api_keys, tenancy};
+    use yorishiro::models::tenancy;
 
     if !crate::require_postgres_backend() {
         return;
     }
 
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let other = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let service = api_keys::Entity::create_api_key(&ctx.db, target.workspace_id, None, false)
+        let service = crate::requests::fixtures::create_key(&ctx.db, target.workspace_id, None)
             .await
             .unwrap();
         // Set persisted state directly until a fully fenced disable operation is available.
         crate::requests::fixtures::disable_tenant(&ctx, target.tenant_id).await;
         for key in [&target.api_key, &service.plaintext] {
             request
-                .get("/api/whoami")
+                .get("/api/caller-identity")
                 .add_header("Authorization", format!("Bearer {key}"))
                 .await
                 .assert_status(axum::http::StatusCode::UNAUTHORIZED);
         }
         for user_id in [None, Some(target.owner_id)] {
             assert!(matches!(
-                api_keys::Entity::create_api_key(&ctx.db, target.workspace_id, user_id, false,)
-                    .await,
+                crate::requests::fixtures::create_key(&ctx.db, target.workspace_id, user_id,).await,
                 Err(yorishiro::YorishiroError::Unauthenticated)
             ));
         }
@@ -200,7 +197,7 @@ async fn disabled_tenant_rejects_credentials_issuance_and_discovery() {
                 .is_empty()
         );
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", other.api_key))
             .await
             .assert_status(axum::http::StatusCode::OK);
@@ -219,8 +216,7 @@ async fn retirement_inventory_does_not_expose_accounts() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let first = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let second = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert!(
@@ -236,7 +232,6 @@ async fn retirement_inventory_does_not_expose_accounts() {
             let inventory = retirement::inventory(&ctx.db, tenant.tenant_id)
                 .await
                 .unwrap();
-            assert_eq!(inventory.shared_user_accounts, 0);
             assert_eq!(inventory.external_workspace_forks, 0);
             let body = serde_json::to_value(inventory).unwrap();
             assert!(!body.to_string().contains(&first.owner_id.to_string()));
@@ -256,8 +251,7 @@ async fn retirement_inventory_preserves_cross_tenant_fork_integrity() {
         return;
     }
 
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let source = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let definition = yorishiro::data::templates::get_template("general-notes").unwrap();
@@ -309,7 +303,7 @@ async fn retirement_inventory_preserves_cross_tenant_fork_integrity() {
             .unwrap();
         assert_eq!(inventory.external_workspace_forks, 0);
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", source.api_key))
             .await
             .assert_status(axum::http::StatusCode::OK);
@@ -320,7 +314,7 @@ async fn retirement_inventory_preserves_cross_tenant_fork_integrity() {
 #[tokio::test]
 async fn retirement_inventory_is_read_only_and_target_specific() {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    use yorishiro::models::_entities::{api_keys, workspace_workspaces};
+    use yorishiro::models::_entities::{access_keys, workspace_workspaces};
     boot_request::<App, _, _>(|request, ctx| async move {
         let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let before = retirement::inventory(&ctx.db, tenant.tenant_id)
@@ -331,15 +325,15 @@ async fn retirement_inventory_is_read_only_and_target_specific() {
             .await
             .unwrap()
             .unwrap();
-        let keys_before = api_keys::Entity::find()
-            .filter(api_keys::Column::WorkspaceId.eq(tenant.workspace_id))
+        let keys_before = access_keys::Entity::find()
+            .filter(access_keys::Column::TenantId.eq(tenant.tenant_id))
             .all(&ctx.db)
             .await
             .unwrap();
         assert_eq!(before.tenant_id, tenant.tenant_id);
         assert!(before.workspace_ids.contains(&tenant.workspace_id));
         assert!(before.memberships > 0);
-        assert!(before.api_keys > 0);
+        assert!(before.access_keys > 0);
         assert_eq!(
             before.identity_policy,
             "retain_root_accounts_delete_tenant_users"
@@ -364,8 +358,8 @@ async fn retirement_inventory_is_read_only_and_target_specific() {
                 .unwrap(),
             workspace_before
         );
-        let keys_after = api_keys::Entity::find()
-            .filter(api_keys::Column::WorkspaceId.eq(tenant.workspace_id))
+        let keys_after = access_keys::Entity::find()
+            .filter(access_keys::Column::TenantId.eq(tenant.tenant_id))
             .all(&ctx.db)
             .await
             .unwrap();
@@ -375,7 +369,7 @@ async fn retirement_inventory_is_read_only_and_target_specific() {
         );
         assert_eq!(
             request
-                .get("/api/whoami")
+                .get("/api/caller-identity")
                 .add_header("Authorization", format!("Bearer {}", tenant.api_key))
                 .await
                 .status_code(),

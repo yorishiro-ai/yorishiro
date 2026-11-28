@@ -20,14 +20,6 @@ pub(crate) fn database_instant(instant: DateTime<Utc>) -> DateTime<chrono::Fixed
     instant.into()
 }
 
-/// Formats an instant in SQLite's offset-bearing timestamp text shape for the configured zone.
-#[must_use]
-pub(crate) fn sqlite_timestamp<T: chrono::TimeZone>(instant: &DateTime<T>, timezone: Tz) -> String {
-    instant
-        .with_timezone(&timezone)
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
-}
-
 /// Parses a configured IANA timezone name.
 ///
 /// # Errors

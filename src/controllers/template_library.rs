@@ -9,14 +9,12 @@ use uuid::Uuid;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext;
 use crate::controllers::openapi::Routes;
+use crate::dtos::common::TemplateIdPath;
 use crate::dtos::template_library::{
     CreateTemplateRequest, ForkTemplateRequest, UpdateTemplateRequest,
 };
 use crate::models::template_templates::{self, TemplateRecord};
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn list_templates(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -26,21 +24,15 @@ async fn list_templates(
     Ok(Json(templates))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn get_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(TemplateIdPath { template_id }): Path<TemplateIdPath<Uuid>>,
 ) -> Result<Json<TemplateRecord>, ApiError> {
-    let template = template_templates::get_as(&ctx.db, &auth, id).await?;
+    let template = template_templates::get_as(&ctx.db, &auth, template_id).await?;
     Ok(Json(template))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn create_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
@@ -50,38 +42,32 @@ async fn create_template(
     Ok(Created(template))
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn update_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(TemplateIdPath { template_id }): Path<TemplateIdPath<Uuid>>,
     Json(body): Json<UpdateTemplateRequest>,
 ) -> Result<Json<TemplateRecord>, ApiError> {
-    let template = template_templates::update_as(&ctx.db, &auth, id, body.into()).await?;
+    let template = template_templates::update_as(&ctx.db, &auth, template_id, body.into()).await?;
     Ok(Json(template))
 }
 
 pub(crate) async fn delete_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(TemplateIdPath { template_id }): Path<TemplateIdPath<Uuid>>,
 ) -> Result<axum::response::NoContent, ApiError> {
-    template_templates::delete_as(&ctx.db, &auth, id).await?;
+    template_templates::delete_as(&ctx.db, &auth, template_id).await?;
     Ok(axum::response::NoContent)
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
 async fn fork_template(
     State(ctx): State<AppContext>,
     AuthContext(auth): AuthContext,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(TemplateIdPath { template_id }): Path<TemplateIdPath<Uuid>>,
     Json(body): Json<ForkTemplateRequest>,
 ) -> Result<impl aide::axum::IntoApiResponse, ApiError> {
-    let template = template_templates::fork_as(&ctx.db, &auth, id, body.name).await?;
+    let template = template_templates::fork_as(&ctx.db, &auth, template_id, body.name).await?;
     Ok(Created(template))
 }
 
@@ -91,56 +77,30 @@ pub fn routes() -> Routes {
         .prefix("api/template-library")
         .add(
             "/",
-            aide::axum::routing::get_with(list_templates, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["template_library_list"]),
-                ))
-            }),
+            aide::axum::routing::get_with(list_templates, |op| op.id("ListTemplateLibraryItems")),
         )
         .add(
             "/",
             aide::axum::routing::post_with(create_template, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["template_library_create"]),
-                ))
+                op.id("CreateTemplateLibraryItem")
             }),
         )
         .add(
-            "/{id}",
-            aide::axum::routing::get_with(get_template, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["template_library_get"]),
-                ))
-            }),
+            "/{template_id}",
+            aide::axum::routing::get_with(get_template, |op| op.id("GetTemplateLibraryItem")),
         )
         .add(
-            "/{id}",
-            aide::axum::routing::put_with(update_template, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["template_library_update"]),
-                ))
-            }),
+            "/{template_id}",
+            aide::axum::routing::put_with(update_template, |op| op.id("UpdateTemplateLibraryItem")),
         )
         .add(
-            "/{id}",
+            "/{template_id}",
             aide::axum::routing::delete_with(delete_template, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["template_library_delete"]),
-                ))
+                op.id("DeleteTemplateLibraryItem")
             }),
         )
         .add(
-            "/{id}/fork",
-            aide::axum::routing::post_with(fork_template, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["template_library_fork"]),
-                ))
-            }),
+            "/{template_id}/fork",
+            aide::axum::routing::post_with(fork_template, |op| op.id("ForkTemplateLibraryItem")),
         )
 }

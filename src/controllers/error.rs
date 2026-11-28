@@ -15,6 +15,7 @@ impl From<YorishiroError> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        crate::controllers::middleware::access_log::failed(&self.0);
         let (status, body) = self.0.into_http_parts();
         (status, Json(body)).into_response()
     }
@@ -35,48 +36,43 @@ impl aide::OperationOutput for ApiError {
     }
 }
 
-/// `201 Created` with a JSON body.
-pub struct Created<T>(pub T);
+/// A JSON body with a fixed success status, in the response and in the `OpenAPI` document.
+macro_rules! json_with_status {
+    ($(#[$doc:meta])* $name:ident, $status:ident, $code:literal) => {
+        $(#[$doc])*
+        pub struct $name<T>(pub T);
 
-impl<T: serde::Serialize> IntoResponse for Created<T> {
-    fn into_response(self) -> Response {
-        (axum::http::StatusCode::CREATED, Json(self.0)).into_response()
-    }
+        impl<T: serde::Serialize> IntoResponse for $name<T> {
+            fn into_response(self) -> Response {
+                (axum::http::StatusCode::$status, Json(self.0)).into_response()
+            }
+        }
+
+        impl<T: schemars::JsonSchema> aide::OperationOutput for $name<T> {
+            type Inner = T;
+
+            fn inferred_responses(
+                ctx: &mut aide::generate::GenContext,
+                operation: &mut aide::openapi::Operation,
+            ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
+                <Json<T> as aide::OperationOutput>::operation_response(ctx, operation)
+                    .into_iter()
+                    .map(|response| (Some(aide::openapi::StatusCode::Code($code)), response))
+                    .collect()
+            }
+        }
+    };
 }
 
-impl<T: schemars::JsonSchema> aide::OperationOutput for Created<T> {
-    type Inner = T;
-
-    fn inferred_responses(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
-        <Json<T> as aide::OperationOutput>::operation_response(ctx, operation)
-            .into_iter()
-            .map(|response| (Some(aide::openapi::StatusCode::Code(201)), response))
-            .collect()
-    }
-}
-
-/// `202 Accepted` with a JSON body.
-pub struct Accepted<T>(pub T);
-
-impl<T: serde::Serialize> IntoResponse for Accepted<T> {
-    fn into_response(self) -> Response {
-        (axum::http::StatusCode::ACCEPTED, Json(self.0)).into_response()
-    }
-}
-
-impl<T: schemars::JsonSchema> aide::OperationOutput for Accepted<T> {
-    type Inner = T;
-
-    fn inferred_responses(
-        ctx: &mut aide::generate::GenContext,
-        operation: &mut aide::openapi::Operation,
-    ) -> Vec<(Option<aide::openapi::StatusCode>, aide::openapi::Response)> {
-        <Json<T> as aide::OperationOutput>::operation_response(ctx, operation)
-            .into_iter()
-            .map(|response| (Some(aide::openapi::StatusCode::Code(202)), response))
-            .collect()
-    }
-}
+json_with_status!(
+    /// `201 Created` with a JSON body.
+    Created,
+    CREATED,
+    201
+);
+json_with_status!(
+    /// `202 Accepted` with a JSON body.
+    Accepted,
+    ACCEPTED,
+    202
+);

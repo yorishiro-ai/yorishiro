@@ -64,13 +64,13 @@ pub mod edition {
     }
 
     pub(crate) async fn workspace_embedding_provider(
-        conn: &sea_orm::DatabaseConnection,
+        ctx: &AppContext,
         workspace_id: uuid::Uuid,
     ) -> std::result::Result<
         Option<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>,
         crate::YorishiroError,
     > {
-        active::workspace_embedding_provider(conn, workspace_id).await
+        active::workspace_embedding_provider(ctx, workspace_id).await
     }
 
     pub(crate) async fn workspace_embedding_metadata(
@@ -81,13 +81,6 @@ pub mod edition {
         crate::YorishiroError,
     > {
         active::workspace_embedding_metadata(conn, workspace_id).await
-    }
-
-    pub(crate) async fn run_reindex_schedule_override(
-        ctx: &AppContext,
-        tick: chrono::DateTime<chrono::Utc>,
-    ) -> Result<bool> {
-        active::run_reindex_schedule_override(ctx, tick).await
     }
 
     #[async_trait]
@@ -122,8 +115,10 @@ pub mod edition {
         }
 
         async fn after_context(ctx: AppContext) -> Result<AppContext> {
-            let ctx = base::after_context(ctx).await?;
+            let mut ctx = base::after_context(ctx).await?;
             active::compose_context(&ctx)?;
+            let schedule = active::reindex_schedule(&ctx)?;
+            crate::tasks::reindex_scheduler::configure(&mut ctx.config, schedule.as_deref());
             let settings = crate::data::settings::configured(&ctx)?;
             let cap = active::tenant_creation_cap(settings.max_tenants, &ctx);
             ctx.shared_store
@@ -208,7 +203,7 @@ pub mod edition {
             reason = "edition contributions share an async provider lookup contract"
         )]
         pub(super) async fn workspace_embedding_provider(
-            _conn: &sea_orm::DatabaseConnection,
+            _ctx: &AppContext,
             _workspace_id: uuid::Uuid,
         ) -> std::result::Result<
             Option<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>,
@@ -232,14 +227,11 @@ pub mod edition {
         }
 
         #[expect(
-            clippy::unused_async,
-            reason = "edition contributions share an async schedule override contract"
+            clippy::unnecessary_wraps,
+            reason = "the overlay validates its schedule configuration"
         )]
-        pub(super) async fn run_reindex_schedule_override(
-            _ctx: &AppContext,
-            _tick: chrono::DateTime<chrono::Utc>,
-        ) -> Result<bool> {
-            Ok(false)
+        pub(super) const fn reindex_schedule(_ctx: &AppContext) -> Result<Option<String>> {
+            Ok(None)
         }
 
         #[expect(
@@ -254,12 +246,13 @@ pub mod edition {
             configured: i32,
             _ctx: &AppContext,
         ) -> impl Fn() -> Option<i32> + Send + Sync + 'static {
-            if configured != 1 {
+            use crate::data::tenant_policy::DEFAULT_TENANT_CAP;
+            if configured != DEFAULT_TENANT_CAP {
                 tracing::warn!(
                     "YORISHIRO_MAX_TENANTS is ignored in Community Edition; enforcing one tenant"
                 );
             }
-            || Some(1)
+            || Some(DEFAULT_TENANT_CAP)
         }
 
         pub(super) const fn workers(registry: WorkerRegistry) -> WorkerRegistry {
@@ -286,7 +279,7 @@ pub mod workers;
 
 pub use edition::App;
 pub(crate) use edition::{
-    quota_override, run_reindex_schedule_override, workspace_embedding_metadata,
-    workspace_embedding_provider, workspace_worker_class,
+    quota_override, workspace_embedding_metadata, workspace_embedding_provider,
+    workspace_worker_class,
 };
 pub use error::YorishiroError;

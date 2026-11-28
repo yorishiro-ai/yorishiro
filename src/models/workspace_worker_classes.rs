@@ -11,7 +11,8 @@ impl ActiveModelBehavior for ActiveModel {
         C: ConnectionTrait,
     {
         let mut this = self;
-        this.updated_at = crate::db::stamped_updated_at(insert, this.updated_at);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        this.updated_at = crate::db::stamped_updated_at(this.updated_at);
         Ok(this)
     }
 }

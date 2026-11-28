@@ -29,7 +29,6 @@ async fn up_templates(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .create_table(
             Table::create()
                 .table(Alias::new("template_templates"))
-                .if_not_exists()
                 .col(helpers::uuidv7_pk(manager))
                 .col(
                     helpers::json_col(manager, Alias::new("tags"))
@@ -118,7 +117,6 @@ async fn up_template_catalog(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .create_table(
             Table::create()
                 .table(Alias::new("template_versions"))
-                .if_not_exists()
                 .col(helpers::uuidv7_pk(manager))
                 .col(helpers::uuid_col(manager, Alias::new("template_id")).not_null())
                 .col(ColumnDef::new(Alias::new("version")).integer().not_null())
@@ -173,7 +171,6 @@ async fn up_template_catalog(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .create_table(
             Table::create()
                 .table(Alias::new("template_reviews"))
-                .if_not_exists()
                 .col(helpers::uuidv7_pk(manager))
                 .col(helpers::uuid_col(manager, Alias::new("template_id")).not_null())
                 .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
@@ -185,11 +182,7 @@ async fn up_template_catalog(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                 .col(ColumnDef::new(Alias::new("comment")).text())
                 .col(helpers::uuid_col(manager, Alias::new("created_by")))
                 .col(helpers::created_at(manager))
-                .col(
-                    helpers::ts_tz_col(manager, Alias::new("updated_at"))
-                        .not_null()
-                        .default(Expr::current_timestamp()),
-                )
+                .col(helpers::ts_tz_col(manager, Alias::new("updated_at")).not_null())
                 .check(Expr::cust("rating BETWEEN 1 AND 5"))
                 .index(
                     Index::create()

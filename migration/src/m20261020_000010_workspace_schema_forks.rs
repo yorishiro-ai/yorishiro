@@ -29,7 +29,6 @@ async fn up_workspace_schema_forks(manager: &SchemaManager<'_>) -> Result<(), Db
     let [created_at, updated_at] = helpers::timestamps(manager);
     let table = Table::create()
         .table(Alias::new("workspace_schema_forks"))
-        .if_not_exists()
         .col(helpers::uuidv7_pk(manager))
         .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
         .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())

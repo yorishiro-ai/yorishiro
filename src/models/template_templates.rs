@@ -1,8 +1,9 @@
 //! CRUD for `template_templates`, the user-contributed schema template library.
 //!
-//! Distinct from `crate::data::templates` (the built-in templates shipped with the binary and served from memory): these are tenant-scoped, DB-backed templates that a tenant's members create and manage.
-//! Runs on `ctx.db` (the migration-role connection): `template_templates` has no RLS of its own, so every function here takes a `tenant_id` and filters/checks visibility explicitly.
+//! These are tenant-scoped, DB-backed templates, unlike the built-ins in `crate::data::templates`.
+//! They run on `ctx.db`, and `template_templates` has no RLS, so every function takes a `tenant_id` and checks visibility explicitly.
 
+use crate::error::OptionExt;
 pub use crate::models::_entities::template_templates::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, Condition, DatabaseTransaction, QueryOrder, QuerySelect};
@@ -15,13 +16,14 @@ use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(self, db: &C, insert: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
         let mut this = self;
-        this.id = crate::db::sqlite_generated_id(db, this.id);
-        this.updated_at = crate::db::stamped_updated_at(insert, this.updated_at);
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        this.updated_at = crate::db::stamped_updated_at(this.updated_at);
         Ok(this)
     }
 }
@@ -29,6 +31,7 @@ impl ActiveModelBehavior for ActiveModel {
 /// A row from the tenant's DB-backed template library, with `definition` parsed.
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct TemplateRecord {
+    #[serde(rename = "template_id")]
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,
@@ -154,16 +157,15 @@ pub async fn get_template(
         .await
         .internal()?;
 
-    row.ok_or_else(|| YorishiroError::not_found(format!("template '{template_id}' was not found")))?
+    row.or_not_found(format!("template '{template_id}' was not found"))?
         .try_into()
 }
 
 /// Resolves a `template_id` as either a library template or a built-in, and says which.
 ///
-/// A UUID can only mean the library; anything else can only mean a built-in.
-/// Parsing decides which, so neither lookup runs against an id that could not name it, and a library miss reports the library's own not-found rather than the built-in one.
+/// A UUID names a library template and anything else names a built-in.
 ///
-/// The returned id is the origin to record: `Some` for a library template, whose later edits the schema can then be told about, and `None` for a built-in, which has no row to point at.
+/// The returned id is the origin to record: `Some` for a library template, and `None` for a built-in, which has no row to point at.
 pub(crate) async fn resolve_template_definition(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -235,16 +237,33 @@ pub(crate) async fn create_template(
     row.try_into()
 }
 
+pub(crate) async fn authorize_builtin(
+    db: &DatabaseConnection,
+    actor: &crate::models::access_keys::AuthContext,
+    action: crate::models::iam::policy::Action,
+) -> Result<(), YorishiroError> {
+    let txn = crate::db::begin_write(db).await.internal()?;
+    crate::models::iam::access::require_iam_action(
+        &txn,
+        actor,
+        action,
+        crate::models::iam::policy::Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await
+}
+
 pub(crate) async fn list_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<TemplateRecord>, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryList,
+        crate::models::iam::policy::Action::ListTemplateLibraryItems,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -255,14 +274,14 @@ pub(crate) async fn list_as(
 
 pub(crate) async fn get_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryGet,
+        crate::models::iam::policy::Action::GetTemplateLibraryItem,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -273,14 +292,14 @@ pub(crate) async fn get_as(
 
 pub(crate) async fn create_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     input: CreateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryCreate,
+        crate::models::iam::policy::Action::CreateTemplateLibraryItem,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -295,7 +314,7 @@ pub(crate) async fn create_as(
 /// Rejects stale or unauthorized credentials and propagates validation and persistence errors.
 pub async fn update_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     template_id: Uuid,
     input: UpdateTemplateInput,
 ) -> Result<TemplateRecord, YorishiroError> {
@@ -303,7 +322,7 @@ pub async fn update_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryUpdate,
+        crate::models::iam::policy::Action::UpdateTemplateLibraryItem,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -316,14 +335,14 @@ pub async fn update_as(
 
 pub(crate) async fn delete_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     template_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryDelete,
+        crate::models::iam::policy::Action::DeleteTemplateLibraryItem,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -335,7 +354,7 @@ pub(crate) async fn delete_as(
 
 pub(crate) async fn fork_as(
     db: &DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     source_template_id: Uuid,
     name: String,
 ) -> Result<TemplateRecord, YorishiroError> {
@@ -343,7 +362,7 @@ pub(crate) async fn fork_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TemplateLibraryFork,
+        crate::models::iam::policy::Action::ForkTemplateLibraryItem,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -399,7 +418,6 @@ pub async fn update_template(
             YorishiroError::not_found(format!("template '{template_id}' was not found"))
         })?;
 
-    // Track whether definition changed before the update moves input.definition.
     let definition_changed = input.definition.is_some();
 
     let mut active: ActiveModel = existing.into();
@@ -419,10 +437,13 @@ pub async fn update_template(
         active.locale = ActiveValue::Set(Some(locale));
     }
 
-    let record = active.update(conn).await.internal()?.try_into()?;
+    let record = active
+        .update(conn)
+        .await
+        .map_err(|error| YorishiroError::not_found_on_missing(error, "template was not found"))?
+        .try_into()?;
 
-    // If the definition changed, stamp origin_updated_at=NULL on every linked schema
-    // following this template so the workspace knows there is an upstream update available.
+    // Following schemas learn of the upstream edit through a pending origin mark.
     if definition_changed {
         schema_schemas::notify_upstream_change(conn, template_id).await?;
     }
@@ -437,6 +458,20 @@ pub(crate) async fn delete_template(
     tenant_id: Uuid,
     template_id: Uuid,
 ) -> Result<(), YorishiroError> {
+    let owned = Entity::find()
+        .filter(Column::Id.eq(template_id))
+        .filter(Column::TenantId.eq(tenant_id))
+        .count(conn)
+        .await
+        .internal()?
+        > 0;
+    if owned {
+        schema_schemas::detach_origins(
+            conn,
+            crate::models::_entities::schema_schemas::Column::OriginTemplateId.eq(template_id),
+        )
+        .await?;
+    }
     let result = Entity::delete_many()
         .filter(Column::Id.eq(template_id))
         .filter(Column::TenantId.eq(tenant_id))

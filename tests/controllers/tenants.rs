@@ -2,9 +2,7 @@
 
 use axum::http::StatusCode;
 use serde_json::{Value, json};
-use yorishiro::App;
 
-use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
 
 #[tokio::test]
@@ -13,8 +11,7 @@ async fn owner_can_inspect_and_confirm_disablement_without_deleting_data() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let target = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let target_admin =
             crate::requests::fixtures::issue_tenant_key(&ctx, target.tenant_id, target.owner_id)
@@ -70,13 +67,13 @@ async fn owner_can_inspect_and_confirm_disablement_without_deleting_data() {
             yorishiro::models::tenant_tenants::retirement::inventory(&ctx.db, target.tenant_id)
                 .await
                 .unwrap();
-        assert_eq!(after.api_keys, 0);
+        assert_eq!(after.access_keys, 0);
         assert_eq!(
             serde_json::to_value(after.workspace_ids).unwrap(),
             before["workspace_ids"]
         );
         request
-            .get("/api/whoami")
+            .get("/api/caller-identity")
             .add_header("Authorization", format!("Bearer {}", other.api_key))
             .await
             .assert_status(StatusCode::OK);

@@ -78,8 +78,7 @@ pub(crate) fn initializers() -> Vec<Box<dyn Initializer>> {
 ///
 /// An edition that brings its own rule for a seam inserts its own `Arc<dyn Trait>` afterwards: the store is keyed by `TypeId`, so the later insert wins without changing any call site.
 pub(crate) async fn after_context(ctx: AppContext) -> Result<AppContext> {
-    let mut ctx = ctx;
-    initializers::database::install(&mut ctx).await?;
+    initializers::database::install(&ctx).await?;
     let ctx = install_services(ctx)?;
     initializers::queue::install(&ctx);
     Ok(ctx)
@@ -90,7 +89,8 @@ pub(crate) async fn after_context(ctx: AppContext) -> Result<AppContext> {
 /// An edition mounts its own route groups after the base ones, so it adds paths rather than replacing any.
 pub(crate) struct RouteMounts {
     app_routes: AppRoutes,
-    api: aide::openapi::OpenApi,
+    api: aide::axum::ApiRouter<AppContext>,
+    action_paths: Vec<(String, String)>,
     credential_paths: Vec<&'static str>,
 }
 
@@ -103,7 +103,8 @@ impl RouteMounts {
     pub(crate) fn community() -> Self {
         let mut mounts = Self {
             app_routes: AppRoutes::with_default_routes(),
-            api: aide::openapi::OpenApi::default(),
+            api: aide::axum::ApiRouter::new(),
+            action_paths: Vec::new(),
             credential_paths: Vec::new(),
         };
         mounts
@@ -111,15 +112,15 @@ impl RouteMounts {
             .guard_credentials("/auth/root/login")
             .guard_credentials("/auth/tenant/login");
 
-        mounts.mount(controllers::audit_log::routes());
-        mounts.mount(controllers::api_keys::routes());
+        mounts.mount(controllers::access_keys::routes());
         mounts.mount(controllers::auth::routes());
         mounts.mount(controllers::entities::routes());
         mounts.mount(controllers::entities::migration_routes());
         mounts.mount(controllers::export::routes());
         mounts.mount(controllers::import::routes());
         mounts.mount(controllers::iam::routes());
-        mounts.mount(controllers::members::routes());
+        mounts.mount(controllers::groups::routes());
+        mounts.mount(controllers::policies::routes());
         mounts.mount(controllers::tenants::routes());
         mounts.mount(controllers::relations::routes());
         mounts.mount(controllers::schemas::routes());
@@ -127,7 +128,7 @@ impl RouteMounts {
         mounts.mount(controllers::search::routes());
         mounts.mount(controllers::setup::routes());
         mounts.mount(controllers::template_library::routes());
-        mounts.mount(controllers::whoami::routes());
+        mounts.mount(controllers::caller_identity::routes());
         mounts.mount(controllers::users::routes());
         mounts.mount(controllers::workspaces::routes());
         mounts
@@ -136,9 +137,13 @@ impl RouteMounts {
     /// Registers a route group with Loco and merges its generated operations into the document.
     pub(crate) fn mount(&mut self, routes: controllers::openapi::Routes) -> &mut Self {
         let controllers::openapi::Routes {
-            loco: routes, api, ..
+            loco: routes,
+            api,
+            action_paths,
+            ..
         } = routes;
-        controllers::openapi::merge_api(&mut self.api, api);
+        self.api = std::mem::replace(&mut self.api, aide::axum::ApiRouter::new()).merge(api);
+        self.action_paths.extend(action_paths);
         let current = std::mem::replace(&mut self.app_routes, AppRoutes::empty());
         self.app_routes = current.add_route(routes);
         self
@@ -151,9 +156,15 @@ impl RouteMounts {
     }
 
     /// Publishes the document and credential paths to the shared store, and returns the route tree.
-    pub(crate) fn finish(mut self, ctx: &AppContext) -> AppRoutes {
-        controllers::openapi::assert_unique_operation_ids(&mut self.api);
-        ctx.shared_store.insert(self.api);
+    pub(crate) fn finish(self, ctx: &AppContext) -> AppRoutes {
+        let mut api = aide::openapi::OpenApi::default();
+        let _ = self.api.finish_api_with(&mut api, |mut transform| {
+            let api = transform.inner_mut();
+            controllers::openapi::document_action_paths(api, self.action_paths);
+            controllers::openapi::finalize_operation_ids(api);
+            controllers::openapi::swagger::describe(transform)
+        });
+        ctx.shared_store.insert(api);
         ctx.shared_store
             .insert(CredentialPaths(self.credential_paths));
         self.app_routes
@@ -163,12 +174,8 @@ impl RouteMounts {
 /// Mounts the MCP server under `/mcp` and the swagger docs.
 ///
 /// Rate limiting and the maintenance guard are layered here because `/mcp` is mounted here: `Hooks::routes` layers would not cover it.
-/// The `server.middlewares:` config block is used only for Loco's built-in middleware (`request_id`, `logger`, and shared REST/MCP CORS).
 ///
-/// `rmcp`'s `StreamableHttpService` is a plain `tower::Service`, not
-/// something `Hooks::routes()`/`AppRoutes` can carry, so it's mounted here
-/// instead: this hook runs after Loco's own routes are built, which is where
-/// Loco itself says custom Axum logic belongs.
+/// `rmcp`'s `StreamableHttpService` is a plain `tower::Service` that `Hooks::routes()` cannot carry, so it is mounted in this hook, which runs after Loco's own routes are built.
 pub(crate) fn after_routes(
     router: axum::Router,
     ctx: &AppContext,
@@ -178,7 +185,7 @@ pub(crate) fn after_routes(
         .shared_store
         .get::<aide::openapi::OpenApi>()
         .ok_or_else(|| loco_rs::Error::Message("OpenAPI document missing".into()))?;
-    let router = controllers::openapi::swagger::mount(router, &api);
+    let router = controllers::openapi::swagger::mount(router, api);
     let router = controllers::mcp::mount(router, ctx, move |ctx| tools.server(ctx));
     let credential_paths = ctx
         .shared_store
@@ -202,39 +209,23 @@ pub(crate) fn after_routes(
         controllers::middleware::maintenance::maintenance_guard,
     ));
     let settings = ctx.config.settings::<crate::data::settings::Settings>()?;
-    if settings.http_allowed_networks.is_empty() {
-        return Ok(router);
-    }
-    Ok(router.layer(axum::middleware::from_fn_with_state(
-        std::sync::Arc::<[ipnet::IpNet]>::from(settings.http_allowed_networks),
-        controllers::middleware::client_network::require_allowed_network,
-    )))
+    let router = if settings.http_allowed_networks.is_empty() {
+        router
+    } else {
+        router.layer(axum::middleware::from_fn_with_state(
+            std::sync::Arc::<[ipnet::IpNet]>::from(settings.http_allowed_networks),
+            controllers::middleware::client_network::require_allowed_network,
+        ))
+    };
+    Ok(controllers::middleware::access_log::layer(router, ctx))
 }
 
-/// Enables Loco's built-in middleware stack (`request_id`, `logger`, etc.).
-/// Custom middleware (rate limiter, maintenance guard) stays in `after_routes` so it also covers the `/mcp` mount.
+/// Keeps REST-only middleware in Loco's stack.
 pub(crate) fn middlewares(
     ctx: &AppContext,
 ) -> Vec<Box<dyn loco_rs::controller::middleware::MiddlewareLayer>> {
-    use loco_rs::controller::middleware::MiddlewareStackExt;
-
-    let logger_config = ctx
-        .config
-        .server
-        .middlewares
-        .logger
-        .clone()
-        .unwrap_or(loco_rs::controller::middleware::logger::Config { enable: true });
     let mut stack = loco_rs::controller::middleware::default_middleware_stack(ctx);
-    // Apply CORS after mounting MCP so REST and MCP share the same layer.
-    stack.retain(|middleware| middleware.name() != "cors");
-    stack.replace(
-        "logger",
-        Box::new(controllers::middleware::access_log::Middleware::new(
-            &logger_config,
-            &ctx.environment,
-        )),
-    );
+    stack.retain(|middleware| !matches!(middleware.name(), "cors" | "logger" | "request_id"));
     stack
 }
 
@@ -264,19 +255,35 @@ pub(crate) async fn connect_workers(
 }
 
 pub(crate) fn register_tasks(tasks: &mut Tasks) {
-    tasks.register(tasks::inspect_tenant_retirement::InspectTenantRetirement);
-    tasks.register(tasks::disable_tenant::DisableTenant);
-    tasks.register(tasks::delete_tenant::DeleteTenant);
-    tasks.register(tasks::delete_due_tenants::DeleteDueTenants);
-    tasks.register(tasks::reset_root_password::ResetRootPassword);
+    use tasks::Audited;
+    tasks.register(
+        Audited::operator(tasks::inspect_tenant_retirement::InspectTenantRetirement).reading(),
+    );
+    tasks.register(Audited::operator(tasks::disable_tenant::DisableTenant));
+    tasks.register(Audited::operator(tasks::delete_tenant::DeleteTenant));
+    tasks.register(Audited::service(
+        tasks::delete_due_tenants::DeleteDueTenants,
+    ));
+    tasks.register(Audited::service(
+        tasks::purge_audit_events::PurgeAuditEvents,
+    ));
+    tasks.register(Audited::operator(
+        tasks::reset_root_password::ResetRootPassword,
+    ));
     // tasks-inject
-    tasks.register(tasks::delete_user::DeleteUser);
-    tasks.register(tasks::resync_embeddings::ResyncEmbeddings);
-    tasks.register(tasks::embedding_index_maintenance::EmbeddingIndexMaintenance);
-    tasks.register(tasks::maintenance::Maintenance);
-    tasks.register(tasks::maintenance_status::MaintenanceStatus);
-    tasks.register(tasks::recover_worker_dispatches::RecoverWorkerDispatches);
-    tasks.register(tasks::tenant_reindex_scheduler::TenantReindexScheduler);
+    tasks.register(Audited::operator(tasks::delete_user::DeleteUser));
+    tasks.register(Audited::operator(
+        tasks::resync_embeddings::ResyncEmbeddings,
+    ));
+    tasks.register(Audited::service(
+        tasks::embedding_index_maintenance::EmbeddingIndexMaintenance,
+    ));
+    tasks.register(Audited::operator(tasks::maintenance::Maintenance));
+    tasks.register(Audited::operator(tasks::maintenance_status::MaintenanceStatus).reading());
+    tasks.register(Audited::service(
+        tasks::recover_worker_dispatches::RecoverWorkerDispatches,
+    ));
+    tasks.register(Audited::service(tasks::reindex_scheduler::ReindexScheduler));
     tasks.register(tasks::db_load_guard::DbLoadGuard);
 }
 

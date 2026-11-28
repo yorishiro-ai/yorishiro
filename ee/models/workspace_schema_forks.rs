@@ -1,5 +1,6 @@
 //! Workspace-owned schema fork metadata and immutable fork heads.
 
+use crate::error::OptionExt;
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Alias, Asterisk, Expr, Func, Query};
@@ -12,9 +13,7 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::schema_schemas;
-use crate::models::schema_schemas::metaschema::{
-    MetaSchemaDefinition, VersioningDiff, validate_definition,
-};
+use crate::models::schema_schemas::metaschema::{MetaSchemaDefinition, validate_definition};
 
 use crate::models::_entities::schema_schemas::Column as SchemaColumn;
 use crate::models::_entities::workspace_schema_fork_heads as fork_heads;
@@ -22,7 +21,7 @@ pub use crate::models::_entities::workspace_schema_forks::{ActiveModel, Column, 
 
 pub(crate) async fn workspace_for_actor(
     db: &impl ConnectionTrait,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
     if let Some(workspace_id) = actor.workspace_id {
@@ -32,17 +31,17 @@ pub(crate) async fn workspace_for_actor(
         .one(db)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("schema fork was not found"))?;
+        .or_not_found("schema fork was not found")?;
     crate::models::iam::access::check_workspace_target(db, actor, fork.workspace_id).await
 }
 
 pub(crate) async fn list_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<ForkRecord>, YorishiroError> {
     use crate::models::iam::{access::read_workspaces, policy::Action};
-    let workspaces = read_workspaces(&ctx.db, actor, Action::SchemaForkList).await?;
+    let workspaces = read_workspaces(&ctx.db, actor, Action::ListSchemaForks).await?;
     let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
     let rows = Entity::find()
         .filter(Column::TenantId.eq(actor.tenant_id))
@@ -64,6 +63,7 @@ pub(crate) async fn list_for_actor(
 
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 pub struct ForkRecord {
+    #[serde(rename = "fork_id")]
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,
@@ -228,7 +228,7 @@ async fn current_source<C: ConnectionTrait>(
 ) -> Result<schema_schemas::Model, YorishiroError> {
     let source = source_by_id(conn, tenant_id, source_workspace_id, source_schema_id)
         .await?
-        .ok_or_else(|| YorishiroError::not_found("source schema was not found"))?;
+        .or_not_found("source schema was not found")?;
     if source.status != schema_schemas::SchemaStatus::Active.as_db_str() {
         return Err(YorishiroError::ValidationFailed {
             message: "source_schema_id must name the active source schema".into(),
@@ -247,7 +247,7 @@ async fn latest_source<C: ConnectionTrait>(
 ) -> Result<schema_schemas::Model, YorishiroError> {
     latest_source_by_name(conn, tenant_id, source_workspace_id, source_schema_name)
         .await?
-        .ok_or_else(|| YorishiroError::not_found("source schema was not found"))
+        .or_not_found("source schema was not found")
 }
 
 async fn get_fork<C: ConnectionTrait>(
@@ -263,7 +263,7 @@ async fn get_fork<C: ConnectionTrait>(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("schema fork '{fork_id}' was not found")))
+        .or_not_found(format!("schema fork '{fork_id}' was not found"))
 }
 
 async fn next_version<C: ConnectionTrait>(
@@ -287,22 +287,18 @@ async fn insert_fork_head<C: ConnectionTrait>(
     tenant_id: Uuid,
     workspace_id: Uuid,
     definition: &MetaSchemaDefinition,
-) -> Result<(schema_schemas::Model, VersioningDiff), YorishiroError> {
+) -> Result<schema_schemas::Model, YorishiroError> {
     validate_definition(definition)?;
     let name = definition.name.clone();
     schema_schemas::lock_version(conn, workspace_id, &name).await?;
     let version = next_version(conn, workspace_id, &name).await?;
-    let diff = VersioningDiff {
-        is_breaking: false,
-        reasons: Vec::new(),
-    };
-    let row = schema_schemas::ActiveModel {
+    schema_schemas::ActiveModel {
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(workspace_id),
         name: ActiveValue::Set(name),
         version: ActiveValue::Set(version),
         definition: ActiveValue::Set(serde_json::to_value(definition).internal()?),
-        status: ActiveValue::Set("archived".into()),
+        status: ActiveValue::Set(schema_schemas::SchemaStatus::Archived.as_db_str().into()),
         origin_template_id: ActiveValue::Set(None),
         origin_status: ActiveValue::Set(
             schema_schemas::SchemaOriginStatus::Detached
@@ -315,8 +311,7 @@ async fn insert_fork_head<C: ConnectionTrait>(
     }
     .insert(conn)
     .await
-    .internal()?;
-    Ok((row, diff))
+    .internal()
 }
 
 async fn to_record<C: ConnectionTrait>(conn: &C, row: Model) -> Result<ForkRecord, YorishiroError> {
@@ -324,7 +319,7 @@ async fn to_record<C: ConnectionTrait>(conn: &C, row: Model) -> Result<ForkRecor
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::Internal("fork head is missing".into()))?;
+        .or_internal("fork head is missing")?;
     let source_active = latest_source_by_name(
         conn,
         row.tenant_id,
@@ -351,28 +346,6 @@ async fn to_record<C: ConnectionTrait>(conn: &C, row: Model) -> Result<ForkRecor
         created_at: row.created_at.into(),
         updated_at: row.updated_at.into(),
     })
-}
-
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn list<C: ConnectionTrait>(
-    conn: &C,
-    tenant_id: Uuid,
-    workspace_id: Uuid,
-) -> Result<Vec<ForkRecord>, YorishiroError> {
-    let rows = Entity::find()
-        .filter(Column::TenantId.eq(tenant_id))
-        .filter(Column::WorkspaceId.eq(workspace_id))
-        .order_by_asc(Column::CreatedAt)
-        .all(conn)
-        .await
-        .internal()?;
-    let mut records = Vec::with_capacity(rows.len());
-    for row in rows {
-        records.push(to_record(conn, row).await?);
-    }
-    Ok(records)
 }
 
 ///
@@ -442,10 +415,9 @@ pub async fn create<C: ConnectionTrait>(
         workspace_id,
         &parse_definition(source.definition.clone())?,
     )
-    .await?
-    .0;
+    .await?;
     let row = ActiveModel {
-        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
+        id: crate::db::generated_id(ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(workspace_id),
         source_workspace_id: ActiveValue::Set(input.source_workspace_id),
@@ -463,7 +435,7 @@ pub async fn create<C: ConnectionTrait>(
         )
     })?;
     fork_heads::ActiveModel {
-        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
+        id: crate::db::generated_id(ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(workspace_id),
         fork_id: ActiveValue::Set(row.id),
@@ -544,9 +516,7 @@ pub async fn update<C: ConnectionTrait>(
         (parse_definition(source.definition.clone())?, Some(source))
     };
     let previous_head_id = fork.fork_schema_id;
-    let head = insert_fork_head(conn, tenant_id, workspace_id, &definition)
-        .await?
-        .0;
+    let head = insert_fork_head(conn, tenant_id, workspace_id, &definition).await?;
     let mut active: ActiveModel = fork.into();
     active.fork_schema_id = ActiveValue::Set(head.id);
     active.customized = ActiveValue::Set(source_update.is_none());
@@ -568,7 +538,7 @@ pub async fn update<C: ConnectionTrait>(
         });
     }
     fork_heads::ActiveModel {
-        id: crate::db::sqlite_generated_id(conn, ActiveValue::NotSet),
+        id: crate::db::generated_id(ActiveValue::NotSet),
         tenant_id: ActiveValue::Set(tenant_id),
         workspace_id: ActiveValue::Set(workspace_id),
         fork_id: ActiveValue::Set(fork_id),
@@ -626,7 +596,7 @@ pub async fn delete<C: ConnectionTrait>(
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn get_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     fork_id: Uuid,
 ) -> Result<ForkRecord, YorishiroError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
@@ -636,7 +606,7 @@ pub(crate) async fn get_for_actor(
         ctx,
         actor,
         target,
-        crate::models::iam::policy::Action::SchemaForkGet,
+        crate::models::iam::policy::Action::GetSchemaFork,
         async |session| {
             get(
                 session.txn(),
@@ -656,16 +626,16 @@ pub(crate) async fn get_for_actor(
 /// Returns the session, authorization or create error.
 pub(crate) async fn create_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     input: CreateInput,
 ) -> Result<ForkRecord, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::SchemaForkCreate,
+            crate::models::iam::policy::Action::CreateSchemaFork,
         ),
-        Some(crate::models::iam::policy::Action::SchemaForkCreate),
+        Some(crate::models::iam::policy::Action::CreateSchemaFork),
         async |session| {
             create(
                 session.txn(),
@@ -685,7 +655,7 @@ pub(crate) async fn create_for_actor(
 /// Returns the session, authorization or update error.
 pub(crate) async fn update_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     fork_id: Uuid,
     input: UpdateInput,
 ) -> Result<ForkRecord, YorishiroError> {
@@ -696,7 +666,7 @@ pub(crate) async fn update_for_actor(
         ctx,
         actor,
         target,
-        Some(crate::models::iam::policy::Action::SchemaForkUpdate),
+        Some(crate::models::iam::policy::Action::UpdateSchemaFork),
         async |session| {
             update(
                 session.txn(),
@@ -717,7 +687,7 @@ pub(crate) async fn update_for_actor(
 /// Returns the session, authorization or delete error.
 pub(crate) async fn delete_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     fork_id: Uuid,
 ) -> Result<(), YorishiroError> {
     let target = crate::models::iam::access::WorkspaceTarget::Workspace(
@@ -727,7 +697,7 @@ pub(crate) async fn delete_for_actor(
         ctx,
         actor,
         target,
-        Some(crate::models::iam::policy::Action::SchemaForkDelete),
+        Some(crate::models::iam::policy::Action::DeleteSchemaFork),
         async |session| {
             delete(
                 session.txn(),

@@ -1,12 +1,13 @@
 //! Snapshot restoration runs on the configured Loco queue, not the request task.
 
+use crate::error::OptionExt;
 use crate::models::iam::session::WorkspaceSession;
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker, prelude::async_trait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::{api_key_audit_log, api_keys::AuthContext, entity_entities};
+use crate::models::{access_keys::AuthContext, entity_entities, job_results};
 use crate::workers::{
     dispatch::{JobSpec, dispatch_job},
     embedding_sync::WorkerClass,
@@ -17,7 +18,7 @@ pub(crate) struct UndoArgs {
     lifecycle_id: Option<Uuid>,
     tenant_id: Uuid,
     workspace_id: Uuid,
-    api_key_id: Uuid,
+    access_key_id: Uuid,
     user_id: Option<Uuid>,
     snapshot_job_id: Uuid,
     worker_class: WorkerClass,
@@ -48,9 +49,7 @@ impl BackgroundWorker<UndoArgs> for UndoWorker {
 
 impl UndoWorker {
     async fn restore(&self, args: &UndoArgs) -> Result<(), YorishiroError> {
-        let id = args
-            .lifecycle_id
-            .ok_or_else(|| YorishiroError::Internal("undo lifecycle missing".into()))?;
+        let id = args.lifecycle_id.or_internal("undo lifecycle missing")?;
         // Hold control-plane permission stable until snapshot restoration commits.
         let authorization = crate::db::begin_authorization(&self.ctx.db)
             .await
@@ -61,11 +60,11 @@ impl UndoWorker {
         crate::db::lock_for_update(&txn, &format!("undo:{id}"))
             .await
             .internal()?;
-        if api_key_audit_log::job_completed(
+        if job_results::job_completed(
             &txn,
             args.workspace_id,
             id,
-            api_key_audit_log::AuditAction::UndoMigrationJob,
+            job_results::JobKind::UndoMigrationJob,
         )
         .await?
         {
@@ -77,11 +76,10 @@ impl UndoWorker {
             &AuthContext {
                 tenant_id: args.tenant_id,
                 workspace_id: Some(args.workspace_id),
-                api_key_id: args.api_key_id,
+                access_key_id: args.access_key_id,
                 user_id: args.user_id,
-                audit: false,
             },
-            crate::models::iam::policy::Action::MigrationUndo,
+            crate::models::iam::policy::Action::UndoMigrationJob,
             crate::models::iam::policy::Resource::Workspace {
                 tenant_id: args.tenant_id,
                 workspace_id: args.workspace_id,
@@ -90,15 +88,15 @@ impl UndoWorker {
         .await?;
         let report =
             entity_entities::undo_job(&txn, args.workspace_id, args.snapshot_job_id).await?;
-        api_key_audit_log::record(
+        job_results::record(
             &txn,
-            api_key_audit_log::AuditActor {
+            job_results::JobActor {
                 tenant_id: args.tenant_id,
                 workspace_id: args.workspace_id,
-                api_key_id: args.api_key_id,
+                access_key_id: args.access_key_id,
                 user_id: args.user_id,
             },
-            api_key_audit_log::AuditAction::UndoMigrationJob,
+            job_results::JobKind::UndoMigrationJob,
             serde_json::json!({"job_id": id, "snapshot_job_id": args.snapshot_job_id,
                 "restored": report.restored, "missing": report.missing}),
         )
@@ -140,7 +138,7 @@ pub(crate) async fn enqueue(
     crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         auth,
-        crate::models::iam::policy::Action::MigrationUndo,
+        crate::models::iam::policy::Action::UndoMigrationJob,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: auth.tenant_id,
             workspace_id: auth.require_workspace()?,
@@ -154,7 +152,7 @@ pub(crate) async fn enqueue(
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
         workspace_id: auth.require_workspace()?,
-        api_key_id: auth.api_key_id,
+        access_key_id: auth.access_key_id,
         user_id: auth.user_id,
         snapshot_job_id,
         worker_class,

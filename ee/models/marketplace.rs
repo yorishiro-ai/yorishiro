@@ -1,14 +1,15 @@
 //! The template marketplace: `template_templates`, `template_versions` and `template_reviews`.
 //!
-//! All three are created by the one schema migration in the root `migration` crate; this crate has never had a migration crate of its own, and the tables are base-owned even though only `ee/` reads them.
+//! The tables belong to the community schema migration even though only `ee/` reads them.
 //!
-//! Record shapes, input DTOs, and the reads live here.
-//! Write decisions live in the private `write` implementation module.
+//! Record shapes, input DTOs and reads live here.
+//! Write decisions live in the private `write` module.
 
 mod write;
 
 pub(crate) use write::{fork_template, publish_version, set_visibility, submit_review};
 
+use crate::error::OptionExt;
 use sea_orm::SelectExt;
 
 use crate::error::{ResultExt, YorishiroError};
@@ -24,7 +25,7 @@ use uuid::Uuid;
 
 async fn authorized_transaction(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     action: crate::models::iam::policy::Action,
 ) -> Result<sea_orm::DatabaseTransaction, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
@@ -42,13 +43,13 @@ async fn authorized_transaction(
 
 pub(crate) async fn list_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     page: ListParams,
 ) -> Result<Vec<MarketplaceListing>, YorishiroError> {
     let txn = authorized_transaction(
         db,
         actor,
-        crate::models::iam::policy::Action::MarketplaceList,
+        crate::models::iam::policy::Action::ListMarketplaceTemplates,
     )
     .await?;
     list_marketplace(&txn, page).await
@@ -56,29 +57,71 @@ pub(crate) async fn list_as(
 
 pub(crate) async fn versions_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
     let txn = authorized_transaction(
         db,
         actor,
-        crate::models::iam::policy::Action::MarketplaceVersionList,
+        crate::models::iam::policy::Action::ListMarketplaceVersions,
     )
     .await?;
     list_versions(&txn, actor.tenant_id, template_id, page).await
 }
 
+pub(crate) async fn get_template_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::access_keys::AuthContext,
+    template_id: Uuid,
+) -> Result<MarketplaceListing, YorishiroError> {
+    let txn = authorized_transaction(
+        db,
+        actor,
+        crate::models::iam::policy::Action::GetMarketplaceTemplate,
+    )
+    .await?;
+    marketplace_listings(&txn, Some(template_id), ListParams::default())
+        .await?
+        .pop()
+        .or_not_found("marketplace template was not found")
+}
+
+pub(crate) async fn get_version_as(
+    db: &sea_orm::DatabaseConnection,
+    actor: &crate::models::access_keys::AuthContext,
+    template_id: Uuid,
+    version_id: Uuid,
+) -> Result<TemplateVersionRecord, YorishiroError> {
+    let txn = authorized_transaction(
+        db,
+        actor,
+        crate::models::iam::policy::Action::GetMarketplaceVersion,
+    )
+    .await?;
+    require_postgres(&txn, "reading a marketplace version")?;
+    visible_versions(
+        &txn,
+        actor.tenant_id,
+        template_id,
+        Some(version_id),
+        ListParams::default(),
+    )
+    .await?
+    .pop()
+    .or_not_found("marketplace version was not found")
+}
+
 pub(crate) async fn reviews_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateReviewRecord>, YorishiroError> {
     let txn = authorized_transaction(
         db,
         actor,
-        crate::models::iam::policy::Action::MarketplaceReviewList,
+        crate::models::iam::policy::Action::ListMarketplaceReviews,
     )
     .await?;
     list_reviews(&txn, actor.tenant_id, template_id, page).await
@@ -115,6 +158,7 @@ pub struct MarketplaceListing {
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct TemplateVersionRecord {
+    #[serde(rename = "version_id")]
     pub id: Uuid,
     pub template_id: Uuid,
     pub version: i32,
@@ -249,6 +293,7 @@ impl TryFrom<crate::models::_entities::template_versions::Model> for TemplateVer
 
 #[derive(Serialize, FromQueryResult, schemars::JsonSchema)]
 pub struct TemplateReviewRecord {
+    #[serde(rename = "review_id")]
     pub id: Uuid,
     pub template_id: Uuid,
     pub tenant_id: Uuid,
@@ -361,13 +406,9 @@ impl TryFrom<ForkSourceDbRecord> for ForkSource {
 
 /// Lists community-visible templates across every tenant, ordered by name then id, one page at a time.
 ///
-/// A template appears only once it has a non-draft version: `visibility = 'community'` says its owner is willing to share it, but with nothing published there is nothing to install, and a listing whose every entry 404s on install is worse than a shorter one.
+/// A template appears only once it has a non-draft version, because with nothing published there is nothing to install.
 ///
-/// The three aggregates (latest stable version, review count, average rating) are correlated
-/// subqueries rather than a `JOIN` + `GROUP BY`: `limit` bounds the page to 200 rows, so their cost
-/// is bounded too, and nothing has measured the rewrite as faster.
-///
-/// `SeaQuery` builds the correlated aggregates inside the same paginated entity projection.
+/// The three aggregates (latest stable version, review count, average rating) are correlated subqueries, and the page limit bounds their cost.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -375,11 +416,19 @@ pub async fn list_marketplace(
     conn: &impl ConnectionTrait,
     page: ListParams,
 ) -> Result<Vec<MarketplaceListing>, YorishiroError> {
+    marketplace_listings(conn, None, page).await
+}
+
+async fn marketplace_listings(
+    conn: &impl ConnectionTrait,
+    template_id: Option<Uuid>,
+    page: ListParams,
+) -> Result<Vec<MarketplaceListing>, YorishiroError> {
     use crate::models::_entities::{
         template_reviews as review, template_templates as template, template_versions as version,
     };
     use sea_orm::sea_query::{Alias, SimpleExpr};
-    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
+    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect, QueryTrait};
     require_postgres(conn, "listing the marketplace")?;
     let latest = Query::select()
         .expr(Expr::col((version::Entity, version::Column::Version)).max())
@@ -443,6 +492,9 @@ pub async fn list_marketplace(
         )
         .filter(template::Column::Visibility.eq(TemplateVisibility::Community.as_db_str()))
         .filter(Expr::exists(published))
+        .apply_if(template_id, |query, id| {
+            query.filter(template::Column::Id.eq(id))
+        })
         .order_by_asc(template::Column::Name)
         .order_by_asc(template::Column::Id)
         .limit(page.limit())
@@ -471,7 +523,7 @@ pub async fn list_marketplace(
 /// Versions of a template that `tenant_id` is allowed to see.
 ///
 /// **Drafts are the caller's own only.**
-/// The database does not enforce this: `template_versions` carries no RLS, matching `template_templates`, so this WHERE clause is the enforcement, and dropping it publishes every tenant's unfinished work.
+/// `template_versions` carries no RLS, so this WHERE clause is the only enforcement.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -481,9 +533,21 @@ pub async fn list_versions(
     template_id: Uuid,
     page: ListParams,
 ) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
+    visible_versions(conn, tenant_id, template_id, None, page).await
+}
+
+async fn visible_versions(
+    conn: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    template_id: Uuid,
+    version_id: Option<Uuid>,
+    page: ListParams,
+) -> Result<Vec<TemplateVersionRecord>, YorishiroError> {
     use crate::models::_entities::template_templates::Column as TemplateColumn;
     use crate::models::_entities::template_versions::{Column, Entity, Relation};
-    use sea_orm::{ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
+    use sea_orm::{
+        ColumnTrait, Condition, QueryFilter, QueryOrder, QuerySelect, QueryTrait, RelationTrait,
+    };
 
     let rows = Entity::find()
         .select_only()
@@ -496,6 +560,7 @@ pub async fn list_versions(
         .column(Column::CreatedAt)
         .column_as(TemplateColumn::Visibility, "template_visibility")
         .filter(Column::TemplateId.eq(template_id))
+        .apply_if(version_id, |query, id| query.filter(Column::Id.eq(id)))
         .join(
             sea_orm::JoinType::InnerJoin,
             Relation::TemplateTemplates.def(),
@@ -525,10 +590,10 @@ pub async fn list_versions(
 
 /// Inserts the next version of a template, the number assigned as `max(version) + 1` inside the same statement.
 ///
-/// Called inside the transaction that holds `template-version:{template_id}`'s advisory lock (`models::marketplace::publish_version`): at READ COMMITTED, Postgres locks no range for rows that do not exist yet, so two concurrent inserts would otherwise read the same maximum and collide on the `template_id, version` unique index.
+/// Call it inside a transaction holding the `template-version:{template_id}` advisory lock.
+/// At READ COMMITTED, PostgreSQL locks no range for rows that do not exist yet, so concurrent inserts would otherwise read the same maximum.
 ///
-/// `SeaQuery` builds one `INSERT ... SELECT` so the version is computed in the inserting statement.
-/// Splitting this into a separate `SELECT max(version)` plus an `ActiveModel` insert would reopen exactly the race the advisory lock and single-statement `COALESCE` together close.
+/// One `INSERT ... SELECT` computes the version in the inserting statement, so do not split it into a separate `SELECT max(version)`.
 pub(crate) async fn insert_next_version(
     conn: &impl ConnectionTrait,
     template_id: Uuid,
@@ -539,24 +604,28 @@ pub(crate) async fn insert_next_version(
 
     require_postgres(conn, "publishing a template version")?;
     let select = Query::select()
+        .expr(Expr::val(Uuid::now_v7()))
         .expr(Expr::val(template_id))
         .expr(Expr::col(Column::Version).max().if_null(0).add(1))
         .expr(Expr::val(request.definition.clone()))
         .expr(Expr::val(request.changelog.clone()))
         .expr(Expr::val(request.status.as_db_str()))
         .expr(Expr::val(user_id))
+        .expr(Expr::val(crate::data::time::now()))
         .from(Entity)
         .and_where(Expr::col(Column::TemplateId).eq(template_id))
         .to_owned();
     let statement = Query::insert()
         .into_table(Entity)
         .columns([
+            Column::Id,
             Column::TemplateId,
             Column::Version,
             Column::Definition,
             Column::Changelog,
             Column::Status,
             Column::CreatedBy,
+            Column::CreatedAt,
         ])
         .select_from(select)
         .internal()?
@@ -574,7 +643,7 @@ pub(crate) async fn insert_next_version(
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::Internal("insert did not return a row".into()))
+        .or_internal("insert did not return a row")
         .and_then(TemplateVersionRecord::try_from)
 }
 
@@ -625,7 +694,7 @@ pub async fn list_reviews(
         .collect()
 }
 
-/// Whether a template visible to `tenant_id` exists, for `models::marketplace::submit_review`'s "reviewing a template nobody can see is meaningless" guard.
+/// Whether a template visible to `tenant_id` exists.
 pub(crate) async fn is_visible(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -665,6 +734,9 @@ pub(crate) async fn upsert_review(
         updated_at: sea_orm::ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     let row = Entity::insert(active)
         .on_conflict(
             OnConflict::columns([Column::TemplateId, Column::TenantId])
@@ -772,7 +844,7 @@ pub(crate) enum InsertForkOutcome {
 }
 
 /// Inserts the caller's own private copy of a forked template.
-/// The forked copy starts `visibility = 'tenant'`: publishing someone else's work into the marketplace under your name is a decision, not a default.
+/// The copy starts tenant-private, whatever the source's visibility.
 pub(crate) async fn insert_fork(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -783,7 +855,6 @@ pub(crate) async fn insert_fork(
 ) -> Result<InsertForkOutcome, YorishiroError> {
     use crate::models::_entities::template_templates::ActiveModel;
 
-    // Forks always start tenant-private, regardless of source visibility.
     let active = ActiveModel {
         tenant_id: sea_orm::ActiveValue::Set(tenant_id),
         name: sea_orm::ActiveValue::Set(source.name.clone()),
@@ -811,7 +882,7 @@ pub(crate) async fn insert_fork(
     }
 }
 
-/// Whether a template exists and belongs to `tenant_id`, for `models::marketplace::require_ownership`.
+/// Whether a template exists and belongs to `tenant_id`.
 pub(crate) async fn is_owned_by(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -828,8 +899,7 @@ pub(crate) async fn is_owned_by(
         .internal()
 }
 
-/// Sets a template's marketplace visibility.
-/// `models::marketplace::set_visibility` has already checked ownership; this is the write alone.
+/// Writes a template's marketplace visibility; the caller has already checked ownership.
 pub(crate) async fn update_visibility(
     conn: &impl ConnectionTrait,
     template_id: Uuid,
@@ -842,6 +912,8 @@ pub(crate) async fn update_visibility(
         visibility: sea_orm::ActiveValue::Set(visibility.as_db_str().to_string()),
         ..Default::default()
     };
-    active.update(conn).await.internal()?;
+    active.update(conn).await.map_err(|error| {
+        YorishiroError::not_found_on_missing(error, "template version was not found")
+    })?;
     Ok(())
 }

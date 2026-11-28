@@ -19,6 +19,7 @@ pub(crate) struct SetupResponse {
     pub(crate) user_id: Uuid,
     pub(crate) email: String,
     pub(crate) tenant_id: Uuid,
-    /// A freshly issued tenant-scoped admin key, scoped to the new admin account: shown only here, same as `/auth/root/login`'s, so the setup screen can log straight into the dashboard afterward.
-    pub(crate) api_key: String,
+    /// A freshly issued access key for the new admin account.
+    /// Shown only here, so the setup screen can sign straight in.
+    pub(crate) access_key: String,
 }

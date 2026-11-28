@@ -4,12 +4,12 @@ use serde::Serialize;
 
 mod operations;
 
-pub(crate) use operations::create_tenant_user_as;
+pub use operations::create_tenant_user_member;
 pub use operations::list_members;
-pub use operations::preview_removal;
-pub use operations::{add_member, remove_member, remove_member_as};
-pub(crate) use operations::{add_member_in_transaction, is_member, list_members_as};
-pub use operations::{create_tenant_user_member, reset_tenant_user_password};
+pub use operations::{add_member, remove_member};
+pub(crate) use operations::{
+    add_member_in_transaction, is_member, list_member_users, remove_member_in_transaction,
+};
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub struct MembershipRecord {
@@ -19,23 +19,15 @@ pub struct MembershipRecord {
     pub display_name: Option<String>,
 }
 
-/// A point-in-time snapshot, not authorization for a later mutation.
-#[derive(Serialize, schemars::JsonSchema)]
-pub struct MembershipRemovalPreview {
-    pub user_id: Uuid,
-    pub member: bool,
-    pub revoked_api_key_ids: Vec<Uuid>,
-    pub lost_workspace_ids: Vec<Uuid>,
-}
-
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(mut self, db: &C, _insert: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
-        self.id = crate::db::sqlite_generated_id(db, self.id);
-        Ok(self)
+        let mut this = self;
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        Ok(this)
     }
 }

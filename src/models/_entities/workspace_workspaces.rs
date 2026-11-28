@@ -32,10 +32,6 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::api_key_audit_log::Entity")]
-    ApiKeyAuditLog,
-    #[sea_orm(has_many = "super::api_keys::Entity")]
-    ApiKeys,
     #[sea_orm(has_many = "super::compute_credit_ledger::Entity")]
     ComputeCreditLedger,
     #[sea_orm(has_many = "super::entity_column_preferences::Entity")]
@@ -46,10 +42,14 @@ pub enum Relation {
     EntityRelations,
     #[sea_orm(has_many = "super::entity_snapshots::Entity")]
     EntitySnapshots,
+    #[sea_orm(has_many = "super::import_staging::Entity")]
+    ImportStaging,
     #[sea_orm(has_many = "super::inference_jobs::Entity")]
     InferenceJobs,
     #[sea_orm(has_many = "super::inference_proposals::Entity")]
     InferenceProposals,
+    #[sea_orm(has_many = "super::job_results::Entity")]
+    JobResults,
     #[sea_orm(has_many = "super::query_embedding_requests::Entity")]
     QueryEmbeddingRequests,
     #[sea_orm(
@@ -74,18 +74,6 @@ pub enum Relation {
     WorkspaceLlmKeys,
     #[sea_orm(has_one = "super::workspace_worker_classes::Entity")]
     WorkspaceWorkerClasses,
-}
-
-impl Related<super::api_key_audit_log::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ApiKeyAuditLog.def()
-    }
-}
-
-impl Related<super::api_keys::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ApiKeys.def()
-    }
 }
 
 impl Related<super::compute_credit_ledger::Entity> for Entity {
@@ -118,6 +106,12 @@ impl Related<super::entity_snapshots::Entity> for Entity {
     }
 }
 
+impl Related<super::import_staging::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ImportStaging.def()
+    }
+}
+
 impl Related<super::inference_jobs::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::InferenceJobs.def()
@@ -127,6 +121,12 @@ impl Related<super::inference_jobs::Entity> for Entity {
 impl Related<super::inference_proposals::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::InferenceProposals.def()
+    }
+}
+
+impl Related<super::job_results::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::JobResults.def()
     }
 }
 

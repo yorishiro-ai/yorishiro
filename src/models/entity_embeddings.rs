@@ -9,7 +9,7 @@ mod stamp;
 mod write;
 
 pub use indexes::maintain_workspace_indexes;
-pub(crate) use lock::reindex_workspace_with_actor;
+pub(crate) use lock::with_reindex_lock;
 pub use lock::{
     WorkspaceReindexLockGuard, acquire_workspace_reindex_lock, reindex_workspace_with_lock,
     workspace_reindex_lock_key,
@@ -38,7 +38,7 @@ pub use crate::models::_entities::entity_embeddings::{ActiveModel, Entity, Model
 
 impl sea_orm::ActiveModelBehavior for ActiveModel {}
 
-pub(super) fn validate_vector(
+pub(crate) fn validate_vector(
     vector: &[f32],
     expected_dimensions: usize,
 ) -> Result<(), crate::YorishiroError> {

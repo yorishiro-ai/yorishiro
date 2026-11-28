@@ -15,6 +15,7 @@ use loco_rs::prelude::async_trait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::YorishiroError;
 use crate::services::embedding::EmbeddingProviderAvailability;
 use crate::workers::embedding_sync::WorkerClass;
 
@@ -41,7 +42,7 @@ pub struct ReindexArgs {
 )]
 pub struct ReindexActor {
     pub tenant_id: Uuid,
-    pub api_key_id: Uuid,
+    pub access_key_id: Uuid,
     pub user_id: Option<Uuid>,
 }
 
@@ -59,27 +60,22 @@ impl ReindexArgs {
     }
 }
 
-/// Shared implementation of the reindex worker's `perform` body: builds the provider,
-/// fetches candidates, acquires the lock, and runs `reindex_workspace_with_lock`.
-///
-/// Called by [`ReindexWorker`] once the job has been admitted.
 async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Result<()> {
     let actor = args
         .actor
         .as_ref()
-        .map(|actor| crate::models::api_keys::AuthContext {
+        .map(|actor| crate::models::access_keys::AuthContext {
             tenant_id: actor.tenant_id,
-            api_key_id: actor.api_key_id,
+            access_key_id: actor.access_key_id,
             user_id: actor.user_id,
             workspace_id: Some(args.workspace_id),
-            audit: false,
         });
     if let Some(actor) = &actor {
         let txn = crate::db::begin_write(&ctx.db).await?;
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            crate::models::iam::policy::Action::WorkspaceReindex,
+            crate::models::iam::policy::Action::ReindexWorkspace,
             crate::models::iam::policy::Resource::Workspace {
                 tenant_id: actor.tenant_id,
                 workspace_id: args.workspace_id,
@@ -89,17 +85,6 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         .map_err(loco_rs::Error::wrap)?;
         txn.commit().await?;
     }
-    // Resolve in the worker so workspace-specific overrides are honored without putting
-    // credentials in the queue payload.
-    let provider = crate::models::workspace_workspaces::embedding_provider(ctx, args.workspace_id)
-        .await
-        .map_err(loco_rs::Error::wrap)?
-        .ok_or_else(|| loco_rs::Error::Message("embedding provider absent".into()))?;
-    if provider.availability() == EmbeddingProviderAvailability::Disabled {
-        return Err(loco_rs::Error::Message(
-            "embedding provider disabled".into(),
-        ));
-    }
     let concurrency = ctx
         .shared_store
         .get::<std::sync::Arc<tokio::sync::Semaphore>>()
@@ -108,25 +93,73 @@ async fn perform_reindex(ctx: &AppContext, args: &ReindexArgs) -> loco_rs::Resul
         .acquire_owned()
         .await
         .map_err(loco_rs::Error::wrap)?;
-    let outcome = crate::models::entity_embeddings::reindex_workspace_with_actor(
-        ctx,
+    crate::models::entity_embeddings::with_reindex_lock(ctx, args.workspace_id, async || {
+        // A provider change or entity write can invalidate a reindex even while it holds the reindex lock.
+        for _ in 0..2 {
+            let result = reindex_current_assignment(ctx, args, actor.as_ref()).await;
+            if !matches!(result, Err(YorishiroError::Conflict { .. })) {
+                return result;
+            }
+        }
+        reindex_current_assignment(ctx, args, actor.as_ref()).await
+    })
+    .await
+    .map_err(loco_rs::Error::wrap)
+}
+
+async fn reindex_current_assignment(
+    ctx: &AppContext,
+    args: &ReindexArgs,
+    actor: Option<&crate::models::access_keys::AuthContext>,
+) -> Result<(), YorishiroError> {
+    // Resolve after taking the reindex lock so a preceding reindex cannot invalidate this snapshot.
+    let provider = crate::models::workspace_workspaces::embedding_provider(ctx, args.workspace_id)
+        .await?
+        .filter(|provider| provider.availability() != EmbeddingProviderAvailability::Disabled)
+        .ok_or_else(|| YorishiroError::BackendUnavailable {
+            message: "no embedding provider is configured".into(),
+        })?;
+    let outcome = crate::models::entity_embeddings::reindex_workspace_as(
+        &ctx.db,
         args.workspace_id,
         provider.as_ref(),
-        actor.as_ref(),
+        actor,
         args.startup,
     )
-    .await
-    .map_err(loco_rs::Error::wrap)?;
-
+    .await?;
     if !outcome.failures.is_empty() {
-        return Err(loco_rs::Error::Message(format!(
-            "reindex incomplete: {} entities, {} reindexed, {} failed",
-            outcome.total,
-            outcome.reindexed,
-            outcome.failures.len()
-        )));
+        for failure in &outcome.failures {
+            tracing::warn!(
+                workspace_id = %args.workspace_id,
+                entity_id = %failure.entity_id,
+                lifecycle_id = ?args.lifecycle_id,
+                error_code = failure.error.code().map_or("internal", |code| code.as_str()),
+                "reindex could not prepare an entity embedding"
+            );
+        }
+        record_failed_entities(ctx, args, &outcome).await;
+        tracing::warn!(
+            workspace_id = %args.workspace_id,
+            total = outcome.total,
+            failed = outcome.failures.len(),
+            "reindex could not prepare all workspace embeddings"
+        );
+        return Err(YorishiroError::BackendUnavailable {
+            message: format!(
+                "reindex could not prepare embeddings for {} of {} entities",
+                outcome.failures.len(),
+                outcome.total
+            ),
+        });
     }
 
+    // The row that ends the job names the index it published.
+    let embedding_revision =
+        crate::models::workspace_workspaces::embedding_revision(&ctx.db, args.workspace_id).await?;
+    crate::controllers::middleware::access_log::noted(
+        crate::models::iam::policy::Action::ReindexWorkspace,
+        &serde_json::json!({"workspace_id": args.workspace_id, "embedding_revision": embedding_revision}),
+    );
     Ok(())
 }
 
@@ -204,13 +237,13 @@ pub async fn enqueue_reindex(
 /// Returns the session, authorization or enqueue error.
 pub(crate) async fn enqueue_requested_for_actor(
     ctx: &AppContext,
-    actor: crate::models::api_keys::AuthContext,
-) -> Result<String, crate::YorishiroError> {
+    actor: crate::models::access_keys::AuthContext,
+) -> Result<String, YorishiroError> {
     WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::WorkspaceReindex,
+            crate::models::iam::policy::Action::ReindexWorkspace,
         ),
         None,
         async |session| enqueue_requested(ctx, session.txn(), &session.ctx).await,
@@ -221,12 +254,11 @@ pub(crate) async fn enqueue_requested_for_actor(
 pub(crate) async fn enqueue_requested(
     ctx: &AppContext,
     txn: &sea_orm::DatabaseTransaction,
-    actor: &crate::models::api_keys::AuthContext,
-) -> Result<String, crate::YorishiroError> {
+    actor: &crate::models::access_keys::AuthContext,
+) -> Result<String, YorishiroError> {
     use crate::error::ResultExt;
-    use crate::models::api_key_audit_log::{self, AuditAction, AuditActor};
     if ctx.queue_provider.is_none() {
-        return Err(crate::YorishiroError::BackendUnavailable {
+        return Err(YorishiroError::BackendUnavailable {
             message: "reindex requires a queue provider (configure queue: in the server config)"
                 .into(),
         });
@@ -235,23 +267,11 @@ pub(crate) async fn enqueue_requested(
     crate::models::iam::access::require_iam_action(
         authorization.as_ref().unwrap_or(txn),
         actor,
-        crate::models::iam::policy::Action::WorkspaceReindex,
+        crate::models::iam::policy::Action::ReindexWorkspace,
         crate::models::iam::policy::Resource::Workspace {
             tenant_id: actor.tenant_id,
             workspace_id: actor.require_workspace()?,
         },
-    )
-    .await?;
-    api_key_audit_log::record(
-        txn,
-        AuditActor {
-            workspace_id: actor.require_workspace()?,
-            tenant_id: actor.tenant_id,
-            api_key_id: actor.api_key_id,
-            user_id: actor.user_id,
-        },
-        AuditAction::ReindexEmbeddings,
-        serde_json::json!({"workspace_id":actor.require_workspace()?}),
     )
     .await?;
     let worker_class =
@@ -265,7 +285,7 @@ pub(crate) async fn enqueue_requested(
             startup: false,
             actor: Some(ReindexActor {
                 tenant_id: actor.tenant_id,
-                api_key_id: actor.api_key_id,
+                access_key_id: actor.access_key_id,
                 user_id: actor.user_id,
             }),
         },
@@ -277,4 +297,42 @@ pub(crate) async fn enqueue_requested(
         authorization.commit().await.internal()?;
     }
     Ok(id)
+}
+
+/// Leaves one trail row naming every entity the reindex could not prepare, with each one's error code.
+async fn record_failed_entities(
+    ctx: &AppContext,
+    args: &ReindexArgs,
+    outcome: &crate::models::entity_embeddings::ReindexOutcome,
+) {
+    let Some(lifecycle_id) = args.lifecycle_id else {
+        return;
+    };
+    let request_id = crate::models::queue_job_lifecycles::Entity::request_id(&ctx.db, lifecycle_id)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "req-id-none".to_owned());
+    let failed: Vec<_> = outcome
+        .failures
+        .iter()
+        .map(|failure| {
+            serde_json::json!({
+                "entity_id": failure.entity_id,
+                "error_code": failure.error.code().map_or("internal", |code| code.as_str()),
+            })
+        })
+        .collect();
+    let row = crate::models::api_events::Call::job(
+        request_id,
+        lifecycle_id,
+        format!("{}.entities", args.job_name()),
+        Some(args.workspace_id),
+        Some("failed"),
+        0,
+    )
+    .with_resources(serde_json::Value::Array(failed));
+    if let Err(error) = row.append(&ctx.db).await {
+        tracing::error!(%lifecycle_id, %error, "the failed entities could not be recorded in the trail");
+    }
 }

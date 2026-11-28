@@ -29,6 +29,8 @@ pub struct Model {
     pub concurrency_limit: Option<i32>,
     #[sea_orm(column_type = "Text", nullable)]
     pub error: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub request_id: Option<String>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }

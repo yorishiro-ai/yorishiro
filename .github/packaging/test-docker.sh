@@ -35,7 +35,7 @@ import sys
 config = json.load(sys.stdin)
 assert set(config["services"]) == {"testdb", "redis"}
 assert all("build" not in service for service in config["services"].values())
-assert any(mount["source"] == "test_pgdata" for mount in config["services"]["testdb"]["volumes"])
+assert "/var/lib/postgresql" in config["services"]["testdb"]["tmpfs"]
 '
   docker compose -f "$repo/docker-compose.dev.yaml" config --format json |
     python3 -c '
@@ -125,7 +125,10 @@ if [[ $# -gt 0 ]]; then
     fi
     after_base=$(sha256sum "$tmp/config/production.yaml" 2>/dev/null || true)
     after_local=$(sha256sum "$tmp/config/production.local.yaml" 2>/dev/null || true)
-    test "$before_base" = "$after_base" && test "$before_local" = "$after_local"
+    if [[ "$before_base" != "$after_base" || "$before_local" != "$after_local" ]]; then
+      echo "$name: the container changed its mounted configuration" >&2
+      return 1
+    fi
     if [[ "$expected" = success && "$ready" != true ]]; then
       cat "/tmp/yorishiro-docker-$name.log" >&2
       return 1

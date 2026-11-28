@@ -1,5 +1,55 @@
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
+
+#[tokio::test]
+async fn provider_settings_reject_invalid_base_urls_before_saving() {
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let auth = format!("Bearer {}", tenant.api_key);
+        for (path, mut body) in [
+            (
+                "/api/workspace/embedding-provider",
+                serde_json::json!({"model":"test", "api_key":"test-key", "dimensions":32}),
+            ),
+            (
+                "/api/workspace/llm-provider",
+                serde_json::json!({"model":"test", "api_key":"test-key"}),
+            ),
+        ] {
+            for base_url in [
+                "https://",
+                "https://u:p@example.invalid/v1",
+                "https://example.invalid/v1?token=x",
+            ] {
+                body["base_url"] = serde_json::json!(base_url);
+                request
+                    .put(path)
+                    .add_header("Authorization", &auth)
+                    .json(&body)
+                    .await
+                    .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+            }
+            let closed = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                .await
+                .unwrap();
+            body["base_url"] =
+                serde_json::json!(format!("http://{}", closed.local_addr().unwrap()));
+            drop(closed);
+            request
+                .put(path)
+                .add_header("Authorization", &auth)
+                .json(&body)
+                .await
+                .assert_status(StatusCode::BAD_GATEWAY);
+            request
+                .get(path)
+                .add_header("Authorization", &auth)
+                .await
+                .assert_status(StatusCode::NOT_FOUND);
+        }
+    })
+    .await;
+}
 use axum::http::StatusCode;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, SelectExt};
 use yorishiro::App;
@@ -29,13 +79,14 @@ async fn document_prefix_revision_contract() {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let read = || workspace_workspaces::Entity::find_by_id(setup.workspace_id).one(&ctx.db);
         let initial = read().await.unwrap().unwrap();
+        let (_, provider, _) = crate::http_stub::keyword_provider(768).await;
         let mut config = serde_json::json!({
-            "base_url": "https://embedding.example.invalid/v1",
+            "base_url": provider.url,
             "model": "test-model", "api_key": "test-key", "dimensions": 768,
             "query_instruction": "query: ", "document_prefix": "passage: "
         });
         let put = request
-            .put("/api/workspace/embedding-key")
+            .put("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&config)
             .await;
@@ -46,7 +97,7 @@ async fn document_prefix_revision_contract() {
 
         config["query_instruction"] = serde_json::json!("different query: ");
         let put = request
-            .put("/api/workspace/embedding-key")
+            .put("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&config)
             .await;
@@ -63,7 +114,7 @@ async fn document_prefix_revision_contract() {
 
         config["document_prefix"] = serde_json::json!("new passage: ");
         let put = request
-            .put("/api/workspace/embedding-key")
+            .put("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&config)
             .await;
@@ -72,7 +123,7 @@ async fn document_prefix_revision_contract() {
         assert!(document_changed.embedding_revision > query_changed.embedding_revision);
         assert!(document_changed.embedding_reindexing);
         let response = request
-            .get("/api/workspace/embedding-key")
+            .get("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
@@ -90,9 +141,10 @@ async fn document_prefix_revision_contract() {
 async fn embedding_key_set_get_and_clear_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let (_, provider, _) = crate::http_stub::keyword_provider(1536).await;
 
         let missing = request
-            .get("/api/workspace/embedding-key")
+            .get("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
@@ -103,10 +155,10 @@ async fn embedding_key_set_get_and_clear_round_trip() {
         );
 
         let put = request
-            .put("/api/workspace/embedding-key")
+            .put("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://embed.example.com/v1/",
+                "base_url": format!("{}/", provider.url),
                 "model": "text-embedding-3-small",
                 "api_key": "sk-secret-value",
                 "dimensions": 1536
@@ -120,7 +172,7 @@ async fn embedding_key_set_get_and_clear_round_trip() {
         );
 
         let get = request
-            .get("/api/workspace/embedding-key")
+            .get("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
@@ -131,7 +183,7 @@ async fn embedding_key_set_get_and_clear_round_trip() {
         );
         let body: serde_json::Value = get.json();
         // The trailing slash is trimmed once at write time, matching llm-key.
-        assert_eq!(body["base_url"], "https://embed.example.com/v1");
+        assert_eq!(body["base_url"], provider.url);
         assert_eq!(body["model"], "text-embedding-3-small");
         assert_eq!(body["dimensions"], 1536);
         assert_eq!(body["configured"], true);
@@ -142,7 +194,7 @@ async fn embedding_key_set_get_and_clear_round_trip() {
         );
 
         let delete = request
-            .delete("/api/workspace/embedding-key")
+            .delete("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
@@ -153,7 +205,7 @@ async fn embedding_key_set_get_and_clear_round_trip() {
         );
 
         let after_delete = request
-            .get("/api/workspace/embedding-key")
+            .get("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(after_delete.status_code(), StatusCode::NOT_FOUND);
@@ -173,7 +225,7 @@ async fn a_non_http_base_url_is_refused() {
             "embed.example.com/v1",
         ] {
             let put = request
-                .put("/api/workspace/embedding-key")
+                .put("/api/workspace/embedding-provider")
                 .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .json(&serde_json::json!({
                     "base_url": bad_url,
@@ -242,11 +294,12 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
         .await
         .expect("persist vector and workspace stamp");
 
+        let (_, provider, _) = crate::http_stub::keyword_provider(1024).await;
         let put = request
-            .put("/api/workspace/embedding-key")
+            .put("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://embed.example.com/v1",
+                "base_url": provider.url,
                 "model": "embed-3072",
                 "api_key": "sk-secret-value",
                 // Deliberately differs from the workspace's stamped width.
@@ -270,7 +323,7 @@ async fn a_dimension_mismatch_against_the_workspace_stamp_stores_and_triggers_re
                 .expect("read durable reindex registration")
         );
         let get = request
-            .get("/api/workspace/embedding-key")
+            .get("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
@@ -291,12 +344,13 @@ async fn set_accepts_arbitrary_positive_widths_without_creating_tables() {
 
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let (_, provider, _) = crate::http_stub::keyword_provider(3072).await;
 
         let refused = request
-            .put("/api/workspace/embedding-key")
+            .put("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://embed.example.com/v1",
+                "base_url": provider.url,
                 "model": "text-embedding-3-large",
                 "api_key": "sk-secret-value",
                 "dimensions": 0
@@ -310,7 +364,7 @@ async fn set_accepts_arbitrary_positive_widths_without_creating_tables() {
         );
         assert!(
             request
-                .get("/api/workspace/embedding-key")
+                .get("/api/workspace/embedding-provider")
                 .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .await
                 .status_code()
@@ -319,10 +373,10 @@ async fn set_accepts_arbitrary_positive_widths_without_creating_tables() {
         );
 
         let stored = request
-            .put("/api/workspace/embedding-key")
+            .put("/api/workspace/embedding-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://embed.example.com/v1",
+                "base_url": provider.url,
                 "model": "embed-3072",
                 "api_key": "sk-secret-value",
                 "dimensions": 3072

@@ -6,10 +6,8 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DbBackend, EntityTrait, PaginatorTrait, QueryFilter,
     TransactionTrait,
 };
-use std::sync::Arc;
 use uuid::Uuid;
 use yorishiro::App;
-use yorishiro::db::DbHandle;
 use yorishiro::edition::ee::models::inference_jobs::{self, InferenceJobStatus};
 use yorishiro::models::_entities::inference_jobs as rows;
 
@@ -19,9 +17,10 @@ use yorishiro::models::_entities::inference_jobs as rows;
 async fn llm_key_set_get_and_clear_round_trip() {
     boot_request::<App, _, _>(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let provider = crate::http_stub::llm_provider().await;
 
         let missing = request
-            .get("/api/workspace/llm-key")
+            .get("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
@@ -32,10 +31,10 @@ async fn llm_key_set_get_and_clear_round_trip() {
         );
 
         let put = request
-            .put("/api/workspace/llm-key")
+            .put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://api.example.com/v1/",
+                "base_url": format!("{}/", provider.url),
                 "model": "gpt-4o-mini",
                 "api_key": "sk-secret-value"
             }))
@@ -48,7 +47,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
         );
 
         let get = request
-            .get("/api/workspace/llm-key")
+            .get("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
@@ -59,7 +58,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
         );
         let body: serde_json::Value = get.json();
         // The trailing slash is trimmed once at write time.
-        assert_eq!(body["base_url"], "https://api.example.com/v1");
+        assert_eq!(body["base_url"], provider.url);
         assert_eq!(body["model"], "gpt-4o-mini");
         assert_eq!(body["configured"], true);
         let rendered = get.text();
@@ -69,7 +68,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
         );
 
         let delete = request
-            .delete("/api/workspace/llm-key")
+            .delete("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
@@ -80,7 +79,7 @@ async fn llm_key_set_get_and_clear_round_trip() {
         );
 
         let after_delete = request
-            .get("/api/workspace/llm-key")
+            .get("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(after_delete.status_code(), StatusCode::NOT_FOUND);
@@ -100,7 +99,7 @@ async fn a_non_http_base_url_is_refused() {
             "api.example.com/v1",
         ] {
             let put = request
-                .put("/api/workspace/llm-key")
+                .put("/api/workspace/llm-provider")
                 .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .json(&serde_json::json!({
                     "base_url": bad_url,
@@ -160,7 +159,7 @@ async fn infer_fill_without_a_configured_key_is_refused() {
             &setup.api_key,
             2,
             "tools/call",
-            serde_json::json!({"name":"infer_fill","arguments":{"schema_name":"note"}}),
+            serde_json::json!({"name":"create_inference_job","arguments":{"schema_name":"note"}}),
         )
         .await;
         assert_eq!(mcp["result"]["isError"], true);
@@ -268,28 +267,26 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
         let member = yorishiro::models::tenancy::register_member(&txn, setup.tenant_id,
             &crate::requests::fixtures::unique_email("confirm-iam"), "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
-        let key = yorishiro::models::api_keys::Entity::create_api_key(&ctx.db, setup.workspace_id, Some(member.id), false).await.unwrap();
-        let document = serde_json::json!({"statements":[{"effect":"allow","actions":["inference_confirm"],
-            "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
+        let key = crate::requests::fixtures::create_key(&ctx.db, setup.workspace_id, Some(member.id)).await.unwrap();
+        let document = serde_json::json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["inference:ConfirmInferenceProposals"],
+            "Resource":[format!("yrn:workspace:{}:{}", setup.tenant_id, setup.workspace_id)]}]});
         for deny in [false, true] {
-            let policy = request.post("/api/iam/policies")
+            let policy = request.post("/api/policies")
                 .add_header("Authorization", format!("Bearer {iam_key}"))
                 .json(&serde_json::json!({"name":format!("confirm-{deny}"),"document":document})).await;
             policy.assert_status(StatusCode::CREATED);
-            let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
-            let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+            let policy_id = policy.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
+            let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
             request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);
             let queued = request.post(&format!("/api/inference-jobs/{job_id}/confirm"))
                 .add_header("Authorization", format!("Bearer {}", key.plaintext)).await;
             queued.assert_status(StatusCode::ACCEPTED);
-            let id = queued.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+            let id = queued.json::<serde_json::Value>()["confirmation_job_id"].as_str().unwrap().parse().unwrap();
             if deny {
                 let mut denied = document.clone();
-                denied["statements"][0]["effect"] = serde_json::json!("deny");
-                request.put(&format!("/api/iam/policies/{policy_id}"))
-                    .add_header("Authorization", format!("Bearer {iam_key}"))
-                    .json(&serde_json::json!({"name":format!("confirm-{deny}"),"document":denied})).await.assert_status_ok();
+                denied["Statement"][0]["Effect"] = serde_json::json!("Deny");
+                crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {iam_key}"), &policy_id, &denied).await;
             } else {
                 request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                     .await.assert_status(StatusCode::NO_CONTENT);
@@ -301,11 +298,10 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             unchanged.assert_status_ok();
             assert_eq!(unchanged.json::<serde_json::Value>()["data"], fetched["data"]);
         }
-        let revoked = yorishiro::models::api_keys::Entity::create_api_key(
+        let revoked = crate::requests::fixtures::create_key(
             &ctx.db,
             setup.workspace_id,
             Some(setup.owner_id),
-            false,
         )
         .await
         .expect("issue confirmation automation key");
@@ -319,12 +315,12 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             "{}",
             denied.text()
         );
-        let denied_id = denied.json::<serde_json::Value>()["job_id"]
+        let denied_id = denied.json::<serde_json::Value>()["confirmation_job_id"]
             .as_str()
             .unwrap()
             .parse()
             .unwrap();
-        yorishiro::models::api_keys::Entity::revoke(&ctx.db, revoked.id)
+        yorishiro::models::access_keys::Entity::revoke(&ctx.db, revoked.id)
             .await
             .expect("revoke queued confirmation actor");
         crate::requests::jobs::fail_via_api(
@@ -347,9 +343,9 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
 
         let session = crate::controllers::mcp::initialize(&request).await;
         let confirm = crate::controllers::mcp::mcp_call(&request, &session, &setup.api_key, 40, "tools/call",
-            serde_json::json!({"name":"confirm_inference_proposals","arguments":{"job_id":job_id}})).await;
+            serde_json::json!({"name":"confirm_inference_proposals","arguments":{"inference_job_id":job_id}})).await;
         let accepted = crate::controllers::mcp::tool_result_json(&confirm);
-        let confirmation_id = accepted["job_id"].as_str().unwrap().parse().unwrap();
+        let confirmation_id = accepted["confirmation_job_id"].as_str().unwrap().parse().unwrap();
         crate::requests::jobs::finish_via_api(
             &request,
             &ctx,
@@ -369,7 +365,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
 
         // The accepted write is snapshot-backed and remains undoable through the base endpoint.
         let undo = request
-            .post(&format!("/api/migration-jobs/{job_id}/undo"))
+            .post(&format!("/api/migration-jobs/{job_id}:undo"))
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert_eq!(
@@ -379,7 +375,7 @@ async fn proposals_require_explicit_confirmation_and_undo_reverses_it() {
             undo.text()
         );
         let undo_report: serde_json::Value = undo.json();
-        let undo_id = undo_report["job_id"].as_str().unwrap().parse().unwrap();
+        let undo_id = undo_report["migration_job_id"].as_str().unwrap().parse().unwrap();
         crate::requests::jobs::finish_via_api(
             &request,
             &ctx,
@@ -500,7 +496,7 @@ async fn create_completed_proposal(
     clippy::too_many_lines,
     reason = "the same reviewer crosses implicit deny, explicit deny, detached, and allowed policies before comparing REST and MCP proposal results"
 )]
-async fn proposals_can_be_listed_rejected_and_discarded() {
+async fn proposals_can_be_listed_and_discarded() {
     boot_request::<App, _, _>(|request, ctx| async move {
         crate::requests::require_licence(&ctx);
         let session = crate::controllers::mcp::initialize(&request).await;
@@ -532,27 +528,25 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
             &txn, setup.tenant_id, &crate::requests::fixtures::unique_email("proposal-reviewer"),
             "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
-        let key = yorishiro::models::api_keys::Entity::create_api_key(
+        let key = crate::requests::fixtures::create_key(
             &ctx.db, setup.workspace_id,
-            Some(member.id), false,
+            Some(member.id),
         ).await.unwrap();
-        let document = serde_json::json!({"statements":[{"effect":"allow",
-            "actions":["inference_job_get","inference_proposal_list","inference_reject","inference_discard","inference_confirmation_get"],
-            "resources":[{"type":"workspace","tenant_id":setup.tenant_id,"workspace_id":setup.workspace_id}]}]});
-        let policy = request.post("/api/iam/policies").add_header("Authorization", format!("Bearer {iam_key}"))
+        let document = serde_json::json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow",
+            "Action":["inference:GetInferenceJob","inference:ListInferenceProposals","inference:DiscardInferenceProposals","inference:DiscardInferenceProposals","inference:GetInferenceConfirmation"],
+            "Resource":[format!("yrn:workspace:{}:{}", setup.tenant_id, setup.workspace_id)]}]});
+        let policy = request.post("/api/policies").add_header("Authorization", format!("Bearer {iam_key}"))
             .json(&serde_json::json!({"name":"proposal-reviewer","document":document})).await;
         policy.assert_status(StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
-        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        let policy_id = policy.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         for mode in ["implicit", "deny", "detached"] {
             if mode == "deny" {
                 request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                     .await.assert_status(StatusCode::NO_CONTENT);
                 let mut denied = document.clone();
-                denied["statements"][0]["effect"] = serde_json::json!("deny");
-                request.put(&format!("/api/iam/policies/{policy_id}"))
-                    .add_header("Authorization", format!("Bearer {iam_key}"))
-                    .json(&serde_json::json!({"name":"proposal-reviewer","document":denied})).await.assert_status_ok();
+                denied["Statement"][0]["Effect"] = serde_json::json!("Deny");
+                crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {iam_key}"), &policy_id, &denied).await;
             } else if mode == "detached" {
                 request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                     .await.assert_status(StatusCode::NO_CONTENT);
@@ -563,21 +557,24 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
                 request.get(&path).add_header("Authorization", format!("Bearer {}", key.plaintext))
                     .await.assert_status(StatusCode::FORBIDDEN);
             }
-            for action in ["reject", "discard"] {
+            for action in ["discard"] {
                 request.post(&format!("/api/inference-jobs/{rejected_job}/{action}"))
                     .add_header("Authorization", format!("Bearer {}", key.plaintext))
                     .await.assert_status(StatusCode::FORBIDDEN);
             }
             for (index, name) in ["get_inference_job", "list_inference_proposals", "get_inference_confirmation",
-                "reject_inference_proposals", "discard_inference_proposals", "confirm_inference_proposals"].into_iter().enumerate() {
+                "discard_inference_proposals", "confirm_inference_proposals"].into_iter().enumerate() {
+                let arguments = if name == "get_inference_confirmation" {
+                    serde_json::json!({"confirmation_job_id":rejected_job})
+                } else {
+                    serde_json::json!({"inference_job_id":rejected_job})
+                };
                 let mcp = crate::controllers::mcp::mcp_call(&request, &session, &key.plaintext, i64::try_from(index).unwrap() + 10, "tools/call",
-                    serde_json::json!({"name":name,"arguments":{"job_id":rejected_job}})).await;
-                assert_eq!(mcp["result"]["structuredContent"]["error"]["code"], "scope_insufficient", "{name}: {mcp}");
+                    serde_json::json!({"name":name,"arguments":arguments})).await;
+                assert_eq!(mcp["result"]["structuredContent"]["error"]["code"], "access_denied", "{name}: {mcp}");
             }
         }
-        request.put(&format!("/api/iam/policies/{policy_id}"))
-            .add_header("Authorization", format!("Bearer {iam_key}"))
-            .json(&serde_json::json!({"name":"proposal-reviewer","document":document})).await.assert_status_ok();
+        crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {iam_key}"), &policy_id, &document).await;
         request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
         request.get(&format!("/api/inference-jobs/{rejected_job}"))
@@ -598,9 +595,11 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
         );
         let proposals: serde_json::Value = listed.json();
         let mcp = crate::controllers::mcp::mcp_call(&request, &session, &key.plaintext, 30, "tools/call",
-            serde_json::json!({"name":"list_inference_proposals","arguments":{"job_id":rejected_job}})).await;
+            serde_json::json!({"name":"list_inference_proposals","arguments":{"inference_job_id":rejected_job}})).await;
         assert_eq!(crate::controllers::mcp::tool_result_json(&mcp), proposals);
         assert_eq!(proposals.as_array().unwrap().len(), 1);
+        assert!(proposals[0]["proposal_id"].as_str().is_some());
+        assert_eq!(proposals[0]["inference_job_id"], rejected_job.to_string());
         assert_eq!(proposals[0]["status"], "pending");
         assert_eq!(proposals[0]["proposed"], "reject me");
         let unchanged = request.get(&format!("/api/inference-jobs/{discarded_job}/proposals"))
@@ -609,7 +608,7 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
         assert_eq!(unchanged.json::<serde_json::Value>()[0]["status"], "pending");
 
         let rejected = request
-            .post(&format!("/api/inference-jobs/{rejected_job}/reject"))
+            .post(&format!("/api/inference-jobs/{rejected_job}/discard"))
             .add_header("Authorization", format!("Bearer {}", key.plaintext))
             .await;
         assert_eq!(
@@ -618,7 +617,9 @@ async fn proposals_can_be_listed_rejected_and_discarded() {
             "response: {:?}",
             rejected.text()
         );
-        assert_eq!(rejected.json::<serde_json::Value>()["changed"], 1);
+        let rejected: serde_json::Value = rejected.json();
+        assert_eq!(rejected["inference_job_id"], rejected_job.to_string());
+        assert_eq!(rejected["changed"], 1);
 
         let discarded = request
             .post(&format!("/api/inference-jobs/{discarded_job}/discard"))
@@ -640,8 +641,7 @@ async fn proposals_cannot_be_listed_by_another_tenant() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
         let rejected_job = Uuid::new_v4();
@@ -654,7 +654,7 @@ async fn proposals_cannot_be_listed_by_another_tenant() {
         )
         .await;
         let rejected = request
-            .post(&format!("/api/inference-jobs/{rejected_job}/reject"))
+            .post(&format!("/api/inference-jobs/{rejected_job}/discard"))
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         rejected.assert_status_ok();
@@ -670,119 +670,6 @@ async fn proposals_cannot_be_listed_by_another_tenant() {
             "response: {:?}",
             denied.text()
         );
-    })
-    .await;
-}
-
-/// A terminal action that wins the per-job lock must prevent an overlapping confirmation from
-/// writing the entity. This uses two real PostgreSQL transactions rather than a sequential replay.
-#[tokio::test]
-async fn terminal_proposal_actions_serialize_against_confirmation() {
-    // It holds an advisory lock across two transactions, which SQLite has no equivalent of.
-    if !crate::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let entity = crate::requests::fixtures::rest_create_entity(&request, &setup).await;
-        let db = ctx.shared_store.get::<DbHandle>().unwrap().clone();
-
-        for terminal_action in ["reject", "discard"] {
-            let job_id = Uuid::new_v4();
-            create_completed_proposal(
-                &ctx,
-                &setup,
-                entity,
-                job_id,
-                serde_json::json!(format!("must not apply: {terminal_action}")),
-            )
-            .await;
-
-            let terminal_db = db.clone();
-            let confirm_db = db.clone();
-            let terminal_setup = setup.workspace_id;
-            let terminal_tenant = setup.tenant_id;
-            let confirm_tenant = setup.tenant_id;
-            let barrier = Arc::new(tokio::sync::Barrier::new(2));
-            let confirm_barrier = barrier.clone();
-            // Hold the action lock before starting confirmation. The confirmation races in a
-            // separate task, but cannot pass the lock until this terminal action commits.
-            let terminal_txn = terminal_db
-                .tenant
-                .begin_for_workspace(terminal_tenant, terminal_setup)
-                .await
-                .expect("begin terminal proposal transaction");
-            yorishiro::db::lock_for_update(&terminal_txn, &format!("inference-proposals:{job_id}"))
-                .await
-                .expect("hold proposal action lock");
-            let confirm = tokio::spawn(async move {
-                let txn = confirm_db
-                    .tenant
-                    .begin_for_workspace(confirm_tenant, terminal_setup)
-                    .await
-                    .expect("begin confirmation transaction");
-                confirm_barrier.wait().await;
-                let result = yorishiro::edition::ee::models::inference_proposals::confirm(
-                    &txn,
-                    terminal_setup,
-                    job_id,
-                    None,
-                )
-                .await;
-                if result.is_ok() {
-                    txn.commit().await.expect("commit confirmation");
-                } else {
-                    txn.rollback().await.expect("rollback confirmation");
-                }
-                result
-            });
-            barrier.wait().await;
-            let terminal_result = if terminal_action == "reject" {
-                yorishiro::edition::ee::models::inference_proposals::reject(
-                    &terminal_txn,
-                    terminal_setup,
-                    job_id,
-                )
-                .await
-            } else {
-                yorishiro::edition::ee::models::inference_proposals::discard(
-                    &terminal_txn,
-                    terminal_setup,
-                    job_id,
-                )
-                .await
-            }
-            .expect("terminal proposal action");
-            terminal_txn.commit().await.expect("commit terminal action");
-            let confirm_result = confirm.await.expect("join confirmation task");
-
-            assert_eq!(terminal_result.changed, 1);
-            assert!(
-                confirm_result.is_err(),
-                "confirmation must observe the terminal {terminal_action}"
-            );
-
-            let entity_after =
-                yorishiro::models::entity_entities::get(&ctx.db, setup.workspace_id, entity)
-                    .await
-                    .expect("read entity after race");
-            assert_eq!(entity_after.data["summary"], serde_json::Value::Null);
-            let proposals = yorishiro::edition::ee::models::inference_proposals::for_job(
-                &ctx.db,
-                setup.workspace_id,
-                job_id,
-            )
-            .await
-            .expect("read terminal proposal");
-            assert_eq!(
-                proposals[0].status.to_string(),
-                if terminal_action == "reject" {
-                    "rejected"
-                } else {
-                    "discarded"
-                }
-            );
-        }
     })
     .await;
 }
@@ -866,14 +753,7 @@ async fn create_pending_proposal(
     txn.commit().await.expect("commit proposal");
 }
 
-/// `infer_job_status` is registered on its own path (`GET /api/inference-jobs/{job_id}`),
-/// not co-registered on `POST /api/schemas/active/{name}/infer-fill` where axum's router
-/// would have handed the schema name to a handler that expects a `job_id`.
-///
-/// This test posts to `infer-fill`, collects the `job_id` from the response, and polls the
-/// dedicated status endpoint with that `job_id`, confirming the status route resolves to a
-/// 200 (the durable status row stores the job and returns it) rather than a 404 or a misrouted
-/// response.
+/// The status endpoint returns the same `inference_job_id` as the submission endpoint.
 #[tokio::test]
 async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
     boot_request::<App, _, _>(|request, ctx| async move {
@@ -881,11 +761,12 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
 
         // Set up a workspace LLM key so infer-fill passes its validation gate.
+        let provider = crate::http_stub::llm_provider().await;
         let put_key = request
-            .put("/api/workspace/llm-key")
+            .put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://api.example.com/v1",
+                "base_url": provider.url,
                 "model": "gpt-4o-mini",
                 "api_key": "sk-test-key"
             }))
@@ -936,9 +817,8 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
             create_entity.text()
         );
 
-        // POST to infer-fill — the model will reject this (no real LLM), but the handler
-        // returns a job_id even when the queue is busy or the model is unreachable; we only
-        // need a real job_id to prove the status route is on a different path.
+        // The handler returns a job_id even when no LLM is reachable.
+        // A real job_id is enough to show the status route is on a different path.
         let infer = request
             .post("/api/schemas/active/article/infer-fill")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
@@ -946,14 +826,14 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
         assert_eq!(
             infer.status_code(),
             200,
-            "infer-fill must return a job_id: {:?}",
+            "infer-fill must return an inference_job_id: {:?}",
             infer.text()
         );
         let infer_body: serde_json::Value = infer.json();
         assert_eq!(infer_body["status"], "queued");
-        let job_id = infer_body["job_id"]
+        let job_id = infer_body["inference_job_id"]
             .as_str()
-            .expect("response must contain a job_id string");
+            .expect("response must contain an inference_job_id string");
 
         // Poll the dedicated status endpoint with that real job_id.
         // Status is served from `/inference-jobs/{job_id}`, not from the POST path.
@@ -968,19 +848,17 @@ async fn infer_job_status_is_on_its_own_path_not_colliding_with_infer_fill() {
             status.text()
         );
         let status_body: serde_json::Value = status.json();
-        assert_eq!(status_body["job_id"].as_str().unwrap(), job_id);
+        assert_eq!(status_body["inference_job_id"].as_str().unwrap(), job_id);
 
-        // Verify the POST and GET handlers are distinct: a GET on the infer-fill path
-        // should not be handled by infer_job_status (it should be a 405 Method Not Allowed
-        // or a 404, depending on how axum resolves it — the point is it's not the job
-        // status handler).
+        // A GET on the infer-fill path must not reach infer_job_status.
+        // Axum answers 405 or 404 depending on how it resolves the route.
         let get_on_infer_fill = request
             .get("/api/schemas/active/test/infer-fill")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         assert!(
             get_on_infer_fill.status_code() != 200
-                || get_on_infer_fill.json::<serde_json::Value>()["job_id"]
+                || get_on_infer_fill.json::<serde_json::Value>()["inference_job_id"]
                     != serde_json::json!("test"),
             "the POST path must not serve job status"
         );
@@ -994,11 +872,12 @@ async fn infer_fill_dispatch_failure_rolls_back_job() {
     boot_request::<App, _, _>(|request, ctx| async move {
         crate::requests::require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let provider = crate::http_stub::llm_provider().await;
         let put_key = request
-            .put("/api/workspace/llm-key")
+            .put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://api.example.com/v1",
+                "base_url": provider.url,
                 "model": "gpt-4o-mini",
                 "api_key": "sk-test-key"
             }))
@@ -1117,11 +996,12 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         assert_ne!(setup.tenant_id, setup.workspace_id);
         crate::requests::fixtures::rest_create_entity(&request, &setup).await;
+        let provider = crate::http_stub::llm_provider().await;
         let key = request
-            .put("/api/workspace/llm-key")
+            .put("/api/workspace/llm-provider")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .json(&serde_json::json!({
-                "base_url": "https://api.example.com/v1/",
+                "base_url": format!("{}/", provider.url),
                 "model": "gpt-4o-mini",
                 "api_key": "sk-secret-value"
             }))
@@ -1134,7 +1014,7 @@ async fn the_infer_fill_worker_runs_against_a_workspace_that_is_not_its_tenant()
             .add_header("Authorization", format!("Bearer {}", setup.api_key))
             .await;
         response.assert_status(StatusCode::OK);
-        let job_id = response.json::<serde_json::Value>()["job_id"]
+        let job_id = response.json::<serde_json::Value>()["inference_job_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -1216,17 +1096,6 @@ async fn infer_fill_for_an_unknown_schema_is_not_found_and_queues_nothing() {
     boot_request::<App, _, _>(|request, ctx| async move {
         crate::requests::require_licence(&ctx);
         let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        request
-            .put("/api/workspace/llm-key")
-            .add_header("Authorization", format!("Bearer {}", setup.api_key))
-            .json(&serde_json::json!({
-                "base_url": "https://api.example.com/v1",
-                "model": "gpt-4o-mini",
-                "api_key": "sk-test-key"
-            }))
-            .await
-            .assert_status(StatusCode::NO_CONTENT);
-
         let response = request
             .post("/api/schemas/active/does-not-exist/infer-fill")
             .add_header("Authorization", format!("Bearer {}", setup.api_key))

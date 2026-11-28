@@ -1,5 +1,9 @@
 //! Which tools an MCP server exposes and which of them a request may see or call.
 
+use std::{collections::HashMap, sync::LazyLock};
+
+use crate::models::iam::policy::{AccessLevel, Action};
+
 use super::{
     AppContext, Arc, ToolRouter, YorishiroMcpServer, community_tool_router, compose_tool_routers,
 };
@@ -18,36 +22,45 @@ pub(crate) fn workspace_selection_tool(name: &str) -> bool {
     matches!(
         name,
         "archive_schema"
-            | "create_api_key"
+            | "create_access_key"
             | "create_entity"
             | "create_relation"
             | "create_schema"
             | "delete_entity"
             | "delete_relation"
             | "delete_schema"
-            | "export_jsonl"
-            | "fill_defaults"
+            | "export_workspace"
+            | "fill_entity_defaults"
             | "get_active_schema"
             | "get_entity"
             | "get_entity_drift"
             | "get_entity_type_json_schema"
+            | "get_group"
+            | "get_policy"
+            | "get_policy_version"
             | "get_relation"
-            | "get_schema_by_id"
-            | "import_job_status"
-            | "import_jsonl"
-            | "list_audit_log"
+            | "get_schema"
+            | "get_import_job"
+            | "create_import_job"
+            | "list_attached_group_policies"
+            | "list_attached_user_policies"
             | "list_entities"
+            | "list_groups"
+            | "list_groups_for_user"
+            | "list_api_events"
+            | "list_policies"
+            | "list_policy_versions"
             | "list_relations"
             | "list_schemas"
-            | "migration_dry_run"
-            | "migration_job_status"
-            | "recall_context"
+            | "preview_migration"
+            | "get_migration_job"
+            | "recall_entity_context"
             | "reindex_workspace"
             | "search_entities"
-            | "set_relation_status"
+            | "update_relation"
             | "undo_migration_job"
             | "update_entity"
-            | "whoami"
+            | "get_caller_identity"
     )
 }
 
@@ -100,50 +113,29 @@ impl McpToolSet {
 }
 
 // Unknown tools fail closed in read-only mode; scope alone cannot distinguish reads from IAM writes.
-pub(crate) fn read_only_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "capabilities"
-            | "whoami"
-            | "discover_workspaces"
-            | "export_jsonl"
-            | "get_active_schema"
-            | "get_current_user"
-            | "get_entity"
-            | "get_entity_drift"
-            | "get_entity_type_json_schema"
-            | "get_iam_group"
-            | "get_iam_role"
-            | "get_iam_policy"
-            | "get_relation"
-            | "get_schema_by_id"
-            | "get_template"
-            | "get_template_library_item"
-            | "get_tenant"
-            | "get_workspace"
-            | "import_job_status"
-            | "migration_job_status"
-            | "migration_dry_run"
-            | "list_api_keys"
-            | "list_audit_log"
-            | "list_entities"
-            | "list_iam_audit"
-            | "list_iam_group_members"
-            | "list_iam_role_members"
-            | "list_iam_group_policies"
-            | "list_iam_role_policies"
-            | "list_iam_groups"
-            | "list_iam_policies"
-            | "list_iam_user_policies"
-            | "list_members"
-            | "list_relations"
-            | "list_schemas"
-            | "list_template_library"
-            | "list_templates"
-            | "list_workspaces"
-            | "preview_member_removal"
-            | "recall_context"
-            | "search_entities"
-            | "tenant_retirement_inventory"
-    )
+fn read_only_tool(name: &str) -> bool {
+    name == "get_caller_identity"
+        || action_for_tool(name).is_some_and(|action| {
+            matches!(action.access_level(), AccessLevel::List | AccessLevel::Read)
+        })
+}
+
+pub(crate) fn action_for_tool(name: &str) -> Option<Action> {
+    static ACTIONS: LazyLock<HashMap<String, Action>> = LazyLock::new(|| {
+        Action::ALL
+            .iter()
+            .copied()
+            .map(|action| {
+                let mut name = String::new();
+                for ch in action.name().chars() {
+                    if ch.is_ascii_uppercase() && !name.is_empty() {
+                        name.push('_');
+                    }
+                    name.push(ch.to_ascii_lowercase());
+                }
+                (name, action)
+            })
+            .collect()
+    });
+    ACTIONS.get(name).copied()
 }

@@ -1,8 +1,8 @@
 //! A per-key fixed-window rate limiter, applied to the credential routes reachable without a bearer token.
 //!
-//! Which paths those are is not decided here: `crate::app::RouteMounts` collects them as route groups are mounted, so a route group added by another edition is guarded by naming its path when it is mounted, and the limiter never learns who added it.
+//! `crate::app::RouteMounts` collects those paths as route groups are mounted, so the limiter never learns which edition added them.
 //!
-//! Keyed by client IP; falls back to a single shared bucket when no `ConnectInfo` is present on the request (Loco's boot path always populates it, so this only matters for a request driven directly through the router, e.g. some test harnesses).
+//! Keyed by client IP; a request without `ConnectInfo` shares one bucket.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -109,12 +109,11 @@ impl RateLimiter {
 
 /// Charges a search query against its workspace's token budget, refusing when the budget is spent.
 ///
-/// Charged before embedding, since embedding is the work the budget protects, and counting is cheap (a query is short), which is why search is metered in tokens while writes stay on request counts.
-/// The server holds no tokenizer, so a query costs one token per four bytes, rounded up: the estimate every provider without its own tokenizer already uses, and an overestimate for non-English text, which suits a quota.
-/// A free function taking both `ctx` values rather than a method on either, so a check written for only one caller can't leave the other able to spend the budget it's meant to protect: both the REST and MCP search handlers call this same function.
+/// Charged before embedding, since embedding is the work the budget protects.
+/// The server holds no tokenizer, so a query costs one token per four bytes, rounded up.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error when the workspace's token budget is spent.
 pub fn charge_search_tokens(
     limiter: &RateLimiter,
     workspace_id: uuid::Uuid,

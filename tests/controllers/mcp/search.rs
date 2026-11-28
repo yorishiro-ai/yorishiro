@@ -2,7 +2,7 @@ use axum::http::StatusCode;
 use serde_json::{Value, json};
 use yorishiro::models::{entity_entities, schema_schemas};
 
-use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
+use crate::requests::fixtures::{TenantArgs, TestTenant, issue_access_key};
 
 use super::*;
 
@@ -130,7 +130,7 @@ async fn postgres_search_returns_the_nearest_document_across_code_collapse_and_r
             let hits = rest.json::<Value>();
             assert_eq!(hits.as_array().unwrap().len(), 10);
             assert_eq!(
-                hits[0]["entity"]["id"],
+                hits[0]["entity"]["entity_id"],
                 nearest.id.to_string(),
                 "phase {phase}: {hits}"
             );
@@ -164,7 +164,7 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             owner_id,
             ..
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let read_key = issue_api_key(&ctx, workspace_id, owner_id, false).await;
+        let read_key = issue_access_key(&ctx, workspace_id, owner_id).await;
         let definition = serde_json::from_value(json!({
             "name": "note",
             "entity_types": { "note": { "fields": {
@@ -246,28 +246,19 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             .add_query_param("limit", "1")
             .add_header("Authorization", format!("Bearer {read_key}"))
             .await;
-        if ctx.db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            assert_eq!(filtered["result"]["isError"], true, "{filtered}");
-            assert!(
-                filtered["result"]["content"][0]["text"]
-                    .as_str()
-                    .unwrap()
-                    .contains("content filtering is not supported on SQLite")
-            );
-            rest.assert_status(StatusCode::NOT_IMPLEMENTED);
-            assert_eq!(rest.json::<Value>()["error"]["code"], "backend_unsupported");
-        } else {
-            assert_eq!(filtered["result"]["isError"], false, "{filtered}");
-            let filtered_hits = tool_result_json(&filtered);
-            assert_eq!(filtered_hits.as_array().unwrap().len(), 1);
-            assert_eq!(filtered_hits[0]["entity"]["id"], candidates[0].to_string());
-            rest.assert_status(StatusCode::OK);
-            assert_eq!(
-                rest.json::<Value>(),
-                filtered_hits,
-                "filters agree across transports"
-            );
-        }
+        assert_eq!(filtered["result"]["isError"], false, "{filtered}");
+        let filtered_hits = tool_result_json(&filtered);
+        assert_eq!(filtered_hits.as_array().unwrap().len(), 1);
+        assert_eq!(
+            filtered_hits[0]["entity"]["entity_id"],
+            candidates[0].to_string()
+        );
+        rest.assert_status(StatusCode::OK);
+        assert_eq!(
+            rest.json::<Value>(),
+            filtered_hits,
+            "filters agree across transports"
+        );
         let calls = inputs.lock().unwrap().len();
         let (failed_provider, _failed_server) = unavailable_provider().await;
         let reindex =
@@ -289,7 +280,7 @@ async fn mcp_search_asks_a_worker_to_embed_the_query() {
             unavailable["result"]["content"][0]["text"]
                 .as_str()
                 .unwrap()
-                .contains("reindexed")
+                .contains("workspace embeddings are changing")
         );
         let rest = request
             .get("/api/search?query_text=beta")

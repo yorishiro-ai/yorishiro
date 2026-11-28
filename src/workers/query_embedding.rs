@@ -8,6 +8,7 @@
 //! It travels to the shared target like documents do, so any worker serving the shared target answers searches; its priority puts a waiting search ahead of document backlog on that target.
 //! A job whose row is gone or no longer pending is a late delivery and does nothing.
 
+use crate::error::OptionExt;
 use std::time::Duration;
 
 use loco_rs::app::AppContext;
@@ -104,7 +105,7 @@ async fn embed(
     let concurrency = ctx
         .shared_store
         .get::<std::sync::Arc<tokio::sync::Semaphore>>()
-        .ok_or_else(|| YorishiroError::Internal("embedding concurrency missing".into()))?;
+        .or_internal("embedding concurrency missing")?;
     let _permit = concurrency.acquire_owned().await.internal()?;
     if deadline_at <= crate::data::time::now().fixed_offset() {
         return Err(YorishiroError::ProviderBusy {
@@ -122,7 +123,7 @@ async fn embed(
 
 /// Embeds `query_text` for a search by asking a worker, and waits a bounded time for the answer.
 ///
-/// `tenant_id` and `workspace_id` come from the verified API key.
+/// `tenant_id` and `workspace_id` come from the verified access key.
 /// On PostgreSQL every read and write of the request row runs on the tenant pool inside that workspace's scope, so row level security applies; SQLite is single-tenant.
 /// There is no fallback: when no worker answers in time the search fails, because a lexical result would silently differ from the semantic one the caller asked for.
 ///

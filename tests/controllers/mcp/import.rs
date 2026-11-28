@@ -50,11 +50,11 @@ async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
             &schema_key,
             2,
             "tools/call",
-            json!({ "name": "import_jsonl", "arguments": { "jsonl": jsonl } }),
+            json!({ "name": "create_import_job", "arguments": { "jsonl": jsonl } }),
         )
         .await;
         let accepted = tool_result_json(&result);
-        let id = accepted["job_id"].as_str().unwrap().parse().unwrap();
+        let id = accepted["import_job_id"].as_str().unwrap().parse().unwrap();
         crate::requests::jobs::fail_via_api(
             &request,
             &ctx,
@@ -69,7 +69,7 @@ async fn mcp_import_rolls_back_prior_records_when_a_later_line_is_invalid() {
             &schema_key,
             3,
             "tools/call",
-            json!({"name": "import_job_status", "arguments": {"job_id": id}}),
+            json!({"name": "get_import_job", "arguments": {"import_job_id": id}}),
         )
         .await;
         assert_eq!(tool_result_json(&status)["status"], "failed");

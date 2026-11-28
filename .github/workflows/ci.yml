@@ -1,6 +1,6 @@
 name: CI
 
-# Every edition and backend runs `cargo test` as is; public contracts run the built binary.
+# Both databases run the suite, with backend-specific cases guarded in tests.
 
 on:
   pull_request:
@@ -21,17 +21,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   PYTHONDONTWRITEBYTECODE: "1"
-  EMBEDDING_MODEL_REVISION: d128750597153bb5987e10b1c3493a34e5a4502a
-  EMBEDDING_MODEL_ID: intfloat/multilingual-e5-base
-  EMBEDDING_MODEL_SHORT_ID: multilingual-e5-base
-  EMBEDDING_MODEL_REMOTE_PATH: model.safetensors
-  EMBEDDING_MODEL_LOCAL_NAME: model.safetensors
-  EMBEDDING_MODEL_SHA256: a18a44fad1d0b46ded15928144138cff1135d5cc8233bdd90be5f18822de09a7
-  EMBEDDING_MODEL_SIZE: "1112201288"
-  EMBEDDING_TOKENIZER_REMOTE_PATH: tokenizer.json
-  EMBEDDING_TOKENIZER_LOCAL_NAME: tokenizer.json
-  EMBEDDING_TOKENIZER_SHA256: 62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626
-  EMBEDDING_TOKENIZER_SIZE: "17082660"
 
 jobs:
   licensed-validation:
@@ -39,9 +28,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 2
     outputs:
-      enabled: ${{ steps.eligibility.outputs.enabled }}
       matrix: ${{ steps.eligibility.outputs.matrix }}
-      regenerate-schema: ${{ steps.schema-changes.outputs.regenerate }}
     steps:
       - id: eligibility
         env:
@@ -52,11 +39,10 @@ jobs:
           if [[ "$TRUSTED" == true || "$DEPENDABOT_LICENCE" == true ]]; then
             enabled=true
           fi
-          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
           matrix=$(jq -cn --argjson licensed "$enabled" '
             [
               {name:"ce-sqlite", edition:"ce", database:"sqlite"},
-              {name:"ee-sqlite", edition:"ee", database:"sqlite", models:true},
+              {name:"ee-sqlite", edition:"ee", database:"sqlite"},
               {name:"ce-postgres", edition:"ce", database:"postgres"},
               {name:"ee-postgres", edition:"ee", database:"postgres"}
             ] + if $licensed then
@@ -66,7 +52,15 @@ jobs:
           if [[ "$enabled" != true ]]; then
             echo 'Licensed checks run after merge on develop. No licence is exposed to this run.' >> "$GITHUB_STEP_SUMMARY"
           fi
-      - uses: actions/checkout@v7
+
+  schema-changes:
+    name: Check schema changes
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      regenerate: ${{ steps.schema-changes.outputs.regenerate }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -93,7 +87,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/rust-setup
         with:
           components: clippy
@@ -106,7 +100,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -121,17 +115,21 @@ jobs:
           components: rustfmt, clippy
           cache-key: check
 
-      - name: Check formatting, scripts, boundaries, tests and Clippy
+      - name: Check formatting, scripts, boundaries, compilation and Clippy
         run: make check-all-ee
 
       - name: Check pinned versions agree
         # Service containers start before checkout and cannot read repository configuration.
+        shell: bash
         run: |
-          for pattern in 'pgvector/pgvector:[A-Za-z0-9.-]+' 'valkey/valkey:[A-Za-z0-9.-]+'; do
-            found="$(grep -rhoE "$pattern" .github docker-compose.yaml docker-compose.dev.yaml docker-compose.test.yaml Dockerfile Makefile | grep -oE '[0-9][0-9.]*$' | sort -u)"
-            if [ "$(wc -l <<<"$found")" -ne 1 ]; then
-              echo "::error::pinned versions disagree for '$pattern':"
-              echo "$found"
+          for image in pgvector/pgvector valkey/valkey; do
+            if ! found=$(grep -rhoE "${image}:[A-Za-z0-9_.:@-]+" .github docker-compose.yaml docker-compose.dev.yaml docker-compose.test.yaml scripts/generate_entities.sh | sort -u); then
+              echo "::error::could not read a pinned reference for $image"
+              exit 1
+            fi
+            if [[ "$found" == *$'\n'* ]]; then
+              echo "::error::pinned references disagree for $image"
+              printf '%s\n' "$found"
               exit 1
             fi
           done
@@ -146,15 +144,14 @@ jobs:
 
   schema-generation:
     name: Schema generation (PostgreSQL)
-    needs: [licensed-validation, build-ce]
-    if: needs.licensed-validation.outputs.regenerate-schema == 'true'
+    needs: [schema-changes, build-tests]
+    if: needs.schema-changes.outputs.regenerate == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
       DATABASE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
       QUEUE_URL: postgres://yorishiro:yorishiro@localhost:5432/yorishiro
       LOCO_ENV: test
-      DB_CONNECT_TIMEOUT: "5000"
     services:
       db:
         image: pgvector/pgvector:pg18
@@ -165,26 +162,27 @@ jobs:
         ports:
           - 5432:5432
         options: >-
+          --shm-size=1g
+          --tmpfs /var/lib/postgresql
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: ./.github/actions/rust-setup
         with:
           components: rustfmt
       - uses: ./.github/actions/sea-orm-cli
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: public-contract-binary-ce
+          name: tests-ce
           path: ${{ runner.temp }}/binary
       - name: Restore the built binary
         run: |
-          mkdir -p target/debug
-          tar -xzf "$RUNNER_TEMP/binary/public-contract-ce.tar.gz" -C target/debug
-          test -x target/debug/yorishiro
+          tar -xf "$RUNNER_TEMP/binary/tests-ce.tar" target/ci-tests/debug/yorishiro
+          test -x target/ci-tests/debug/yorishiro
 
       - name: Bootstrap PostgreSQL extensions and non-superuser migration identity
         uses: ./.github/actions/postgres-test-setup
@@ -192,13 +190,17 @@ jobs:
           container: ${{ job.services.db.id }}
 
       - name: Run migrations with the built binary
-        run: ./target/debug/yorishiro db migrate
+        env:
+          LLVM_PROFILE_FILE: ${{ runner.temp }}/schema-%p.profraw
+        run: ./target/ci-tests/debug/yorishiro db migrate
 
       - name: Regenerate entities
         id: regenerate-entities
+        env:
+          LLVM_PROFILE_FILE: ${{ runner.temp }}/schema-%p.profraw
         run: |
           rm -f src/models/_entities/*.rs
-          ./target/debug/yorishiro db entities
+          ./target/ci-tests/debug/yorishiro db entities
           python3 scripts/harden_generated_entities.py
 
       - name: Verify _entities/ matches a fresh regen
@@ -208,27 +210,25 @@ jobs:
 
       - name: Upload generated entities on mismatch
         if: ${{ failure() && steps.regenerate-entities.outcome == 'success' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: generated-entities
           path: src/models/_entities/
           if-no-files-found: error
 
-  build-ce:
-    name: Community binary
+  build-tests:
+    name: Test executables
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [ce, ee]
     uses: ./.github/workflows/test-build.yml
     with:
-      edition: ce
-
-  build-ee:
-    name: Enterprise binary
-    uses: ./.github/workflows/test-build.yml
-    with:
-      edition: ee
+      edition: ${{ matrix.edition }}
 
   test:
     name: Test (${{ matrix.name }})
-    needs: licensed-validation
+    needs: [licensed-validation, build-tests]
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     strategy:
@@ -238,9 +238,8 @@ jobs:
     env:
       DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgres://yorishiro:yorishiro@localhost:5432/yorishiro' || '' }}
       YORISHIRO_LICENSE_KEY: ${{ matrix.licensed && secrets.YORISHIRO_LICENSE_KEY || '' }}
-      DB_MAX_CONNECTIONS: "100"
-      DB_CONNECT_TIMEOUT: "5000"
       RUST_BACKTRACE: "1"
+      LLVM_PROFILE_FILE: ${{ github.workspace }}/target/ci-tests/coverage-%p-%m.profraw
     services:
       db:
         image: ${{ matrix.database == 'postgres' && 'pgvector/pgvector:pg18' || '' }}
@@ -251,48 +250,27 @@ jobs:
         ports:
           - 5432:5432
         options: >-
+          --shm-size=1g
+          --tmpfs /var/lib/postgresql
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/rust-setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          cache-key: test-${{ matrix.name }}
+          name: tests-${{ matrix.edition }}
+          path: ${{ runner.temp }}
+      - name: Restore test executables
+        env:
+          EDITION: ${{ matrix.edition }}
+        run: tar -xf "$RUNNER_TEMP/tests-$EDITION.tar"
       - name: Require the signed licence
         if: matrix.licensed
         run: test -n "$YORISHIRO_LICENSE_KEY"
-      - name: Restore the multilingual-e5-base cache
-        if: matrix.models
-        uses: actions/cache/restore@v6
-        id: embedding-cache
-        with:
-          path: |
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
-          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
-      - name: Report a model cache miss on an external run
-        if: matrix.models && steps.embedding-cache.outputs.cache-hit != 'true' && needs.licensed-validation.outputs.enabled != 'true'
-        run: echo 'E5 model tests are skipped on this run because the verified model cache was not available.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Prepare and verify multilingual-e5-base artifacts
-        if: matrix.models && (steps.embedding-cache.outputs.cache-hit == 'true' || needs.licensed-validation.outputs.enabled == 'true')
-        env:
-          CACHE_DIR: ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}
-          CACHE_HIT: ${{ steps.embedding-cache.outputs.cache-hit }}
-          MODEL_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_REMOTE_PATH }}
-          TOKENIZER_URL: https://huggingface.co/${{ env.EMBEDDING_MODEL_ID }}/resolve/${{ env.EMBEDDING_MODEL_REVISION }}/${{ env.EMBEDDING_MODEL_TOKENIZER_REMOTE_PATH }}
-        run: python3 scripts/embedding_cache.py prepare
-      - name: Save verified multilingual-e5-base cache
-        if: matrix.models && steps.embedding-cache.outputs.cache-hit != 'true' && needs.licensed-validation.outputs.enabled == 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_MODEL_LOCAL_NAME }}
-            ${{ github.workspace }}/models/${{ env.EMBEDDING_MODEL_SHORT_ID }}/${{ env.EMBEDDING_TOKENIZER_LOCAL_NAME }}
-          key: embedding-model-${{ env.EMBEDDING_MODEL_SHORT_ID }}-${{ env.EMBEDDING_MODEL_REVISION }}-${{ env.EMBEDDING_MODEL_SHA256 }}-${{ env.EMBEDDING_TOKENIZER_SHA256 }}
       - name: Bootstrap PostgreSQL extensions and a non-superuser migration identity
         if: matrix.database == 'postgres'
         uses: ./.github/actions/postgres-test-setup
@@ -301,17 +279,36 @@ jobs:
       - name: Run the tests
         run: |
           if [[ '${{ matrix.licensed }}' == true ]]; then
-            make test-licence
+            make test-licence TEST_BINARY="$(cat target/ci-tests/test-executable)"
             exit 0
           fi
-          # Bound concurrent database setup and teardown without changing the worker races inside each test.
-          if [[ '${{ matrix.name }}' == 'ee-postgres' ]]; then
-            export RUST_TEST_THREADS=2
-          fi
-          make test-${{ matrix.database }} EDITION=${{ matrix.edition }}
+          make test-${{ matrix.database }} EDITION=${{ matrix.edition }} TEST_BINARY="$(cat target/ci-tests/test-executable)"
+      - name: Generate coverage
+        if: ${{ !matrix.licensed && github.event_name != 'merge_group' }}
+        continue-on-error: true
+        id: coverage
+        env:
+          REPORT: ${{ matrix.name }}.lcov
+        run: |
+          rustup component add llvm-tools-preview
+          host=$(rustc -vV | sed -n 's/^host: //p')
+          llvm="$(rustc --print sysroot)/lib/rustlib/$host/bin"
+          "$llvm/llvm-profdata" merge -sparse target/ci-tests/*.profraw -o "$RUNNER_TEMP/coverage.profdata"
+          "$llvm/llvm-cov" export -format=lcov -instr-profile="$RUNNER_TEMP/coverage.profdata" \
+            -object "$(cat target/ci-tests/test-executable)" -object target/ci-tests/debug/yorishiro \
+            -ignore-filename-regex '(^|/)(tests|benches|patches|target)/|/\.cargo/|/\.rustup/|^/rustc/' > "$REPORT"
+          test -s "$REPORT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: steps.coverage.outcome == 'success'
+        continue-on-error: true
+        with:
+          name: coverage-${{ matrix.name }}
+          path: ${{ matrix.name }}.lcov
+          if-no-files-found: error
 
   test-valkey:
     name: Test (ee-valkey)
+    needs: build-tests
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     services:
@@ -322,122 +319,52 @@ jobs:
           --health-cmd "valkey-cli ping"
           --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/rust-setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          cache-key: test-ee-valkey
+          name: tests-ee
+          path: ${{ runner.temp }}
+      - name: Restore test executables
+        run: tar -xf "$RUNNER_TEMP/tests-ee.tar"
       - name: Run the Valkey queue tests
-        run: make test-valkey EDITION=ee VALKEY_URL=redis://127.0.0.1:6379
-
-  public-contract:
-    name: Public contracts (SQLite, ${{ matrix.edition }}, ${{ matrix.suite }})
-    needs: build-ce
-    runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {edition: ce, suite: rest}
-          - {edition: ce, suite: mcp}
-          - {edition: ce, suite: management}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: public-contract-binary-${{ matrix.edition }}
-          path: ${{ runner.temp }}/binary
-      - name: Restore the built binary
-        run: tar -xzf "$RUNNER_TEMP/binary/public-contract-${{ matrix.edition }}.tar.gz" -C "$RUNNER_TEMP/binary"
-      - name: Exercise the public interface through real processes
-        run: >-
-          make test-contract
-          BINARY="$RUNNER_TEMP/binary/yorishiro"
-          SUITE="${{ matrix.suite }}"
-          EDITION="${{ matrix.edition }}"
-          ARTIFACTS="$RUNNER_TEMP/contracts"
-      - name: Upload redacted logs and scenario results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: public-contract-result-${{ matrix.edition }}-${{ matrix.suite }}
-          path: ${{ runner.temp }}/contracts
-          if-no-files-found: error
-          retention-days: 7
-
-  public-contract-ee:
-    name: Public contracts (SQLite, ee, mcp)
-    needs: build-ee
-    runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: public-contract-binary-ee
-          path: ${{ runner.temp }}/binary
-      - name: Exercise the enterprise delta through real processes
-        run: |
-          tar -xzf "$RUNNER_TEMP/binary/public-contract-ee.tar.gz" -C "$RUNNER_TEMP/binary"
-          make test-contract BINARY="$RUNNER_TEMP/binary/yorishiro" SUITE=mcp EDITION=ee ARTIFACTS="$RUNNER_TEMP/contracts"
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: public-contract-result-ee-mcp
-          path: ${{ runner.temp }}/contracts
-          if-no-files-found: error
-          retention-days: 7
-
-  public-contract-tenant:
-    name: Public contracts (PostgreSQL, licensed ee, tenant)
-    needs: [build-ee, licensed-validation]
-    if: needs.licensed-validation.outputs.enabled == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    services:
-      db:
-        image: pgvector/pgvector:pg18
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports: [5432:5432]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s --health-timeout 3s --health-retries 10
+          LLVM_PROFILE_FILE: ${{ runner.temp }}/valkey-%p-%m.profraw
+        run: make test-valkey EDITION=ee VALKEY_URL=redis://127.0.0.1:6379 TEST_BINARY="$(cat target/ci-tests/test-executable)"
+
+  coverage:
+    name: Report coverage
+    needs: test
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          name: public-contract-binary-ee
-          path: ${{ runner.temp }}/binary
-      - name: Prepare the owned non-superuser PostgreSQL database
-        uses: ./.github/actions/postgres-test-setup
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          container: ${{ job.services.db.id }}
-          database: public_contract
-      - name: Exercise authenticated cross-tenant acceptance
-        env:
-          YORISHIRO_PUBLIC_POSTGRES_URL: postgres://yorishiro:yorishiro@localhost:5432/public_contract
-          YORISHIRO_LICENSE_KEY: ${{ secrets.YORISHIRO_LICENSE_KEY }}
+          pattern: coverage-*
+          path: coverage
+          merge-multiple: true
+      - name: Require reports from both backends and editions
         run: |
-          test -n "$YORISHIRO_LICENSE_KEY"
-          tar -xzf "$RUNNER_TEMP/binary/public-contract-ee.tar.gz" -C "$RUNNER_TEMP/binary"
-          make test-contract BINARY="$RUNNER_TEMP/binary/yorishiro" SUITE=tenant-postgres EDITION=ee ARTIFACTS="$RUNNER_TEMP/contracts"
-      - uses: actions/upload-artifact@v7
-        if: always()
+          for report in coverage/{ce,ee}-{sqlite,postgres}.lcov; do
+            test -s "$report"
+          done
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
         with:
-          name: public-contract-result-ee-tenant-postgres
-          path: ${{ runner.temp }}/contracts
-          if-no-files-found: error
-          retention-days: 7
+          files: coverage/ce-sqlite.lcov,coverage/ce-postgres.lcov,coverage/ee-sqlite.lcov,coverage/ee-postgres.lcov
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
 
   required-check:
     name: Required validation
     if: ${{ always() }}
-    needs: [licensed-validation, ce, check, schema-generation, build-ce, build-ee, test, test-valkey, public-contract, public-contract-ee, public-contract-tenant]
+    needs: [licensed-validation, schema-changes, ce, check, schema-generation, build-tests, test, test-valkey]
     runs-on: ubuntu-26.04
     steps:
       - name: Require every validation to succeed
@@ -450,11 +377,9 @@ jobs:
             jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"' <<< "$RESULTS"
           } >> "$GITHUB_STEP_SUMMARY"
           jq -e '
-            .["licensed-validation"].outputs.enabled as $licensed
-            | .["licensed-validation"].outputs["regenerate-schema"] as $regenerate
+            .["schema-changes"].outputs.regenerate as $regenerate
             | to_entries | all(
                 .value.result == "success" or
-                (.key == "schema-generation" and .value.result == "skipped" and $regenerate == "false") or
-                (.key == "public-contract-tenant" and .value.result == "skipped" and $licensed == "false")
+                (.key == "schema-generation" and .value.result == "skipped" and $regenerate == "false")
               )
           ' <<< "$RESULTS"

@@ -18,7 +18,6 @@ pub mod pagination;
 // Tenants, users, workspaces and their memberships and keys.
 pub mod tenancy;
 pub mod tenant_memberships;
-pub mod tenant_reindex_schedules;
 pub mod tenant_retirement_events;
 pub mod tenant_tenants;
 pub mod user_users;
@@ -27,17 +26,20 @@ pub mod workspace_llm_keys;
 pub mod workspace_worker_classes;
 pub mod workspace_workspaces;
 
-// API keys.
-pub mod api_key_audit_log;
-pub mod api_keys;
+// Access keys.
+pub mod access_keys;
+pub mod job_results;
+
+// The append-only trail of every call.
+pub mod api_events;
 
 // IAM: policies, groups, roles and the checks that evaluate them.
 pub mod iam;
-pub mod iam_audit_events;
 pub mod iam_group_memberships;
 pub mod iam_group_policy_attachments;
 pub mod iam_groups;
 pub mod iam_policies;
+pub mod iam_policy_versions;
 pub mod iam_tenant_roots;
 pub mod iam_user_policy_attachments;
 
@@ -65,6 +67,7 @@ pub mod search;
 pub mod transfer;
 
 // Queue bookkeeping and system state.
+pub mod import_staging;
 pub mod queue_job_dispatch_outbox;
 pub mod queue_job_lifecycles;
 pub mod system_maintenance;

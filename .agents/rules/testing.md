@@ -6,9 +6,9 @@ Run commands from the repository root, or use `make -C /path/to/repo <target>`.
 
 | Command | What it does | Backend |
 |---|---|---|
-| `make test-sqlite` | The whole suite on SQLite (`cargo test`); `EDITION=ce` selects community, the default is `ee` | SQLite |
-| `make test-valkey` | Only the Valkey queue provider tests, with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` (default: the compose `redis` service) | SQLite + Valkey |
-| `make test-postgres` | The whole suite on PostgreSQL; every test creates and drops its own database | PostgreSQL |
+| `make test-sqlite` | Full suite; `EDITION=ce` selects community, and `ee` is the default | SQLite |
+| `make test-valkey` | Valkey queue tests; override the default Compose endpoint with `VALKEY_URL` | SQLite + Valkey |
+| `make test-postgres` | Full suite; request tests use disposable databases | PostgreSQL |
 | `make check-ce` | `cargo check --locked --no-default-features --features community --workspace` | CE |
 | `make check-ee` | `cargo check --locked --features enterprise --workspace` | EE |
 | `make clippy-ce` | Strict Clippy for every CE target, including tests | CE |
@@ -25,21 +25,19 @@ Run commands from the repository root, or use `make -C /path/to/repo <target>`.
 | Variable | Default | Overrides |
 |---|---|---|
 | `DATABASE_URL` | `postgres://yorishiro:yorishiro@localhost:15432/yorishiro` | Target database for the test command |
-| `DB_MAX_CONNECTIONS` | `100` in CI and the PostgreSQL example | PostgreSQL pool maximum; production defaults are documented separately |
-| `DB_CONNECT_TIMEOUT` | `5000` in CI and the PostgreSQL example | PostgreSQL connection timeout |
-The backend comes from `DATABASE_URL` and the edition from the feature set; there is no other test selector.
+| `DB_MAX_CONNECTIONS` | `10` on SQLite, `100` on PostgreSQL | Application and SQL queue pool maximum |
+| `DB_CONNECT_TIMEOUT` | `500` | Connection timeout in milliseconds |
+
+`DATABASE_URL` selects the database backend, and Cargo features select the edition.
 A Valkey (Redis-compatible) queue runs with `YORISHIRO_QUEUE_KIND=Redis` and `QUEUE_URL` naming a server; the Valkey tests skip otherwise.
 A test that needs a licensed edition calls `crate::requests::require_licence(&ctx)` after boot.
 It installs a test licence unless `YORISHIRO_LICENSE_KEY` already holds a valid key, so these tests run in every environment.
 Only the signature check needs the real key: `make test-licence` runs it, and the CI job `ee-licence` supplies the key.
-The pinned E5 model tests skip unless `models/multilingual-e5-base/` holds the model files.
 
 Custom PostgreSQL:
 
 ```sh
-DATABASE_URL=postgres://user:pass@host:5432/db \
-  DB_MAX_CONNECTIONS=100 DB_CONNECT_TIMEOUT=5000 \
-  make test-postgres
+DATABASE_URL=postgres://user:pass@host:5432/db make test-postgres
 ```
 
 ### `make entities`
@@ -55,12 +53,14 @@ Development databases are not used; entity generation requires PostgreSQL.
 
 ### Multi-tenant tests
 
+Use `boot_multitenant_request` for tests that create multiple tenants through the API on PostgreSQL.
+It sets the deployment cap to unlimited for that boot and installs a test licence if needed.
 Community Edition and unlicensed Enterprise enforce a one-tenant deployment cap.
-A test that creates more than one tenant in one boot therefore needs a licensed Enterprise deployment: call `require_licence` after boot.
 
 ```rust
-boot_request::<App, _, _>(|request, ctx| async move {
-    crate::requests::require_licence(&ctx);
+crate::requests::boot_multitenant_request(|request, ctx| async move {
+    // Exercise multiple tenants.
+}).await;
 ```
 
 A test that must observe the unlicensed cap boots with `crate::requests::unlicensed()`, so the gate never sees a key.
@@ -69,12 +69,13 @@ A test changes the booted app's configuration by passing overrides to `boot_requ
 ### CI
 
 CI runs `make test-sqlite` and `make test-postgres` for `ce` and `ee`, plus `make test-licence`, which verifies a signed key with the repository secret.
-Each job runs every test; nothing is assigned or inventoried per test, so a new test needs no registration.
-The real-binary REST/MCP/CLI contracts live in `tests/contract/`; common suites own SQLite processes and the licensed tenant suite owns a PostgreSQL database.
-Keep deterministic fault/race fixtures internal when their guarantees need direct state control.
+The signed licence job runs on pushes to `develop` and eligible same-repository pull requests, not on forks or merge queue refs.
+Use backend guards only for tests that exercise behaviour specific to one database.
+CI builds the native test harness and CLI once per edition and runs them with the same settings as the Make targets.
+Codecov reports coverage for both editions and databases on pull requests and pushes to `develop`.
 The package and Docker installability checks run in `packaging.yml`, selected by its path filters on pull requests and on pushes to `develop`.
 
-The integration tests are one binary rooted at `tests/mod.rs`.
+The integration tests form one Loco test binary rooted at `tests/mod.rs`, without `#[path]` includes.
 A test file sits at the same path as the source file it covers; not every source file has tests.
 
 - `tests/controllers/`: REST handlers, MCP tools, middleware, route inventory, OpenAPI assembly
@@ -89,13 +90,14 @@ A test file sits at the same path as the source file it covers; not every source
 - `tests/integration/`: real child processes
 - `tests/ee/`: mirrors `ee/`, including REST and MCP tests under `ee/controllers/`; compiled only with the `enterprise` feature
 
-There is no `tests/lib.rs` and no `tests/test_helpers.rs`.
+There is no `tests/lib.rs` and no `tests/test_helpers.rs`, and no Python test suite: Python only runs the repository checks under `scripts/`.
 
 ## Where tests live
 
 Every test is under `tests/`. `src/` and `ee/` contain no `#[test]` and no `#[cfg(test)]`: CI rejects both.
 Keep items private or crate-visible unless production callers or integration tests need the public boundary.
-Test-only seams in production code are not allowed either: a dispatcher is replaced by inserting an `Arc<dyn Trait>` into `AppContext::shared_store`, the same call production makes.
+Do not add test-only seams to production code.
+To replace a dispatcher, insert an `Arc<dyn Trait>` into `AppContext::shared_store` as production code does.
 
 `tests/` builds without the enterprise feature (`--no-default-features --features community`).
 A module that needs `ee/` is declared with `#[cfg(feature = "enterprise")]`, and a test that asserts an enterprise-only behaviour is gated the same way.
@@ -123,30 +125,19 @@ Call sites:
 if !require_sqlite_backend() { return; }
 ```
 
-Files that need a specific backend guard with it:
-- `tests/models/content_entities_sqlite.rs`: entity CRUD seeded via raw SQL
-- `tests/models/tenancy_sqlite.rs`: the SQLite tenancy cap
-- `tests/models/search.rs`: PostgreSQL-only query shapes, guarded the other way
-
-
 ## `close_app_pools` (required)
 
-**`boot_request` closes the pools itself; a test that boots an app by other means must call `close_app_pools` before it returns, or teardown panics even on a passing test.**
-
-One definition, in `tests/requests/mod.rs`. One crate means one binary, so every suite reaches it by path.
-
-`after_context` shares the application pool with identity operations and opens a separate tenant pool.
-Test teardown must explicitly close both pools before `DROP DATABASE`.
+`boot_request` gives each test a disposable SQLite file or PostgreSQL database and closes its pools before cleanup.
+If a test boots an app another way, call `close_app_pools` from `tests/requests/mod.rs` before returning so cleanup can drop the database.
 
 ## Boot failure diagnostics
 
-A boot failure that leaves a pool open surfaces as a `DROP DATABASE` panic during cleanup, not as the actual boot error. `after_context` opens the identity pool eagerly before `db::converge` runs; if `converge` then fails, that pool holds a session that blocks `DROP DATABASE`.
-
-`close_app_pools` in `tests/requests/mod.rs` closes every pool this app opens. Use it before assuming a `DROP DATABASE` panic is the actual failure.
+A `DROP DATABASE` panic can mask a boot failure if a pool still holds a session.
+Check the boot error and ensure teardown closes the pools.
 
 ## PostgreSQL requirements
 
-Loco creates each throwaway database with `CREATE DATABASE`, which copies `template1`. A fresh Postgres volume needs `vector`/`pg_trgm` installed into `template1` itself. Verify:
+Loco creates each throwaway database with `CREATE DATABASE`, which copies `template1`. A fresh Postgres volume needs `vector` installed into `template1` itself. Verify:
 
 ```sh
 psql -d template1 -c '\dx'
@@ -162,7 +153,9 @@ Teardown drains workers and closes queue and application pools before removing t
 
 ## Gate testing
 
-**A gate is not a gate until a deliberate violation makes it fire.** Race-safety claims (quota locks, version-serialization locks, foreign-key-violation branches) need racing calls behind a barrier, not a sequential replay-rejection test.
+**A gate is not a gate until a deliberate violation makes it fire.**
+A test that claims a lock or constraint holds must trigger the violation, not only replay the accepted path.
+There are no barrier-based race tests: assert the observable end state of the guarded operation instead.
 
 ## MCP tools
 

@@ -19,29 +19,29 @@ use crate::models::entity_entities;
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct GetEntityArgs {
-    pub id: Uuid,
+    pub entity_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct UpdateEntityArgs {
-    pub id: Uuid,
+    pub entity_id: Uuid,
     #[serde(flatten)]
     pub body: UpdateEntityRequest,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct DeleteEntityArgs {
-    pub id: Uuid,
+    pub entity_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct MigrationDryRunArgs {
-    pub name: String,
+    pub schema_name: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct MigrationJobArgs {
-    pub job_id: Uuid,
+    pub migration_job_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -73,7 +73,7 @@ impl TryFrom<ListEntitiesArgs> for entity_entities::ListEntitiesQuery {
 
 #[tool_router(vis = "pub(crate)", router = tool_router_entities)]
 impl YorishiroMcpServer {
-    #[tool(description = "Create a new entity (requires entity_create IAM permission)")]
+    #[tool(description = "Create an entity.")]
     pub async fn create_entity(
         &self,
         Parameters(args): Parameters<CreateEntityRequest>,
@@ -86,20 +86,21 @@ impl YorishiroMcpServer {
         ok_json(record)
     }
 
-    #[tool(description = "Get a single entity by ID (requires entity_get IAM permission)")]
+    #[tool(description = "Get an entity by ID.")]
     pub async fn get_entity(
         &self,
         Parameters(args): Parameters<GetEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts);
-        let record =
-            try_tool!(entity_entities::get_for_actor(self.app_context(), &actor, args.id).await);
+        let record = try_tool!(
+            entity_entities::get_for_actor(self.app_context(), &actor, args.entity_id).await
+        );
         ok_json(record)
     }
 
     #[tool(
-        description = "Replace the data of an existing entity (requires entity_update IAM permission); pass expected_updated_at from a prior read to refuse the write with a conflict when the entity changed in between"
+        description = "Replace an entity's data. Pass expected_updated_at from a prior read to prevent overwriting a concurrent update."
     )]
     pub(crate) async fn update_entity(
         &self,
@@ -113,7 +114,7 @@ impl YorishiroMcpServer {
                 self.app_context(),
                 &actor,
                 entity_entities::UpdateEntityInput {
-                    id: args.id,
+                    id: args.entity_id,
                     data: args.body.data,
                     updated_by,
                     expected_updated_at: args.body.expected_updated_at,
@@ -124,18 +125,20 @@ impl YorishiroMcpServer {
         ok_json(record)
     }
 
-    #[tool(description = "Delete an entity (requires entity_delete IAM permission)")]
+    #[tool(description = "Delete an entity.")]
     pub(crate) async fn delete_entity(
         &self,
         Parameters(args): Parameters<DeleteEntityArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts);
-        try_tool!(entity_entities::delete_for_actor(self.app_context(), &actor, args.id).await);
+        try_tool!(
+            entity_entities::delete_for_actor(self.app_context(), &actor, args.entity_id).await
+        );
         ok_json(serde_json::json!({ "deleted": true }))
     }
 
-    #[tool(description = "List entities (requires entity_list IAM permission)")]
+    #[tool(description = "List entities.")]
     pub async fn list_entities(
         &self,
         Parameters(args): Parameters<ListEntitiesArgs>,
@@ -151,11 +154,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Report how an entity stands against the active version of its schema \
-                           (requires entity_drift_get IAM permission). Entities are migrated lazily, so one written \
-                           against an older version can still contain newer fields. Reports active \
-                           fields absent from stored data, including nested fields in existing \
-                           objects. Present nulls and type errors are not missing-value diagnostics."
+        description = "Compare an entity with the active schema and report missing fields, including fields in nested objects. Nulls and type errors do not count as missing."
     )]
     pub(crate) async fn get_entity_drift(
         &self,
@@ -163,33 +162,37 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts);
-        render(entity_entities::drift_for_actor(self.app_context(), actor, args.id).await)
+        render(entity_entities::drift_for_actor(self.app_context(), actor, args.entity_id).await)
     }
 
     #[tool(
         description = "Count what migrating a schema's entities to its active version would \
-                           face, without doing it (requires migration_dry_run IAM permission). Reports how many are \
+                           face, without doing it. Reports how many are \
                            current, how many are behind without missing required fields, and how many lack a \
                            field the active version requires: the last being the work a \
                            migration would have to fill in. Inspects stored data, not only schema \
                            definitions; this is not full active-schema validation."
     )]
-    pub async fn migration_dry_run(
+    pub async fn preview_migration(
         &self,
         Parameters(args): Parameters<MigrationDryRunArgs>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts);
         render(
-            entity_entities::migration_dry_run_for_actor(self.app_context(), actor, &args.name)
-                .await,
+            entity_entities::migration_dry_run_for_actor(
+                self.app_context(),
+                actor,
+                &args.schema_name,
+            )
+            .await,
         )
     }
 
     #[tool(
-        description = "Enqueue a fill-defaults job (requires migration_fill_defaults IAM permission, rechecked at execution). Returns a job ID; the worker fills absent required fields and takes undo snapshots. Completed counts appear in the audit log."
+        description = "Enqueue a job to fill absent required fields and take undo snapshots. Completed counts appear in the audit log."
     )]
-    pub async fn fill_defaults(
+    pub async fn fill_entity_defaults(
         &self,
         Parameters(args): Parameters<FillDefaultsRequest>,
         Extension(parts): Extension<Parts>,
@@ -205,14 +208,12 @@ impl YorishiroMcpServer {
         );
         ok_json(crate::dtos::entities::FillDefaultsResponse {
             schema_name: args.schema_name,
-            job_id,
+            migration_job_id: job_id,
         })
     }
 
-    #[tool(
-        description = "Get a migration job's status (requires migration_job_get IAM permission)"
-    )]
-    pub(crate) async fn migration_job_status(
+    #[tool(description = "Get a migration job's status")]
+    pub(crate) async fn get_migration_job(
         &self,
         Parameters(args): Parameters<MigrationJobArgs>,
         Extension(parts): Extension<Parts>,
@@ -222,14 +223,18 @@ impl YorishiroMcpServer {
             crate::models::queue_job_lifecycles::migration_job_status_for_actor(
                 self.app_context(),
                 actor,
-                args.job_id,
+                args.migration_job_id,
             )
-            .await,
+            .await
+            .map(|status| crate::dtos::jobs::MigrationJobStatus {
+                migration_job_id: args.migration_job_id,
+                status,
+            }),
         )
     }
 
     #[tool(
-        description = "Enqueue workspace embedding reindex (requires workspace_reindex IAM permission, rechecked before execution and publication)"
+        description = "Queue a rebuild of the workspace's embeddings. The worker rechecks authorization before execution and publication."
     )]
     pub(crate) async fn reindex_workspace(
         &self,
@@ -239,12 +244,12 @@ impl YorishiroMcpServer {
         let job_id = try_tool!(
             crate::workers::reindex::enqueue_requested_for_actor(self.app_context(), actor).await
         );
-        ok_json(crate::dtos::entities::ReindexResponse { job_id })
+        ok_json(crate::dtos::entities::ReindexResponse {
+            migration_job_id: job_id,
+        })
     }
 
-    #[tool(
-        description = "Enqueue undo of a migration job's snapshots (requires migration_undo IAM permission, rechecked at execution)"
-    )]
+    #[tool(description = "Queue a job that restores entities from a migration job's snapshots.")]
     pub(crate) async fn undo_migration_job(
         &self,
         Parameters(args): Parameters<MigrationJobArgs>,
@@ -252,11 +257,16 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let actor = verified!(self, parts);
         let job_id = try_tool!(
-            crate::workers::undo::enqueue_for_actor(self.app_context(), actor, args.job_id).await
+            crate::workers::undo::enqueue_for_actor(
+                self.app_context(),
+                actor,
+                args.migration_job_id
+            )
+            .await
         );
         ok_json(crate::dtos::entities::UndoResponse {
-            job_id,
-            snapshot_job_id: args.job_id,
+            migration_job_id: job_id,
+            snapshot_job_id: args.migration_job_id,
         })
     }
 }

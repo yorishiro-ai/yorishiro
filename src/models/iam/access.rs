@@ -1,11 +1,12 @@
 //! Cross-table authorization decisions shared by every transport.
 //! Credential verification and table mutations remain in their owning models.
 
+use crate::error::OptionExt;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, TransactionTrait};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 use crate::models::tenant_memberships;
 
 pub(crate) async fn authorize_workspace_action(
@@ -33,8 +34,9 @@ pub(crate) async fn check_workspace_target(
     actor: &AuthContext,
     workspace_id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
-    let tenant =
-        crate::models::workspace_workspaces::get_workspace_tenant(db, workspace_id).await?;
+    let tenant = crate::models::workspace_workspaces::get_workspace_tenant(db, workspace_id)
+        .await
+        .map_err(|error| hide_inferred_resource(true, error))?;
     if tenant != actor.tenant_id
         || actor
             .workspace_id
@@ -80,11 +82,14 @@ impl WorkspaceTarget {
                     .all(db)
                     .await
                     .internal()?;
-                let permitted =
-                    read_workspaces(db, actor, crate::models::iam::policy::Action::MigrationUndo)
-                        .await?
-                        .into_iter()
-                        .collect::<std::collections::HashSet<_>>();
+                let permitted = read_workspaces(
+                    db,
+                    actor,
+                    crate::models::iam::policy::Action::UndoMigrationJob,
+                )
+                .await?
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>();
                 let matching: Vec<_> = workspaces
                     .into_iter()
                     .filter(|workspace| permitted.contains(workspace))
@@ -103,10 +108,10 @@ impl WorkspaceTarget {
                     .one(db)
                     .await
                     .internal()?
-                    .ok_or_else(|| YorishiroError::not_found("job was not found"))?;
+                    .or_not_found("job was not found")?;
                 let workspace = record
                     .workspace_id
-                    .ok_or_else(|| YorishiroError::not_found("workspace job was not found"))?;
+                    .or_not_found("workspace job was not found")?;
                 check_workspace_target(db, actor, workspace).await
             }
             Self::Workspace(id) => check_workspace_target(db, actor, id).await,
@@ -125,7 +130,7 @@ pub(crate) fn hide_inferred_resource(inferred: bool, error: YorishiroError) -> Y
     if inferred
         && matches!(
             error,
-            YorishiroError::ScopeInsufficient { .. } | YorishiroError::NotFound { .. }
+            YorishiroError::AccessDenied { .. } | YorishiroError::NotFound { .. }
         )
     {
         YorishiroError::not_found("resource was not found")
@@ -172,9 +177,6 @@ pub(crate) async fn read_workspaces(
 ) -> Result<Vec<Uuid>, YorishiroError> {
     let txn = db.begin().await.internal()?;
     let evaluation = IamEvaluation::load(&txn, actor).await?;
-    if action == crate::models::iam::policy::Action::AuditLogList {
-        require_audit(&evaluation.current)?;
-    }
     let workspaces = evaluation.selected_or_allowed(action).await?;
     txn.commit().await.internal()?;
     Ok(workspaces)
@@ -183,10 +185,124 @@ pub(crate) async fn read_workspaces(
 pub(crate) struct IamEvaluation<'a> {
     txn: &'a DatabaseTransaction,
     current: AuthContext,
-    bound_workspace_id: Option<Uuid>,
     root: bool,
     root_session: bool,
     policies: Vec<crate::models::iam::policy::Policy>,
+    policy_names: Vec<String>,
+}
+
+/// Rejects a caller that neither is the tenant root nor holds `AdministratorAccess`.
+/// Granting `AdministratorAccess` is the one grant that cannot exceed what the grantor already holds.
+pub(crate) async fn require_administrator(
+    txn: &DatabaseTransaction,
+    actor: &AuthContext,
+) -> Result<(), YorishiroError> {
+    let evaluation = IamEvaluation::load(txn, actor).await?;
+    if evaluation.holds_administrator_access() {
+        Ok(())
+    } else {
+        let principal = evaluation.principal_yrn().await;
+        tracing::warn!(
+            caller = %evaluation.current.yrn(),
+            principal = %principal,
+            "granting AdministratorAccess denied",
+        );
+        Err(YorishiroError::AccessDenied {
+            message: "granting AdministratorAccess requires holding AdministratorAccess".into(),
+            hint: "ask a tenant administrator to make this change".into(),
+        })
+    }
+}
+
+/// The result of asking whether a user's policies allow an action on a resource.
+pub struct Simulation {
+    pub decision: crate::models::iam::policy::Decision,
+    pub matched_policies: Vec<String>,
+}
+
+/// Evaluates a hypothetical request for `user_id`, or for the caller when it is absent, with the code real requests use.
+///
+/// # Errors
+/// Rejects callers without `iam:SimulatePrincipalPolicy`, unknown users and malformed resources.
+pub(crate) async fn simulate_principal_policy(
+    db: &sea_orm::DatabaseConnection,
+    actor: &AuthContext,
+    user_id: Option<Uuid>,
+    action: crate::models::iam::policy::Action,
+    resource: Option<&str>,
+) -> Result<Simulation, YorishiroError> {
+    use crate::models::iam::policy::{Action, Decision, Policy, Resource};
+    let txn = crate::db::begin_write(db).await.internal()?;
+    require_iam_action(
+        &txn,
+        actor,
+        Action::SimulatePrincipalPolicy,
+        Resource::Tenant {
+            tenant_id: actor.tenant_id,
+        },
+    )
+    .await?;
+    let tenant_id = actor.tenant_id;
+    let user_id = user_id
+        .or(actor.user_id)
+        .ok_or(YorishiroError::Unauthenticated)?;
+    if !tenant_memberships::is_member(&txn, tenant_id, user_id).await? {
+        return Err(YorishiroError::not_found("user was not found"));
+    }
+    let target = match resource {
+        None | Some("*") => {
+            let tenant = Resource::Tenant { tenant_id };
+            if action.applies_to(tenant) {
+                tenant
+            } else {
+                Resource::AllWorkspaces { tenant_id }
+            }
+        }
+        Some(yrn) => {
+            let target = Resource::parse(yrn)?;
+            if target.tenant_id() != tenant_id {
+                return Err(YorishiroError::not_found("resource was not found"));
+            }
+            if !action.applies_to(target) {
+                return Err(YorishiroError::ValidationFailed {
+                    message: "the resource is not of the kind this action applies to".into(),
+                    details: vec![],
+                    hint: "use the tenant YRN or * for tenant actions, and a workspace YRN or * for workspace actions".into(),
+                });
+            }
+            if let Resource::Workspace { workspace_id, .. } = target
+                && crate::models::workspace_workspaces::get_workspace_tenant(&txn, workspace_id)
+                    .await?
+                    != tenant_id
+            {
+                return Err(YorishiroError::not_found("resource was not found"));
+            }
+            target
+        }
+    };
+    if crate::models::iam_tenant_roots::Model::contains(&txn, tenant_id, user_id).await? {
+        txn.commit().await.internal()?;
+        return Ok(Simulation {
+            decision: Decision::Allowed,
+            matched_policies: Vec::new(),
+        });
+    }
+    let effective =
+        crate::models::iam_policies::Model::effective_for_user(&txn, tenant_id, user_id).await?;
+    let policies = effective
+        .iter()
+        .map(|policy| policy.parse(tenant_id))
+        .collect::<Result<Vec<Policy>, _>>()?;
+    let evaluation = Policy::simulate(&policies, tenant_id, action, target);
+    txn.commit().await.internal()?;
+    Ok(Simulation {
+        decision: evaluation.decision,
+        matched_policies: evaluation
+            .matched
+            .into_iter()
+            .map(|index| effective[index].name.clone())
+            .collect(),
+    })
 }
 
 impl<'a> IamEvaluation<'a> {
@@ -195,14 +311,28 @@ impl<'a> IamEvaluation<'a> {
         action: crate::models::iam::policy::Action,
     ) -> Result<Vec<Uuid>, YorishiroError> {
         if let Some(workspace_id) = self.current.workspace_id {
-            self.require(
-                action,
-                crate::models::iam::policy::Resource::Workspace {
-                    tenant_id: self.current.tenant_id,
-                    workspace_id,
-                },
-            )
-            .await?;
+            use crate::models::iam::policy::{Action, Resource};
+            let target = Resource::Workspace {
+                tenant_id: self.current.tenant_id,
+                workspace_id,
+            };
+            if let Err(error) = self.require(action, target).await {
+                if matches!(error, YorishiroError::AccessDenied { .. }) {
+                    match self
+                        .require_with_owner(Action::GetWorkspace, target, true)
+                        .await
+                    {
+                        Err(YorishiroError::AccessDenied { .. }) => {
+                            return Err(hide_inferred_resource(true, error));
+                        }
+                        result => result?,
+                    }
+                }
+                return Err(hide_inferred_resource(
+                    matches!(error, YorishiroError::NotFound { .. }),
+                    error,
+                ));
+            }
             Ok(vec![workspace_id])
         } else {
             self.workspace_ids(action).await
@@ -234,7 +364,7 @@ impl<'a> IamEvaluation<'a> {
                 .await
             {
                 Ok(()) => allowed.push(workspace.id),
-                Err(YorishiroError::ScopeInsufficient { .. }) => {}
+                Err(YorishiroError::AccessDenied { .. }) => {}
                 Err(error) => return Err(error),
             }
         }
@@ -245,40 +375,47 @@ impl<'a> IamEvaluation<'a> {
         txn: &'a DatabaseTransaction,
         actor: &AuthContext,
     ) -> Result<Self, YorishiroError> {
-        use crate::models::iam::policy::Policy;
         use sea_orm::EntityTrait;
         crate::db::lock_for_update(txn, &format!("tenant-membership:{}", actor.tenant_id))
             .await
             .internal()?;
-        let current = crate::models::api_keys::Model::current_context(txn, actor).await?;
-        let key = crate::models::api_keys::Entity::find_by_id(current.api_key_id)
+        let current = crate::models::access_keys::Model::current_context(txn, actor).await?;
+        let key = crate::models::access_keys::Entity::find_by_id(current.access_key_id)
             .one(txn)
             .await
             .internal()?
             .ok_or(YorishiroError::Unauthenticated)?;
         let user_id = current.user_id.ok_or(YorishiroError::Unauthenticated)?;
         let root = key.has_root_principal(txn).await?;
-        let documents = if root {
+        let effective = if root {
             Vec::new()
         } else {
-            crate::models::iam_policies::Model::for_user(txn, current.tenant_id, user_id).await?
+            crate::models::iam_policies::Model::effective_for_user(txn, current.tenant_id, user_id)
+                .await?
         };
-        let mut policies = Vec::with_capacity(documents.len());
-        for document in documents {
-            let json = serde_json::to_string(&document.document).internal()?;
-            // Ownership is verified for the concrete target; stale unrelated selectors must not block it.
-            policies.push(Policy::parse(&json, current.tenant_id, |tenant, _| {
-                tenant == current.tenant_id
-            })?);
+        let mut policies = Vec::with_capacity(effective.len());
+        let mut policy_names = Vec::with_capacity(effective.len());
+        for policy in effective {
+            policies.push(policy.parse(current.tenant_id)?);
+            policy_names.push(policy.name);
         }
         Ok(Self {
             txn,
             root_session: key.is_login_session() && root,
             current,
-            bound_workspace_id: key.workspace_id,
             root,
             policies,
+            policy_names,
         })
+    }
+
+    /// Whether the caller is the tenant root or holds the managed `AdministratorAccess`.
+    fn holds_administrator_access(&self) -> bool {
+        self.root
+            || self
+                .policy_names
+                .iter()
+                .any(|name| name == crate::models::iam::builtin::ADMINISTRATOR_ACCESS)
     }
 
     pub(crate) async fn require(
@@ -286,7 +423,24 @@ impl<'a> IamEvaluation<'a> {
         action: crate::models::iam::policy::Action,
         target: crate::models::iam::policy::Resource,
     ) -> Result<(), YorishiroError> {
-        self.require_with_owner(action, target, false).await
+        let result = self.require_with_owner(action, target, false).await;
+        match &result {
+            Ok(()) => crate::controllers::middleware::access_log::authorized(action, target),
+            Err(YorishiroError::AccessDenied { message, .. }) => {
+                crate::controllers::middleware::access_log::denied();
+                let principal = self.principal_yrn().await;
+                tracing::warn!(
+                    caller = %self.current.yrn(),
+                    principal = %principal,
+                    action = %action.qualified(),
+                    target = %target.yrn(),
+                    reason = %message,
+                    "IAM denied the request",
+                );
+            }
+            _ => {}
+        }
+        result
     }
 
     async fn require_with_owner(
@@ -295,33 +449,23 @@ impl<'a> IamEvaluation<'a> {
         target: crate::models::iam::policy::Resource,
         tenant_owns_workspace: bool,
     ) -> Result<(), YorishiroError> {
-        use crate::models::iam::policy::{Policy, Resource};
+        use crate::models::iam::policy::{Decision, Policy, Resource};
         if !action.applies_to(target) {
             return Err(YorishiroError::Unauthenticated);
         }
         if let Resource::Workspace { workspace_id, .. } = target
-            && (self
+            && self
                 .current
                 .workspace_id
                 .is_some_and(|id| id != workspace_id)
-                || self.bound_workspace_id.is_some_and(|id| id != workspace_id))
         {
-            return Err(YorishiroError::ScopeInsufficient {
-                message: "credential workspace does not match the target workspace".into(),
-                hint: "use a credential for the target workspace".into(),
+            return Err(YorishiroError::AccessDenied {
+                message: "the selected workspace does not match the target workspace".into(),
+                hint: "select the target workspace, or omit the selection".into(),
             });
         }
         let workspace = match target {
-            Resource::Tenant { tenant_id } if tenant_id == self.current.tenant_id => {
-                if self.bound_workspace_id.is_some() {
-                    return Err(YorishiroError::ScopeInsufficient {
-                        message: "workspace-bound credentials cannot access tenant resources"
-                            .into(),
-                        hint: "use a tenant-scoped credential".into(),
-                    });
-                }
-                None
-            }
+            Resource::Tenant { tenant_id } if tenant_id == self.current.tenant_id => None,
             Resource::Workspace {
                 tenant_id,
                 workspace_id,
@@ -329,8 +473,7 @@ impl<'a> IamEvaluation<'a> {
                 && self
                     .current
                     .workspace_id
-                    .is_none_or(|id| id == workspace_id)
-                && self.bound_workspace_id.is_none_or(|id| id == workspace_id) =>
+                    .is_none_or(|id| id == workspace_id) =>
             {
                 if !tenant_owns_workspace
                     && crate::models::workspace_workspaces::get_workspace_tenant(
@@ -349,33 +492,65 @@ impl<'a> IamEvaluation<'a> {
         if self.root_session || (self.root && workspace.is_some()) {
             return Ok(());
         }
-        if Policy::allows(
-            &self.policies,
-            self.current.tenant_id,
-            action,
-            target,
-            |tenant, id| tenant == self.current.tenant_id && Some(id) == workspace,
-        ) {
-            Ok(())
-        } else {
-            Err(YorishiroError::ScopeInsufficient {
-                message: "IAM policy does not permit this operation".into(),
-                hint: "request an applicable IAM policy grant".into(),
-            })
+        let evaluation = Policy::simulate(&self.policies, self.current.tenant_id, action, target);
+        let (message, hint) = match evaluation.decision {
+            Decision::Allowed => return Ok(()),
+            Decision::ImplicitDeny => (
+                format!(
+                    "no IAM policy allows {} on {}",
+                    action.qualified(),
+                    target.yrn()
+                ),
+                "request an applicable IAM policy grant",
+            ),
+            Decision::ExplicitDeny => {
+                let policies = evaluation
+                    .matched
+                    .iter()
+                    .map(|&index| self.policy_names[index].as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (
+                    format!(
+                        "IAM policy explicitly denies {} on {}: {policies}",
+                        action.qualified(),
+                        target.yrn()
+                    ),
+                    "review the denying IAM policies",
+                )
+            }
+        };
+        Err(YorishiroError::AccessDenied {
+            message,
+            hint: hint.into(),
+        })
+    }
+
+    /// The YRN of the user behind the credential, or of the access key when it has none.
+    /// Only denials need it, so the lookup is best effort and never fails a request.
+    async fn principal_yrn(&self) -> String {
+        use sea_orm::EntityTrait;
+        if let Some(user_id) = self.current.user_id
+            && let Ok(Some(user)) = crate::models::user_users::Entity::find_by_id(user_id)
+                .one(self.txn)
+                .await
+        {
+            return user.yrn(self.current.tenant_id);
         }
+        self.current.yrn()
     }
 }
 
 /// Persisted, secret-free identity and target information shared by transports.
 pub struct AccessIdentity {
     pub current: AuthContext,
+    pub yrn: String,
     pub workspace_name: Option<String>,
     pub tenant_name: String,
-    pub bound_workspace_id: Option<Uuid>,
     pub tenant_root: bool,
 }
 
-/// Resolves names and binding after revalidating the credential and membership.
+/// Resolves names and the target workspace after revalidating the credential and membership.
 ///
 /// # Errors
 /// Rejects stale credentials and invalid target bindings or propagates lookup failures.
@@ -384,7 +559,7 @@ pub async fn identity(
     actor: &AuthContext,
 ) -> Result<AccessIdentity, YorishiroError> {
     use sea_orm::EntityTrait;
-    let current = crate::models::api_keys::Model::current_context(conn, actor).await?;
+    let current = crate::models::access_keys::Model::current_context(conn, actor).await?;
     let workspace = if let Some(workspace_id) = current.workspace_id {
         Some(
             crate::models::workspace_workspaces::Entity::find_by_id(workspace_id)
@@ -398,47 +573,28 @@ pub async fn identity(
         None
     };
     let tenant = crate::models::tenant_tenants::Model::find_by_id(conn, current.tenant_id).await?;
-    let key = crate::models::api_keys::Entity::find_by_id(current.api_key_id)
+    let key = crate::models::access_keys::Entity::find_by_id(current.access_key_id)
         .one(conn)
         .await
         .internal()?
         .ok_or(YorishiroError::Unauthenticated)?;
     let tenant_root = key.is_login_session() && key.has_root_principal(conn).await?;
+    let yrn = if let Some(user_id) = current.user_id {
+        crate::models::user_users::Entity::find_by_id(user_id)
+            .one(conn)
+            .await
+            .internal()?
+            .ok_or(YorishiroError::Unauthenticated)?
+            .yrn(current.tenant_id)
+    } else {
+        current.yrn()
+    };
     Ok(AccessIdentity {
         current,
+        yrn,
         workspace_name: workspace.map(|workspace| workspace.name),
         tenant_name: tenant.name,
-        bound_workspace_id: key.workspace_id,
         tenant_root,
-    })
-}
-
-#[derive(serde::Serialize)]
-pub struct AccessCapabilities {
-    pub database_backend: &'static str,
-    pub row_level_security: bool,
-    pub audit: bool,
-    pub tenant_root: bool,
-}
-
-/// # Errors
-/// Rejects revoked credentials or missing membership and propagates database failures.
-pub async fn capabilities(
-    conn: &impl ConnectionTrait,
-    actor: &AuthContext,
-) -> Result<AccessCapabilities, YorishiroError> {
-    let identity = identity(conn, actor).await?;
-    let current = identity.current;
-    Ok(AccessCapabilities {
-        database_backend: match conn.get_database_backend() {
-            sea_orm::DatabaseBackend::Postgres => "postgres",
-            sea_orm::DatabaseBackend::Sqlite => "sqlite",
-            sea_orm::DatabaseBackend::MySql => "mysql",
-            _ => "unknown",
-        },
-        row_level_security: crate::db::is_postgres(conn),
-        audit: require_audit(&current).is_ok(),
-        tenant_root: identity.tenant_root,
     })
 }
 
@@ -458,34 +614,4 @@ pub(crate) async fn require_key_attribution(
         return Err(YorishiroError::Unauthenticated);
     }
     Ok(())
-}
-
-/// # Errors
-/// Rejects inactive tenants and an audit grant the issuer does not hold.
-pub async fn require_key_grant(
-    conn: &impl ConnectionTrait,
-    issuer: &AuthContext,
-    audit: bool,
-) -> Result<(), YorishiroError> {
-    crate::models::tenant_tenants::Model::require_active(conn, issuer.tenant_id).await?;
-    if audit {
-        require_audit(issuer)?;
-    }
-    Ok(())
-}
-
-/// Audit is an operator grant a key holds.
-///
-/// # Errors
-/// Returns scope insufficient when the explicit audit grant is absent.
-pub fn require_audit(ctx: &AuthContext) -> Result<(), YorishiroError> {
-    if ctx.audit {
-        Ok(())
-    } else {
-        Err(YorishiroError::ScopeInsufficient {
-            message: "this operation requires the audit grant, which this API key does not hold"
-                .into(),
-            hint: "reissue an API key with audit:true".into(),
-        })
-    }
 }

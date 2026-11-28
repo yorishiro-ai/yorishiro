@@ -12,7 +12,7 @@ mod conflict {
     use tokio::sync::{Notify, Semaphore};
     use uuid::Uuid;
     use yorishiro::App;
-    use yorishiro::models::_entities::{api_keys, workspace_workspaces};
+    use yorishiro::models::_entities::workspace_workspaces;
     use yorishiro::models::queue_job_lifecycles::{Entity, LifecycleStatus};
     use yorishiro::models::{entity_entities, schema_schemas};
     use yorishiro::services::embedding::{
@@ -1547,7 +1547,7 @@ mod conflict {
             crate::requests::fixtures::grant_iam_administrator(&txn, tenant_id, owner.id).await;
             txn.commit().await.unwrap();
             let write_key =
-                api_keys::Entity::create_api_key(&ctx.db, workspace_id, Some(owner.id), false)
+                crate::requests::fixtures::create_key(&ctx.db, workspace_id, Some(owner.id))
                     .await
                     .expect("create write key")
                     .plaintext;

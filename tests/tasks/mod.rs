@@ -1,5 +1,6 @@
+mod purge_audit_events;
+mod reindex_scheduler;
 mod resync_embeddings;
-mod tenant_reindex_scheduler;
 
 pub(crate) mod inspect_tenant_retirement;
 

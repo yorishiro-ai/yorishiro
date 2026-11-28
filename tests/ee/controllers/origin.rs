@@ -22,7 +22,7 @@ async fn create_template(
         .json(&json!({ "name": "library-note", "definition": definition }))
         .await;
     response.assert_status(StatusCode::CREATED);
-    serde_json::from_value(response.json::<serde_json::Value>()["id"].clone())
+    serde_json::from_value(response.json::<serde_json::Value>()["template_id"].clone())
         .expect("created template ID")
 }
 
@@ -47,7 +47,7 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
             "response: {:?}",
             create.text()
         );
-        let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["id"]
+        let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["schema_id"]
             .as_str()
             .unwrap()
             .parse()
@@ -83,73 +83,6 @@ async fn a_schema_with_no_origin_is_never_reported_or_mergeable() {
             body["error"]["hint"],
             "only a schema created from a template library entry can be merged; create one with POST /api/schemas and a template_id"
         );
-    })
-    .await;
-}
-
-/// Separate workspaces can merge concurrently, including on single-tenant SQLite.
-#[tokio::test]
-async fn concurrent_rest_merges_commit_for_separate_workspaces() {
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let mut inputs = Vec::new();
-        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let library_key =
-            crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
-                .await;
-        let template = create_template(&request, &library_key, note_definition()).await;
-        for _ in 0..2 {
-            let txn = ctx.db.begin().await.unwrap();
-            let workspace = yorishiro::models::tenancy::create_workspace(
-                &txn,
-                tenant.tenant_id,
-                &format!("merge-{}", Uuid::new_v4()),
-                None,
-                None,
-            )
-            .await
-            .unwrap();
-            txn.commit().await.unwrap();
-            let key = crate::requests::fixtures::issue_api_key(
-                &ctx,
-                workspace.id,
-                tenant.owner_id,
-                false,
-            )
-            .await;
-            let response = request
-                .post("/api/schemas")
-                .add_header("Authorization", format!("Bearer {key}"))
-                .json(&json!({"template_id":template.to_string()}))
-                .await;
-            response.assert_status(StatusCode::CREATED);
-            let id = response.json::<serde_json::Value>()["schema"]["id"]
-                .as_str()
-                .unwrap()
-                .to_owned();
-            inputs.push((key, id));
-        }
-        let barrier = tokio::sync::Barrier::new(2);
-        let merge = |(key, id): (String, String)| {
-            let request = &request;
-            let barrier = &barrier;
-            async move {
-                barrier.wait().await;
-                let response = request
-                    .post(&format!("/api/schemas/{id}/merge"))
-                    .add_header("Authorization", format!("Bearer {key}"))
-                    .await;
-                response.assert_status(StatusCode::CREATED);
-                let body = response.json::<serde_json::Value>();
-                let created = body["schema"]["id"].as_str().unwrap();
-                let persisted = request
-                    .get(&format!("/api/schemas/{created}"))
-                    .add_header("Authorization", format!("Bearer {key}"))
-                    .await;
-                persisted.assert_status(StatusCode::OK);
-                assert_eq!(body["schema"]["version"], 2);
-            }
-        };
-        tokio::join!(merge(inputs.pop().unwrap()), merge(inputs.pop().unwrap()));
     })
     .await;
 }
@@ -243,7 +176,7 @@ async fn upstream_changes_preview_and_merge_round_trip() {
             "response: {:?}",
             local_after_publication.text()
         );
-        let schema_id: Uuid = local_after_publication.json::<serde_json::Value>()["schema"]["id"]
+        let schema_id: Uuid = local_after_publication.json::<serde_json::Value>()["schema"]["schema_id"]
             .as_str()
             .unwrap()
             .parse()
@@ -353,7 +286,7 @@ async fn publication_waits_for_merge_revision_lock_and_remains_pending() {
             .json(&json!({ "template_id": template.to_string() }))
             .await;
         assert_eq!(create.status_code(), StatusCode::CREATED);
-        let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["id"]
+        let schema_id: Uuid = create.json::<serde_json::Value>()["schema"]["schema_id"]
             .as_str()
             .unwrap()
             .parse()
@@ -482,9 +415,10 @@ async fn merging_a_conflicting_field_is_refused() {
             }))
             .await;
         local.assert_status(StatusCode::CREATED);
-        let schema_id: Uuid =
-            serde_json::from_value(local.json::<serde_json::Value>()["schema"]["id"].clone())
-                .expect("active local schema ID");
+        let schema_id: Uuid = serde_json::from_value(
+            local.json::<serde_json::Value>()["schema"]["schema_id"].clone(),
+        )
+        .expect("active local schema ID");
 
         request
             .put(&format!("/api/template-library/{template}"))

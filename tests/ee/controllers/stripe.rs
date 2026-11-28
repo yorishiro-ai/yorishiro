@@ -502,3 +502,30 @@ async fn checkout_completion_links_the_stripe_customer() {
     })
     .await;
 }
+
+/// A webhook the server refuses still leaves a row in the API trail, with no tenant to own it.
+#[tokio::test]
+async fn a_refused_webhook_leaves_a_tenantless_trail_row() {
+    boot_request_with::<App, _, _>(&stripe_overrides(), |request, ctx| async move {
+        crate::requests::fixtures::install_licence(&ctx, "pro");
+        let body = subscription_updated_body("evt_bad", Utc::now().timestamp(), "cus_none");
+        let response = request
+            .post("/api/stripe/webhook")
+            .add_header("x-request-id", "stripe-bad")
+            .add_header("stripe-signature", "t=1,v1=00")
+            .bytes(body.into())
+            .await;
+        assert!(response.status_code().is_client_error());
+        let rows = yorishiro::tasks::read_audit_events::rows(&ctx.db, "none", 20)
+            .await
+            .unwrap();
+        let row = rows
+            .iter()
+            .find(|row| row.request_id == "stripe-bad" && row.phase == "completed")
+            .expect("the refused webhook is in the trail");
+        assert_eq!(row.event_name, "POST /api/stripe/webhook");
+        assert!(matches!(row.outcome.as_deref(), Some("denied" | "failed")));
+        assert!(row.tenant_id.is_none());
+    })
+    .await;
+}

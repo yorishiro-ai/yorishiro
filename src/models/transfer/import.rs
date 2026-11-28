@@ -16,7 +16,7 @@ use super::ExportRecord;
 
 /// Outcome of a successful import: how many records of each kind were inserted.
 //
-// The caller supplies an RLS-scoped transaction and commits only after all records and embedding jobs succeed; an error rolls back on drop.
+// The caller supplies an RLS-scoped transaction and commits only after all records and embedding jobs succeed.
 #[derive(Clone, Default, Serialize, schemars::JsonSchema)]
 pub struct ImportResult {
     pub schemas: u64,
@@ -28,12 +28,14 @@ pub struct ImportResult {
 
 /// Imports a JSON Lines document produced by `export::export_jsonl` (or hand-written in the same shape): one `{"kind":"schema"|"entity"|"relation","record":{...}}` object per line.
 ///
-/// Schemas and entities are re-inserted with freshly generated IDs, so an entity line resolves its schema by *name* (preferring a schema line this same import already processed over the exported, workspace-local `schema_id`), and a relation line's `source_id`/`target_id` are remapped through the entity lines this same import already processed.
-/// A schema/entity line must therefore appear before anything that references it: the order `export::export_jsonl` produces (schemas, then entities, then relations).
+/// Records are re-inserted with freshly generated IDs.
+/// An entity line resolves its schema by name, preferring a schema line this import already processed over the exported `schema_id`.
+/// A relation line's `source_id` and `target_id` are remapped through the entity lines already processed.
+/// A schema or entity line must therefore appear before anything that references it, which is the order `export::export_jsonl` produces.
 ///
-/// `tenant_id` comes from the authenticated request, not the export: an exported schema's `tenant_id` is only meaningful in its source tenant, and reusing it here would violate `schema_schemas`' FK to `tenant_tenants` once source and destination tenants differ.
+/// `tenant_id` comes from the authenticated request, not the export, because an exported `tenant_id` is only meaningful in its source tenant.
 ///
-/// Every imported entity is attributed to `imported_by`, not the exported `created_by`: the exported value names a user in the source tenant that `yorishiro_app` can't verify exists (`user_users` carries no grant to that role), risking an FK violation on restore.
+/// Every imported entity is attributed to `imported_by`, not the exported `created_by`, which names a user the destination tenant may not have.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -57,9 +59,9 @@ pub(crate) async fn import_with_quota(
 ) -> Result<ImportResult, YorishiroError> {
     let mut result = ImportResult::default();
     let mut entity_id_map: HashMap<Uuid, Uuid> = HashMap::new();
-    // Exported schema_ids are workspace-local to the source, so track name-by-old-id for schema lines this import has processed instead of re-querying the exported id.
+    // Exported schema ids belong to the source workspace, so map the old id to the name of each schema line processed here.
     let mut schema_name_by_old_id: HashMap<Uuid, String> = HashMap::new();
-    // A schema that already existed in the destination workspace before this import (not itself a schema line in this file) falls through to get_by_id below on every entity line that references it; memoized the same way migration_dry_run and recall_context cache a schema lookup, since a batch of entities sharing one pre-existing schema is the common case, not the exception.
+    // Memoizes lookups of schemas that already existed in the destination workspace.
     let mut schema_name_by_id: HashMap<Uuid, String> = HashMap::new();
 
     for (line_no, line) in reader.lines().enumerate() {
@@ -99,8 +101,7 @@ pub(crate) async fn import_with_quota(
             ExportRecord::Entity(entity) => {
                 let old_id = entity.id;
 
-                // `entity_entities::create` takes a schema name, not an ID.
-                // Prefer a schema line this import just created; fall back to looking the exported ID up in the destination workspace, for a schema that already exists there.
+                // `create` takes a schema name: use the schema line from this import, else look the id up in the destination workspace.
                 let schema_name = match schema_name_by_old_id.get(&entity.schema_id) {
                     Some(name) => name.clone(),
                     None => {

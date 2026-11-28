@@ -1,6 +1,6 @@
 //! Refuses requests while the deployment is in maintenance.
 //!
-//! Layered in `Hooks::after_routes` so it covers REST and MCP alike, and reads the state per request rather than caching it: an operator turning maintenance off expects the next request to be served, not the one after some TTL.
+//! Layered in `Hooks::after_routes` so it covers REST and MCP alike, and reads the state on every request so that turning maintenance off takes effect at once.
 
 use axum::extract::{Request, State};
 use axum::middleware::Next;
@@ -12,8 +12,8 @@ use crate::models::system_maintenance;
 
 /// Paths that answer even under full lock.
 ///
-/// `/_ping`, `/_health` and `/_readiness` are Loco's own health-check routes, how an orchestrator decides whether the process is alive.
-/// Refusing them would have the scheduler restart a server that is deliberately paused, and restarting it would not clear the state, which lives in the database, so the loop would not converge.
+/// `/_ping`, `/_health` and `/_readiness` are Loco's health-check routes.
+/// Refusing them would make an orchestrator restart a server that is deliberately paused, and the state lives in the database, so a restart would not clear it.
 fn always_served(path: &str) -> bool {
     matches!(path, "/_ping" | "/_health" | "/_readiness")
 }

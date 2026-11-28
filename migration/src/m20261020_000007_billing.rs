@@ -29,7 +29,6 @@ async fn up_billing(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .create_table(
             Table::create()
                 .table(Alias::new("tenant_billing"))
-                .if_not_exists()
                 .col(
                     helpers::uuid_col(manager, Alias::new("tenant_id"))
                         .not_null()
@@ -68,7 +67,6 @@ async fn up_billing(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .create_table(
             Table::create()
                 .table(Alias::new("stripe_events"))
-                .if_not_exists()
                 .col(
                     ColumnDef::new(Alias::new("event_id"))
                         .text()
@@ -87,7 +85,6 @@ async fn up_billing(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .create_index(
             Index::create()
                 .name("stripe_events_customer_id_idx")
-                .if_not_exists()
                 .table(Alias::new("stripe_events"))
                 .col(Alias::new("customer_id"))
                 .col(Alias::new("stripe_created"))
@@ -116,7 +113,6 @@ async fn up_compute_credit_ledger(manager: &SchemaManager<'_>) -> Result<(), DbE
 
     let table = Table::create()
         .table(Alias::new("compute_credit_ledger"))
-        .if_not_exists()
         .col(helpers::uuidv7_pk(manager))
         .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
         .col(

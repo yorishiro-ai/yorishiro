@@ -16,44 +16,41 @@ pub type BoxResult<T> = Result<T, BoxError>;
 /// arm in `YorishiroErrorCode::from_variant`.  A new variant without a code
 /// fails to compile.
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum YorishiroError {
     /// The request body or parameters do not conform to the expected schema.
     /// Includes per-field [`ValidationDetail`] so clients can render precise
     /// messages.
+    #[error("validation failed: {message}")]
     ValidationFailed {
         message: String,
         details: Vec<ValidationDetail>,
         hint: String,
     },
 
-    WorkspaceSelectionRequired {
-        workspaces: Vec<uuid::Uuid>,
-    },
+    #[error("multiple workspaces permit this operation")]
+    WorkspaceSelectionRequired { workspaces: Vec<uuid::Uuid> },
+    #[error("no workspace permits this operation")]
     WorkspaceAccessDenied,
 
     /// The requested resource does not exist.
-    NotFound {
-        message: String,
-    },
+    #[error("not found: {message}")]
+    NotFound { message: String },
 
-    /// The authenticated principal lacks the required scope or role.
-    ScopeInsufficient {
-        message: String,
-        hint: String,
-    },
+    /// The authenticated principal does not have permission for the operation.
+    #[error("access denied: {message}")]
+    AccessDenied { message: String, hint: String },
 
     /// The request would create a duplicate or contradict an existing resource.
-    Conflict {
-        message: String,
-    },
+    #[error("conflict: {message}")]
+    Conflict { message: String },
 
     /// The relation type does not match the expected category.
-    RelationTypeMismatch {
-        message: String,
-    },
+    #[error("relation type mismatch: {message}")]
+    RelationTypeMismatch { message: String },
 
     /// No valid authentication credentials were provided.
+    #[error("unauthenticated")]
     Unauthenticated,
 
     /// The deployment is in maintenance mode.
@@ -61,6 +58,7 @@ pub enum YorishiroError {
     /// `read_only` refuses writes (423), `full_lock` refuses everything (503);
     /// `retry_after` is seconds, and reaches the caller as a header as well as
     /// in the body, since agents retry on the header.
+    #[error("maintenance: {message}")]
     Maintenance {
         message: String,
         read_only: bool,
@@ -68,21 +66,19 @@ pub enum YorishiroError {
     },
 
     /// The backend provider (e.g. LLM, embedding) responded with a busy / retry-after signal.
+    #[error("provider busy: {message}")]
     ProviderBusy {
         message: String,
         retry_after: std::time::Duration,
     },
 
-    /// The embedding provider HTTP endpoint is unreachable.
-    ProviderUnreachable {
-        url: String,
-        message: String,
-    },
+    /// The provider HTTP endpoint is unreachable or does not respond as expected.
+    #[error("provider unreachable at {url}: {message}")]
+    ProviderUnreachable { url: String, message: String },
 
     /// The requested feature is not supported on the current backend.
-    BackendUnsupported {
-        message: String,
-    },
+    #[error("not implemented for backend: {message}")]
+    BackendUnsupported { message: String },
 
     /// A required backend component (queue provider, embedding provider) is not configured.
     ///
@@ -90,59 +86,12 @@ pub enum YorishiroError {
     /// `ProviderBusy` (503, provider is busy): this variant covers the "not
     /// configured at all" case where no backend component exists to contact or
     /// wait for.
-    BackendUnavailable {
-        message: String,
-    },
+    #[error("backend unavailable: {message}")]
+    BackendUnavailable { message: String },
 
     /// An unexpected internal error occurred.
-    Internal(BoxError),
-}
-
-impl std::fmt::Display for YorishiroError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ValidationFailed { message, .. } => {
-                write!(formatter, "validation failed: {message}")
-            }
-            Self::WorkspaceSelectionRequired { .. } => {
-                formatter.write_str("multiple workspaces permit this operation")
-            }
-            Self::WorkspaceAccessDenied => {
-                formatter.write_str("no workspace permits this operation")
-            }
-            Self::NotFound { message } => write!(formatter, "not found: {message}"),
-            Self::ScopeInsufficient { message, .. } => {
-                write!(formatter, "scope insufficient: {message}")
-            }
-            Self::Conflict { message } => write!(formatter, "conflict: {message}"),
-            Self::RelationTypeMismatch { message } => {
-                write!(formatter, "relation type mismatch: {message}")
-            }
-            Self::Unauthenticated => formatter.write_str("unauthenticated"),
-            Self::Maintenance { message, .. } => write!(formatter, "maintenance: {message}"),
-            Self::ProviderBusy { message, .. } => write!(formatter, "provider busy: {message}"),
-            Self::ProviderUnreachable { url, message } => write!(
-                formatter,
-                "embedding provider unreachable at {url}: {message}"
-            ),
-            Self::BackendUnsupported { message } => {
-                write!(formatter, "not implemented for backend: {message}")
-            }
-            Self::BackendUnavailable { message } => {
-                write!(formatter, "backend unavailable: {message}")
-            }
-            Self::Internal(error) => write!(formatter, "internal error: {error}"),
-        }
-    }
-}
-
-impl std::error::Error for YorishiroError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Internal(error) => Some(&**error),
-            _ => None,
-        }
-    }
+    #[error("internal error: {0}")]
+    Internal(#[source] BoxError),
 }
 
 impl From<BoxError> for YorishiroError {
@@ -164,9 +113,7 @@ pub(crate) fn mcp_internal(error: impl Into<BoxError>) -> rmcp::ErrorData {
 
 /// Machine-readable error code for every `YorishiroError` variant.
 ///
-/// This is the **single source of truth**: the code, HTTP status, and
-/// description are all defined on this enum.  Looking up the code tells you
-/// everything about the error — status code, meaning, and typical response.
+/// This is the **single source of truth**: the code, HTTP status and description are all defined on this enum.
 ///
 /// ## Code reference table
 ///
@@ -174,7 +121,6 @@ pub(crate) fn mcp_internal(error: impl Into<BoxError>) -> rmcp::ErrorData {
 /// |---|---|---|
 /// | `validation_failed` | 422 | Request body does not conform to schema |
 /// | `not_found` | 404 | Resource does not exist |
-/// | `scope_insufficient` | 403 | Insufficient permissions |
 /// | `conflict` | 409 | Duplicate or contradicting request |
 /// | `relation_type_mismatch` | 422 | Relation type does not match category |
 /// | `unauthenticated` | 401 | Authentication required |
@@ -185,36 +131,34 @@ pub(crate) fn mcp_internal(error: impl Into<BoxError>) -> rmcp::ErrorData {
 /// | `backend_unsupported` | 501 | Feature not supported on this backend |
 /// | `backend_unavailable` | 503 | Required backend not configured |
 ///
-/// Internal errors have no code (they are not listed here) — callers must
-/// handle `YorishiroError::Internal` separately and log the real error.
+/// Internal errors have no code, so callers handle `YorishiroError::Internal` separately and log the real error.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum YorishiroErrorCode {
-    /// 422 Unprocessable Entity — the request body does not conform to the expected schema.
+    /// 422 Unprocessable Entity: the request body does not conform to the expected schema.
     ValidationFailed,
     WorkspaceSelectionRequired,
     AccessDenied,
-    /// 404 Not Found — the requested resource does not exist.
+    /// 404 Not Found: the requested resource does not exist.
     NotFound,
-    /// 403 Forbidden — the authenticated principal lacks the required scope or role.
-    ScopeInsufficient,
-    /// 409 Conflict — the request would create a duplicate or contradict an existing resource.
+    /// 403 Forbidden: the authenticated principal lacks the required scope or role.
+    /// 409 Conflict: the request would create a duplicate or contradict an existing resource.
     Conflict,
-    /// 422 Unprocessable Entity — the relation type does not match the expected category.
+    /// 422 Unprocessable Entity: the relation type does not match the expected category.
     RelationTypeMismatch,
-    /// 401 Unauthorized — no valid authentication credentials were provided.
+    /// 401 Unauthorized: no valid authentication credentials were provided.
     Unauthenticated,
-    /// 423 Locked — the deployment is in read-only maintenance mode.
+    /// 423 Locked: the deployment is in read-only maintenance mode.
     MaintenanceReadOnly,
-    /// 503 Service Unavailable — the deployment is fully locked for maintenance.
+    /// 503 Service Unavailable: the deployment is fully locked for maintenance.
     MaintenanceFullLock,
-    /// 503 Service Unavailable — the backend provider is temporarily busy.
+    /// 503 Service Unavailable: the backend provider is temporarily busy.
     ProviderBusy,
-    /// 502 Bad Gateway — the embedding provider is unreachable.
+    /// 502 Bad Gateway: the embedding provider is unreachable.
     ProviderUnreachable,
-    /// 501 Not Implemented — the requested feature is not supported on this backend.
+    /// 501 Not Implemented: the requested feature is not supported on this backend.
     BackendUnsupported,
-    /// 503 Service Unavailable — a required backend component is not configured.
+    /// 503 Service Unavailable: a required backend component is not configured.
     BackendUnavailable,
 }
 
@@ -236,7 +180,6 @@ impl YorishiroErrorCode {
             Self::WorkspaceSelectionRequired => "workspace_selection_required",
             Self::AccessDenied => "access_denied",
             Self::NotFound => "not_found",
-            Self::ScopeInsufficient => "scope_insufficient",
             Self::Conflict => "conflict",
             Self::RelationTypeMismatch => "relation_type_mismatch",
             Self::Unauthenticated => "unauthenticated",
@@ -259,7 +202,7 @@ impl YorishiroErrorCode {
             | Self::RelationTypeMismatch
             | Self::WorkspaceSelectionRequired => axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             Self::NotFound => axum::http::StatusCode::NOT_FOUND,
-            Self::ScopeInsufficient | Self::AccessDenied => axum::http::StatusCode::FORBIDDEN,
+            Self::AccessDenied => axum::http::StatusCode::FORBIDDEN,
             Self::Conflict => axum::http::StatusCode::CONFLICT,
             Self::Unauthenticated => axum::http::StatusCode::UNAUTHORIZED,
             Self::MaintenanceReadOnly => axum::http::StatusCode::LOCKED,
@@ -277,16 +220,15 @@ impl YorishiroErrorCode {
         match self {
             Self::ValidationFailed => "The request body does not conform to the expected schema",
             Self::WorkspaceSelectionRequired => "Select one of the permitted workspaces",
-            Self::AccessDenied => "No workspace permits this operation",
+            Self::AccessDenied => "Insufficient permissions for the requested operation",
             Self::NotFound => "The requested resource does not exist",
-            Self::ScopeInsufficient => "Insufficient permissions for the requested operation",
             Self::Conflict => "The request conflicts with an existing resource",
             Self::RelationTypeMismatch => "The relation type does not match the expected category",
             Self::Unauthenticated => "Authentication is required",
             Self::MaintenanceReadOnly => "The deployment is in read-only maintenance mode",
             Self::MaintenanceFullLock => "The deployment is fully locked for maintenance",
             Self::ProviderBusy => "The backend provider is temporarily busy",
-            Self::ProviderUnreachable => "The embedding provider is unreachable",
+            Self::ProviderUnreachable => "The configured provider is unreachable",
             Self::BackendUnsupported => "The requested feature is not supported on this backend",
             Self::BackendUnavailable => "A required backend component is not configured",
         }
@@ -311,6 +253,38 @@ impl YorishiroError {
         }
     }
 
+    /// The classification the audit trail keeps: the error's code, or `internal` for an unexpected failure.
+    #[must_use]
+    pub const fn trail_code(&self) -> &'static str {
+        match self.code() {
+            Some(code) => code.as_str(),
+            None => "internal",
+        }
+    }
+
+    /// A description that never repeats input: the code's fixed text, plus the names of the fields a validation refused.
+    #[must_use]
+    pub fn trail_message(&self) -> String {
+        match (self, self.code()) {
+            (Self::ValidationFailed { details, .. }, Some(code)) if !details.is_empty() => {
+                let fields: Vec<&str> =
+                    details.iter().map(|detail| detail.field.as_str()).collect();
+                format!("{}: {}", code.description(), fields.join(", "))
+            }
+            (_, Some(code)) => code.description().to_owned(),
+            (_, None) => "internal error".to_owned(),
+        }
+    }
+
+    /// The HTTP status the error maps to, so a transport without one can still report it.
+    #[must_use]
+    pub const fn trail_status(&self) -> u16 {
+        match self.code() {
+            Some(code) => code.http_status().as_u16(),
+            None => 500,
+        }
+    }
+
     /// Returns the [`YorishiroErrorCode`] for this error variant.
     ///
     /// `Internal` has no code (it is not listed in `YorishiroErrorCode`),
@@ -322,9 +296,10 @@ impl YorishiroError {
             Self::WorkspaceSelectionRequired { .. } => {
                 Some(YorishiroErrorCode::WorkspaceSelectionRequired)
             }
-            Self::WorkspaceAccessDenied => Some(YorishiroErrorCode::AccessDenied),
+            Self::WorkspaceAccessDenied | Self::AccessDenied { .. } => {
+                Some(YorishiroErrorCode::AccessDenied)
+            }
             Self::NotFound { .. } => Some(YorishiroErrorCode::NotFound),
-            Self::ScopeInsufficient { .. } => Some(YorishiroErrorCode::ScopeInsufficient),
             Self::Conflict { .. } => Some(YorishiroErrorCode::Conflict),
             Self::RelationTypeMismatch { .. } => Some(YorishiroErrorCode::RelationTypeMismatch),
             Self::Unauthenticated => Some(YorishiroErrorCode::Unauthenticated),
@@ -365,7 +340,7 @@ impl YorishiroError {
                         "problem": id.to_string(),
                         "code": ValidationErrorCode::Other,
                     })).collect::<Vec<_>>(),
-                    "hint": "select a workspace with workspace_id or X-Workspace-Id; use discover_workspaces to see workspace names",
+                    "hint": "select a workspace with workspace_id or x-workspace-id; use discover_workspaces to see workspace names",
                 }}),
             ),
             Self::WorkspaceAccessDenied => YorishiroErrorCode::AccessDenied
@@ -386,11 +361,11 @@ impl YorishiroError {
                 }),
             ),
             Self::NotFound { message } => YorishiroErrorCode::NotFound.message_response(message),
-            Self::ScopeInsufficient { message, hint } => (
-                YorishiroErrorCode::ScopeInsufficient.http_status(),
+            Self::AccessDenied { message, hint } => (
+                YorishiroErrorCode::AccessDenied.http_status(),
                 serde_json::json!({
                     "error": {
-                        "code": YorishiroErrorCode::ScopeInsufficient.as_str(),
+                        "code": YorishiroErrorCode::AccessDenied.as_str(),
                         "message": message,
                         "hint": hint
                     }
@@ -442,8 +417,8 @@ impl YorishiroError {
                 serde_json::json!({
                     "error": {
                         "code": YorishiroErrorCode::ProviderUnreachable.as_str(),
-                        "message": format!("the embedding provider at {url} could not be reached: {message}"),
-                        "hint": "check that the provider is running and that YORISHIRO_EMBEDDING_BASE_URL points at it",
+                        "message": format!("provider at {url}: {message}"),
+                        "hint": "check that the provider is running and that its base URL, model and credentials are correct",
                     }
                 }),
             ),
@@ -539,6 +514,53 @@ pub struct ValidationDetail {
 }
 
 impl YorishiroError {
+    /// Whether the database refused a write because a row it references is missing or still referenced.
+    /// `sea_orm` does not report PostgreSQL `restrict_violation` or a SQLite `RESTRICT` foreign key, so those are matched by code.
+    #[must_use]
+    pub fn is_foreign_key_violation(error: &sea_orm::DbErr) -> bool {
+        use sea_orm::{DbErr, RuntimeErr};
+        matches!(
+            error,
+            DbErr::Exec(RuntimeErr::SqlxError(sqlx_error))
+                if sqlx_error.as_database_error().is_some_and(|database| {
+                    database.code().as_deref() == Some("23001")
+                        || (database.code().as_deref() == Some("1811")
+                            && database.message() == "FOREIGN KEY constraint failed")
+                })
+        ) || matches!(
+            error.sql_err(),
+            Some(sea_orm::SqlErr::ForeignKeyConstraintViolation(_))
+        )
+    }
+
+    /// A row that is gone (`RecordNotFound`, or `RecordNotUpdated` after a concurrent delete) becomes a not-found with `message`; any other database error is internal.
+    /// Use it only where the missing row is what the caller named, never for an internal invariant such as a lost lease.
+    #[must_use]
+    pub fn not_found_on_missing(error: sea_orm::DbErr, message: impl Into<String>) -> Self {
+        if matches!(
+            error,
+            sea_orm::DbErr::RecordNotFound(_) | sea_orm::DbErr::RecordNotUpdated
+        ) {
+            Self::NotFound {
+                message: message.into(),
+            }
+        } else {
+            Self::Internal(error.into())
+        }
+    }
+
+    /// A foreign-key violation becomes a conflict with `message`; any other database error is internal.
+    #[must_use]
+    pub fn conflict_on_fk(error: sea_orm::DbErr, message: impl Into<String>) -> Self {
+        if Self::is_foreign_key_violation(&error) {
+            Self::Conflict {
+                message: message.into(),
+            }
+        } else {
+            Self::Internal(error.into())
+        }
+    }
+
     /// A unique-constraint violation becomes a conflict with `message`; any other database error is internal.
     pub(crate) fn conflict_on_unique(error: sea_orm::DbErr, message: impl Into<String>) -> Self {
         if matches!(
@@ -564,5 +586,49 @@ pub trait ResultExt<T> {
 impl<T, E: Into<BoxError>> ResultExt<T> for Result<T, E> {
     fn internal(self) -> Result<T, YorishiroError> {
         self.map_err(|err| YorishiroError::Internal(err.into()))
+    }
+}
+
+/// Turns a missing optional value into the matching [`YorishiroError`].
+pub trait OptionExt<T> {
+    /// # Errors
+    /// Returns `NotFound` with `message` when the value is absent.
+    fn or_not_found(self, message: impl Into<String>) -> Result<T, YorishiroError>;
+
+    /// # Errors
+    /// Returns `Internal` with `message` when the value is absent.
+    fn or_internal(self, message: &'static str) -> Result<T, YorishiroError>;
+}
+
+impl<T> OptionExt<T> for Option<T> {
+    fn or_not_found(self, message: impl Into<String>) -> Result<T, YorishiroError> {
+        self.ok_or_else(|| YorishiroError::not_found(message))
+    }
+
+    fn or_internal(self, message: &'static str) -> Result<T, YorishiroError> {
+        self.ok_or_else(|| YorishiroError::Internal(message.into()))
+    }
+}
+
+/// The trail's classification of an error that crossed into a Loco-owned path, such as a job failure.
+///
+/// Only the code and a fixed description are kept: the error's own text can repeat what the caller sent.
+#[must_use]
+pub(crate) fn describe_loco(error: &loco_rs::Error) -> (String, String) {
+    let internal = || ("internal".to_owned(), "internal error".to_owned());
+    match error {
+        loco_rs::Error::Any(inner) => inner
+            .downcast_ref::<YorishiroError>()
+            .map_or_else(internal, |error| {
+                (error.trail_code().to_owned(), error.trail_message())
+            }),
+        loco_rs::Error::CustomError(_, detail) => detail
+            .errors
+            .as_ref()
+            .and_then(|body| body["error"]["code"].as_str())
+            .map_or_else(internal, |code| {
+                (code.to_owned(), detail.error.clone().unwrap_or_default())
+            }),
+        _ => internal(),
     }
 }

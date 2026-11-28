@@ -1,11 +1,7 @@
-#[cfg(feature = "enterprise")]
-use crate::requests::boot_request;
 use chrono::Utc;
 #[cfg(feature = "enterprise")]
 use serde_json::json;
 use uuid::Uuid;
-#[cfg(feature = "enterprise")]
-use yorishiro::App;
 use yorishiro::models::_entities::template_templates;
 use yorishiro::models::template_templates::{self as templates, TemplateVisibility};
 
@@ -77,9 +73,7 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
-
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let owner_a = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let owner_b = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let tenant_a = owner_a.tenant_id;
@@ -101,7 +95,7 @@ async fn list_and_get_respect_tenant_and_community_visibility() {
                 .await;
             assert_eq!(response.status_code(), 201, "{}", response.text());
             let body: serde_json::Value = response.json();
-            ids.push(Uuid::parse_str(body["id"].as_str().unwrap()).unwrap());
+            ids.push(Uuid::parse_str(body["template_id"].as_str().unwrap()).unwrap());
         }
         let [private, community, hidden]: [Uuid; 3] = ids.try_into().unwrap();
 

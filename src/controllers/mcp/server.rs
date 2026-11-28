@@ -1,5 +1,9 @@
 //! The MCP server type and its tool dispatch.
 
+use loco_rs::controller::middleware::request_id::LocoRequestId;
+
+use crate::controllers::middleware::access_log;
+
 use super::{
     AppContext, Arc, CallToolRequestParams, CallToolResponse, ErrorData, ListToolsResult,
     McpToolPolicy, PaginatedRequestParams, RequestContext, ResultType, RoleServer,
@@ -32,10 +36,9 @@ impl YorishiroMcpServer {
             .entry("properties")
             .or_insert_with(|| serde_json::json!({}));
         if let Some(properties) = properties.as_object_mut() {
-            properties.entry("workspace_id").or_insert_with(|| serde_json::json!({
-                "type":"string", "format":"uuid",
-                "description":"Workspace to operate on for this call. No workspace-bound key is required."
-            }));
+            properties
+                .entry("workspace_id")
+                .or_insert_with(|| serde_json::json!({"type":"string", "format":"uuid"}));
         }
         tool
     }
@@ -64,32 +67,7 @@ impl YorishiroMcpServer {
         super::authorize::verify(self.app_context(), parts).await
     }
 
-    pub(crate) fn tool_capabilities(
-        &self,
-        audit: bool,
-    ) -> Result<Vec<serde_json::Value>, ErrorData> {
-        self.tool_router
-            .list_all()
-            .into_iter()
-            .filter(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()))
-            .map(|tool| {
-                let grants = tool.meta.as_ref()
-                    .and_then(|meta| meta.0.get("yorishiro/required_grants"))
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!([]));
-                Ok(serde_json::json!({
-                    "name": tool.name,
-                    "required_grants": grants,
-                    "grants_satisfied": grants.as_array().is_some_and(|grants| grants.iter().all(|grant| grant == "audit" && audit)),
-                }))
-            })
-            .collect()
-    }
-}
-
-#[tool_handler(router = self.tool_router.clone())]
-impl ServerHandler for YorishiroMcpServer {
-    async fn call_tool(
+    async fn dispatch_tool(
         &self,
         mut request: CallToolRequestParams,
         mut context: RequestContext<RoleServer>,
@@ -115,7 +93,7 @@ impl ServerHandler for YorishiroMcpServer {
                     .map_err(crate::error::mcp_internal)?;
                 if parts
                     .headers
-                    .get_all(crate::models::api_keys::WORKSPACE_HEADER)
+                    .get_all(crate::models::access_keys::WORKSPACE_HEADER)
                     .iter()
                     .any(|header| {
                         header
@@ -132,7 +110,7 @@ impl ServerHandler for YorishiroMcpServer {
                 }
                 parts
                     .headers
-                    .insert(crate::models::api_keys::WORKSPACE_HEADER, value);
+                    .insert(crate::models::access_keys::WORKSPACE_HEADER, value);
             }
         }
         let maintenance = match crate::models::system_maintenance::get(&self.ctx.db).await {
@@ -146,12 +124,10 @@ impl ServerHandler for YorishiroMcpServer {
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         self.tool_router.call(tcc).await
     }
+}
 
-    fn list_tools(
-        &self,
-        _request: Option<PaginatedRequestParams>,
-        context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send {
+impl YorishiroMcpServer {
+    fn tool_listing(&self, context: &RequestContext<RoleServer>) -> ListToolsResult {
         let supports_cache_hints = context
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
@@ -162,14 +138,94 @@ impl ServerHandler for YorishiroMcpServer {
             .map(|tool| self.advertised_tool(tool))
             .collect();
         tools.retain(|tool| self.tool_policy.allows(&self.ctx, tool.name.as_ref()));
-        std::future::ready(Ok(ListToolsResult {
+        ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
             tools,
             meta: None,
             next_cursor: None,
             ttl_ms: supports_cache_hints.then_some(0),
             cache_scope: supports_cache_hints.then_some(rmcp::model::CacheScope::Public),
-        }))
+        }
+    }
+}
+
+#[tool_handler(router = self.tool_router.clone())]
+impl ServerHandler for YorishiroMcpServer {
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let (request_id, source_ip, user_agent) = request_source(&context);
+        let tool = self
+            .tool_router
+            .get(&request.name)
+            .map_or_else(|| "<unknown tool>".to_owned(), |tool| tool.name.to_string());
+        let parameters = request.arguments.as_ref().map_or_else(
+            || serde_json::json!({}),
+            |arguments| {
+                crate::models::api_events::identifiers(
+                    arguments.iter().map(|(key, value)| (key.as_str(), value)),
+                )
+            },
+        );
+        let call = access_log::Call {
+            transport: "mcp",
+            operation: &tool,
+            request_id: request_id.as_ref(),
+            read_only: self.tool_policy.read_only(&tool),
+            source_ip,
+            user_agent: &user_agent,
+            parameters,
+        };
+        access_log::track(
+            call,
+            &self.ctx.db,
+            self.dispatch_tool(request, context),
+            |result| match result {
+                Err(error) => ("failed", Some(i64::from(error.code.0))),
+                Ok(CallToolResponse::Complete(response)) if response.is_error == Some(true) => {
+                    ("failed", None)
+                }
+                Ok(_) => ("success", None),
+            },
+            || {
+                Err(crate::error::mcp_internal(
+                    "the call could not be recorded in the audit trail",
+                ))
+            },
+        )
+        .await
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let (request_id, source_ip, user_agent) = request_source(&context);
+        let listing = self.tool_listing(&context);
+        let call = access_log::Call {
+            transport: "mcp",
+            operation: "tools/list",
+            request_id: request_id.as_ref(),
+            read_only: true,
+            source_ip,
+            user_agent: &user_agent,
+            parameters: serde_json::json!({}),
+        };
+        access_log::track(
+            call,
+            &self.ctx.db,
+            std::future::ready(Ok(listing)),
+            |_| ("success", None),
+            || {
+                Err(crate::error::mcp_internal(
+                    "the call could not be recorded in the audit trail",
+                ))
+            },
+        )
+        .await
     }
 
     fn get_tool(&self, name: &str) -> Option<rmcp::model::Tool> {
@@ -185,12 +241,25 @@ impl ServerHandler for YorishiroMcpServer {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Yorishiro is a multi-tenant knowledge store with user-defined schemas. \
-             Every tool call requires authentication via an `Authorization: Bearer <api-key>` \
+             Every tool call requires authentication via an `Authorization: Bearer <access-key>` \
              header, and IAM policies decide which operations a key's user may perform. \
-             Select a workspace with the `workspace_id` tool argument or `X-Workspace-Id` header. \
-             Without selection, lists and search span permitted workspaces, resource IDs resolve their workspace, \
+             Select a workspace with the `workspace_id` tool argument or `x-workspace-id` header. \
+             Without selection, a tenant with one workspace acts on it, lists and search span permitted workspaces, resource IDs resolve their workspace, \
              and destination operations select a workspace only when exactly one is permitted. \
-             Tenant root sign-in sessions have full tenant access; issued keys retain their grants and bindings.",
+             Tenant root sign-in sessions have full tenant access; issued keys keep the grants of their user.",
         )
     }
+}
+
+fn request_source(
+    context: &RequestContext<RoleServer>,
+) -> (Option<LocoRequestId>, Option<std::net::IpAddr>, String) {
+    let parts = context.extensions.get::<axum::http::request::Parts>();
+    (
+        parts
+            .and_then(|parts| parts.extensions.get::<LocoRequestId>())
+            .cloned(),
+        parts.and_then(|parts| access_log::source_ip(&parts.extensions)),
+        parts.map_or_default(|parts| access_log::user_agent(&parts.headers).to_owned()),
+    )
 }

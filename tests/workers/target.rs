@@ -339,6 +339,7 @@ mod concurrency {
             return;
         }
         let overrides = [
+            crate::requests::max_tenants(0),
             ("initializers.plan_policy_enabled", "false".into()),
             ("initializers.worker_admission.tenant_private", "1".into()),
         ];
@@ -417,6 +418,7 @@ mod concurrency {
             return;
         }
         let overrides = [
+            crate::requests::max_tenants(0),
             ("initializers.plan_policy_enabled", "false".into()),
             ("initializers.worker_admission.shared", "1".into()),
             ("initializers.worker_admission.official", "1".into()),

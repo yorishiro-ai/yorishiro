@@ -27,7 +27,7 @@ pub struct ListRelationsParams {
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
-pub(crate) struct SetRelationStatusRequest {
+pub(crate) struct UpdateRelationRequest {
     /// `active`, `deprecated` or `archived`.
     /// Traversal follows `active` relations only.
     pub(crate) status: RelationStatus,

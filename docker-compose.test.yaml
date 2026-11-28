@@ -1,4 +1,4 @@
-# Test dependencies only. Application tests run through Cargo.
+# Test dependencies only. PostgreSQL data is disposable.
 services:
   testdb:
     image: pgvector/pgvector:pg18
@@ -9,8 +9,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
+    tmpfs:
+      - /var/lib/postgresql
     volumes:
-      - test_pgdata:/var/lib/postgresql
       - ./scripts/init-test-postgres.sql:/docker-entrypoint-initdb.d/init-test-postgres.sql:ro
     healthcheck:
       # Do not accept an existing volume initialized with a superuser test role.
@@ -30,6 +31,3 @@ services:
       retries: 5
     ports:
       - "127.0.0.1:6379:6379"
-
-volumes:
-  test_pgdata:

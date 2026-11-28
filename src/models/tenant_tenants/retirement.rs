@@ -1,20 +1,18 @@
 //! Tenant retirement inventory and fenced lifecycle operations.
 
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use uuid::Uuid;
+
+use crate::error::{ResultExt, YorishiroError};
+use crate::models::_entities::{
+    access_keys, entity_entities, entity_relations, queue_job_dispatch_outbox,
+    queue_job_lifecycles, schema_schemas, template_templates, tenant_memberships,
+    workspace_schema_forks, workspace_workspaces,
+};
 
 const DISABLED_REASON: &str = "tenant disabled";
 
 const DELETE_GRACE_PERIOD: chrono::Duration = chrono::Duration::days(7);
-
-use crate::error::{ResultExt, YorishiroError};
-use crate::models::_entities::{
-    api_keys, entity_entities, entity_relations, queue_job_dispatch_outbox, queue_job_lifecycles,
-    schema_schemas, template_templates, tenant_memberships, workspace_schema_forks,
-    workspace_workspaces,
-};
 
 /// A secret-free snapshot, not approval for a later destructive operation.
 #[derive(serde::Serialize, schemars::JsonSchema)]
@@ -25,10 +23,9 @@ pub struct RetirementInventory {
     pub delete_scheduled_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub workspace_ids: Vec<Uuid>,
     pub memberships: u64,
-    pub shared_user_accounts: u64,
     /// External forks must be resolved explicitly before irreversible cleanup.
     pub external_workspace_forks: u64,
-    pub api_keys: u64,
+    pub access_keys: u64,
     pub jobs: u64,
     pub active_jobs: u64,
     pub dispatches: u64,
@@ -44,13 +41,13 @@ pub struct RetirementInventory {
 /// Rejects unauthorized credentials and propagates inventory failures.
 pub async fn inventory_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
 ) -> Result<RetirementInventory, YorishiroError> {
     let txn = crate::db::begin_write(db).await.internal()?;
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TenantGet,
+        crate::models::iam::policy::Action::GetTenantRetirementInventory,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -68,7 +65,7 @@ pub async fn inventory_as(
 /// Database failures roll back disablement, key revocation, work cancellation and audit together.
 pub async fn disable_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     confirmed_tenant_id: Uuid,
 ) -> Result<(), YorishiroError> {
     if confirmed_tenant_id != actor.tenant_id
@@ -84,7 +81,7 @@ pub async fn disable_as(
     crate::models::iam::access::require_iam_action(
         &txn,
         actor,
-        crate::models::iam::policy::Action::TenantUpdate,
+        crate::models::iam::policy::Action::DisableTenant,
         crate::models::iam::policy::Resource::Tenant {
             tenant_id: actor.tenant_id,
         },
@@ -137,9 +134,9 @@ async fn disable_in_transaction(
         .await
         .internal()?;
     }
-    api_keys::Entity::revoke_matching(
+    access_keys::Entity::revoke_matching(
         txn,
-        sea_orm::Condition::all().add(api_keys::Column::TenantId.eq(tenant_id)),
+        sea_orm::Condition::all().add(access_keys::Column::TenantId.eq(tenant_id)),
     )
     .await?;
     cancel_work(txn, tenant_id).await?;
@@ -178,7 +175,7 @@ pub async fn delete_by_operator(
         });
     }
     let txn = crate::db::begin_write(db).await.internal()?;
-    // Serialize quota release with tenant creation and cleanup with membership/publication writes.
+    // Serializes quota release with tenant creation, and cleanup with membership and publication writes.
     crate::db::lock_for_update(&txn, "create_tenant")
         .await
         .internal()?;
@@ -330,8 +327,8 @@ async fn delete_disabled_in(
         });
     }
     cancel_work(txn, tenant_id).await?;
-    api_keys::Entity::delete_many()
-        .filter(api_keys::Column::TenantId.eq(tenant_id))
+    access_keys::Entity::delete_many()
+        .filter(access_keys::Column::TenantId.eq(tenant_id))
         .exec(txn)
         .await
         .internal()?;
@@ -365,6 +362,17 @@ async fn delete_disabled_in(
         .exec(txn)
         .await
         .internal()?;
+    crate::models::schema_schemas::detach_origins(
+        txn,
+        schema_schemas::Column::OriginTemplateId.in_subquery(
+            sea_orm::sea_query::Query::select()
+                .column(template_templates::Column::Id)
+                .from(template_templates::Entity)
+                .and_where(template_templates::Column::TenantId.eq(tenant_id))
+                .to_owned(),
+        ),
+    )
+    .await?;
     template_templates::Entity::delete_many()
         .filter(template_templates::Column::TenantId.eq(tenant_id))
         .exec(txn)
@@ -491,32 +499,6 @@ pub async fn cancel_work(
     Ok(())
 }
 
-async fn shared_user_account_count(
-    conn: &impl ConnectionTrait,
-    tenant_id: Uuid,
-) -> Result<u64, YorishiroError> {
-    let user_ids = tenant_memberships::Entity::find()
-        .select_only()
-        .column(tenant_memberships::Column::UserId)
-        .filter(tenant_memberships::Column::TenantId.eq(tenant_id))
-        .into_tuple::<Uuid>()
-        .all(conn)
-        .await
-        .internal()?;
-    let count = tenant_memberships::Entity::find()
-        .select_only()
-        .column(tenant_memberships::Column::UserId)
-        .filter(tenant_memberships::Column::UserId.is_in(user_ids))
-        .filter(tenant_memberships::Column::TenantId.ne(tenant_id))
-        .distinct()
-        .into_tuple::<Uuid>()
-        .all(conn)
-        .await
-        .internal()?
-        .len() as u64;
-    Ok(count)
-}
-
 /// Inventories one tenant without changing credentials, memberships, jobs or data.
 /// This operator entry point requires a trusted identity connection, not a tenant-scoped pool.
 ///
@@ -548,16 +530,15 @@ pub async fn inventory(
         .count(conn)
         .await
         .internal()?;
-    let shared_user_accounts = shared_user_account_count(conn, tenant_id).await?;
     let external_workspace_forks = workspace_schema_forks::Entity::find()
         .filter(workspace_schema_forks::Column::SourceWorkspaceId.is_in(workspace_ids.clone()))
         .filter(workspace_schema_forks::Column::TenantId.ne(tenant_id))
         .count(conn)
         .await
         .internal()?;
-    let api_keys = api_keys::Entity::find()
-        .filter(api_keys::Column::TenantId.eq(tenant_id))
-        .filter(api_keys::Column::RevokedAt.is_null())
+    let access_keys = access_keys::Entity::find()
+        .filter(access_keys::Column::TenantId.eq(tenant_id))
+        .filter(access_keys::Column::RevokedAt.is_null())
         .count(conn)
         .await
         .internal()?;
@@ -605,9 +586,8 @@ pub async fn inventory(
         delete_scheduled_at: tenant.delete_scheduled_at,
         workspace_ids,
         memberships,
-        shared_user_accounts,
         external_workspace_forks,
-        api_keys,
+        access_keys,
         jobs,
         active_jobs,
         dispatches,

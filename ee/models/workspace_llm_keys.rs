@@ -7,18 +7,20 @@
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_llm_keys::{ActiveModel, Column, Entity};
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 use crate::models::iam::policy::Action;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::edition::ee::services::inference::InferenceConfig;
+use crate::edition::ee::services::inference::{InferenceClient, InferenceConfig};
+
+use super::super::data::provider::{check_client, check_error, validate_credentials};
 
 /// What a workspace has configured, without the key itself.
 ///
-/// `api_key` is deliberately absent rather than masked: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
+/// `api_key` is absent rather than masked: a masked value still travels through logs and proxies.
 #[derive(Clone, Serialize, sea_orm::FromQueryResult, schemars::JsonSchema)]
 #[schemars(rename = "LlmKeyResponse")]
 pub(crate) struct LlmKeyDescription {
@@ -36,9 +38,24 @@ pub(crate) async fn set_as(
     model: &str,
     api_key: &str,
 ) -> Result<(), YorishiroError> {
-    let txn =
-        super::iam::access::workspace_transaction(db, actor, Action::LlmProviderUpdate).await?;
-    set(&txn, actor.require_workspace()?, base_url, model, api_key).await?;
+    let action = Action::UpdateWorkspaceLlmProvider;
+    super::iam::access::workspace_transaction(db, actor, action)
+        .await?
+        .commit()
+        .await
+        .internal()?;
+    let base_url = validate_credentials(base_url, api_key)?;
+    let config = InferenceConfig {
+        base_url: base_url.into(),
+        model: model.into(),
+        api_key: api_key.into(),
+    };
+    InferenceClient::with_client(config.clone(), check_client()?)
+        .propose_fields(&serde_json::json!({"sample": "provider check"}), &["label"])
+        .await
+        .map_err(|error| check_error(base_url, error))?;
+    let txn = super::iam::access::workspace_transaction(db, actor, action).await?;
+    set(&txn, actor.require_workspace()?, config).await?;
     txn.commit().await.internal()
 }
 
@@ -47,7 +64,8 @@ pub(crate) async fn clear_as(
     actor: &AuthContext,
 ) -> Result<(), YorishiroError> {
     let txn =
-        super::iam::access::workspace_transaction(db, actor, Action::LlmProviderDelete).await?;
+        super::iam::access::workspace_transaction(db, actor, Action::DeleteWorkspaceLlmProvider)
+            .await?;
     clear(&txn, actor.require_workspace()?).await?;
     txn.commit().await.internal()
 }
@@ -56,7 +74,8 @@ pub(crate) async fn describe_as(
     db: &sea_orm::DatabaseConnection,
     actor: &AuthContext,
 ) -> Result<Option<LlmKeyDescription>, YorishiroError> {
-    let txn = super::iam::access::workspace_transaction(db, actor, Action::LlmProviderGet).await?;
+    let txn = super::iam::access::workspace_transaction(db, actor, Action::GetWorkspaceLlmProvider)
+        .await?;
     describe(&txn, actor.require_workspace()?).await
 }
 
@@ -64,20 +83,19 @@ pub(crate) async fn describe_as(
 async fn set(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
-    base_url: &str,
-    model: &str,
-    api_key: &str,
+    config: InferenceConfig,
 ) -> Result<(), YorishiroError> {
-    let base_url = crate::edition::ee::data::provider::validate_credentials(base_url, api_key)?;
-
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(workspace_id),
-        base_url: ActiveValue::Set(base_url.to_string()),
-        model: ActiveValue::Set(model.to_string()),
-        api_key: ActiveValue::Set(api_key.to_string()),
+        base_url: ActiveValue::Set(config.base_url),
+        model: ActiveValue::Set(config.model),
+        api_key: ActiveValue::Set(config.api_key),
         updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     Entity::insert(active)
         .on_conflict(
             OnConflict::column(Column::WorkspaceId)
@@ -126,7 +144,7 @@ async fn describe(
 /// The credentials themselves, for making a call.
 ///
 /// `None` means the workspace has configured none.
-/// Callers turn that into a refusal rather than a fallback: inferring nothing and filling defaults instead would look, to the caller, like inference that produced default-shaped answers.
+/// Callers refuse the request instead of falling back, so missing credentials never pass for inference.
 pub(crate) async fn get(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

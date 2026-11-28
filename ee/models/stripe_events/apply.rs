@@ -16,7 +16,7 @@ fn unlinked_customer() -> YorishiroError {
     }
 }
 
-/// The tenant a subscription event's `customer` field resolves to, or `None` (logged by the caller as appropriate) when the object has no `customer` field or that customer isn't linked to any tenant yet.
+/// The tenant a subscription event's `customer` field resolves to, or `None` when the object has no `customer` or that customer is not linked yet.
 async fn resolve_tenant_by_customer(
     conn: &impl ConnectionTrait,
     object: &serde_json::Value,
@@ -31,11 +31,13 @@ async fn resolve_tenant_by_customer(
 
 /// Applies a verified Stripe event to the tenant model.
 ///
-/// The checkout session that starts a subscription is expected to have `client_reference_id` set to the tenant id, which is recorded (`link_stripe_customer`) so later subscription events (keyed only by Stripe customer id) can be traced back to it.
+/// The checkout session that starts a subscription carries the tenant id as `client_reference_id`.
+/// `link_stripe_customer` records it so later subscription events, keyed only by Stripe customer id, resolve to the tenant.
 ///
-/// Idempotency and ordering are enforced inside one transaction (see `stripe_events`, `is_event_processed`/`is_stale_for_customer`): a duplicate delivery, or a delayed delivery older than one already applied for the same customer, is accepted (so Stripe doesn't retry it forever) but not re-applied.
+/// Idempotency and ordering are enforced inside one transaction.
+/// A duplicate delivery, or one older than an event already applied for the same customer, is accepted so Stripe stops retrying, but it is not applied again.
 ///
-/// Everything here runs in one `DatabaseTransaction`, not on `ctx.db` directly: `db::lock_for_update(&txn, ...)` is a transaction-scoped advisory lock that releases on commit or rollback with no separate connection to leak.
+/// Everything runs in one `DatabaseTransaction`, so the advisory lock releases on commit or rollback.
 pub(crate) async fn apply_stripe_event(
     ctx: &AppContext,
     config: &StripeConfig,
@@ -59,8 +61,8 @@ pub(crate) async fn apply_stripe_event(
         );
         return Ok(());
     };
-    // Only the subscription events are ordered per customer.
-    // `checkout.session.completed` also carries a `customer` field but is a one-time link event with no ordering relationship to the subscription stream, so it's excluded here.
+    // Only subscription events are ordered per customer.
+    // `checkout.session.completed` is a one-time link event outside that stream.
     let customer_id = matches!(
         event.event_type.as_str(),
         "customer.subscription.created"
@@ -72,7 +74,7 @@ pub(crate) async fn apply_stripe_event(
     .and_then(|value| value.as_str())
     .map(str::to_owned);
 
-    // Serializes concurrent deliveries for the same customer: the second caller's `is_stale_for_customer` re-read sees the first caller's write only after it commits.
+    // Serializes concurrent deliveries for one customer, so the second sees the first's write only after it commits.
     if let Some(customer_id) = customer_id.as_deref() {
         db::lock_for_update(&txn, &format!("stripe-customer:{customer_id}"))
             .await

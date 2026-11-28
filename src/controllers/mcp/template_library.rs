@@ -20,7 +20,7 @@ use crate::models::template_templates;
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct GetTemplateLibraryItemArgs {
-    pub id: Uuid,
+    pub template_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -33,14 +33,14 @@ pub(crate) struct ListTemplateLibraryArgs {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct UpdateTemplateLibraryArgs {
-    pub id: Uuid,
+    pub template_id: Uuid,
     #[serde(flatten)]
     pub body: UpdateTemplateRequest,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct ForkTemplateLibraryArgs {
-    pub id: Uuid,
+    pub template_id: Uuid,
     #[serde(flatten)]
     pub body: ForkTemplateRequest,
 }
@@ -48,7 +48,7 @@ pub(crate) struct ForkTemplateLibraryArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_template_library)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Create a tenant-shared schema template in the library, not a workspace data schema (requires template_library_create IAM permission)"
+        description = "Create a schema template in the tenant library without creating a workspace schema."
     )]
     pub(crate) async fn create_template_library_item(
         &self,
@@ -60,7 +60,7 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Update an owned tenant template; existing workspace schema versions are unchanged (requires template_library_update IAM permission)"
+        description = "Update a template the tenant owns without changing existing workspace schema versions."
     )]
     pub(crate) async fn update_template_library_item(
         &self,
@@ -69,13 +69,18 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts);
         render(
-            template_templates::update_as(&self.app_context().db, &auth, args.id, args.body.into())
-                .await,
+            template_templates::update_as(
+                &self.app_context().db,
+                &auth,
+                args.template_id,
+                args.body.into(),
+            )
+            .await,
         )
     }
 
     #[tool(
-        description = "Delete an owned tenant template while preserving existing workspace schemas (requires template_library_delete IAM permission)"
+        description = "Delete a template the tenant owns while preserving existing workspace schemas."
     )]
     pub(crate) async fn delete_template_library_item(
         &self,
@@ -83,15 +88,13 @@ impl YorishiroMcpServer {
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts);
-        match template_templates::delete_as(&self.app_context().db, &auth, args.id).await {
+        match template_templates::delete_as(&self.app_context().db, &auth, args.template_id).await {
             Ok(()) => ok_json(serde_json::json!({"deleted": true})),
             Err(error) => Ok(err_to_tool_result(error)),
         }
     }
 
-    #[tool(
-        description = "Fork a visible schema template into the current tenant's library (requires template_library_fork IAM permission)"
-    )]
+    #[tool(description = "Fork a visible schema template into the current tenant's library.")]
     pub(crate) async fn fork_template_library_item(
         &self,
         Parameters(args): Parameters<ForkTemplateLibraryArgs>,
@@ -99,18 +102,23 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts);
         render(
-            template_templates::fork_as(&self.app_context().db, &auth, args.id, args.body.name)
-                .await,
+            template_templates::fork_as(
+                &self.app_context().db,
+                &auth,
+                args.template_id,
+                args.body.name,
+            )
+            .await,
         )
     }
 
     #[tool(
         description = "List the tenant's DB-backed schema template library (own templates plus \
-                           any community-visible ones). Distinct from `list_templates`, which \
+                           any community-visible ones). Distinct from `list_builtin_templates`, which \
                            lists the built-in templates shipped with the server (requires read \
                            scope)"
     )]
-    pub(crate) async fn list_template_library(
+    pub(crate) async fn list_template_library_items(
         &self,
         Parameters(args): Parameters<ListTemplateLibraryArgs>,
         Extension(parts): Extension<Parts>,
@@ -134,8 +142,9 @@ impl YorishiroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let auth = verified!(self, parts);
 
-        let template =
-            try_tool!(template_templates::get_as(&self.app_context().db, &auth, args.id).await);
+        let template = try_tool!(
+            template_templates::get_as(&self.app_context().db, &auth, args.template_id).await
+        );
         ok_json(template)
     }
 }

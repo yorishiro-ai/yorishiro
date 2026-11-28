@@ -1,18 +1,21 @@
-# Test environment (LOCO_ENV=test, Loco's default under cargo test).
-# The database follows DATABASE_URL's scheme; the queue follows YORISHIRO_QUEUE_KIND, or the database when unset.
-# The tenant cap policy lives in the edition, not here.
+# An unconfigured start uses local SQLite files and serves a single-tenant trial instance.
+# Set DATABASE_URL to PostgreSQL to use it for application data and the default queue.
+# Set `YORISHIRO_QUEUE_KIND=Redis` and a `redis://` or `rediss://` `QUEUE_URL` to use the Redis-compatible provider independently of the application database.
+
 logger:
   enable: true
-  # Enable pretty backtrace (sets RUST_BACKTRACE=1)
   pretty_backtrace: true
-  level: debug
+  level: <%= get_env(name="LOG_LEVEL", default="debug") %>
   format: compact
 
 server:
   # Port on which the server listens, on the interface selected by BINDING.
   port: <%= get_env(name="PORT", default="5150") %>
+  # Binding for the server (which interface to bind to).
+  # Explicit 0.0.0.0 or :: enables network access and accepts any MCP Host.
   binding: <%= get_env(name="BINDING", default="localhost") %>
-  host: http://localhost
+  # Defaults to localhost for an unconfigured trial instance.
+  host: <%= get_env(name="HOST", default="http://localhost") %>
   middlewares:
     cors:
       enable: true
@@ -29,48 +32,103 @@ server:
     logger:
       enable: true
 
-# Scheduler Configuration (disabled in test)
+# Loco's scheduler executes registered tasks as separate processes.
+# Run `cargo loco scheduler` in a dedicated process to recover durable dispatch records and interrupted reindexes.
 scheduler:
+  output: stdout
+  jobs:
+    worker_dispatch_recovery:
+      run: "recover_worker_dispatches"
+      schedule: "0 * * * * *"
+      run_on_start: true
+    embedding_index_maintenance:
+      run: "embedding_index_maintenance"
+      schedule: "0 */10 * * * *"
+      run_on_start: true
+    delete_due_tenants:
+      run: "delete_due_tenants"
+      schedule: "0 0 * * * *"
+      run_on_start: true
+    purge_audit_events:
+      run: "purge_audit_events"
+      schedule: "0 30 3 * * *"
+      run_on_start: false
 
 # Run HTTP and worker processes separately. Start a worker with an explicit target, such as
 # --worker=worker-target:shared. Official and tenant workers need their own selected targets.
 # Bare --worker, --server-and-worker, and --all are rejected.
 
-
-queue:
+# Queue providers need different fields, so each branch renders a complete configuration.
+# External providers require an explicit URI; SQLite defaults to a separate local file.
 <% if get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Redis" %>
+queue:
   kind: Redis
-  uri: <%= get_env(name="QUEUE_URL") %>
+  uri: '<%= get_env(name="QUEUE_URL") | replace(from="'", to="''") %>'
   dangerously_flush: false
-  queues: null
   num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
-  reaper: null
+  reaper:
+    age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
+    interval_seconds: 60
 <% elif get_env(name="YORISHIRO_QUEUE_KIND", default=(get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first | replace(from="postgres", to="Postgres") | replace(from="sqlite", to="Sqlite"))) == "Sqlite" %>
+queue:
   kind: Sqlite
+
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
-  connect_timeout: 500
-  idle_timeout: 500
-  min_connections: 1
-  max_connections: 10
-  uri: '<%= get_env(name="QUEUE_URL", default="sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc") %>'
+  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
+  idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
+  min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
+<% if (get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first) == "sqlite" %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="10") %>
+<% else %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="100") %>
+<% endif %>
+  uri: '<%= get_env(name="QUEUE_URL", default="sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc") | replace(from="'", to="''") %>'
   dangerously_flush: false
   num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="1") %>
   reaper:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
+  # Loco deletes finished SQL queue rows after these ages; queued and processing jobs are never touched.
+  retention:
+    completed_days: 7
+    cancelled_days: 7
+    failed_days: 30
+    interval_seconds: 3600
 <% else %>
+queue:
   kind: Postgres
-  enable_logging: true
+
+  enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
   connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
   idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
   min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
-  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="50") %>
-  uri: <%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) %>
+<% if (get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first) == "sqlite" %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="10") %>
+<% else %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="100") %>
+<% endif %>
+
+  # Postgres connection URI. Commonly the same value as DATABASE_URL.
+  uri: '<%= get_env(name="QUEUE_URL", default=get_env(name="DATABASE_URL", default="postgres://localhost:5432/yorishiro")) | replace(from="'", to="''") %>'
+  # Dangerously flush all data in the queue table on startup. dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_flush: false
+
+  # Workers dequeuing in parallel, tunable per deployment.
+  # Postgres claims rows with `FOR UPDATE SKIP LOCKED`, so raising this genuinely adds parallelism, and a `--worker` process on another host adds more.
   num_workers: <%= get_env(name="YORISHIRO_QUEUE_WORKERS", default="2") %>
+
+  # Requeues jobs left in `processing` by a worker that died before completing or failing them.
+  # Off by default in Loco, which leaves such a job stuck forever: nothing else moves it, since `fail_job` only runs when `perform` actually returns an error.
+  # `age_minutes` must exceed the longest a healthy job can legitimately take, or the reaper requeues work still in progress.
   reaper:
     age_minutes: <%= get_env(name="YORISHIRO_QUEUE_REAPER_AGE_MINUTES", default="30") %>
     interval_seconds: 60
+  # Loco deletes finished SQL queue rows after these ages; queued and processing jobs are never touched.
+  retention:
+    completed_days: 7
+    cancelled_days: 7
+    failed_days: 30
+    interval_seconds: 3600
 <% endif %>
 
 workers:
@@ -81,9 +139,9 @@ settings:
   # Deployment routing declaration, not live worker discovery.
   worker_targets: <%= get_env(name="YORISHIRO_WORKER_TARGETS", default='["worker-target:shared"]') %>
   timezone: <%= get_env(name="YORISHIRO_TIMEZONE", default="UTC") %>
+  max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="1") %>
   mcp:
     allowed_hosts: "<%= get_env(name="YORISHIRO_MCP_ALLOWED_HOSTS", default="") %>"
-  max_tenants: <%= get_env(name="YORISHIRO_MAX_TENANTS", default="0") %>
   embedding:
     provider: <%= get_env(name="YORISHIRO_EMBEDDING_PROVIDER", default="none") %>
     dimensions: <%= get_env(name="YORISHIRO_EMBEDDING_DIMENSIONS", default="768") %>
@@ -100,34 +158,37 @@ settings:
     timeout_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_TIMEOUT_MS", default="15000") %>
     poll_interval_ms: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_POLL_INTERVAL_MS", default="100") %>
     retention_seconds: <%= get_env(name="YORISHIRO_QUERY_EMBEDDING_RETENTION_SECS", default="300") %>
-
 database:
-<% if (get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first) == "sqlite" %>
-  uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///tmp/yorishiro.sqlite3?mode=rwc") %>'
-  run_on_start: "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA mmap_size = 134217728; PRAGMA journal_size_limit = 67108864; PRAGMA cache_size = 2000; PRAGMA busy_timeout = 5000;"
+  # Database connection URI.
+  # Defaults to a local SQLite file for an unconfigured trial instance.
+  # Use PostgreSQL for database-enforced tenant isolation; both backends support vector search.
+  uri: '<%= get_env(name="DATABASE_URL", default="sqlite:///tmp/yorishiro.sqlite3?mode=rwc") | replace(from="'", to="''") %>'
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
-  connect_timeout: 500
-  idle_timeout: 500
-  min_connections: 1
-  max_connections: 10
-<% else %>
-  uri: <%= get_env(name="DATABASE_URL") %>
-  enable_logging: true
   connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
   idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
   min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="1") %>
-  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="50") %>
+  # Maximum number of connections for a pool. SQLite has a single writer, so it defaults to 10 rather than 100.
+<% if (get_env(name="DATABASE_URL", default="sqlite://") | split(pat=":") | first) == "sqlite" %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="10") %>
+<% else %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="100") %>
 <% endif %>
-  auto_migrate: true
-  dangerously_truncate: <%= get_env(name="DANGEROUSLY_TRUNCATE", default="false") %>
-  dangerously_recreate: <%= get_env(name="DANGEROUSLY_RECREATE", default="false") %>
+  # Run migration up when application loaded.
+  # Convenient for single-instance deploys. Turn it off if you run more than
+  # one instance or migrate as a separate release step, so instances do not
+  # race to migrate the same database.
+  auto_migrate: <%= get_env(name="DB_AUTO_MIGRATE", default="true") %>
+  # Truncate database when application loaded. This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
+  dangerously_truncate: false
+  # Recreating schema when application loaded.  This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
+  dangerously_recreate: false
 
-auth:
-  jwt:
-    secret: uClCedX7U2MVLKyarzNq
-    expiration: 604800 # 7 days
+# Deliberately absent, not merely unset.
+# Authentication uses API keys through RequestAuth, not Loco's JWT configuration.
 
 initializers:
+  # Set a deployment-wide UTC cron schedule with an active licence, e.g. "0 0 3 * * *".
+  reindex_schedule: '<%= get_env(name="YORISHIRO_REINDEX_SCHEDULE", default="") | replace(from="'", to="''") %>'
   plan_policy_enabled: '<%= get_env(name="YORISHIRO_PLAN_POLICY_ENABLED", default="false") %>'
   worker_admission:
     shared: '<%= get_env(name="YORISHIRO_WORKER_CLASS_SHARED_LIMIT", default="") %>'

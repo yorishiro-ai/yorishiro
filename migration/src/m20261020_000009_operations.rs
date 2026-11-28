@@ -1,5 +1,6 @@
 use super::helpers;
 use sea_orm_migration::prelude::*;
+use sea_orm_migration::sea_orm::prelude::DateTimeUtc;
 
 #[derive(DeriveMigrationName)]
 pub(crate) struct Migration;
@@ -12,14 +13,12 @@ impl MigrationTrait for Migration {
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         Box::pin(up_maintenance(manager)).await?;
-        Box::pin(up_reindex_schedules(manager)).await?;
         Box::pin(up_tenant_retirement_events(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         Box::pin(down_tenant_retirement_events(manager)).await?;
-        Box::pin(down_reindex_schedules(manager)).await?;
         Box::pin(down_maintenance(manager)).await?;
         Ok(())
     }
@@ -28,7 +27,6 @@ impl MigrationTrait for Migration {
 async fn up_maintenance(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let table = Table::create()
         .table(Alias::new("system_maintenance"))
-        .if_not_exists()
         .col(
             ColumnDef::new(Alias::new("id"))
                 .boolean()
@@ -49,11 +47,7 @@ async fn up_maintenance(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                 .default(300),
         )
         .col(ColumnDef::new(Alias::new("reason")).text())
-        .col(
-            helpers::ts_tz_col(manager, Alias::new("updated_at"))
-                .not_null()
-                .default(Expr::current_timestamp()),
-        )
+        .col(helpers::ts_tz_col(manager, Alias::new("updated_at")).not_null())
         .to_owned();
 
     helpers::create_table_with_checks(
@@ -76,8 +70,13 @@ async fn up_maintenance(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .execute(
             &Query::insert()
                 .into_table(Alias::new("system_maintenance"))
-                .columns([Alias::new("id")])
-                .values_panic([true.into()])
+                .columns([Alias::new("id"), Alias::new("updated_at")])
+                .values_panic([
+                    true.into(),
+                    DateTimeUtc::from(std::time::SystemTime::now())
+                        .fixed_offset()
+                        .into(),
+                ])
                 .to_owned(),
         )
         .await?;
@@ -92,60 +91,6 @@ async fn down_maintenance(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .drop_table(
             Table::drop()
                 .table(Alias::new("system_maintenance"))
-                .to_owned(),
-        )
-        .await?;
-
-    Ok(())
-}
-
-async fn up_reindex_schedules(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    let [created_at, updated_at] = helpers::timestamps(manager);
-    let ts_tz_col = helpers::ts_tz_col(manager, Alias::new("scheduled_for"));
-    manager
-        .create_table(
-            Table::create()
-                .table(Alias::new("tenant_reindex_schedules"))
-                .if_not_exists()
-                .col(
-                    helpers::uuid_col(manager, Alias::new("tenant_id"))
-                        .not_null()
-                        .primary_key(),
-                )
-                .col(ColumnDef::new(Alias::new("interval")).text().not_null())
-                .col(ColumnDef::new(Alias::new("timezone")).text())
-                .col(ts_tz_col)
-                .col(created_at)
-                .col(updated_at)
-                .foreign_key(
-                    ForeignKey::create()
-                        .name("fk_tenant_reindex_schedules_tenant_id")
-                        .from(
-                            Alias::new("tenant_reindex_schedules"),
-                            Alias::new("tenant_id"),
-                        )
-                        .to(Alias::new("tenant_tenants"), Alias::new("id"))
-                        .on_delete(ForeignKeyAction::Cascade),
-                )
-                .to_owned(),
-        )
-        .await?;
-
-    helpers::pg_only(
-        manager,
-        "REVOKE ALL ON TABLE tenant_reindex_schedules FROM PUBLIC;
-                 GRANT SELECT ON TABLE tenant_reindex_schedules TO yorishiro_app;",
-    )
-    .await?;
-
-    Ok(())
-}
-
-async fn down_reindex_schedules(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    manager
-        .drop_table(
-            Table::drop()
-                .table(Alias::new("tenant_reindex_schedules"))
                 .to_owned(),
         )
         .await?;

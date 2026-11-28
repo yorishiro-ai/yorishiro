@@ -27,7 +27,6 @@ async fn signup_without_invite_creates_its_own_tenant() {
         let signup_body: serde_json::Value = signup_response.json();
         assert_eq!(signup_body["email"], "no-invite@example.com");
         assert!(signup_body.get("role").is_none(), "signup response carries no role label");
-        assert_eq!(signup_body["workspaces"].as_array().unwrap().len(), 0);
 
         let login_response = request
             .post("/auth/root/login")
@@ -42,7 +41,7 @@ async fn signup_without_invite_creates_its_own_tenant() {
         assert!(login.get("workspace_id").is_none());
         let workspaces = request
             .get("/api/workspaces")
-            .add_header("Authorization", format!("Bearer {}", login["api_key"].as_str().unwrap()))
+            .add_header("Authorization", format!("Bearer {}", login["access_key"].as_str().unwrap()))
             .await;
         workspaces.assert_status_ok();
         assert_eq!(workspaces.json::<serde_json::Value>(), serde_json::json!([]));
@@ -130,7 +129,6 @@ async fn login_issues_tenant_key_after_credentials_are_verified() {
             &transaction,
             tenant.tenant_id,
             &format!("login-selection-{}", uuid::Uuid::new_v4()),
-            None,
             None,
         )
         .await

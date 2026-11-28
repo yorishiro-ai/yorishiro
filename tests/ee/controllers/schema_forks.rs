@@ -51,25 +51,30 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let schema_response = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {source_key}"))
+            .add_header("x-workspace-id", source_workspace_id.to_string())
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
         assert_eq!(schema_response.status_code(), StatusCode::CREATED);
         let schema: serde_json::Value = schema_response.json();
-        let source_schema_id: Uuid = schema["schema"]["id"].as_str().unwrap().parse().unwrap();
+        let source_schema_id: Uuid = schema["schema"]["schema_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
 
         let target = fixtures::create_workspace(&ctx, tenant_id, "target").await;
-        let target_key = fixtures::issue_api_key(&ctx, target.id, owner_id, false).await;
-        let read_key = fixtures::issue_api_key(
+        let target_key = fixtures::issue_access_key(&ctx, target.id, owner_id).await;
+        let read_key = fixtures::issue_access_key(
             &ctx,
             target.id,
             fixtures::create_iam_reader(&ctx, tenant_id).await,
-            false,
         )
         .await;
 
         let denied = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {read_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "source_workspace_id": source_workspace_id,
                 "source_schema_id": source_schema_id
@@ -80,6 +85,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let created = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "source_workspace_id": source_workspace_id,
                 "source_schema_id": source_schema_id
@@ -99,7 +105,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         assert_eq!(fork["customized"], false);
         assert_eq!(fork["source_schema_version"], schema["schema"]["version"]);
         assert_eq!(fork["definition"], schema["schema"]["definition"]);
-        let fork_id = fork["id"].as_str().unwrap().to_owned();
+        let fork_id = fork["fork_id"].as_str().unwrap().to_owned();
         let original_head_id: Uuid = fork["fork_schema_id"].as_str().unwrap().parse().unwrap();
         let original_head_version =
             i32::try_from(fork["fork_schema_version"].as_i64().unwrap()).unwrap();
@@ -122,15 +128,17 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let listed = request
             .get("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {read_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(listed.status_code(), StatusCode::OK);
         let listed: serde_json::Value = listed.json();
         assert_eq!(listed.as_array().unwrap().len(), 1);
-        assert_eq!(listed[0]["id"], fork["id"]);
+        assert_eq!(listed[0]["fork_id"], fork["fork_id"]);
 
         let fetched = request
             .get(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {read_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(fetched.status_code(), StatusCode::OK);
         assert_eq!(
@@ -141,6 +149,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let duplicate = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "source_workspace_id": source_workspace_id,
                 "source_schema_id": source_schema_id
@@ -151,6 +160,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let local = request
             .put(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "definition": fork["definition"],
                 "expected_fork_schema_id": fork["fork_schema_id"]
@@ -180,6 +190,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let renamed = request
             .put(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "definition": renamed_definition,
                 "expected_fork_schema_id": local["fork_schema_id"]
@@ -198,6 +209,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let fork_after_rename = request
             .get(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(fork_after_rename.status_code(), StatusCode::OK);
         let fork_after_rename: serde_json::Value = fork_after_rename.json();
@@ -217,6 +229,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let stale = request
             .put(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "definition": local["definition"],
                 "expected_fork_schema_id": original_head_id
@@ -227,6 +240,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let source_v2 = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {source_key}"))
+            .add_header("x-workspace-id", source_workspace_id.to_string())
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
         assert_eq!(
@@ -236,11 +250,12 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
             source_v2.text()
         );
         let source_v2: serde_json::Value = source_v2.json();
-        let source_v2_id = source_v2["schema"]["id"].as_str().unwrap();
+        let source_v2_id = source_v2["schema"]["schema_id"].as_str().unwrap();
 
         let before_follow_get = request
             .get(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {read_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(before_follow_get.status_code(), StatusCode::OK);
         assert_eq!(
@@ -250,6 +265,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let before_follow_list = request
             .get("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {read_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(before_follow_list.status_code(), StatusCode::OK);
         assert_eq!(
@@ -260,6 +276,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let follow = request
             .put(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "action": "follow",
                 "expected_fork_schema_id": local["fork_schema_id"],
@@ -271,6 +288,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let followed = request
             .put(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "action": "follow",
                 "force": true,
@@ -291,12 +309,14 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let after_follow_get = request
             .get(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {read_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(after_follow_get.status_code(), StatusCode::OK);
         assert!(after_follow_get.json::<serde_json::Value>()["upstream_version"].is_null());
         let after_follow_list = request
             .get("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {read_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(after_follow_list.status_code(), StatusCode::OK);
         assert!(after_follow_list.json::<serde_json::Value>()[0]["upstream_version"].is_null());
@@ -309,6 +329,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let delete_old_referenced = request
             .delete(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(delete_old_referenced.status_code(), StatusCode::CONFLICT);
         yorishiro::models::entity_entities::delete(&ctx.db, target.id, old_reference)
@@ -320,6 +341,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let delete_current_referenced = request
             .delete(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(
             delete_current_referenced.status_code(),
@@ -332,18 +354,20 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
         let deleted = request
             .delete(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(deleted.status_code(), StatusCode::NO_CONTENT);
 
         let missing = request
             .get(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(missing.status_code(), StatusCode::NOT_FOUND);
         assert_eq!(
             workspace_schema_fork_heads::Entity::find()
                 .filter(
-                    workspace_schema_fork_heads::Column::ForkId.eq(fork["id"]
+                    workspace_schema_fork_heads::Column::ForkId.eq(fork["fork_id"]
                         .as_str()
                         .unwrap()
                         .parse::<Uuid>()
@@ -358,6 +382,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
             let preserved = request
                 .get(&format!("/api/schemas/{head_id}"))
                 .add_header("Authorization", format!("Bearer {target_key}"))
+                .add_header("x-workspace-id", target.id.to_string())
                 .await;
             assert_eq!(
                 preserved.status_code(),
@@ -366,7 +391,7 @@ async fn schema_fork_crud_copy_follow_and_history_guards() {
                 preserved.text()
             );
             assert_eq!(
-                preserved.json::<serde_json::Value>()["id"],
+                preserved.json::<serde_json::Value>()["schema_id"],
                 head_id.to_string()
             );
         }
@@ -383,8 +408,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let TestTenant {
             tenant_id: tenant_a,
             workspace_id: source_workspace,
@@ -403,16 +427,18 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
         let source_response = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {source_key}"))
+            .add_header("x-workspace-id", source_workspace.to_string())
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
         assert_eq!(source_response.status_code(), StatusCode::CREATED);
         let source: serde_json::Value = source_response.json();
-        let source_schema_id = source["schema"]["id"].as_str().unwrap();
+        let source_schema_id = source["schema"]["schema_id"].as_str().unwrap();
         let target = fixtures::create_workspace(&ctx, tenant_a, "fork-http-target").await;
-        let target_key = fixtures::issue_api_key(&ctx, target.id, owner_a, false).await;
+        let target_key = fixtures::issue_access_key(&ctx, target.id, owner_a).await;
         let created = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "source_workspace_id": source_workspace,
                 "source_schema_id": source_schema_id
@@ -425,7 +451,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
             created.text()
         );
         let fork: serde_json::Value = created.json();
-        let fork_id = fork["id"].as_str().unwrap();
+        let fork_id = fork["fork_id"].as_str().unwrap();
 
         let TestTenant {
             workspace_id: workspace_b,
@@ -442,12 +468,13 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
             },
         )
         .await;
-        let read_b = fixtures::issue_api_key(&ctx, workspace_b, owner_b, false).await;
-        let schema_b = fixtures::issue_api_key(&ctx, workspace_b, owner_b, false).await;
+        let read_b = fixtures::issue_access_key(&ctx, workspace_b, owner_b).await;
+        let schema_b = fixtures::issue_access_key(&ctx, workspace_b, owner_b).await;
 
         let list_b = request
             .get("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {read_b}"))
+            .add_header("x-workspace-id", workspace_b.to_string())
             .await;
         assert_eq!(list_b.status_code(), StatusCode::OK);
         assert_eq!(list_b.json::<serde_json::Value>(), serde_json::json!([]));
@@ -455,12 +482,14 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
         let get_b = request
             .get(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {read_b}"))
+            .add_header("x-workspace-id", workspace_b.to_string())
             .await;
         assert_eq!(get_b.status_code(), StatusCode::NOT_FOUND);
 
         let create_cross_tenant = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {schema_b}"))
+            .add_header("x-workspace-id", workspace_b.to_string())
             .json(&serde_json::json!({
                 "source_workspace_id": source_workspace,
                 "source_schema_id": source_schema_id
@@ -471,6 +500,7 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
         let update_cross_tenant = request
             .put(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {schema_b}"))
+            .add_header("x-workspace-id", workspace_b.to_string())
             .json(&serde_json::json!({ "action": "follow" }))
             .await;
         assert_eq!(update_cross_tenant.status_code(), StatusCode::NOT_FOUND);
@@ -478,12 +508,14 @@ async fn schema_fork_http_routes_use_rls_for_cross_tenant_isolation() {
         let delete_cross_tenant = request
             .delete(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {schema_b}"))
+            .add_header("x-workspace-id", workspace_b.to_string())
             .await;
         assert_eq!(delete_cross_tenant.status_code(), StatusCode::NOT_FOUND);
 
         let still_there = request
             .get(&format!("/api/schema-forks/{fork_id}"))
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .await;
         assert_eq!(still_there.status_code(), StatusCode::OK);
     })
@@ -501,14 +533,19 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let workspace_b = fixtures::create_workspace(&ctx, tenant_id, "workspace-b").await;
         let workspace_c = fixtures::create_workspace(&ctx, tenant_id, "workspace-c").await;
-        let key_b = fixtures::issue_api_key(&ctx, workspace_b.id, owner_id, false).await;
-        let key_c = fixtures::issue_api_key(&ctx, workspace_c.id, owner_id, false).await;
+        let key_b = fixtures::issue_access_key(&ctx, workspace_b.id, owner_id).await;
+        let key_c = fixtures::issue_access_key(&ctx, workspace_c.id, owner_id).await;
 
         let mut schemas = Vec::new();
-        for key in [&key_a, &key_b, &key_c] {
+        for (key, workspace) in [
+            (&key_a, workspace_a),
+            (&key_b, workspace_b.id),
+            (&key_c, workspace_c.id),
+        ] {
             let response = request
                 .post("/api/schemas")
                 .add_header("Authorization", format!("Bearer {key}"))
+                .add_header("x-workspace-id", workspace.to_string())
                 .json(&serde_json::json!({ "template_id": "task-management" }))
                 .await;
             assert_eq!(
@@ -519,7 +556,7 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
             );
             let body: serde_json::Value = response.json();
             schemas.push(
-                body["schema"]["id"]
+                body["schema"]["schema_id"]
                     .as_str()
                     .unwrap()
                     .parse::<Uuid>()
@@ -530,6 +567,7 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
         let b_follows_a = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {key_b}"))
+            .add_header("x-workspace-id", workspace_b.id.to_string())
             .json(&serde_json::json!({
                 "source_workspace_id": workspace_a,
                 "source_schema_id": schemas[0]
@@ -545,6 +583,7 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
         let c_follows_b = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {key_c}"))
+            .add_header("x-workspace-id", workspace_c.id.to_string())
             .json(&serde_json::json!({
                 "source_workspace_id": workspace_b.id,
                 "source_schema_id": schemas[1]
@@ -560,6 +599,7 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
         let cycle = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {key_a}"))
+            .add_header("x-workspace-id", workspace_a.to_string())
             .json(&serde_json::json!({
                 "source_workspace_id": workspace_c.id,
                 "source_schema_id": schemas[2]
@@ -578,208 +618,13 @@ async fn schema_forks_reject_transitive_workspace_cycles() {
 #[tokio::test]
 #[expect(
     clippy::too_many_lines,
-    reason = "both directions must race against the same schema graph so the resulting edge and cycle rejection can be checked together"
-)]
-async fn concurrent_opposite_forks_allow_one_edge_and_reject_the_other() {
-    if !crate::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant {
-            tenant_id,
-            workspace_id: workspace_a,
-            owner_id,
-            api_key: key_a,
-        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let workspace_b = fixtures::create_workspace(&ctx, tenant_id, "opposite-cycle-b").await;
-        let key_b = fixtures::issue_api_key(&ctx, workspace_b.id, owner_id, false).await;
-
-        let first_response = request
-            .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {key_a}"))
-            .json(&serde_json::json!({ "template_id": "task-management" }))
-            .await;
-        assert_eq!(first_response.status_code(), StatusCode::CREATED);
-        let schema_a: serde_json::Value = first_response.json();
-        let first_schema_id = schema_a["schema"]["id"]
-            .as_str()
-            .unwrap()
-            .parse::<Uuid>()
-            .unwrap();
-
-        let second_response = request
-            .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {key_b}"))
-            .json(&serde_json::json!({ "template_id": "task-management" }))
-            .await;
-        assert_eq!(second_response.status_code(), StatusCode::CREATED);
-        let schema_b: serde_json::Value = second_response.json();
-        let second_schema_id = schema_b["schema"]["id"]
-            .as_str()
-            .unwrap()
-            .parse::<Uuid>()
-            .unwrap();
-
-        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
-        let db = ctx.shared_store.get::<yorishiro::db::DbHandle>().unwrap();
-        let txn_a = db
-            .tenant
-            .begin_for_workspace(tenant_id, workspace_a)
-            .await
-            .unwrap();
-        let txn_b = db
-            .tenant
-            .begin_for_workspace(tenant_id, workspace_b.id)
-            .await
-            .unwrap();
-        let barrier_a = barrier.clone();
-        let barrier_b = barrier;
-        let create_a = async {
-            barrier_a.wait().await;
-            let result = yorishiro::edition::ee::models::workspace_schema_forks::create(
-                &txn_a,
-                tenant_id,
-                workspace_a,
-                yorishiro::edition::ee::models::workspace_schema_forks::CreateInput {
-                    source_workspace_id: workspace_b.id,
-                    source_schema_id: second_schema_id,
-                },
-            )
-            .await;
-            if result.is_ok() {
-                txn_a.commit().await.unwrap();
-            } else {
-                txn_a.rollback().await.unwrap();
-            }
-            result
-        };
-        let create_b = async {
-            barrier_b.wait().await;
-            let result = yorishiro::edition::ee::models::workspace_schema_forks::create(
-                &txn_b,
-                tenant_id,
-                workspace_b.id,
-                yorishiro::edition::ee::models::workspace_schema_forks::CreateInput {
-                    source_workspace_id: workspace_a,
-                    source_schema_id: first_schema_id,
-                },
-            )
-            .await;
-            if result.is_ok() {
-                txn_b.commit().await.unwrap();
-            } else {
-                txn_b.rollback().await.unwrap();
-            }
-            result
-        };
-        let (result_a, result_b) = tokio::join!(create_a, create_b);
-        assert_ne!(
-            result_a.is_ok(),
-            result_b.is_ok(),
-            "exactly one opposite edge may commit"
-        );
-        assert!(
-            matches!(result_a, Err(yorishiro::YorishiroError::Conflict { .. }))
-                || matches!(result_b, Err(yorishiro::YorishiroError::Conflict { .. })),
-            "the losing edge must be rejected as a cycle conflict"
-        );
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn fork_creation_shares_the_schema_version_lock() {
-    if !crate::require_postgres_backend() {
-        return;
-    }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        let TestTenant {
-            tenant_id,
-            workspace_id: source_workspace_id,
-            api_key: source_key,
-            ..
-        } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
-        let source_response = request
-            .post("/api/schemas")
-            .add_header("Authorization", format!("Bearer {source_key}"))
-            .json(&serde_json::json!({ "template_id": "task-management" }))
-            .await;
-        assert_eq!(source_response.status_code(), StatusCode::CREATED);
-        let source: serde_json::Value = source_response.json();
-        let source_schema_id = source["schema"]["id"]
-            .as_str()
-            .unwrap()
-            .parse::<Uuid>()
-            .unwrap();
-        let definition = serde_json::from_value(source["schema"]["definition"].clone()).unwrap();
-        let target = fixtures::create_workspace(&ctx, tenant_id, "version-race-target").await;
-
-        let db = ctx.shared_store.get::<yorishiro::db::DbHandle>().unwrap();
-        let first = db
-            .tenant
-            .begin_for_workspace(tenant_id, target.id)
-            .await
-            .unwrap();
-        yorishiro::models::schema_schemas::lock_version(&first, target.id, "task-management")
-            .await
-            .unwrap();
-
-        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
-        let second_barrier = barrier.clone();
-        let second_db = db.tenant.clone();
-        let mut second = tokio::spawn(async move {
-            let txn = second_db
-                .begin_for_workspace(tenant_id, target.id)
-                .await
-                .unwrap();
-            second_barrier.wait().await;
-            let fork = yorishiro::edition::ee::models::workspace_schema_forks::create(
-                &txn,
-                tenant_id,
-                target.id,
-                yorishiro::edition::ee::models::workspace_schema_forks::CreateInput {
-                    source_workspace_id,
-                    source_schema_id,
-                },
-            )
-            .await
-            .unwrap();
-            txn.commit().await.unwrap();
-            fork
-        });
-        barrier.wait().await;
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(250), &mut second)
-                .await
-                .is_err(),
-            "fork creation must wait for the canonical workspace and schema-name lock"
-        );
-
-        let ordinary = yorishiro::models::schema_schemas::create_schema(
-            &first, tenant_id, target.id, definition, None, None,
-        )
-        .await
-        .unwrap();
-        assert_eq!(ordinary.0.version, 1);
-        first.commit().await.unwrap();
-
-        let fork = second.await.unwrap();
-        assert_eq!(fork.fork_schema_version, 2);
-    })
-    .await;
-}
-
-#[tokio::test]
-#[expect(
-    clippy::too_many_lines,
     reason = "both direct write attempts use the same scoped tenant and foreign fork to verify isolation and schema integrity"
 )]
 async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
     if !crate::require_postgres_backend() {
         return;
     }
-    boot_request::<App, _, _>(|request, ctx| async move {
-        crate::requests::require_licence(&ctx);
+    crate::requests::boot_multitenant_request(|request, ctx| async move {
         let TestTenant {
             tenant_id: tenant_a,
             workspace_id: source_workspace,
@@ -798,15 +643,17 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
         let source_response = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {source_key}"))
+            .add_header("x-workspace-id", source_workspace.to_string())
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
         let source: serde_json::Value = source_response.json();
-        let source_schema_id = source["schema"]["id"].as_str().unwrap();
+        let source_schema_id = source["schema"]["schema_id"].as_str().unwrap();
         let target = fixtures::create_workspace(&ctx, tenant_a, "target-a").await;
-        let target_key = fixtures::issue_api_key(&ctx, target.id, owner_a, false).await;
+        let target_key = fixtures::issue_access_key(&ctx, target.id, owner_a).await;
         let created = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "source_workspace_id": source_workspace,
                 "source_schema_id": source_schema_id
@@ -819,7 +666,7 @@ async fn schema_fork_rls_and_integrity_reject_cross_tenant_rows() {
             created.text()
         );
         let fork: serde_json::Value = created.json();
-        let fork_id = fork["id"].as_str().unwrap().parse::<Uuid>().unwrap();
+        let fork_id = fork["fork_id"].as_str().unwrap().parse::<Uuid>().unwrap();
 
         let TestTenant {
             tenant_id: tenant_b,
@@ -914,17 +761,19 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
         let source_response = request
             .post("/api/schemas")
             .add_header("Authorization", format!("Bearer {source_key}"))
+            .add_header("x-workspace-id", source_workspace.to_string())
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
         let source: serde_json::Value = source_response.json();
         let target = fixtures::create_workspace(&ctx, tenant_a, "sqlite-target").await;
-        let target_key = fixtures::issue_api_key(&ctx, target.id, owner_id, false).await;
+        let target_key = fixtures::issue_access_key(&ctx, target.id, owner_id).await;
         let created = request
             .post("/api/schema-forks")
             .add_header("Authorization", format!("Bearer {target_key}"))
+            .add_header("x-workspace-id", target.id.to_string())
             .json(&serde_json::json!({
                 "source_workspace_id": source_workspace,
-                "source_schema_id": source["schema"]["id"]
+                "source_schema_id": source["schema"]["schema_id"]
             }))
             .await;
         assert_eq!(
@@ -934,7 +783,7 @@ async fn sqlite_schema_fork_integrity_rejects_cross_tenant_rows() {
             created.text()
         );
         let fork: serde_json::Value = created.json();
-        let fork_id = fork["id"].as_str().unwrap().parse::<Uuid>().unwrap();
+        let fork_id = fork["fork_id"].as_str().unwrap().parse::<Uuid>().unwrap();
         let original = workspace_schema_forks::Entity::find_by_id(fork_id)
             .one(&ctx.db)
             .await

@@ -1,7 +1,7 @@
 //! Publishes the community edition's built-in templates as official marketplace listings.
 //!
-//! Bypasses `models::marketplace::publish_version`'s ownership check, since the seed has no authenticated tenant to check ownership against.
-//! Invoked from a Loco task (`register_tasks`), not a request path.
+//! Bypasses the ownership check of `models::marketplace::publish_version`, since the seed has no authenticated tenant.
+//! It runs from a Loco task, not a request path.
 
 use crate::db;
 use crate::error::{ResultExt, YorishiroError};
@@ -16,11 +16,11 @@ use sea_orm::{
 use uuid::Uuid;
 
 /// The tenant that owns the officially published templates.
-/// A fixed id, so re-running the seed finds the same row rather than creating a second publisher.
+/// A fixed id, so re-running the seed finds the same row.
 pub const OFFICIAL_TENANT_ID: Uuid = INFRASTRUCTURE_TENANT_ID;
 
 /// Shown as the listing's author.
-/// `template_templates.author` is free text, so this does not require a user account.
+/// `template_templates.author` is free text, so no user account is needed.
 pub(crate) const OFFICIAL_AUTHOR: &str = "Yorishiro";
 
 const OFFICIAL_TENANT_NAME: &str = "Yorishiro Official";
@@ -58,7 +58,7 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
         )
         .await?;
 
-        // Compare against the newest version of any status, not just `stable`: publishing a fresh version every run would otherwise walk the version number up forever while the definition stayed the same.
+        // The newest version of any status is the comparison point, so an unchanged definition publishes nothing.
         let latest = template_versions::Entity::find()
             .filter(template_versions::Column::TemplateId.eq(template_id))
             .order_by_desc(template_versions::Column::Version)
@@ -88,13 +88,13 @@ pub async fn seed_official_templates(ctx: &AppContext) -> Result<SeedOutcome, Yo
             }
         }
 
-        // `stable`, not `draft`: a draft is visible only to its owning tenant, and this tenant has no members to view it.
+        // A draft is visible only to its owning tenant, which has no members, so the seed publishes stable.
         let request = crate::edition::ee::models::marketplace::PublishVersionRequest {
             definition: definition_json,
             changelog: Some(format!("Built-in template '{}'", summary.id)),
             status: crate::edition::ee::models::marketplace::TemplateVersionStatus::Stable,
         };
-        // lock_for_update is transaction-scoped, so this needs its own txn rather than ctx.db.
+        // The advisory lock is transaction-scoped, so the publish needs its own transaction.
         let txn = ctx.db.begin().await.internal()?;
         db::lock_for_update(&txn, &format!("template-version:{template_id}"))
             .await
@@ -123,6 +123,9 @@ pub(crate) async fn ensure_official_tenant(
         name: ActiveValue::Set(OFFICIAL_TENANT_NAME.to_string()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     tenant_tenants::Entity::insert(active)
         .on_conflict(
             OnConflict::column(tenant_tenants::Column::Id)
@@ -159,6 +162,9 @@ async fn upsert_template(
         updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     let row = Entity::insert(active)
         .on_conflict(
             OnConflict::columns([Column::TenantId, Column::Name])

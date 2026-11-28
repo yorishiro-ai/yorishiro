@@ -2,7 +2,7 @@ use loco_rs::task::Vars;
 use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait};
 use yorishiro::App;
 use yorishiro::models::tenant_tenants::retirement;
-use yorishiro::models::{api_keys, user_users};
+use yorishiro::models::{access_keys, user_users};
 
 use crate::requests::boot_request;
 use crate::requests::fixtures::{TenantArgs, TestTenant};
@@ -79,11 +79,11 @@ async fn operator_user_deletion_requires_confirmation_and_schedules_root_tenants
             user_users::create_user(&ctx.db, "detached@example.com", "long-test-password", None)
                 .await
                 .unwrap();
-        let key = api_keys::Entity::create_api_key(&ctx.db, tenant.workspace_id, None, false)
+        let key = crate::requests::fixtures::create_key(&ctx.db, tenant.workspace_id, None)
             .await
             .unwrap();
         // Simulate retained attributed credentials after out-of-band membership cleanup.
-        let mut attributed: api_keys::ActiveModel = api_keys::Entity::find_by_id(key.id)
+        let mut attributed: access_keys::ActiveModel = access_keys::Entity::find_by_id(key.id)
             .one(&ctx.db)
             .await
             .unwrap()
@@ -100,7 +100,7 @@ async fn operator_user_deletion_requires_confirmation_and_schedules_root_tenants
                 .unwrap()
                 .is_none()
         );
-        let stored = api_keys::Entity::find_by_id(key.id)
+        let stored = access_keys::Entity::find_by_id(key.id)
             .one(&ctx.db)
             .await
             .unwrap()
@@ -123,7 +123,7 @@ async fn deleting_the_root_reaps_the_tenant_once_the_deadline_passes() {
             crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id)
                 .await;
         let created = request
-            .post("/api/members/users")
+            .post("/api/users")
             .add_header("Authorization", format!("Bearer {tenant_key}"))
             .json(&serde_json::json!({
                 "user_name": "reap-delegate",

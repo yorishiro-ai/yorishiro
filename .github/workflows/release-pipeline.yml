@@ -1,0 +1,267 @@
+name: Release pipeline
+
+on:
+  workflow_call:
+    inputs:
+      dry_run:
+        type: boolean
+        required: true
+      prerelease:
+        type: boolean
+        required: true
+      version:
+        type: string
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+  IMAGE_NAME: ghcr.io/yorishiro-ai/yorishiro
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-26.04
+    outputs:
+      image: ${{ steps.plan.outputs.image }}
+      tag: ${{ steps.plan.outputs.tag }}
+      ref: ${{ steps.plan.outputs.ref }}
+      commit: ${{ steps.snapshot.outputs.commit || github.sha }}
+      package-version: ${{ steps.plan.outputs.package-version }}
+      file-version: ${{ steps.plan.outputs.file-version }}
+
+    steps:
+      - name: Check the dispatch ref
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" != "true" ] && [ "$GITHUB_REF" != "refs/heads/develop" ]; then
+            echo "A real release must be dispatched from develop (got $GITHUB_REF)." >&2
+            echo "Dispatch with dry_run=true to check the workflow from another branch." >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: ./.github/actions/prepare-stable-source
+        if: ${{ !inputs.prerelease }}
+        id: snapshot
+        with:
+          version: ${{ inputs.version }}
+
+      - name: Plan the release
+        id: plan
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          if [ "$PRERELEASE" = "true" ]; then
+            DATE="$(date -u +%Y%m%d)"
+            # Old tags still reserve their package version numbers.
+            tags=$(git ls-remote --refs --tags origin "refs/tags/pre-${DATE}-*" "refs/tags/${DATE}-*")
+            existing=$(sed -nE "s|^[^[:space:]]+[[:space:]]+refs/tags/(pre-)?${DATE}-([1-9][0-9]*)$|\2|p" <<< "$tags" | sort -n | tail -1)
+            TAG="pre-${DATE}-$(( ${existing:-0} + 1 ))"
+            package_version=$(python3 scripts/release_version.py "$TAG")
+            file_version=$TAG
+          else
+            TAG="v${VERSION}"
+            if [ "$DRY_RUN" != "true" ]; then
+              existing=$(git ls-remote --refs origin "refs/tags/${TAG}")
+              if [ -n "$existing" ]; then
+                echo "Tag ${TAG} already exists on remote." >&2
+                exit 1
+              fi
+            fi
+            package_version=$VERSION
+            file_version=$VERSION
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "image=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "package-version=$package_version" >> "$GITHUB_OUTPUT"
+          echo "file-version=$file_version" >> "$GITHUB_OUTPUT"
+          echo "ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+  binary:
+    needs: prepare
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-26.04
+            arch: amd64
+            target: x86_64-unknown-linux-gnu
+            edition: ce
+          - os: ubuntu-26.04-arm
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            edition: ce
+          - os: ubuntu-26.04
+            arch: amd64
+            target: x86_64-unknown-linux-gnu
+            edition: ee
+          - os: ubuntu-26.04-arm
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            edition: ee
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/prepare-stable-source
+        if: ${{ !inputs.prerelease }}
+        with:
+          version: ${{ inputs.version }}
+
+      - uses: ./.github/actions/build-and-package
+        with:
+          edition: ${{ matrix.edition }}
+          target: ${{ matrix.target }}
+          arch: ${{ matrix.arch }}
+          version: ${{ needs.prepare.outputs.package-version }}
+          file-version: ${{ needs.prepare.outputs.file-version }}
+          build-tag: ${{ needs.prepare.outputs.tag }}
+
+  package-tests:
+    needs: [binary, prepare]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/prepare-stable-source
+        if: ${{ !inputs.prerelease }}
+        with:
+          version: ${{ inputs.version }}
+
+      - uses: ./.github/actions/package-tests
+        with:
+          version: ${{ needs.prepare.outputs.package-version }}
+          file-version: ${{ needs.prepare.outputs.file-version }}
+
+  # Only dry runs can build images before package validation because they do not push.
+  docker-dry-run:
+    needs: prepare
+    if: inputs.dry_run
+    uses: ./.github/workflows/release-docker.yml
+    permissions:
+      contents: read
+    with:
+      image: ${{ needs.prepare.outputs.image }}
+      ref: ${{ needs.prepare.outputs.ref }}
+      tag: ${{ needs.prepare.outputs.tag }}
+      source: ${{ needs.prepare.outputs.commit }}
+      version: ${{ inputs.version }}
+      push: false
+
+  docker:
+    needs: [prepare, package-tests]
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/release-docker.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      image: ${{ needs.prepare.outputs.image }}
+      ref: ${{ needs.prepare.outputs.ref }}
+      tag: ${{ needs.prepare.outputs.tag }}
+      source: ${{ needs.prepare.outputs.commit }}
+      version: ${{ inputs.version }}
+      push: true
+
+  docker-manifest:
+    needs: [docker, prepare]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-26.04
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        edition: [ce, ee]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/docker-manifest
+        with:
+          image: ${{ env.IMAGE_NAME }}
+          source: ${{ needs.prepare.outputs.commit }}
+          edition: ${{ matrix.edition }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  smoke:
+    needs: [docker-manifest, prepare]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-26.04
+    permissions:
+      packages: read
+    strategy:
+      matrix:
+        edition: [ce, ee]
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: yorishiro
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: yorishiro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U yorishiro"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/smoke
+        with:
+          image: ${{ env.IMAGE_NAME }}
+          source: ${{ needs.prepare.outputs.commit }}
+          edition: ${{ matrix.edition }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  github-release:
+    needs: [binary, smoke, prepare]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      packages: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/publish-release
+        with:
+          base: ${{ needs.prepare.outputs.ref }}
+          commit: ${{ needs.prepare.outputs.commit }}
+          tag: ${{ needs.prepare.outputs.tag }}
+          stable-version: ${{ inputs.version }}
+          prerelease: ${{ inputs.prerelease }}
+          image: ${{ env.IMAGE_NAME }}
+          token: ${{ github.token }}

@@ -13,9 +13,9 @@ use crate::error::YorishiroError;
 #[tool_router(vis = "pub(crate)", router = tool_router_llm)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Read the selected workspace's inference LLM endpoint and model without its API key (requires llm_provider_get IAM permission); returns not found when unconfigured"
+        description = "Read the workspace's inference endpoint and model without its secret. Returns not found when no provider is configured."
     )]
-    pub(crate) async fn get_llm_provider(
+    pub(crate) async fn get_workspace_llm_provider(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -30,9 +30,9 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Configure the selected workspace's inference LLM endpoint, model and API key (requires llm_provider_update IAM permission); stores the secret without returning it or invoking inference"
+        description = "Set the workspace's inference endpoint, model and secret after checking them with a sample chat completion. The response omits the secret."
     )]
-    pub(crate) async fn set_llm_provider(
+    pub(crate) async fn update_workspace_llm_provider(
         &self,
         Parameters(input): Parameters<SetLlmKeyRequest>,
         Extension(parts): Extension<Parts>,
@@ -53,9 +53,9 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Remove the selected workspace's inference LLM credentials (requires llm_provider_delete IAM permission); future inference requires configuration again, and already-started external calls are not cancelled"
+        description = "Remove the workspace's inference provider settings. Calls already in progress continue."
     )]
-    pub(crate) async fn reset_llm_provider(
+    pub(crate) async fn delete_workspace_llm_provider(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {

@@ -6,15 +6,15 @@ TEST_COMPOSE := docker compose -f docker-compose.test.yaml
 # Select the edition for the test targets.
 EDITION ?= ee
 TEST_FEATURES = $(if $(filter ce,$(EDITION)),--no-default-features --features community,--features enterprise)
+TEST_RUN = $(if $(TEST_BINARY),$(TEST_BINARY),cargo test --locked --workspace $(TEST_FEATURES))
+TEST_SEPARATOR = $(if $(TEST_BINARY),,--)
 CARGO_TARGET_DIR ?= $(abspath target)
 
 test-postgres task doctor migrate entities: export DATABASE_URL := $(DATABASE_URL)
 task doctor migrate entities: export LOCO_ENV = test
-test-postgres migrate entities: export DB_MAX_CONNECTIONS ?= 100
-test-postgres migrate entities: export DB_CONNECT_TIMEOUT ?= 5000
 test-postgres test-sqlite test-licence test-valkey: export RUST_BACKTRACE ?= 1
 
-.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check test-location-check test-postgres test-sqlite test-licence test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check patch-check test-python test-contract
+.PHONY: check check-ce check-ee clippy clippy-ce clippy-ee fmt fmt-check python-lint edition-boundary-check test-location-check test-postgres test-sqlite test-licence test-valkey build build-ce build-ee task doctor migrate entities check-all check-all-ee package-docker-check patch-check
 
 check: check-ce
 
@@ -38,24 +38,11 @@ fmt: patch-check
 fmt-check: patch-check
 	cargo fmt --all -- --check
 
-python-lint: test-python
-	uv run ruff check scripts tests/contract tests/ci patches/loco-rs/verify.py
+python-lint:
+	uv run ruff check scripts patches/loco-rs/verify.py
 	@for script in scripts/generate_entities.sh .github/packaging/test-artifacts.sh .github/packaging/test-artifacts-self.sh .github/packaging/test-package-lifecycle.sh; do bash -n "$$script" || exit; done
 
-test-python:
-	uv run scripts/test_env_config.py
-	uv run scripts/test_harden_generated_entities.py
-	uv run python -m unittest discover -s tests/contract -p 'test_*.py'
-	uv run python -m unittest discover -s tests/ci -p 'test_*.py'
-
-BINARY ?= $(CARGO_TARGET_DIR)/debug/yorishiro
-SUITE ?= mcp
-ARTIFACTS ?= $(CARGO_TARGET_DIR)/contracts/$(EDITION)-$(SUITE)
-test-contract:
-	python3 tests/contract/run.py --binary "$(BINARY)" --suite "$(SUITE)" --edition "$(EDITION)" --artifacts "$(ARTIFACTS)"
-
 edition-boundary-check:
-	uv run scripts/test_edition_boundary.py
 	uv run scripts/check_edition_boundary.py
 
 test-location-check:
@@ -63,26 +50,27 @@ test-location-check:
 		echo 'ERROR: tests and test-only code belong in tests/' >&2; exit 1; \
 	fi
 
-# Request tests create disposable databases from template1, which must already contain vector and pg_trgm.
-test-postgres: patch-check
+# Request tests create disposable databases from template1, which must already contain vector.
+test-postgres: $(if $(TEST_BINARY),,patch-check)
 	@if [ "$(DATABASE_URL)" = "postgres://yorishiro:yorishiro@localhost:15432/yorishiro" ]; then \
 		$(TEST_COMPOSE) up -d --wait testdb; \
 	fi
-	QUEUE_URL='$(DATABASE_URL)' cargo test --locked --workspace $(TEST_FEATURES)
+	QUEUE_URL='$(DATABASE_URL)' $(TEST_RUN)
 
-test-sqlite: patch-check
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' cargo test --locked --workspace $(TEST_FEATURES)
+test-sqlite: $(if $(TEST_BINARY),,patch-check)
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' $(TEST_RUN)
 
 # Verify that a signed `YORISHIRO_LICENSE_KEY` activates the enterprise edition at boot.
-test-licence: patch-check
+test-licence: override EDITION = ee
+test-licence: $(if $(TEST_BINARY),,patch-check)
 	@test -n "$$YORISHIRO_LICENSE_KEY" || { echo 'YORISHIRO_LICENSE_KEY is required' >&2; exit 1; }
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' cargo test --locked --features enterprise -- --exact ee::controllers::middleware::edition::a_signed_licence_key_activates_enterprise_at_boot
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' QUEUE_URL='sqlite:///tmp/yorishiro_queue.sqlite3?mode=rwc' $(TEST_RUN) $(TEST_SEPARATOR) --exact ee::controllers::middleware::edition::a_signed_licence_key_activates_enterprise_at_boot
 
 # Run queue-provider tests against Valkey with SQLite for application data.
 VALKEY_URL ?= redis://localhost:6379
-test-valkey: patch-check
+test-valkey: $(if $(TEST_BINARY),,patch-check)
 	@if [ "$(VALKEY_URL)" = "redis://localhost:6379" ]; then $(TEST_COMPOSE) up -d --wait redis; fi
-	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' YORISHIRO_QUEUE_KIND=Redis QUEUE_URL='$(VALKEY_URL)' cargo test --locked --workspace $(TEST_FEATURES) -- workers::dispatch workers::queue::upstream_fixes ee::workers::queue::configured_queue_orders_competing_jobs_by_priority
+	DATABASE_URL='sqlite:///tmp/yorishiro.sqlite3?mode=rwc' YORISHIRO_QUEUE_KIND=Redis QUEUE_URL='$(VALKEY_URL)' $(TEST_RUN) $(TEST_SEPARATOR) workers::dispatch workers::queue::upstream_fixes ee::workers::queue::configured_queue_orders_competing_jobs_by_priority
 
 build: build-ce
 

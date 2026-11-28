@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::edition::ee::models::inference_jobs::InferenceJobStatus;
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct InferFillResponse {
-    pub(crate) job_id: String,
+    pub(crate) inference_job_id: String,
     pub(crate) status: InferFillStatus,
 }
 
@@ -16,7 +17,7 @@ pub(crate) enum InferFillStatus {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(crate) struct InferJobStatusResponse {
-    pub(crate) job_id: String,
+    pub(crate) inference_job_id: String,
     pub(crate) status: InferenceJobStatus,
     pub(crate) applied: Option<i64>,
     pub(crate) proposed: Option<i64>,
@@ -28,8 +29,21 @@ pub(crate) struct InferJobStatusResponse {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "LlmKeyRequest")]
 pub(crate) struct SetLlmKeyRequest {
+    /// The server checks this endpoint with a sample completion before saving.
     pub(crate) base_url: String,
     pub(crate) model: String,
     /// Stored as given and never returned.
     pub(crate) api_key: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(crate) struct ConfirmationJobAccepted {
+    pub(crate) confirmation_job_id: Uuid,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(crate) struct ConfirmationJobStatus {
+    pub(crate) confirmation_job_id: Uuid,
+    #[serde(flatten)]
+    pub(crate) status: crate::models::queue_job_lifecycles::BulkJobStatus,
 }

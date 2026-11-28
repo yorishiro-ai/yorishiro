@@ -27,9 +27,9 @@ pub(crate) struct RecallContextArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_recall)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Fetch an entity's full body together with its relations and connected neighbors, up to `depth` hops away, in one call (requires recall IAM permission)"
+        description = "Fetch an entity with its relations and connected neighbors up to `depth` hops away."
     )]
-    pub async fn recall_context(
+    pub async fn recall_entity_context(
         &self,
         Parameters(args): Parameters<RecallContextArgs>,
         Extension(parts): Extension<Parts>,

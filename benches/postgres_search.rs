@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
         let started = Instant::now();
-        let hits = search_by_vector(&txn, workspace, vector.clone(), "", query).await?;
+        let hits = search_by_vector(&txn, workspace, vector.clone(), query).await?;
         let elapsed = started.elapsed().as_secs_f64() * 1000.0;
         if hits.is_empty() {
             return Err(

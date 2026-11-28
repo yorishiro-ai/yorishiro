@@ -17,13 +17,13 @@ use uuid::Uuid;
 
 pub(crate) async fn for_job_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     job_id: Uuid,
 ) -> Result<Vec<ProposalRecord>, YorishiroError> {
     let txn = super::iam::access::workspace_transaction(
         db,
         actor,
-        crate::models::iam::policy::Action::InferenceProposalList,
+        crate::models::iam::policy::Action::ListInferenceProposals,
     )
     .await?;
     let workspace_id = actor.require_workspace()?;
@@ -31,33 +31,15 @@ pub(crate) async fn for_job_as(
     for_job(&txn, workspace_id, job_id).await
 }
 
-pub(crate) async fn reject_as(
-    db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
-    job_id: Uuid,
-) -> Result<ProposalActionReport, YorishiroError> {
-    let txn = super::iam::access::workspace_transaction(
-        db,
-        actor,
-        crate::models::iam::policy::Action::InferenceReject,
-    )
-    .await?;
-    let workspace_id = actor.require_workspace()?;
-    super::inference_jobs::workspace_job(&txn, workspace_id, job_id).await?;
-    let report = reject(&txn, workspace_id, job_id).await?;
-    txn.commit().await.internal()?;
-    Ok(report)
-}
-
 pub(crate) async fn discard_as(
     db: &sea_orm::DatabaseConnection,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     job_id: Uuid,
 ) -> Result<ProposalActionReport, YorishiroError> {
     let txn = super::iam::access::workspace_transaction(
         db,
         actor,
-        crate::models::iam::policy::Action::InferenceDiscard,
+        crate::models::iam::policy::Action::DiscardInferenceProposals,
     )
     .await?;
     let workspace_id = actor.require_workspace()?;
@@ -72,7 +54,6 @@ crate::models::db_enum::db_enum! {
     pub enum ProposalStatus {
         Pending = "pending",
         Confirmed = "confirmed",
-        Rejected = "rejected",
         Discarded = "discarded",
         Stale = "stale",
         Invalid = "invalid",
@@ -82,7 +63,9 @@ crate::models::db_enum::db_enum! {
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 #[schemars(rename = "InferenceProposalResponse")]
 pub struct ProposalRecord {
+    #[serde(rename = "proposal_id")]
     pub id: Uuid,
+    #[serde(rename = "inference_job_id")]
     pub job_id: Uuid,
     pub workspace_id: Uuid,
     pub entity_id: Uuid,
@@ -126,6 +109,7 @@ pub struct ConfirmReport {
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 #[schemars(rename = "ProposalActionResponse")]
 pub struct ProposalActionReport {
+    #[serde(rename = "inference_job_id")]
     pub job_id: Uuid,
     pub changed: i64,
 }
@@ -168,7 +152,6 @@ pub async fn record_batch_attempt(
     let mut inserted = 0;
     for (entity_id, source_field, proposed) in fields {
         let result = ActiveModel {
-            id: Set(Uuid::now_v7()),
             job_id: Set(job_id),
             workspace_id: Set(workspace_id),
             entity_id: Set(entity_id),
@@ -190,6 +173,7 @@ pub async fn record_batch_attempt(
     Ok(inserted)
 }
 
+/// Lists a job's proposals ordered by entity and field.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -261,22 +245,7 @@ async fn transition_pending(
     i64::try_from(result.rows_affected).internal()
 }
 
-///
-/// # Errors
-/// Returns an error if the operation cannot be completed.
-pub async fn reject(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    job_id: Uuid,
-) -> Result<ProposalActionReport, YorishiroError> {
-    lock_job_for_action(conn, job_id).await?;
-    require_completed_job(conn, workspace_id, job_id).await?;
-    Ok(ProposalActionReport {
-        job_id,
-        changed: transition_pending(conn, workspace_id, job_id, ProposalStatus::Rejected).await?,
-    })
-}
-
+/// Discards every pending proposal of a completed job.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -293,6 +262,7 @@ pub async fn discard(
     })
 }
 
+/// Applies a completed job's pending proposals to their entities, marking each entity's proposals confirmed, stale or invalid.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

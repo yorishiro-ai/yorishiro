@@ -44,7 +44,16 @@ impl fmt::Debug for Model {
 }
 
 #[loco_rs::prelude::async_trait]
-impl ActiveModelBehavior for outbox::ActiveModel {}
+impl ActiveModelBehavior for outbox::ActiveModel {
+    async fn before_save<C>(self, _db: &C, _insert: bool) -> Result<Self, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        let mut this = self;
+        this.id = crate::db::generated_id(this.id);
+        Ok(this)
+    }
+}
 
 #[derive(Clone)]
 pub struct PendingDispatch {
@@ -207,6 +216,10 @@ pub async fn record_lifecycle_payload(
             Expr::value(LifecycleStatus::Queued.as_db_str()),
         )
         .col_expr(lifecycle::Column::Attempt, Expr::value(0))
+        .col_expr(
+            lifecycle::Column::UpdatedAt,
+            Expr::value(crate::data::time::now()),
+        )
         .filter(lifecycle::Column::Id.eq(lifecycle_id))
         .filter(lifecycle::Column::Status.is_in([
             LifecycleStatus::Retrying.as_db_str(),
@@ -316,7 +329,7 @@ pub async fn due(db: &impl ConnectionTrait) -> Result<Vec<PendingDispatch>, Yori
                         .add(outbox::Column::WorkerName.eq("QueryEmbeddingWorker"))
                         .add(
                             Expr::col((outbox::Entity, outbox::Column::DeadlineAt))
-                                .gt(Expr::current_timestamp()),
+                                .gt(Expr::val(crate::data::time::now())),
                         ),
                 ),
         )
@@ -346,7 +359,10 @@ pub async fn claim_dispatch(
 ) -> Result<bool, DbErr> {
     let lease_until = crate::data::time::now() + chrono::Duration::seconds(lease_seconds);
     let result = outbox::Entity::update_many()
-        .col_expr(outbox::Column::LastAttemptAt, Expr::current_timestamp())
+        .col_expr(
+            outbox::Column::LastAttemptAt,
+            Expr::val(crate::data::time::now()),
+        )
         .col_expr(
             outbox::Column::ClaimToken,
             Expr::val(claim_token.to_string()),
@@ -357,7 +373,7 @@ pub async fn claim_dispatch(
         .filter(
             outbox::Column::ClaimUntil
                 .is_null()
-                .or(Expr::col(outbox::Column::ClaimUntil).lte(Expr::current_timestamp())),
+                .or(Expr::col(outbox::Column::ClaimUntil).lte(Expr::val(crate::data::time::now()))),
         )
         .exec(db)
         .await?;
@@ -379,7 +395,7 @@ pub async fn acknowledge_dispatch(
         .one(&txn)
         .await?
         .and_then(|row| row.lifecycle_id);
-    // Retry writers lock lifecycle before outbox; acknowledgement must use the same order.
+    // Retry writers lock the lifecycle before the outbox row, so acknowledgement does too.
     let lifecycle = if let Some(lifecycle_id) = lifecycle_id {
         lifecycle::Entity::find_by_id(lifecycle_id)
             .lock_exclusive()
@@ -389,7 +405,10 @@ pub async fn acknowledge_dispatch(
         None
     };
     let result = outbox::Entity::update_many()
-        .col_expr(outbox::Column::PublishedAt, Expr::current_timestamp())
+        .col_expr(
+            outbox::Column::PublishedAt,
+            Expr::val(crate::data::time::now()),
+        )
         .col_expr(outbox::Column::ClaimToken, Expr::val(None::<String>))
         .col_expr(
             outbox::Column::ClaimUntil,
@@ -397,7 +416,7 @@ pub async fn acknowledge_dispatch(
         )
         .filter(outbox::Column::Id.eq(id))
         .filter(outbox::Column::ClaimToken.eq(claim_token.to_string()))
-        .filter(Expr::col(outbox::Column::ClaimUntil).gt(Expr::current_timestamp()))
+        .filter(Expr::col(outbox::Column::ClaimUntil).gt(Expr::val(crate::data::time::now())))
         .filter(outbox::Column::PublishedAt.is_null())
         .exec(&txn)
         .await?;

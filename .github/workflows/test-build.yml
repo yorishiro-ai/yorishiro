@@ -1,4 +1,4 @@
-name: Build the binary
+name: Build test executables
 
 on:
   workflow_call:
@@ -12,26 +12,39 @@ permissions:
 
 jobs:
   build:
-    name: Build binary (${{ inputs.edition }})
+    name: Build tests (${{ inputs.edition }})
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
       EDITION: ${{ inputs.edition }}
-      CARGO_PROFILE_DEV_STRIP: debuginfo
+      CARGO_TARGET_DIR: target/ci-tests
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/rust-setup
         with:
-          cache-key: binary-${{ inputs.edition }}-debug
-      - name: Build the binary
+          cache-key: test-build-${{ inputs.edition }}
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2
+        with:
+          tool: cargo-llvm-cov@0.9.2
+      - name: Build and archive the native test harness and CLI
         run: |
           case "$EDITION" in ce) features=community ;; ee) features=enterprise ;; *) exit 1 ;; esac
-          cargo build --locked --no-default-features --features "$features" --bin yorishiro
-          tar -C target/debug -czf "$RUNNER_TEMP/public-contract-$EDITION.tar.gz" yorishiro
-      - uses: actions/upload-artifact@v7
+          coverage_env=$(cargo llvm-cov show-env --sh --no-cfg-coverage)
+          eval "$coverage_env"
+          cargo test --locked --no-default-features --features "$features" --test mod \
+            --no-run --message-format=json-render-diagnostics > "$RUNNER_TEMP/test-build.json"
+          executable=$(jq -er 'select(.reason == "compiler-artifact" and .target.kind == ["test"] and .target.name == "mod") | .executable' "$RUNNER_TEMP/test-build.json")
+          test -x "$executable"
+          executable="${executable#"$PWD"/}"
+          printf './%s\n' "$executable" > "$CARGO_TARGET_DIR/test-executable"
+          tar -cf "$RUNNER_TEMP/tests-$EDITION.tar" "$CARGO_TARGET_DIR/test-executable" \
+            "$executable" "$CARGO_TARGET_DIR/debug/yorishiro"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: public-contract-binary-${{ inputs.edition }}
-          path: ${{ runner.temp }}/public-contract-${{ inputs.edition }}.tar.gz
+          name: tests-${{ inputs.edition }}
+          path: ${{ runner.temp }}/tests-${{ inputs.edition }}.tar
           if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+          compression-level: 1
+          retention-days: 7

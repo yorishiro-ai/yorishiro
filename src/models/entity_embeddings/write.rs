@@ -1,6 +1,6 @@
 //! Builds the text to embed from an entity and syncs its vector, checking the workspace's provider assignment and concurrency token.
 
-use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -152,15 +152,13 @@ pub async fn sync_embedding_for_record(
     record: &EntityRecord,
     provider: &dyn EmbeddingProvider,
 ) -> Result<(), YorishiroError> {
-    // Re-read the full snapshot with the current token: the caller has an EntityRecord
-    // without token info, so we need the latest token from the DB to guard embed_and_write.
     let snapshot = entity_entities::get_with_token(conn, workspace_id, record.id)
         .await
-        .map_err(|error| match error {
-            DbErr::RecordNotFound(_) => {
-                YorishiroError::not_found(format!("entity '{}' was not found", record.id))
-            }
-            other => YorishiroError::Internal(other.into()),
+        .map_err(|error| {
+            YorishiroError::not_found_on_missing(
+                error,
+                format!("entity '{}' was not found", record.id),
+            )
         })?;
 
     sync_embedding_for_snapshot(conn, workspace_id, &snapshot, provider)
@@ -170,9 +168,8 @@ pub async fn sync_embedding_for_record(
 
 /// Resolves the schema definition for an entity snapshot and synchronizes its embedding.
 ///
-/// This is the private entry point used by the embedding sync worker and `resync_embeddings`
-/// task after their own atomic snapshot read (which already includes the concurrency token).
-/// The public `sync_embedding_for_record` wraps this after re-reading the snapshot.
+/// The embedding sync worker and the `resync_embeddings` task call this after their own snapshot read, which already carries the concurrency token.
+/// `sync_embedding_for_record` wraps it after re-reading the snapshot.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.

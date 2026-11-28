@@ -1,4 +1,3 @@
-mod dashboard;
 mod embedding;
 mod entity_columns;
 pub(crate) mod inference;

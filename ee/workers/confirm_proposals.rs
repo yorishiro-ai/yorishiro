@@ -1,13 +1,14 @@
 //! Proposal confirmation runs on the configured Loco provider.
 
+use crate::error::OptionExt;
 use loco_rs::{app::AppContext, bgworker::BackgroundWorker, prelude::async_trait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::{
-    api_key_audit_log::{self, AuditAction, AuditActor},
-    api_keys::AuthContext,
+    access_keys::AuthContext,
+    job_results::{self, JobActor, JobKind},
 };
 use crate::workers::{
     dispatch::{JobSpec, dispatch_job},
@@ -19,7 +20,7 @@ pub(crate) struct ConfirmProposalsArgs {
     lifecycle_id: Option<Uuid>,
     tenant_id: Uuid,
     workspace_id: Uuid,
-    api_key_id: Uuid,
+    access_key_id: Uuid,
     user_id: Option<Uuid>,
     inference_job_id: Uuid,
     worker_class: WorkerClass,
@@ -52,31 +53,26 @@ impl ConfirmProposalsWorker {
     async fn confirm(&self, args: &ConfirmProposalsArgs) -> Result<(), YorishiroError> {
         let id = args
             .lifecycle_id
-            .ok_or_else(|| YorishiroError::Internal("confirmation lifecycle missing".into()))?;
+            .or_internal("confirmation lifecycle missing")?;
         let txn =
             crate::db::begin_workspace_write(&self.ctx, args.tenant_id, args.workspace_id).await?;
         crate::db::lock_for_update(&txn, &format!("confirm-proposals:{id}"))
             .await
             .internal()?;
         let mut authorization = None;
-        if !api_key_audit_log::job_completed(
-            &txn,
-            args.workspace_id,
-            id,
-            AuditAction::BackgroundJobCompleted,
-        )
-        .await?
+        if !job_results::job_completed(&txn, args.workspace_id, id, JobKind::BackgroundJobCompleted)
+            .await?
         {
             authorization = crate::ee::models::iam::access::authorize_job_actor(
                 &txn,
                 &self.ctx.db,
-                &AuditActor {
+                &JobActor {
                     tenant_id: args.tenant_id,
                     workspace_id: args.workspace_id,
-                    api_key_id: args.api_key_id,
+                    access_key_id: args.access_key_id,
                     user_id: args.user_id,
                 },
-                crate::models::iam::policy::Action::InferenceConfirm,
+                crate::models::iam::policy::Action::ConfirmInferenceProposals,
             )
             .await?;
             let report = crate::edition::ee::models::inference_proposals::confirm(
@@ -86,10 +82,10 @@ impl ConfirmProposalsWorker {
                 args.user_id,
             )
             .await?;
-            api_key_audit_log::record(&txn, AuditActor {
+            job_results::record(&txn, JobActor {
                 tenant_id: args.tenant_id, workspace_id: args.workspace_id,
-                api_key_id: args.api_key_id, user_id: args.user_id,
-            }, AuditAction::BackgroundJobCompleted, serde_json::json!({"job_id": id, "inference_job_id": args.inference_job_id, "confirmed": report.confirmed, "stale": report.stale, "invalid": report.invalid})).await?;
+                access_key_id: args.access_key_id, user_id: args.user_id,
+            }, JobKind::BackgroundJobCompleted, serde_json::json!({"job_id": id, "inference_job_id": args.inference_job_id, "confirmed": report.confirmed, "stale": report.stale, "invalid": report.invalid})).await?;
         }
         txn.commit().await.internal()?;
         if let Some(authorization) = authorization {
@@ -109,13 +105,13 @@ pub(crate) async fn enqueue(
     let authorization = crate::ee::models::iam::access::authorize_job_actor(
         &txn,
         &ctx.db,
-        &AuditActor {
+        &JobActor {
             tenant_id: auth.tenant_id,
             workspace_id: auth.require_workspace()?,
-            api_key_id: auth.api_key_id,
+            access_key_id: auth.access_key_id,
             user_id: auth.user_id,
         },
-        crate::models::iam::policy::Action::InferenceConfirm,
+        crate::models::iam::policy::Action::ConfirmInferenceProposals,
     )
     .await?;
     crate::edition::ee::models::inference_jobs::workspace_job(
@@ -136,7 +132,7 @@ pub(crate) async fn enqueue(
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
         workspace_id: auth.require_workspace()?,
-        api_key_id: auth.api_key_id,
+        access_key_id: auth.access_key_id,
         user_id: auth.user_id,
         inference_job_id,
         worker_class,

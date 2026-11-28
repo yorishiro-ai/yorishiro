@@ -4,16 +4,20 @@ set -euo pipefail
 
 DIST="${1:?usage: test-artifacts.sh <distribution directory> <version>}"
 VERSION="${2:?usage: test-artifacts.sh <distribution directory> <version>}"
+FILE_VERSION="${3:-$VERSION}"
 
 for edition in ce ee; do
   for arch in amd64 arm64; do
     case "$arch" in amd64) deb_arch=amd64; rpm_arch=x86_64 ;; arm64) deb_arch=arm64; rpm_arch=aarch64 ;; esac
     package="yorishiro-${edition}"
-    deb="$DIST/${package}-${VERSION}-${arch}.deb"
-    rpm="$DIST/${package}-${VERSION}-${arch}.rpm"
-    for ext in deb rpm; do
-      test -f "$DIST/${package}-${VERSION}-${arch}.${ext}"
-    done
+    stem="$DIST/${package}-${FILE_VERSION}-${arch}"
+    deb="$stem.deb"
+    rpm="$stem.rpm"
+    members=$'yorishiro\nLICENSE'
+    if [ "$edition" = ee ]; then
+      members+=$'\nee/LICENSE'
+    fi
+    test "$(tar -tzf "$stem.tar.gz")" = "$members"
     test "$(dpkg-deb -f "$deb" Package)" = "$package"
     test "$(dpkg-deb -f "$deb" Version)" = "$VERSION"
     test "$(dpkg-deb -f "$deb" Architecture)" = "$deb_arch"
@@ -23,7 +27,7 @@ for edition in ce ee; do
     test "$(rpm -qp --qf '%{ARCH}' "$rpm")" = "$rpm_arch"
   done
 done
-test "$(find "$DIST" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l)" -eq 8
+test "$(find "$DIST" -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' \) | wc -l)" -eq 12
 for f in "$DIST"/*.deb; do
   case "$(dpkg-deb -f "$f" Package)" in
     yorishiro-ce) peer=yorishiro-ee ;;

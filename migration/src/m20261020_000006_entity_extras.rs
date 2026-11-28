@@ -1,6 +1,5 @@
 use super::helpers;
 use sea_orm_migration::prelude::*;
-use sea_orm_migration::sea_orm::DbBackend;
 
 #[derive(DeriveMigrationName)]
 pub(crate) struct Migration;
@@ -33,7 +32,6 @@ impl MigrationTrait for Migration {
 async fn up_entity_relations(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let table = Table::create()
         .table(Alias::new("entity_relations"))
-        .if_not_exists()
         .col(helpers::uuidv7_pk(manager))
         .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
         .col(helpers::uuid_col(manager, Alias::new("source_id")).not_null())
@@ -158,7 +156,6 @@ async fn up_entity_snapshots(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         .create_table(
             Table::create()
                 .table(Alias::new("entity_snapshots"))
-                .if_not_exists()
                 .col(helpers::uuidv7_pk(manager))
                 .col(helpers::uuid_col(manager, Alias::new("job_id")).not_null())
                 .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
@@ -239,20 +236,18 @@ async fn down_entity_snapshots(manager: &SchemaManager<'_>) -> Result<(), DbErr>
 
 async fn up_entity_column_preferences(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let [created_at, updated_at] = helpers::timestamps(manager);
-    let sqlite = manager.get_database_backend() == DbBackend::Sqlite;
 
     let columns_col = helpers::json_col(manager, Alias::new("columns"))
         .not_null()
-        .default(if sqlite {
-            Expr::cust("'[]'")
-        } else {
-            Expr::cust("'[]'::jsonb")
-        })
+        .default(Expr::cust(helpers::by_backend(
+            manager,
+            "'[]'::jsonb",
+            "'[]'",
+        )))
         .to_owned();
 
     let table = Table::create()
         .table(Alias::new("entity_column_preferences"))
-        .if_not_exists()
         .col(helpers::uuidv7_pk(manager))
         .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
         .col(ColumnDef::new(Alias::new("entity_type")).text().not_null())
@@ -284,11 +279,11 @@ async fn up_entity_column_preferences(manager: &SchemaManager<'_>) -> Result<(),
         table,
         &[(
             "entity_column_preferences_columns_is_array",
-            if sqlite {
-                "json_type(columns) = 'array'"
-            } else {
-                "jsonb_typeof(columns) = 'array'"
-            },
+            helpers::by_backend(
+                manager,
+                "jsonb_typeof(columns) = 'array'",
+                "json_type(columns) = 'array'",
+            ),
         )],
     )
     .await?;

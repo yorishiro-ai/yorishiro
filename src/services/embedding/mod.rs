@@ -183,10 +183,10 @@ impl EmbeddingProvider for UnconfiguredEmbeddingProvider {
 ///
 /// Priority order:
 ///
-/// 1. `YORISHIRO_EMBEDDING_BASE_URL` + `YORISHIRO_EMBEDDING_MODEL` both set — the OpenAI-compatible provider.
+/// 1. `YORISHIRO_EMBEDDING_BASE_URL` + `YORISHIRO_EMBEDDING_MODEL` both set: the OpenAI-compatible provider.
 ///    This is the documented shape for an external embedding backend (LM Studio, Ollama, vLLM, or real `OpenAI`).
-/// 2. `YORISHIRO_EMBEDDING_PROVIDER=none` — explicitly disabled, returns [`UnconfiguredEmbeddingProvider`].
-/// 3. `YORISHIRO_EMBEDDING_PROVIDER=local` — the local in-process provider (candle-based safetensors).
+/// 2. `YORISHIRO_EMBEDDING_PROVIDER=none`: explicitly disabled, returns [`UnconfiguredEmbeddingProvider`].
+/// 3. `YORISHIRO_EMBEDDING_PROVIDER=local`: the local in-process provider (candle-based safetensors).
 ///
 /// The configured default is the local provider; an explicit `OpenAI` provider requires both URL and model.
 ///

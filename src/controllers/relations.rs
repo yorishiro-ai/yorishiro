@@ -9,9 +9,8 @@ use uuid::Uuid;
 use crate::controllers::ApiError;
 use crate::controllers::extractors::{AuthContext, Verified};
 use crate::controllers::openapi::Routes;
-use crate::dtos::relations::{
-    CreateRelationRequest, ListRelationsParams, SetRelationStatusRequest,
-};
+use crate::dtos::common::RelationIdPath;
+use crate::dtos::relations::{CreateRelationRequest, ListRelationsParams, UpdateRelationRequest};
 use crate::models::entity_relations::{self, RelationRecord};
 
 pub(crate) async fn create_relation(
@@ -27,19 +26,19 @@ pub(crate) async fn create_relation(
 pub(crate) async fn get_relation(
     State(ctx): State<AppContext>,
     verified: Verified,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(RelationIdPath { relation_id }): Path<RelationIdPath<Uuid>>,
 ) -> Result<Json<RelationRecord>, ApiError> {
     Ok(Json(
-        entity_relations::get_for_actor(&ctx, verified.ctx, id).await?,
+        entity_relations::get_for_actor(&ctx, verified.ctx, relation_id).await?,
     ))
 }
 
 pub(crate) async fn delete_relation(
     State(ctx): State<AppContext>,
     verified: Verified,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
+    Path(RelationIdPath { relation_id }): Path<RelationIdPath<Uuid>>,
 ) -> Result<axum::response::NoContent, ApiError> {
-    entity_relations::delete_for_actor(&ctx, verified.ctx, id).await?;
+    entity_relations::delete_for_actor(&ctx, verified.ctx, relation_id).await?;
     Ok(axum::response::NoContent)
 }
 
@@ -54,18 +53,18 @@ pub(crate) async fn list_relations(
     Ok(Json(records))
 }
 
-pub(crate) async fn set_relation_status(
+pub(crate) async fn update_relation(
     State(ctx): State<AppContext>,
     verified: Verified,
-    Path(crate::dtos::common::IdPath { id }): Path<crate::dtos::common::IdPath<Uuid>>,
-    Json(body): Json<SetRelationStatusRequest>,
+    Path(RelationIdPath { relation_id }): Path<RelationIdPath<Uuid>>,
+    Json(body): Json<UpdateRelationRequest>,
 ) -> Result<Json<RelationRecord>, ApiError> {
     Ok(Json(
         entity_relations::set_status_for_actor(
             &ctx,
             verified.ctx,
             entity_relations::SetRelationStatusInput {
-                id,
+                id: relation_id,
                 status: body.status,
             },
         )
@@ -79,47 +78,22 @@ pub fn routes() -> Routes {
         .prefix("api/relations")
         .add(
             "/",
-            aide::axum::routing::post_with(create_relation, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["relation_create"]),
-                ))
-            }),
+            aide::axum::routing::post_with(create_relation, |op| op.id("CreateRelation")),
         )
         .add(
             "/",
-            aide::axum::routing::get_with(list_relations, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["relation_list"]),
-                ))
-            }),
+            aide::axum::routing::get_with(list_relations, |op| op.id("ListRelations")),
         )
         .add(
-            "/{id}",
-            aide::axum::routing::get_with(get_relation, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["relation_get"]),
-                ))
-            }),
+            "/{relation_id}",
+            aide::axum::routing::get_with(get_relation, |op| op.id("GetRelation")),
         )
         .add(
-            "/{id}",
-            aide::axum::routing::delete_with(delete_relation, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["relation_delete"]),
-                ))
-            }),
+            "/{relation_id}",
+            aide::axum::routing::delete_with(delete_relation, |op| op.id("DeleteRelation")),
         )
         .add(
-            "/{id}/status",
-            aide::axum::routing::put_with(set_relation_status, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["relation_update"]),
-                ))
-            }),
+            "/{relation_id}",
+            aide::axum::routing::patch_with(update_relation, |op| op.id("UpdateRelation")),
         )
 }

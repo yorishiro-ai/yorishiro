@@ -36,7 +36,7 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
             .add_header("Authorization", format!("Bearer {key}"))
             .json(&json!({"schema_name": "note"})).await;
         assert_eq!(response.status_code(), StatusCode::ACCEPTED, "{}", response.text());
-        let id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        let id = response.json::<serde_json::Value>()["migration_job_id"].as_str().unwrap().parse().unwrap();
         let entity_id = entity_id.unwrap();
         let before = entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap();
         assert_eq!(before.data, json!({"title": "before"}));
@@ -49,25 +49,25 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         let report = entity_entities::migration_dry_run(&ctx.db, workspace, "note").await.unwrap();
         assert_eq!(report.needs_values, 0);
         assert_eq!(report.behind_but_valid, 1);
-        let response = request.post(&format!("/api/migration-jobs/{id}/undo"))
+        let response = request.post(&format!("/api/migration-jobs/{id}:undo"))
             .add_header("Authorization", format!("Bearer {key}"))
             .await;
         assert_eq!(response.status_code(), StatusCode::ACCEPTED);
-        let undo_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        let undo_id = response.json::<serde_json::Value>()["migration_job_id"].as_str().unwrap().parse().unwrap();
         finish_via_api(&request, &ctx, undo_id, &key, &format!("/api/migration-jobs/{undo_id}")).await;
         assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
         assert_eq!(entity_entities::migration_dry_run(&ctx.db, workspace, "note").await.unwrap().needs_values, 1);
         assert_eq!(entity_entities::drift(&ctx.db, workspace, entity_id).await.unwrap().missing_fields[0].name, "rank");
 
-        let revoked = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, workspace, Some(owner_id), false,
+        let revoked = crate::requests::fixtures::create_key(
+            &ctx.db, workspace, Some(owner_id),
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", revoked.plaintext))
             .json(&json!({"schema_name":"note"})).await;
         assert_eq!(response.status_code(), StatusCode::ACCEPTED);
-        let denied_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
-        yorishiro::models::api_keys::Entity::revoke(&ctx.db, revoked.id).await.unwrap();
+        let denied_id = response.json::<serde_json::Value>()["migration_job_id"].as_str().unwrap().parse().unwrap();
+        yorishiro::models::access_keys::Entity::revoke(&ctx.db, revoked.id).await.unwrap();
         finish_job(&ctx, denied_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{denied_id}")))).await;
         assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
 
@@ -77,63 +77,59 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
             &txn, tenant, &crate::requests::fixtures::unique_email("queued-member"),
             "hunter2-hunter2", None).await.unwrap();
         txn.commit().await.unwrap();
-        let document = json!({"statements":[{"effect":"allow","actions":["migration_fill_defaults"],
-            "resources":[{"type":"workspace","tenant_id":tenant,"workspace_id":workspace}]}]});
-        let policy = request.post("/api/iam/policies")
+        let document = json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["migration:FillEntityDefaults"],
+            "Resource":[format!("yrn:workspace:{}:{}", tenant, workspace)]}]});
+        let policy = request.post("/api/policies")
             .add_header("Authorization", format!("Bearer {iam_key}"))
             .json(&json!({"name":"queued-fill","document":document})).await;
         policy.assert_status(StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
-        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        let policy_id = policy.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
-        let attributed = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, workspace, Some(member.id), false,
+        let attributed = crate::requests::fixtures::create_key(
+            &ctx.db, workspace, Some(member.id),
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", attributed.plaintext))
             .json(&json!({"schema_name":"note"})).await;
         assert_eq!(response.status_code(), StatusCode::ACCEPTED);
-        let downgraded_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        let downgraded_id = response.json::<serde_json::Value>()["migration_job_id"].as_str().unwrap().parse().unwrap();
         request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
         finish_job(&ctx, downgraded_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{downgraded_id}")))).await;
         assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
-        assert!(yorishiro::models::api_keys::Entity::find_by_id(attributed.id).one(&ctx.db).await.unwrap().is_some());
+        assert!(yorishiro::models::access_keys::Entity::find_by_id(attributed.id).one(&ctx.db).await.unwrap().is_some());
         request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
         let pending = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", attributed.plaintext))
             .json(&json!({"schema_name":"note"})).await;
         pending.assert_status(StatusCode::ACCEPTED);
-        let pending_id = pending.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        let pending_id = pending.json::<serde_json::Value>()["migration_job_id"].as_str().unwrap().parse().unwrap();
         let mut deny = document.clone();
-        deny["statements"][0]["effect"] = json!("deny");
-        request.put(&format!("/api/iam/policies/{policy_id}"))
-            .add_header("Authorization", format!("Bearer {iam_key}"))
-            .json(&json!({"name":"queued-fill","document":deny})).await.assert_status_ok();
+        deny["Statement"][0]["Effect"] = json!("Deny");
+        crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {iam_key}"), &policy_id, &deny).await;
         finish_job(&ctx, pending_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{pending_id}")))).await;
         assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, before.data);
-        request.put(&format!("/api/iam/policies/{policy_id}"))
-            .add_header("Authorization", format!("Bearer {iam_key}"))
-            .json(&json!({"name":"queued-fill","document":document})).await.assert_status_ok();
+        crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {iam_key}"), &policy_id, &document).await;
         let failed = request.get(&format!("/api/migration-jobs/{downgraded_id}"))
             .add_header("Authorization", format!("Bearer {key}")).await;
         assert_eq!(failed.status_code(), StatusCode::OK);
         assert_eq!(failed.json::<serde_json::Value>()["status"], "failed");
 
-        let removed = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, workspace, Some(member.id), false,
+        let removed = crate::requests::fixtures::create_key(
+            &ctx.db, workspace, Some(member.id),
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", removed.plaintext))
             .json(&json!({"schema_name":"note"})).await;
         assert_eq!(response.status_code(), StatusCode::ACCEPTED);
-        let removed_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        let removed_id = response.json::<serde_json::Value>()["migration_job_id"].as_str().unwrap().parse().unwrap();
         yorishiro::models::tenant_memberships::remove_member(&ctx.db, tenant, member.id).await.unwrap();
         yorishiro::models::tenant_memberships::add_member(&ctx.db, tenant, member.id).await.unwrap();
         for id in [attributed.id, removed.id] {
-            assert!(yorishiro::models::api_keys::Entity::find_by_id(id).one(&ctx.db).await.unwrap().expect("revoked grant history retained").revoked_at.is_some());
+            assert!(yorishiro::models::access_keys::Entity::find_by_id(id).one(&ctx.db).await.unwrap().expect("revoked grant history retained").revoked_at.is_some());
         }
         let rejected = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", removed.plaintext))
@@ -144,56 +140,52 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
         request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
 
-        let attributed = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, workspace, Some(member.id), false,
+        let attributed = crate::requests::fixtures::create_key(
+            &ctx.db, workspace, Some(member.id),
         ).await.unwrap();
         let response = request.post("/api/migration-jobs/fill-defaults")
             .add_header("Authorization", format!("Bearer {}", attributed.plaintext))
             .json(&json!({"schema_name":"note"})).await;
         assert_eq!(response.status_code(), StatusCode::ACCEPTED);
-        let filled_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
+        let filled_id = response.json::<serde_json::Value>()["migration_job_id"].as_str().unwrap().parse().unwrap();
         finish_via_api(&request, &ctx, filled_id, &key, &format!("/api/migration-jobs/{filled_id}")).await;
-        let revoked = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db, workspace, Some(owner_id), false,
+        let revoked = crate::requests::fixtures::create_key(
+            &ctx.db, workspace, Some(owner_id),
         ).await.unwrap();
-        let response = request.post(&format!("/api/migration-jobs/{filled_id}/undo"))
+        let response = request.post(&format!("/api/migration-jobs/{filled_id}:undo"))
             .add_header("Authorization", format!("Bearer {}", revoked.plaintext)).await;
         assert_eq!(response.status_code(), StatusCode::ACCEPTED);
-        let denied_id = response.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap();
-        yorishiro::models::api_keys::Entity::revoke(&ctx.db, revoked.id).await.unwrap();
+        let denied_id = response.json::<serde_json::Value>()["migration_job_id"].as_str().unwrap().parse().unwrap();
+        yorishiro::models::access_keys::Entity::revoke(&ctx.db, revoked.id).await.unwrap();
         finish_job(&ctx, denied_id, "failed", Some((&request, &key, &format!("/api/migration-jobs/{denied_id}")))).await;
         assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, after.data);
-        let undo_document = json!({"statements":[{"effect":"allow","actions":["migration_undo"],
-            "resources":[{"type":"workspace","tenant_id":tenant,"workspace_id":workspace}]}]});
+        let undo_document = json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["migration:UndoMigrationJob"],
+            "Resource":[format!("yrn:workspace:{}:{}", tenant, workspace)]}]});
         request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
             .await.assert_status(StatusCode::NO_CONTENT);
         let session = crate::controllers::mcp::initialize(&request).await;
         for explicit_deny in [false, true] {
-            request.put(&format!("/api/iam/policies/{policy_id}"))
-                .add_header("Authorization", format!("Bearer {iam_key}"))
-                .json(&json!({"name":"queued-fill","document":undo_document})).await.assert_status_ok();
+            crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {iam_key}"), &policy_id, &undo_document).await;
             request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);
             let undo_id: Uuid = if explicit_deny {
                 let queued = crate::controllers::mcp::call_tool(&request, &session, &attributed.plaintext,
-                    "undo_migration_job", json!({"job_id":filled_id})).await;
+                    "undo_migration_job", json!({"migration_job_id":filled_id})).await;
                 assert_ne!(queued["result"]["isError"], true, "{queued}");
                 let queued: serde_json::Value = serde_json::from_str(queued["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-                queued["job_id"].as_str().unwrap().parse().unwrap()
+                queued["migration_job_id"].as_str().unwrap().parse().unwrap()
             } else {
-                let queued = request.post(&format!("/api/migration-jobs/{filled_id}/undo"))
+                let queued = request.post(&format!("/api/migration-jobs/{filled_id}:undo"))
                     .add_header("Authorization", format!("Bearer {}", attributed.plaintext)).await;
                 queued.assert_status(StatusCode::ACCEPTED);
-                queued.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap()
+                queued.json::<serde_json::Value>()["migration_job_id"].as_str().unwrap().parse().unwrap()
             };
             request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);
             if explicit_deny {
                 let mut deny = undo_document.clone();
-                deny["statements"][0]["effect"] = json!("deny");
-                request.put(&format!("/api/iam/policies/{policy_id}"))
-                    .add_header("Authorization", format!("Bearer {iam_key}"))
-                    .json(&json!({"name":"queued-fill","document":deny})).await.assert_status_ok();
+                deny["Statement"][0]["Effect"] = json!("Deny");
+                crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {iam_key}"), &policy_id, &deny).await;
                 request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                     .await.assert_status(StatusCode::NO_CONTENT);
             }
@@ -201,37 +193,41 @@ async fn rest_fill_defaults_waits_for_a_loco_worker() {
             assert_eq!(entity_entities::get(&ctx.db, workspace, entity_id).await.unwrap().data, after.data);
         }
         for explicit_deny in [false, true] {
-            let document = json!({"statements":[{"effect":"allow","actions":["workspace_reindex"],
-                "resources":[{"type":"workspace","tenant_id":tenant,"workspace_id":workspace}]}]});
-            request.put(&format!("/api/iam/policies/{policy_id}"))
-                .add_header("Authorization", format!("Bearer {iam_key}"))
-                .json(&json!({"name":"queued-fill","document":document})).await.assert_status_ok();
+            let document = json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["workspace:ReindexWorkspace"],
+                "Resource":[format!("yrn:workspace:{}:{}", tenant, workspace)]}]});
+            crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {iam_key}"), &policy_id, &document).await;
             let id: Uuid = if explicit_deny {
                 let queued = crate::controllers::mcp::call_tool(&request, &session, &attributed.plaintext,
                     "reindex_workspace", json!({})).await;
                 assert_ne!(queued["result"]["isError"], true, "{queued}");
                 let queued: serde_json::Value = serde_json::from_str(queued["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-                queued["job_id"].as_str().unwrap().parse().unwrap()
+                queued["migration_job_id"].as_str().unwrap().parse().unwrap()
             } else {
                 let queued = request.post("/api/migration-jobs/reindex")
                     .add_header("Authorization", format!("Bearer {}", attributed.plaintext)).await;
                 queued.assert_status_ok();
-                queued.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap()
+                queued.json::<serde_json::Value>()["migration_job_id"].as_str().unwrap().parse().unwrap()
             };
             let before_workspace = yorishiro::models::workspace_workspaces::Entity::find_by_id(workspace).one(&ctx.db).await.unwrap().unwrap();
             if explicit_deny {
                 let mut deny = document;
-                deny["statements"][0]["effect"] = json!("deny");
-                request.put(&format!("/api/iam/policies/{policy_id}"))
-                    .add_header("Authorization", format!("Bearer {iam_key}"))
-                    .json(&json!({"name":"queued-fill","document":deny})).await.assert_status_ok();
+                deny["Statement"][0]["Effect"] = json!("Deny");
+                crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {iam_key}"), &policy_id, &deny).await;
             } else {
                 request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                     .await.assert_status(StatusCode::NO_CONTENT);
             }
             finish_job(&ctx, id, "failed", None).await;
             let lifecycle = yorishiro::models::queue_job_lifecycles::Entity::find_by_id(id).one(&ctx.db).await.unwrap().unwrap();
-            assert!(format!("{lifecycle:?}").contains("IAM policy does not permit"), "{lifecycle:?}");
+            let expected = if explicit_deny {
+                "IAM policy explicitly denies workspace:ReindexWorkspace"
+            } else {
+                "no IAM policy allows workspace:ReindexWorkspace"
+            };
+            assert!(
+                lifecycle.error.as_deref().is_some_and(|error| error.contains(expected)),
+                "{lifecycle:?}"
+            );
             let after_workspace = yorishiro::models::workspace_workspaces::Entity::find_by_id(workspace).one(&ctx.db).await.unwrap().unwrap();
             assert_eq!(before_workspace.embedding_revision, after_workspace.embedding_revision);
             assert_eq!(before_workspace.embedding_reindexing, after_workspace.embedding_reindexing);

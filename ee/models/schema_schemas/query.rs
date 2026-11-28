@@ -1,12 +1,10 @@
 //! Reading which schemas have an origin template that moved on without them.
 //!
-//! The query alone: what to do about a change is `models::schema_schemas`'s, which decides whether a merge is safe and what it would produce.
-//!
-//! Owns no table.
-//! The control plane joins template metadata to page the candidates.
-//! Workspace schema definitions are only loaded on the RLS-scoped connection.
+//! Template metadata is joined on the control plane to page the candidates.
+//! Workspace schema definitions are loaded only on the RLS-scoped connection.
 
 use super::merge;
+use crate::error::OptionExt;
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::pagination::ListParams;
 use crate::models::schema_schemas::metaschema::MetaSchemaDefinition;
@@ -32,24 +30,21 @@ struct Row {
 
 /// Schemas in this workspace whose origin template has changed since the copy was taken.
 ///
-/// Nothing is applied.
-/// The upstream edit does not reach the copy on its own (an automatic update could make stored entities invalid against a definition nobody here chose), so this reports and the workspace decides.
+/// Nothing is applied: the workspace decides whether to follow the upstream edit.
 ///
-/// A schema whose template was deleted is not reported: the trigger has already detached it, and there is no longer an update to take.
-/// `linked` is the whole population here.
+/// A schema whose template was deleted is not reported, because deleting the template detaches it.
 ///
-/// The explicit `origin_updated_at IS NULL` state is the source of truth.
-/// It survives local schema versioning and is cleared only by a successful merge acknowledgement.
-/// Reads both definitions in one joined ORM query before computing the merge summary.
+/// `origin_updated_at IS NULL` marks a pending change.
+/// It survives local schema versioning and is cleared only by a merge.
 pub(crate) async fn list_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     page: ListParams,
 ) -> Result<Vec<UpstreamChange>, YorishiroError> {
     use crate::models::_entities::{schema_schemas as schema, template_templates as template};
     use crate::models::iam::{access::read_workspaces, policy::Action};
     use std::collections::HashMap;
-    let workspaces = read_workspaces(&ctx.db, actor, Action::SchemaUpstreamList).await?;
+    let workspaces = read_workspaces(&ctx.db, actor, Action::ListSchemaUpstreamChanges).await?;
     let rows = schema::Entity::find()
         .select_only()
         .column(schema::Column::WorkspaceId)
@@ -101,7 +96,7 @@ pub(crate) async fn list_for_actor(
                 serde_json::from_value(schema.definition).internal()?;
             let base: MetaSchemaDefinition = schema
                 .origin_snapshot
-                .ok_or_else(|| YorishiroError::Internal("linked schema has no merge base".into()))
+                .or_internal("linked schema has no merge base")
                 .and_then(|value| serde_json::from_value(value).internal())?;
             let template_definition: MetaSchemaDefinition =
                 serde_json::from_value(row.template_definition).internal()?;

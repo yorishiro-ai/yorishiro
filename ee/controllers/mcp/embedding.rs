@@ -13,9 +13,9 @@ use crate::error::YorishiroError;
 #[tool_router(vis = "pub(crate)", router = tool_router_embedding)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Read the selected workspace's embedding provider metadata without its API key (requires embedding_provider_get IAM permission); returns not found when the deployment default is used"
+        description = "Read the workspace's embedding provider settings without its secret. Returns not found when the workspace uses the deployment default."
     )]
-    pub(crate) async fn get_embedding_provider(
+    pub(crate) async fn get_workspace_embedding_provider(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -30,9 +30,9 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Configure the selected workspace's OpenAI-compatible embedding provider (requires embedding_provider_update IAM permission); document changes queue a full reindex atomically, query-instruction-only changes do not; the supplied API key is stored and never returned"
+        description = "Set the workspace's embedding provider after checking the endpoint and vector dimensions with sample text. Changes to document embeddings require a reindex at the deployment's configured time. Query instruction changes alone do not require a reindex. The response omits the secret."
     )]
-    pub(crate) async fn set_embedding_provider(
+    pub(crate) async fn update_workspace_embedding_provider(
         &self,
         Parameters(input): Parameters<SetEmbeddingKeyRequest>,
         Extension(parts): Extension<Parts>,
@@ -45,9 +45,9 @@ impl YorishiroMcpServer {
     }
 
     #[tool(
-        description = "Remove the selected workspace's embedding provider override and queue a full reindex atomically using the deployment default (requires embedding_provider_delete IAM permission)"
+        description = "Remove the workspace's embedding provider override. Automatic reindexing uses the deployment default provider and follows the deployment schedule."
     )]
-    pub(crate) async fn reset_embedding_provider(
+    pub(crate) async fn delete_workspace_embedding_provider(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {

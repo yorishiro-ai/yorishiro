@@ -18,16 +18,16 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::api_key_audit_log::Entity")]
-    ApiKeyAuditLog,
-    #[sea_orm(has_many = "super::api_keys::Entity")]
-    ApiKeys,
-    #[sea_orm(has_many = "super::iam_audit_events::Entity")]
-    IamAuditEvents,
+    #[sea_orm(has_many = "super::access_keys::Entity")]
+    AccessKeys,
     #[sea_orm(has_many = "super::iam_groups::Entity")]
     IamGroups,
     #[sea_orm(has_many = "super::iam_policies::Entity")]
     IamPolicies,
+    #[sea_orm(has_many = "super::import_staging::Entity")]
+    ImportStaging,
+    #[sea_orm(has_many = "super::job_results::Entity")]
+    JobResults,
     #[sea_orm(has_many = "super::schema_schemas::Entity")]
     SchemaSchemas,
     #[sea_orm(has_many = "super::template_reviews::Entity")]
@@ -38,8 +38,6 @@ pub enum Relation {
     TenantBilling,
     #[sea_orm(has_many = "super::tenant_memberships::Entity")]
     TenantMemberships,
-    #[sea_orm(has_one = "super::tenant_reindex_schedules::Entity")]
-    TenantReindexSchedules,
     #[sea_orm(has_many = "super::user_users::Entity")]
     UserUsers,
     #[sea_orm(has_many = "super::workspace_schema_forks::Entity")]
@@ -48,21 +46,9 @@ pub enum Relation {
     WorkspaceWorkspaces,
 }
 
-impl Related<super::api_key_audit_log::Entity> for Entity {
+impl Related<super::access_keys::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::ApiKeyAuditLog.def()
-    }
-}
-
-impl Related<super::api_keys::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ApiKeys.def()
-    }
-}
-
-impl Related<super::iam_audit_events::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::IamAuditEvents.def()
+        Relation::AccessKeys.def()
     }
 }
 
@@ -75,6 +61,18 @@ impl Related<super::iam_groups::Entity> for Entity {
 impl Related<super::iam_policies::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::IamPolicies.def()
+    }
+}
+
+impl Related<super::import_staging::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ImportStaging.def()
+    }
+}
+
+impl Related<super::job_results::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::JobResults.def()
     }
 }
 
@@ -105,12 +103,6 @@ impl Related<super::tenant_billing::Entity> for Entity {
 impl Related<super::tenant_memberships::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::TenantMemberships.def()
-    }
-}
-
-impl Related<super::tenant_reindex_schedules::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::TenantReindexSchedules.def()
     }
 }
 

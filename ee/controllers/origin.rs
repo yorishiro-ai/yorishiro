@@ -1,7 +1,7 @@
 //! Following an origin template: `/api/schemas/upstream-changes`, `merge-preview` and `merge`.
 //!
-//! This overlays base's own `/api/schemas` namespace, since merging a schema is a schema operation from the client's side, not an administrative one like the dashboard or Stripe.
-//!
+//! These routes share the `/api/schemas` prefix because merging is a schema operation from the client's side.
+
 use crate::controllers::ApiError;
 use crate::controllers::Created;
 use crate::controllers::extractors::Verified;
@@ -13,7 +13,6 @@ use loco_rs::app::AppContext;
 use uuid::Uuid;
 
 use crate::edition::ee::dtos::origin::MergeResponse;
-use crate::edition::ee::models::schema_schemas as origin_model;
 use crate::edition::ee::models::schema_schemas as origin;
 use crate::edition::ee::models::schema_schemas::MergePlan;
 
@@ -23,7 +22,7 @@ async fn list_upstream_changes(
     verified: Verified,
     Query(page): Query<crate::dtos::common::PageParams>,
 ) -> Result<Json<Vec<UpstreamChange>>, ApiError> {
-    let changes = origin_model::list_for_actor(&ctx, &verified.ctx, page.try_into()?).await?;
+    let changes = origin::list_for_actor(&ctx, &verified.ctx, page.try_into()?).await?;
     Ok(Json(changes))
 }
 
@@ -60,28 +59,15 @@ pub fn routes() -> Routes {
         .add(
             "/upstream-changes",
             aide::axum::routing::get_with(list_upstream_changes, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_upstream_list"]),
-                ))
+                op.id("ListSchemaUpstreamChanges")
             }),
         )
         .add(
             "/{schema_id}/merge-preview",
-            aide::axum::routing::get_with(merge_preview, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_merge_preview"]),
-                ))
-            }),
+            aide::axum::routing::get_with(merge_preview, |op| op.id("PreviewSchemaMerge")),
         )
         .add(
             "/{schema_id}/merge",
-            aide::axum::routing::post_with(merge_apply, |op| {
-                op.with(crate::controllers::openapi::extension(
-                    "x-yorishiro-required-actions",
-                    serde_json::json!(["schema_merge_apply"]),
-                ))
-            }),
+            aide::axum::routing::post_with(merge_apply, |op| op.id("ApplySchemaMerge")),
         )
 }

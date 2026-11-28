@@ -3,8 +3,11 @@ description: Verifies the built packages and installs them in containers (checko
 
 inputs:
   version:
-    description: Version in the package file names, without any v prefix
+    description: Package manager version
     required: true
+  file-version:
+    description: Public filename version, if different from the package manager version
+    default: ''
   image-tag:
     description: Docker-safe validation tag, when the package version contains characters such as tilde
     default: ''
@@ -18,7 +21,7 @@ runs:
     - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
         path: dist
-        pattern: binary-*
+        pattern: 'yorishiro-*.{tar.gz,deb,rpm}'
         merge-multiple: true
 
     - name: Install package tooling
@@ -29,13 +32,15 @@ runs:
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-      run: ./.github/packaging/test-artifacts.sh dist "$VERSION"
+        FILE_VERSION: ${{ inputs.file-version || inputs.version }}
+      run: ./.github/packaging/test-artifacts.sh dist "$VERSION" "$FILE_VERSION"
 
     - name: Verify artifact metadata checks reject invalid packages
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
-      run: ./.github/packaging/test-artifacts-self.sh dist "$VERSION"
+        FILE_VERSION: ${{ inputs.file-version || inputs.version }}
+      run: ./.github/packaging/test-artifacts-self.sh dist "$VERSION" "$FILE_VERSION"
 
     - name: Verify installed-path policy allows the optional admin override
       shell: bash
@@ -44,16 +49,29 @@ runs:
     - name: Test current package lifecycle and co-install refusal
       shell: bash
       env:
-        VERSION: ${{ inputs.version }}
-      run: ./.github/packaging/test-package-lifecycle.sh dist "$VERSION"
+        FILE_VERSION: ${{ inputs.file-version || inputs.version }}
+      run: ./.github/packaging/test-package-lifecycle.sh dist "$FILE_VERSION"
 
     - name: Test representative installed packages
       shell: bash
       env:
-        VERSION: ${{ inputs.version }}
+        FILE_VERSION: ${{ inputs.file-version || inputs.version }}
       run: |
-        ./.github/packaging/test-install.sh "dist/yorishiro-ce-${VERSION}-amd64.deb"
-        ./.github/packaging/test-systemd.sh "dist/yorishiro-ee-${VERSION}-amd64.deb"
+        ./.github/packaging/test-install.sh "dist/yorishiro-ce-${FILE_VERSION}-amd64.deb"
+        ./.github/packaging/test-systemd.sh "dist/yorishiro-ee-${FILE_VERSION}-amd64.deb"
+
+    - name: Write release checksums
+      shell: bash
+      working-directory: dist
+      run: sha256sum -- *.tar.gz *.deb *.rpm > checksums.txt
+
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: checksums.txt
+        path: dist/checksums.txt
+        archive: false
+        overwrite: true
+        if-no-files-found: error
 
     - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       if: inputs.docker-validation == 'true'
@@ -61,6 +79,8 @@ runs:
     - name: Test Docker configuration ownership and fallback
       if: inputs.docker-validation == 'true'
       shell: bash
+      env:
+        TAG: ${{ inputs.image-tag || inputs.file-version || inputs.version }}
       run: |
-        IMAGE=yorishiro-package-test TAG=${{ inputs.image-tag || inputs.version }} EDITION=ce docker buildx bake -f .github/docker/docker-bake.hcl --load app
-        make package-docker-check IMAGE=yorishiro-package-test:${{ inputs.image-tag || inputs.version }}
+        IMAGE=yorishiro-package-test EDITION=ce docker buildx bake -f .github/docker/docker-bake.hcl --load app
+        make package-docker-check IMAGE="yorishiro-package-test:$TAG"

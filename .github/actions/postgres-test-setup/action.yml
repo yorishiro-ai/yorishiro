@@ -7,9 +7,6 @@ inputs:
   database:
     description: Name of the owned test database.
     default: yorishiro
-  log-ddl:
-    description: Enable DDL logging for coverage diagnostics.
-    default: "false"
 runs:
   using: composite
   steps:
@@ -17,12 +14,7 @@ runs:
       env:
         POSTGRES_CONTAINER: ${{ inputs.container }}
         TEST_DATABASE: ${{ inputs.database }}
-        LOG_DDL: ${{ inputs.log-ddl }}
       run: |
-        options=(-f -)
-        if [[ "$LOG_DDL" == true ]]; then
-          options+=(-c "ALTER SYSTEM SET log_statement = 'ddl'" -c 'SELECT pg_reload_conf()')
-        fi
         docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 \
-          -v "test_database=$TEST_DATABASE" -U postgres -d postgres "${options[@]}" \
+          -v "test_database=$TEST_DATABASE" -U postgres -d postgres -f - \
           < scripts/init-test-postgres.sql

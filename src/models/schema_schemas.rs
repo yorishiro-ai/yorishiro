@@ -1,5 +1,6 @@
 //! Schema model: versioned schemas per workspace, with the version lock, archiving and deleting of versions.
 
+use crate::error::OptionExt;
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Alias, Expr, Func, Query};
@@ -15,14 +16,14 @@ pub mod metaschema;
 
 pub(crate) async fn workspace_for_actor(
     db: &impl ConnectionTrait,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     id: Uuid,
 ) -> Result<Uuid, YorishiroError> {
     let record = Entity::find_by_id(id)
         .one(db)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found("schema was not found"))?;
+        .or_not_found("schema was not found")?;
     crate::models::iam::access::check_workspace_target(db, actor, record.workspace_id).await
 }
 
@@ -30,19 +31,14 @@ use metaschema::{MetaSchemaDefinition, VersioningDiff, validate_definition};
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    /// `id` has a `uuidv7()` column default on PostgreSQL and no default on SQLite; see `crate::db::sqlite_generated_id`.
-    async fn before_save<C>(self, db: &C, _insert: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
         let mut this = self;
-        this.id = crate::db::sqlite_generated_id(db, this.id);
-        // Stamped on insert as well as update, unlike the seven models that stamp only on update: those tables' `updated_at` columns carry a database default on both backends, and this one cannot.
-        // SQLite refuses a non-constant default on `ADD COLUMN` for an existing table, so `schema_schemas.updated_at` has `now()` on PostgreSQL and nothing on SQLite, and an insert that relied on the default would be NULL there.
-        // A caller that sets it deliberately (a backfill, an import preserving original timestamps) is still not overwritten.
-        if !this.updated_at.is_set() {
-            this.updated_at = ActiveValue::Set(Some(crate::data::time::now().into()));
-        }
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        this.updated_at = crate::db::stamped_updated_at_optional(this.updated_at);
         Ok(this)
     }
 }
@@ -121,14 +117,14 @@ pub(crate) async fn delete(
 
     let schema = get_by_id(conn, workspace_id, schema_id).await?;
     lock_version(conn, workspace_id, &schema.name).await?;
-    // A row lock also fences reference writers that rely on the foreign key rather than the version lock.
+    // The row lock also fences reference writers that rely on the foreign key rather than the version lock.
     let row = Entity::find_by_id(schema_id)
         .filter(crate::models::_entities::schema_schemas::Column::WorkspaceId.eq(workspace_id))
         .lock_exclusive()
         .one(conn)
         .await
         .internal()?
-        .ok_or_else(|| YorishiroError::not_found(format!("schema '{schema_id}' was not found")))?;
+        .or_not_found(format!("schema '{schema_id}' was not found"))?;
     let schema = SchemaRecord::try_from(row)?;
     if schema.status != SchemaStatus::Archived {
         return Err(YorishiroError::Conflict {
@@ -138,7 +134,7 @@ pub(crate) async fn delete(
             ),
         });
     }
-    // References to a version are retained history, so deletion refuses them with their name instead of cascading.
+    // References are retained history, so deletion refuses and names them instead of cascading.
     let blockers = deletion_blockers(conn, schema_id).await?;
     if !blockers.is_empty() {
         return Err(YorishiroError::Conflict {
@@ -258,10 +254,9 @@ async fn deletion_blockers(
 }
 
 /// One version of a workspace's schema.
-//
-// `definition` is JSONB in the DB, but the application layer always treats it as a parsed `MetaSchemaDefinition`.
 #[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SchemaRecord {
+    #[serde(rename = "schema_id", alias = "id")]
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub workspace_id: Uuid,
@@ -311,9 +306,7 @@ impl TryFrom<Model> for SchemaRecord {
     }
 }
 
-/// Fetches the currently active schema (the latest version with status='active') for the given workspace and name.
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
+/// Fetches the active schema (the latest active version) for the given workspace and name.
 ///
 /// # Errors
 /// Returns an error if the operation cannot be completed.
@@ -322,8 +315,6 @@ pub async fn get_active_schema(
     workspace_id: Uuid,
     name: &str,
 ) -> Result<SchemaRecord, YorishiroError> {
-    // SQLite serializes UUIDs as binary in SeaORM queries, but the migration stores them as
-    // hex strings in TEXT columns. Convert to hex for the filter so the comparison works.
     use crate::models::_entities::schema_schemas::Column;
 
     let row = Entity::find()
@@ -335,12 +326,11 @@ pub async fn get_active_schema(
         .await
         .internal()?;
 
-    row.ok_or_else(|| YorishiroError::not_found(format!("no active schema named '{name}'")))?
+    row.or_not_found(format!("no active schema named '{name}'"))?
         .try_into()
 }
 
-/// Counts a workspace's currently *active* schemas: one row per distinct name, since `create_schema` archives the previous version before activating a new one.
-/// For workspace-detail summaries, this is a more meaningful "how many schemas does this workspace define" figure than counting every archived version too.
+/// Counts a workspace's active schemas, which is one per name.
 pub(crate) async fn count_active(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -356,9 +346,7 @@ pub(crate) async fn count_active(
         .and_then(|count| i64::try_from(count).internal())
 }
 
-/// Fetches a specific schema version by id (used to resolve the version an entity references).
-///
-/// Runs on the RLS-scoped transaction a request handler holds via `Authorized::txn()`, so it takes anything implementing `ConnectionTrait` (a `DatabaseTransaction`, in practice).
+/// Fetches a specific schema version by id.
 pub(crate) async fn get_by_id(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -373,16 +361,13 @@ pub(crate) async fn get_by_id(
         .await
         .internal()?;
 
-    row.ok_or_else(|| YorishiroError::not_found(format!("schema '{schema_id}' was not found")))?
+    row.or_not_found(format!("schema '{schema_id}' was not found"))?
         .try_into()
 }
 
 /// A schema whose origin template has been edited since the copy was taken.
 ///
-/// The signal only (what changed and where), with no diff and no application.
-/// Whether to follow the upstream edit is the workspace's call, since applying it could invalidate entities already stored against the current definition.
-///
-/// Lives here because it names `schema_schemas` fields (`schema_id`, `version`) this module already owns.
+/// The signal only: whether to follow the upstream edit is the workspace's call, since applying it could invalidate stored entities.
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 pub struct UpstreamChange {
     pub workspace_id: Uuid,
@@ -414,6 +399,7 @@ pub struct MergeDiffSummary {
 /// A lightweight summary that omits the `definition` body.
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 pub(crate) struct SchemaSummary {
+    #[serde(rename = "schema_id")]
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub name: String,
@@ -459,12 +445,12 @@ pub(crate) async fn list(
 
 pub(crate) async fn list_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::api_keys::AuthContext,
+    actor: &crate::models::access_keys::AuthContext,
     page: crate::models::pagination::ListParams,
 ) -> Result<Vec<SchemaSummary>, YorishiroError> {
     use crate::models::_entities::schema_schemas::Column;
     use crate::models::iam::{access::read_workspaces, policy::Action};
-    let workspaces = read_workspaces(&ctx.db, actor, Action::SchemaList).await?;
+    let workspaces = read_workspaces(&ctx.db, actor, Action::ListSchemas).await?;
     let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
     if let [workspace] = workspaces.as_slice() {
         let records = list(&txn, *workspace, page).await?;
@@ -489,7 +475,7 @@ pub(crate) async fn list_for_actor(
 /// Marks every schema that follows `template_id` as having a pending upstream notification.
 ///
 /// Sets `origin_updated_at` to `NULL` for all linked schemas referencing the template.
-/// The merge endpoint clears it back to `Some(NOW())` after applying the upstream change.
+/// A merge sets it back to the current time.
 pub(crate) async fn notify_upstream_change(
     conn: &impl ConnectionTrait,
     template_id: Uuid,
@@ -508,9 +494,38 @@ pub(crate) async fn notify_upstream_change(
     usize::try_from(result.rows_affected).internal()
 }
 
+/// Detaches every linked schema whose origin template matches `origin`.
+///
+/// Call it before deleting those templates.
+/// It runs on a connection that is not scoped to one workspace, because the schemas live in other workspaces and tenants.
+pub(crate) async fn detach_origins(
+    conn: &impl ConnectionTrait,
+    origin: impl sea_orm::sea_query::IntoCondition,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::schema_schemas::{Column, Entity};
+    use sea_orm::EntityTrait;
+
+    Entity::update_many()
+        .col_expr(
+            Column::OriginStatus,
+            Expr::value(SchemaOriginStatus::Detached.as_db_str()),
+        )
+        .col_expr(
+            Column::UpdatedAt,
+            Expr::value(Some(crate::data::time::now())),
+        )
+        .filter(origin)
+        .filter(Column::OriginStatus.eq(SchemaOriginStatus::Linked.as_db_str()))
+        .exec(conn)
+        .await
+        .internal()?;
+    Ok(())
+}
+
+/// Creates the next version of a schema and archives the previous active one.
 ///
 /// # Errors
-/// Returns an error if the operation cannot be completed.
+/// Returns an error if the definition is invalid, the version number is taken or persistence fails.
 pub async fn create_schema(
     conn: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -537,9 +552,8 @@ pub async fn create_schema(
         .map(SchemaRecord::try_from)
         .transpose()?;
 
-    // Only the first version of a name mints an origin from what the caller passed.
-    // Every later one inherits the complete origin state from its predecessor, including a pending notification.
-    // Replacing a pending active version must not acknowledge the update merely because a local version was created.
+    // A later version without an explicit origin inherits its predecessor's origin state, including a pending notification.
+    // Creating a local version must not acknowledge an upstream update.
     let (origin_template_id, origin_snapshot, origin_updated_at) = match &previous {
         Some(previous) if origin_template_id.is_none() => (
             previous.origin_template_id,
@@ -576,7 +590,7 @@ pub async fn create_schema(
     );
 
     if previous.is_some() {
-        // `update_many` is a builder call and never runs `ActiveModelBehavior::before_save`, so `updated_at` is set explicitly here or archiving a schema version would leave its timestamp stale.
+        // `update_many` skips `before_save`, so `updated_at` is set explicitly.
         Entity::update_many()
             .col_expr(
                 Column::Status,
@@ -622,8 +636,7 @@ pub async fn create_schema(
         )
     })?;
 
-    // Inside the transaction: a workspace must not be left active by a schema insert that then rolls back.
-    // Unconditional and idempotent: every version after the first finds it active already, and checking first would only add a round trip.
+    // Inside the transaction, so a rolled-back insert leaves the workspace unchanged.
     crate::models::workspace_workspaces::mark_active(conn, workspace_id, row.id).await?;
 
     Ok((row.try_into()?, diff))
@@ -638,14 +651,14 @@ pub(crate) type CreateSchemaSource = crate::dtos::schemas::CreateSchemaRequest;
 /// Returns the session, authorization or archive error.
 pub(crate) async fn archive_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     schema_id: Uuid,
 ) -> Result<SchemaRecord, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-        Some(crate::models::iam::policy::Action::SchemaArchive),
+        Some(crate::models::iam::policy::Action::ArchiveSchema),
         async |session| archive(session.txn(), session.workspace_id()?, schema_id).await,
     )
     .await
@@ -657,14 +670,14 @@ pub(crate) async fn archive_for_actor(
 /// Returns the session, authorization or delete error.
 pub(crate) async fn delete_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     schema_id: Uuid,
 ) -> Result<(), YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-        Some(crate::models::iam::policy::Action::SchemaDelete),
+        Some(crate::models::iam::policy::Action::DeleteSchema),
         async |session| delete(session.txn(), session.workspace_id()?, schema_id).await,
     )
     .await
@@ -676,23 +689,19 @@ pub(crate) async fn delete_for_actor(
 /// Returns the session, authorization, template-resolution or create error.
 pub(crate) async fn create_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     source: CreateSchemaSource,
 ) -> Result<crate::dtos::schemas::CreateSchemaResponse, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::run(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::SchemaCreate,
+            crate::models::iam::policy::Action::CreateSchema,
         ),
-        Some(crate::models::iam::policy::Action::SchemaCreate),
+        Some(crate::models::iam::policy::Action::CreateSchema),
         async |session| {
             let tenant_id = session.ctx.tenant_id;
-            // Carried alongside the definition so the schema can record which library template it came from.
-            // A built-in has no row to point at, so it stays None.
             let mut origin_template_id = None;
-            // What the template said, kept as the merge base.
-            // Only a template body has one: a definition posted inline is not a copy of anything, even when a template of the same name exists.
             let mut origin_snapshot = None;
             let definition = match source {
                 CreateSchemaSource::Definition(definition) => definition,
@@ -730,16 +739,29 @@ pub(crate) async fn create_for_actor(
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn get_active_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     name: &str,
+) -> Result<SchemaRecord, YorishiroError> {
+    active_for_action(
+        ctx,
+        actor,
+        name,
+        crate::models::iam::policy::Action::GetActiveSchema,
+    )
+    .await
+}
+
+async fn active_for_action(
+    ctx: &loco_rs::app::AppContext,
+    actor: crate::models::access_keys::AuthContext,
+    name: &str,
+    action: crate::models::iam::policy::Action,
 ) -> Result<SchemaRecord, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
-        crate::models::iam::access::WorkspaceTarget::Permission(
-            crate::models::iam::policy::Action::SchemaGet,
-        ),
-        crate::models::iam::policy::Action::SchemaGet,
+        crate::models::iam::access::WorkspaceTarget::Permission(action),
+        action,
         async |session| get_active_schema(session.txn(), session.workspace_id()?, name).await,
     )
     .await
@@ -751,14 +773,14 @@ pub(crate) async fn get_active_for_actor(
 /// Returns the session, authorization or lookup error.
 pub(crate) async fn get_by_id_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     schema_id: Uuid,
 ) -> Result<SchemaRecord, YorishiroError> {
     crate::models::iam::session::WorkspaceSession::read(
         ctx,
         actor,
         crate::models::iam::access::WorkspaceTarget::Schema(schema_id),
-        crate::models::iam::policy::Action::SchemaGet,
+        crate::models::iam::policy::Action::GetSchema,
         async |session| get_by_id(session.txn(), session.workspace_id()?, schema_id).await,
     )
     .await
@@ -770,11 +792,17 @@ pub(crate) async fn get_by_id_for_actor(
 /// Returns the lookup error, or not-found when the entity type is not in the schema.
 pub(crate) async fn entity_type_json_schema_for_actor(
     ctx: &loco_rs::app::AppContext,
-    actor: crate::models::api_keys::AuthContext,
+    actor: crate::models::access_keys::AuthContext,
     name: &str,
     entity_type: &str,
 ) -> Result<serde_json::Value, YorishiroError> {
-    let record = get_active_for_actor(ctx, actor, name).await?;
+    let record = active_for_action(
+        ctx,
+        actor,
+        name,
+        crate::models::iam::policy::Action::GetEntityTypeJsonSchema,
+    )
+    .await?;
     let definition = record
         .definition
         .entity_types

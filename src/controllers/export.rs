@@ -19,14 +19,13 @@ pub(crate) async fn export_jsonl(
 
 pub fn routes() -> Routes {
     Routes::new().tag("community").add(
-        "/api/export.jsonl",
+        "/api/export",
         aide::axum::routing::get_with(export_jsonl, |op| {
-            op.with(crate::controllers::openapi::extension(
-                "x-yorishiro-required-actions",
-                serde_json::json!(["export"]),
-            ))
-            .response_with::<200, String, _>(|op| {
-                op.description("Newline-delimited JSON export, at most 8 MiB and 10,000 records")
+            op.id("ExportWorkspace")
+                .response_with::<200, String, _>(|op| {
+                    op.description(
+                        "Newline-delimited JSON export, at most 8 MiB and 10,000 records",
+                    )
                     .with(|mut op| {
                         let response = op.inner();
                         if let Some(media) =
@@ -38,7 +37,7 @@ pub fn routes() -> Routes {
                         }
                         op
                     })
-            })
+                })
         }),
     )
 }

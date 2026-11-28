@@ -52,41 +52,26 @@ pub(crate) fn routes() -> Routes {
         .add(
             "/",
             aide::axum::routing::get_with(detail, |op| {
-                op.security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-iam-action",
-                        serde_json::json!("tenant_get"),
-                    ))
+                op.id("GetTenant").security_requirement("bearer_auth")
             }),
         )
         .add(
             "/",
             aide::axum::routing::put_with(update, |op| {
-                op.security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-iam-action",
-                        serde_json::json!("tenant_update"),
-                    ))
+                op.id("UpdateTenant").security_requirement("bearer_auth")
             }),
         )
         .add(
             "/retirement",
             aide::axum::routing::get_with(inventory, |op| {
-                op.security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["tenant_get"]),
-                    ))
+                op.id("GetTenantRetirementInventory")
+                    .security_requirement("bearer_auth")
             }),
         )
         .add(
             "/disable",
             aide::axum::routing::post_with(disable, |op| {
-                op.security_requirement("bearer_auth")
-                    .with(crate::controllers::openapi::extension(
-                        "x-yorishiro-required-actions",
-                        serde_json::json!(["tenant_update"]),
-                    ))
+                op.id("DisableTenant").security_requirement("bearer_auth")
             }),
         )
 }

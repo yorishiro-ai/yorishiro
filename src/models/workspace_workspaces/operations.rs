@@ -1,8 +1,8 @@
 //! Workspace reads and lifecycle operations.
 
+use crate::error::OptionExt;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, PaginatorTrait,
-    QueryFilter, RuntimeErr, SqlErr,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
 };
 use uuid::Uuid;
 
@@ -10,7 +10,8 @@ use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_workspaces::Column;
 
 use super::{Entity, Model};
-/// A workspace's id and owning tenant, used for workspace authorization.
+
+/// Looks up the tenant that owns a workspace, for workspace authorization.
 pub(crate) async fn get_workspace_tenant(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -20,14 +21,15 @@ pub(crate) async fn get_workspace_tenant(
         .await
         .internal()?
         .map(|w| w.tenant_id)
-        .ok_or_else(|| YorishiroError::not_found("workspace not found"))
+        .or_not_found("workspace not found")
 }
 
 /// The advisory-lock key serializing every operation that counts a tenant's workspaces before writing.
-/// `create_workspace` and `delete_workspace` share it deliberately: both decide from a count that the other invalidates, so they have to serialize against each other and not merely against themselves.
+/// `create_workspace` and `delete_workspace` share it because each decides from a count the other changes.
 pub(crate) fn workspace_count_lock_key(tenant_id: Uuid) -> String {
     format!("workspace-count:{tenant_id}")
 }
+
 /// Fetches a workspace by id.
 pub(crate) async fn get_workspace(
     conn: &impl ConnectionTrait,
@@ -44,20 +46,13 @@ pub(crate) async fn get_workspace(
 
 /// Deletes a workspace, refusing to remove a tenant's last one.
 ///
-/// `db::lock_for_update` serializes concurrent deletes against the same tenant before counting its workspaces, so two requests racing to delete the tenant's last two workspaces cannot both see a spare one and proceed: a plain `DELETE ... WHERE EXISTS (another workspace)` reads a snapshot each transaction takes independently, which is exactly the race this avoids.
-///
-/// `conn` is a `&DatabaseTransaction` for the same reason `create_workspace`'s is: the advisory lock this takes is transaction-scoped, so handed a pool it would be released before the count and delete it guards, and the signature is what stops a caller from passing one.
+/// The advisory lock serializes deletes in one tenant before the count, so two requests racing to delete its last two workspaces cannot both see a spare one.
+/// `conn` is a transaction because that lock is transaction-scoped.
 pub(crate) async fn delete_workspace(
     conn: &DatabaseTransaction,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    let workspace = Entity::find_by_id(workspace_id)
-        .one(conn)
-        .await
-        .internal()?
-        .ok_or_else(|| {
-            YorishiroError::not_found(format!("workspace '{workspace_id}' was not found"))
-        })?;
+    let workspace = get_workspace(conn, workspace_id).await?;
 
     crate::db::lock_for_update(conn, &workspace_count_lock_key(workspace.tenant_id))
         .await
@@ -78,25 +73,11 @@ pub(crate) async fn delete_workspace(
         .exec(conn)
         .await
         .map_err(|err| {
-            // Let the foreign key fence concurrent fork creation instead of racing a preflight count.
-            // SeaORM does not map PostgreSQL restrict_violation or SQLite RESTRICT triggers.
-            let restricted_foreign_key = matches!(
-                &err,
-                DbErr::Exec(RuntimeErr::SqlxError(error))
-                    if error.as_database_error().is_some_and(|error|
-                        error.code().as_deref() == Some("23001")
-                            || (error.code().as_deref() == Some("1811")
-                                && error.message() == "FOREIGN KEY constraint failed"))
-            );
-            if restricted_foreign_key
-                || matches!(err.sql_err(), Some(SqlErr::ForeignKeyConstraintViolation(_)))
-            {
-                YorishiroError::Conflict {
-                    message: "workspace is still referenced by schema forks; remove those forks before deleting it".into(),
-                }
-            } else {
-                YorishiroError::Internal(err.into())
-            }
+            // The foreign key fences concurrent fork creation, so no preflight count is needed.
+            YorishiroError::conflict_on_fk(
+                err,
+                "workspace is still referenced by schema forks; remove those forks before deleting it",
+            )
         })?;
     Ok(())
 }

@@ -18,11 +18,10 @@ use crate::models::search;
 pub(crate) struct SearchEntitiesArgs {
     /// Natural-language query text.
     /// Vectorized via the embedding provider and matched against entities' `x-embed` field by cosine distance.
-    /// PostgreSQL also fuses NFKC-normalized literal text matches when at most 20 entities match.
-    /// SQLite fills remaining slots from unembedded entities using quoted FTS5 terms of at least three characters.
+    /// Entities whose embedding is not stored yet do not appear in results.
     pub query_text: String,
     pub entity_type: Option<String>,
-    /// JSONB containment filter matched against entity data, e.g. `{"status": "active"}`.
+    /// JSON containment filter applied to the nearest candidates, matched against entity data, e.g. `{"status": "active"}`.
     pub filter: Option<Value>,
     /// Upper bound on the number of results returned (defaults to 10 if omitted).
     pub limit: Option<i64>,
@@ -31,7 +30,7 @@ pub(crate) struct SearchEntitiesArgs {
 #[tool_router(vis = "pub(crate)", router = tool_router_search)]
 impl YorishiroMcpServer {
     #[tool(
-        description = "Search entities by vector similarity and selective literal text; PostgreSQL uses gated rank fusion, SQLite uses text fallback (requires search IAM permission)"
+        description = "Search entities by embedding similarity. Results are ranked by cosine distance."
     )]
     pub(crate) async fn search_entities(
         &self,

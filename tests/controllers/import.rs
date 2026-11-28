@@ -11,12 +11,12 @@ fn concurrent_import_workers_keep_each_apps_database() {
         boot_request::<App, _, _>(|request, ctx| async move {
             let setup = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
             let accepted = request
-                .post("/api/import.jsonl")
+                .post("/api/import-jobs")
                 .add_header("Authorization", format!("Bearer {}", setup.api_key))
                 .text("")
                 .await;
             assert_eq!(accepted.status_code(), StatusCode::ACCEPTED);
-            let id = accepted.json::<serde_json::Value>()["job_id"]
+            let id = accepted.json::<serde_json::Value>()["import_job_id"]
                 .as_str()
                 .unwrap()
                 .parse()
@@ -63,33 +63,28 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
             api_key: key,
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let administrator = fixtures::create_iam_reader(&ctx, tenant_id).await;
-        let read_key = yorishiro::models::api_keys::Entity::create_api_key(
-            &ctx.db,
-            workspace_id,
-            Some(administrator),
-            false,
-        )
-        .await
-        .unwrap();
+        let read_key = fixtures::create_key(&ctx.db, workspace_id, Some(administrator))
+            .await
+            .unwrap();
         let txn = TransactionTrait::begin(&ctx.db).await.unwrap();
         let other_workspace = yorishiro::models::tenancy::create_workspace(
             &txn,
             tenant_id,
             &format!("other-{}", uuid::Uuid::new_v4()),
             None,
-            None,
         )
         .await
         .expect("create another workspace");
         txn.commit().await.unwrap();
-        let other_key = fixtures::issue_api_key(&ctx, other_workspace.id, user_id, false).await;
+        let other_key = fixtures::issue_access_key(&ctx, other_workspace.id, user_id).await;
         let accepted = request
-            .post("/api/import.jsonl")
+            .post("/api/import-jobs")
             .add_header("Authorization", format!("Bearer {key}"))
+            .add_header("x-workspace-id", workspace_id.to_string())
             .text("")
             .await;
         assert_eq!(accepted.status_code(), StatusCode::ACCEPTED);
-        let id = accepted.json::<serde_json::Value>()["job_id"]
+        let id = accepted.json::<serde_json::Value>()["import_job_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -131,6 +126,7 @@ async fn import_status_is_scoped_to_workspace_permission_and_job_type() {
         let foreign = request
             .get(&path)
             .add_header("Authorization", format!("Bearer {other_key}"))
+            .add_header("x-workspace-id", other_workspace.id.to_string())
             .await;
         assert_eq!(foreign.status_code(), StatusCode::NOT_FOUND);
         // The built-in reader policy includes `import_job_get`.
@@ -171,7 +167,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             .json(&serde_json::json!({ "template_id": "task-management" }))
             .await;
         assert_eq!(schema_response.status_code(), StatusCode::CREATED);
-        let schema_id = schema_response.json::<serde_json::Value>()["schema"]["id"]
+        let schema_id = schema_response.json::<serde_json::Value>()["schema"]["schema_id"]
             .as_str()
             .expect("schema id")
             .to_string();
@@ -196,7 +192,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
         let body = format!("{first}\n{second}\n");
 
         let import_response = request
-            .post("/api/import.jsonl")
+            .post("/api/import-jobs")
             .add_header("Authorization", auth.clone())
             .text(body)
             .await;
@@ -207,7 +203,7 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             import_response.text()
         );
         let accepted: serde_json::Value = import_response.json();
-        let id = accepted["job_id"].as_str().unwrap().parse().unwrap();
+        let id = accepted["import_job_id"].as_str().unwrap().parse().unwrap();
         let before = request
             .get("/api/entities?entity_type=project")
             .add_header("Authorization", auth.clone())
@@ -299,6 +295,110 @@ async fn import_resolves_a_pre_existing_schema_for_every_entity_line() {
             std::collections::BTreeSet::from(["first", "second"]),
             "both entities imported against the cached schema lookup, not just the first"
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn embedding_jobs_of_an_import_keep_the_request_that_started_it() {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use yorishiro::models::queue_job_lifecycles as lifecycles;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let auth = format!("Bearer {}", tenant.api_key);
+        let schema = request
+            .post("/api/schemas")
+            .add_header("Authorization", auth.clone())
+            .json(&serde_json::json!({ "template_id": "task-management" }))
+            .await;
+        let schema_id = schema.json::<serde_json::Value>()["schema"]["schema_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let line = serde_json::json!({"kind": "entity", "record": {
+            "id": uuid::Uuid::new_v4(), "workspace_id": uuid::Uuid::new_v4(),
+            "schema_id": schema_id, "schema_version": 1, "entity_type": "project",
+            "data": { "title": "child", "status": "active" },
+            "created_at": chrono::Utc::now(), "updated_at": chrono::Utc::now(),
+            "created_by": null, "updated_by": null,
+        }});
+        let accepted = request
+            .post("/api/import-jobs")
+            .add_header("Authorization", auth.clone())
+            .add_header("x-request-id", "import-parent")
+            .text(format!("{line}\n"))
+            .await;
+        accepted.assert_status(StatusCode::ACCEPTED);
+        let id = accepted.json::<serde_json::Value>()["import_job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        crate::requests::jobs::finish_via_api(
+            &request,
+            &ctx,
+            id,
+            &tenant.api_key,
+            &format!("/api/import-jobs/{id}"),
+        )
+        .await;
+        let children = lifecycles::Entity::find()
+            .filter(lifecycles::Column::WorkspaceId.eq(tenant.workspace_id))
+            .filter(lifecycles::Column::JobName.eq("embedding_sync"))
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert!(!children.is_empty(), "the import enqueued an embedding job");
+        assert!(
+            children
+                .iter()
+                .all(|job| job.request_id.as_deref() == Some("import-parent")),
+            "{children:?}"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_queue_payload_names_the_import_body_and_never_carries_it() {
+    use sea_orm::EntityTrait;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let body = "{\"kind\":\"relation\",\"record\":{\"marker\":\"payload-secret-text\"}}\n";
+        let accepted = request
+            .post("/api/import-jobs")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .text(body)
+            .await;
+        accepted.assert_status(StatusCode::ACCEPTED);
+        let id: uuid::Uuid = accepted.json::<serde_json::Value>()["import_job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let outbox =
+            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+        let payload = outbox.payload.to_string();
+        assert!(!payload.contains("payload-secret-text"), "{payload}");
+        assert!(outbox.payload["staging_id"].is_string(), "{payload}");
+        let staged = yorishiro::models::import_staging::Entity::find()
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(staged.len(), 1);
+        assert_eq!(staged[0].body, body);
+        // The malformed line fails the job; the body then waits for the purge instead of staying in the queue.
+        crate::requests::jobs::finish_job(
+            &ctx,
+            id,
+            "failed",
+            Some((&request, &tenant.api_key, &format!("/api/import-jobs/{id}"))),
+        )
+        .await;
     })
     .await;
 }

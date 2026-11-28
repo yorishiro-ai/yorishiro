@@ -1,6 +1,6 @@
 //! Authentication adapters for enterprise routes.
 //!
-//! Key resolution itself is edition-neutral and lives on the base `AuthContext` extractor, so a tenant-scoped key works identically on community and enterprise routes.
+//! Key resolution itself is edition-neutral and lives on the base `AuthContext` extractor, so a key works identically on community and enterprise routes.
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
@@ -8,12 +8,12 @@ use loco_rs::app::AppContext;
 
 use crate::controllers::ApiError;
 use crate::controllers::extractors::AuthContext as Authenticated;
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 
-/// The header naming which workspace a tenant-scoped API key should act on.
-pub use crate::models::api_keys::WORKSPACE_HEADER;
+/// The header naming the workspace a request acts on.
+pub use crate::models::access_keys::WORKSPACE_HEADER;
 
-/// The caller **with its workspace**: a workspace-scoped key names its own, a tenant-scoped one names it per request with `X-Workspace-Id`.
+/// The caller **with its workspace**, selected with `x-workspace-id` or implied by the tenant's only workspace.
 ///
 /// Use this whenever the work touches a workspace's own content, since that is what the RLS-scoped connection has to be opened against.
 pub struct WorkspaceAuthenticated(pub AuthContext);

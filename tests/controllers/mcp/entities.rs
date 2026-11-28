@@ -1,11 +1,12 @@
 use axum::http::StatusCode;
+use sea_orm::{ColumnTrait, QueryFilter};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::App;
 use yorishiro::models::{entity_entities, schema_schemas};
 
 use crate::requests::boot_request;
-use crate::requests::fixtures::{TenantArgs, TestTenant, issue_api_key};
+use crate::requests::fixtures::{TenantArgs, TestTenant, issue_access_key};
 
 use super::*;
 
@@ -23,12 +24,11 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         let TestTenant {
             tenant_id,
             workspace_id,
-            owner_id,
             api_key: migration_key,
+            ..
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let administrator = crate::requests::fixtures::create_iam_reader(&ctx, tenant_id).await;
-        let read_key = issue_api_key(&ctx, workspace_id, administrator, false).await;
-        let audit_key = issue_api_key(&ctx, workspace_id, owner_id, true).await;
+        let read_key = issue_access_key(&ctx, workspace_id, administrator).await;
 
         let v1 = serde_json::from_value(serde_json::json!({
             "name": "note",
@@ -73,7 +73,7 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
                 .as_array()
                 .expect("tools list")
                 .iter()
-                .any(|tool| tool["name"] == "fill_defaults")
+                .any(|tool| tool["name"] == "fill_entity_defaults")
         );
 
         let denied = mcp_call(
@@ -82,7 +82,7 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             &read_key,
             3,
             "tools/call",
-            json!({ "name": "fill_defaults", "arguments": { "schema_name": "note" } }),
+            json!({ "name": "fill_entity_defaults", "arguments": { "schema_name": "note" } }),
         )
         .await;
         assert_eq!(denied["result"]["isError"], true);
@@ -103,7 +103,7 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             &migration_key,
             4,
             "tools/call",
-            json!({ "name": "fill_defaults", "arguments": { "schema_name": "note" } }),
+            json!({ "name": "fill_entity_defaults", "arguments": { "schema_name": "note" } }),
         )
         .await;
         assert_eq!(call["result"]["isError"], false, "MCP call: {call}");
@@ -114,9 +114,13 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         )
         .expect("serialized fill_defaults report");
         assert_eq!(report["schema_name"], "note");
-        assert!(report["job_id"].as_str().is_some());
+        assert!(report["migration_job_id"].as_str().is_some());
         assert!(report.get("entities_updated").is_none());
-        let job_id: Uuid = report["job_id"].as_str().unwrap().parse().unwrap();
+        let job_id: Uuid = report["migration_job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
         let pending = entity_entities::get(&ctx.db, workspace_id, entity.id)
             .await
             .unwrap();
@@ -135,7 +139,11 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             .expect("read filled entity");
         assert_eq!(updated.data, json!({ "title": "before", "priority": 7 }));
         assert_eq!(updated.schema_version, 1);
-        let job_id: Uuid = report["job_id"].as_str().unwrap().parse().unwrap();
+        let job_id: Uuid = report["migration_job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
 
         // The reader may read a job's status; undoing it needs a write permission.
         let denied = mcp_call(
@@ -144,7 +152,7 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             &read_key,
             10,
             "tools/call",
-            json!({"name":"undo_migration_job","arguments":{"job_id":job_id}}),
+            json!({"name":"undo_migration_job","arguments":{"migration_job_id":job_id}}),
         )
         .await;
         assert_eq!(denied["result"]["isError"], true);
@@ -154,7 +162,7 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             &migration_key,
             12,
             "tools/call",
-            json!({"name":"migration_job_status","arguments":{"job_id":job_id}}),
+            json!({"name":"get_migration_job","arguments":{"migration_job_id":job_id}}),
         )
         .await;
         assert_eq!(status["result"]["isError"], false);
@@ -172,7 +180,7 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             &migration_key,
             13,
             "tools/call",
-            json!({"name":"migration_job_status","arguments":{"job_id":Uuid::new_v4()}}),
+            json!({"name":"get_migration_job","arguments":{"migration_job_id":Uuid::new_v4()}}),
         )
         .await;
         assert_eq!(missing["result"]["isError"], true);
@@ -182,14 +190,14 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             &migration_key,
             14,
             "tools/call",
-            json!({"name":"undo_migration_job","arguments":{"job_id":job_id}}),
+            json!({"name":"undo_migration_job","arguments":{"migration_job_id":job_id}}),
         )
         .await;
         assert_eq!(undo["result"]["isError"], false, "{undo}");
         let undo: Value =
             serde_json::from_str(undo["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(undo["snapshot_job_id"], job_id.to_string());
-        let undo_id = undo["job_id"].as_str().unwrap().parse().unwrap();
+        let undo_id = undo["migration_job_id"].as_str().unwrap().parse().unwrap();
         crate::requests::jobs::finish_via_api(
             &request,
             &ctx,
@@ -225,7 +233,11 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         .await;
         assert_eq!(reindex["result"]["isError"], false, "{reindex}");
         let reindex = tool_result_json(&reindex);
-        let reindex_id: Uuid = reindex["job_id"].as_str().unwrap().parse().unwrap();
+        let reindex_id: Uuid = reindex["migration_job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
         let outbox =
             yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(reindex_id)
                 .one(&ctx.db)
@@ -239,7 +251,7 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             &migration_key,
             17,
             "tools/call",
-            json!({"name":"migration_job_status","arguments":{"job_id":reindex_id}}),
+            json!({"name":"get_migration_job","arguments":{"migration_job_id":reindex_id}}),
         )
         .await;
         assert_eq!(status["result"]["isError"], false, "{status}");
@@ -251,28 +263,18 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             .await;
         rest.assert_status(StatusCode::OK);
         assert_eq!(rest.json::<Value>()["job_name"], status["job_name"]);
-        assert_eq!(rest.json::<Value>()["job_id"], status["job_id"]);
-
-        let audit = request
-            .get("/api/audit-log")
-            .add_header("Authorization", format!("Bearer {audit_key}"))
-            .await;
         assert_eq!(
-            audit.status_code(),
-            StatusCode::OK,
-            "response: {}",
-            audit.text()
+            rest.json::<Value>()["migration_job_id"],
+            status["migration_job_id"]
         );
-        let entries: Vec<Value> = audit.json();
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry["action"] == "reindex_embeddings")
-        );
-        let fill_entry = entries
-            .iter()
-            .find(|entry| entry["action"] == "fill_defaults")
-            .expect("fill_defaults audit record");
+
+        let fill_entry = yorishiro::models::job_results::Entity::find()
+            .filter(yorishiro::models::_entities::job_results::Column::Action.eq("fill_defaults"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("fill_defaults job result");
+        let fill_entry = serde_json::json!({"detail": fill_entry.detail});
         assert_eq!(fill_entry["detail"]["schema_name"], "note");
         assert_eq!(fill_entry["detail"]["job_id"], job_id.to_string());
         assert_eq!(fill_entry["detail"]["entities_updated"], 1);

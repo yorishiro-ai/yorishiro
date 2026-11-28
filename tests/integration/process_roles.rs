@@ -34,12 +34,12 @@ async fn a_job_consumer_does_not_build_the_embedding_provider() {
         )
         .await;
         let accepted = request
-            .post("/api/import.jsonl")
+            .post("/api/import-jobs")
             .add_header("Authorization", format!("Bearer {}", fixture.api_key))
             .text("")
             .await;
         accepted.assert_status(axum::http::StatusCode::ACCEPTED);
-        let id = accepted.json::<serde_json::Value>()["job_id"]
+        let id = accepted.json::<serde_json::Value>()["import_job_id"]
             .as_str()
             .unwrap()
             .to_owned();

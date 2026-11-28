@@ -9,7 +9,7 @@ use loco_rs::{app::AppContext, bgworker::BackgroundWorker};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::models::queue_job_lifecycles::{Admission, Entity, LifecycleStatus};
+use crate::models::queue_job_lifecycles::{Admission, Entity, LifecycleStatus, TrailNote};
 use crate::workers::embedding_sync::WorkerClass;
 use crate::workers::target::WorkerTarget;
 
@@ -62,26 +62,56 @@ where
         }
     };
     let heartbeat = Entity::heartbeat(ctx.db.clone(), id, attempt);
-    let result = work().await;
+    // Every log line of the attempt carries the job's identifiers.
+    let span = tracing::info_span!(
+        "job",
+        lifecycle_id = %id,
+        attempt,
+        workspace_id = %workspace_id,
+        worker_class = class.as_db_str(),
+    );
+    let work = tracing::Instrument::instrument(work(), span);
+    // Jobs this attempt enqueues keep the request ID of the request that started it.
+    let request_id = Entity::request_id(&ctx.db, id)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "req-id-none".to_owned());
+    let (result, resources) =
+        crate::controllers::middleware::access_log::within_request(request_id, work).await;
     heartbeat.abort();
     match result {
         Ok(()) => {
-            Entity::finish(&ctx.db, id, Some(attempt), LifecycleStatus::Completed, None)
-                .await
-                .map_err(|error| message(&error))?;
+            Entity::finish_with_trail(
+                &ctx.db,
+                id,
+                Some(attempt),
+                LifecycleStatus::Completed,
+                None,
+                TrailNote {
+                    resources,
+                    error: None,
+                },
+            )
+            .await
+            .map_err(|error| message(&error))?;
             Ok(())
         }
         Err(error) => {
-            Entity::finish(
+            Entity::finish_with_trail(
                 &ctx.db,
                 id,
                 Some(attempt),
                 LifecycleStatus::Failed,
                 Some(&error.to_string()),
+                TrailNote {
+                    resources,
+                    error: Some(crate::error::describe_loco(&error)),
+                },
             )
             .await
             .map_err(|error| message(&error))?;
-            tracing::error!(lifecycle_id = %id, worker_class = class.as_db_str(), error = %error, "terminal worker failure");
+            tracing::error!(lifecycle_id = %id, attempt, workspace_id = %workspace_id, worker_class = class.as_db_str(), error = %error, "terminal worker failure");
             Err(error)
         }
     }

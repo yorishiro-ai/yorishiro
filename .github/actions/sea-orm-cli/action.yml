@@ -18,7 +18,7 @@ runs:
     # Prebuilt release binaries lack postgres-vector, so cache the source build instead.
     - name: Restore sea-orm-cli
       id: cache
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.cargo/bin/sea-orm-cli
         key: sea-orm-cli-local-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}-postgres-vector-sqlx-postgres-sqlx-sqlite

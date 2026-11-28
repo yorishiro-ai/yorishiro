@@ -1,5 +1,6 @@
 //! IAM model for attaching policies to groups.
 
+use crate::error::OptionExt;
 pub use crate::models::_entities::iam_group_policy_attachments::{
     ActiveModel, Column, Entity, Model,
 };
@@ -9,28 +10,66 @@ use crate::error::{ResultExt, YorishiroError};
 
 #[loco_rs::prelude::async_trait]
 impl ActiveModelBehavior for ActiveModel {
-    async fn before_save<C>(mut self, db: &C, _: bool) -> Result<Self, DbErr>
+    async fn before_save<C>(self, _db: &C, insert: bool) -> Result<Self, DbErr>
     where
         C: ConnectionTrait,
     {
-        self.id = crate::db::sqlite_generated_id(db, self.id);
-        Ok(self)
+        let mut this = self;
+        this.id = crate::db::generated_id(this.id);
+        this.created_at = crate::db::stamped_created_at(insert, this.created_at);
+        Ok(this)
     }
 }
 
 impl Model {
+    pub(crate) async fn count(
+        conn: &impl ConnectionTrait,
+        tenant_id: Uuid,
+        group_id: Uuid,
+    ) -> Result<u64, YorishiroError> {
+        Entity::find()
+            .filter(Column::TenantId.eq(tenant_id))
+            .filter(Column::GroupId.eq(group_id))
+            .count(conn)
+            .await
+            .internal()
+    }
+
+    /// Whether the group holds the managed `AdministratorAccess`.
+    pub(crate) async fn carries_administrator(
+        conn: &impl ConnectionTrait,
+        tenant_id: Uuid,
+        group_id: Uuid,
+    ) -> Result<bool, YorishiroError> {
+        let ids: Vec<Uuid> = Entity::find()
+            .filter(Column::TenantId.eq(tenant_id))
+            .filter(Column::GroupId.eq(group_id))
+            .all(conn)
+            .await
+            .internal()?
+            .into_iter()
+            .map(|row| row.policy_id)
+            .collect();
+        Ok(
+            crate::models::iam_policies::Model::attached(conn, tenant_id, ids)
+                .await?
+                .iter()
+                .any(|policy| policy.name == crate::models::iam::builtin::ADMINISTRATOR_ACCESS),
+        )
+    }
+
     pub(crate) async fn list_as(
         db: &DatabaseConnection,
-        actor: &crate::models::api_keys::AuthContext,
+        actor: &crate::models::access_keys::AuthContext,
         group_id: Uuid,
         params: crate::models::pagination::ListParams,
-    ) -> Result<Vec<Self>, YorishiroError> {
+    ) -> Result<Vec<crate::models::iam_policies::AttachedPolicy>, YorishiroError> {
         use crate::models::iam::policy::{Action, Resource};
         let txn = crate::db::begin_write(db).await.internal()?;
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            Action::GroupPolicyList,
+            Action::ListAttachedGroupPolicies,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
@@ -42,7 +81,7 @@ impl Model {
         {
             return Err(YorishiroError::not_found("IAM group was not found"));
         }
-        let rows = Entity::find()
+        let ids = Entity::find()
             .filter(Column::TenantId.eq(actor.tenant_id))
             .filter(Column::GroupId.eq(group_id))
             .order_by_asc(Column::Id)
@@ -50,14 +89,19 @@ impl Model {
             .offset(params.offset())
             .all(&txn)
             .await
-            .internal()?;
+            .internal()?
+            .into_iter()
+            .map(|row| row.policy_id)
+            .collect();
+        let policies =
+            crate::models::iam_policies::Model::attached(&txn, actor.tenant_id, ids).await?;
         txn.commit().await.internal()?;
-        Ok(rows)
+        Ok(policies)
     }
 
     pub(crate) async fn add_as(
         db: &DatabaseConnection,
-        actor: &crate::models::api_keys::AuthContext,
+        actor: &crate::models::access_keys::AuthContext,
         group_id: Uuid,
         policy_id: Uuid,
     ) -> Result<(), YorishiroError> {
@@ -66,26 +110,30 @@ impl Model {
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            Action::GroupPolicyAttach,
+            Action::AttachGroupPolicy,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
         )
         .await?;
-        crate::models::iam_groups::Model::require_user_managed(&txn, actor.tenant_id, group_id)
-            .await?;
-        if crate::models::iam_policies::Model::find(&txn, actor.tenant_id, policy_id)
+        if crate::models::iam_groups::Model::find(&txn, actor.tenant_id, group_id)
             .await?
             .is_none()
         {
-            return Err(YorishiroError::not_found("IAM policy was not found"));
+            return Err(YorishiroError::not_found("IAM group was not found"));
+        }
+        let policy = crate::models::iam_policies::Model::find(&txn, actor.tenant_id, policy_id)
+            .await?
+            .or_not_found("IAM policy was not found")?;
+        if policy.is_administrator_access() {
+            crate::models::iam::access::require_administrator(&txn, actor).await?;
         }
         Self::add(&txn, actor.tenant_id, group_id, policy_id).await?;
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
-            "group_policy_attach",
-            serde_json::json!({"group_id":group_id,"policy_id":policy_id}),
+            Action::AttachGroupPolicy,
+            serde_json::json!({"group_id": group_id, "policy_id": policy_id, "policy_name": policy.name}),
         )
         .await?;
         txn.commit().await.internal()?;
@@ -94,7 +142,7 @@ impl Model {
 
     pub(crate) async fn remove_as(
         db: &DatabaseConnection,
-        actor: &crate::models::api_keys::AuthContext,
+        actor: &crate::models::access_keys::AuthContext,
         group_id: Uuid,
         policy_id: Uuid,
     ) -> Result<(), YorishiroError> {
@@ -103,28 +151,23 @@ impl Model {
         crate::models::iam::access::require_iam_action(
             &txn,
             actor,
-            Action::GroupPolicyDetach,
+            Action::DetachGroupPolicy,
             Resource::Tenant {
                 tenant_id: actor.tenant_id,
             },
         )
         .await?;
-        crate::models::iam_groups::Model::require_user_managed(&txn, actor.tenant_id, group_id)
-            .await?;
-        if crate::models::iam_policies::Model::find(&txn, actor.tenant_id, policy_id)
+        let policy = crate::models::iam_policies::Model::find(&txn, actor.tenant_id, policy_id)
             .await?
-            .is_none()
-        {
-            return Err(YorishiroError::not_found("IAM policy was not found"));
-        }
+            .or_not_found("IAM policy was not found")?;
         if !Self::remove(&txn, actor.tenant_id, group_id, policy_id).await? {
             return Err(YorishiroError::not_found("group association was not found"));
         }
-        crate::models::iam_audit_events::record(
+        crate::models::api_events::record(
             &txn,
             actor,
-            "group_policy_detach",
-            serde_json::json!({"group_id":group_id,"policy_id":policy_id}),
+            Action::DetachGroupPolicy,
+            serde_json::json!({"group_id": group_id, "policy_id": policy_id, "policy_name": policy.name}),
         )
         .await?;
         txn.commit().await.internal()?;

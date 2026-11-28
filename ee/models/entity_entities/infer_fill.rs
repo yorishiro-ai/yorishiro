@@ -1,6 +1,4 @@
 //! Finding the entities `infer_fill` should consider.
-//!
-//! Finding the entities eligible for infer-fill remains separate from proposal persistence.
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::entity_entities as content_entities_entity;
@@ -19,9 +17,7 @@ pub(crate) struct OutdatedEntity {
 /// Every entity in `workspace_id` still on a version of the schema named `name` other than `active_schema_id`.
 /// The set `infer_fill` walks: an entity already on the active version has nothing the schema says is missing.
 ///
-/// `schema_schemas` rows sharing `(workspace_id, name)` are versions of the same logical schema, so this first
-/// collects every version's id, then filters `entity_entities` by membership in that set: an entity-API
-/// equivalent of the join, since neither table needs a column the other doesn't already expose.
+/// `schema_schemas` rows sharing `(workspace_id, name)` are versions of one schema, so this collects every version's id and filters entities by membership in that set.
 pub(crate) async fn entities_on_outdated_schema(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,

@@ -6,9 +6,10 @@
 
 use std::sync::Arc;
 
+use super::super::data::provider::{check_client, check_error, validate_credentials};
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::_entities::workspace_embedding_keys::{ActiveModel, Column, Entity};
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 use crate::models::iam::policy::Action;
 use crate::services::embedding::{
     EmbeddingProvider, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
@@ -24,24 +25,46 @@ pub(crate) async fn configure(
     request: crate::edition::ee::dtos::embedding::SetEmbeddingKeyRequest,
 ) -> Result<(), YorishiroError> {
     let workspace_id = actor.require_workspace()?;
-    let txn =
-        super::iam::access::workspace_transaction(&ctx.db, actor, Action::EmbeddingProviderUpdate)
-            .await?;
+    let action = Action::UpdateWorkspaceEmbeddingProvider;
+    super::iam::access::workspace_transaction(&ctx.db, actor, action)
+        .await?
+        .commit()
+        .await
+        .internal()?;
+    let config = OpenAiCompatibleConfig {
+        base_url: validate_credentials(&request.base_url, &request.api_key)?.into(),
+        model: request.model,
+        api_key: request.api_key,
+        dimensions: dimension_count(request.dimensions)?,
+        send_dimensions_param: request.send_dimensions_param,
+        query_instruction: request.query_instruction,
+        document_prefix: request.document_prefix,
+    };
+    let sample = OpenAiCompatibleProvider::with_client(config.clone(), check_client()?)
+        .embed_as(
+            crate::services::embedding::EmbedKind::Document,
+            "Provider check",
+        )
+        .await
+        .map_err(|error| check_error(&config.base_url, error))?;
+    crate::models::entity_embeddings::validate_vector(&sample, config.dimensions)?;
+
+    let txn = super::iam::access::workspace_transaction(&ctx.db, actor, action).await?;
     let previous = get(&txn, workspace_id).await?;
     let query_only = previous.as_ref().is_some_and(|old| {
-        old.base_url == request.base_url.trim_end_matches('/')
-            && old.model == request.model
-            && old.api_key == request.api_key
-            && i32::try_from(old.dimensions).ok() == Some(request.dimensions)
-            && old.send_dimensions_param == request.send_dimensions_param
-            && old.document_prefix == request.document_prefix
+        old.base_url == config.base_url
+            && old.model == config.model
+            && old.api_key == config.api_key
+            && old.dimensions == config.dimensions
+            && old.send_dimensions_param == config.send_dimensions_param
+            && old.document_prefix == config.document_prefix
     });
     if query_only {
-        // SQLite fires BEFORE INSERT even for an upsert conflict; avoid document invalidation.
+        // A query-only change keeps stored document vectors valid, so it skips the revision bump and the reindex.
         Entity::update_many()
             .col_expr(
                 Column::QueryInstruction,
-                sea_orm::sea_query::Expr::value(request.query_instruction),
+                sea_orm::sea_query::Expr::value(config.query_instruction),
             )
             .col_expr(
                 Column::UpdatedAt,
@@ -54,18 +77,7 @@ pub(crate) async fn configure(
         txn.commit().await.internal()?;
         return Ok(());
     }
-    set_with_instructions(
-        &txn,
-        workspace_id,
-        &request.base_url,
-        &request.model,
-        &request.api_key,
-        request.dimensions,
-        request.send_dimensions_param,
-        &request.query_instruction,
-        &request.document_prefix,
-    )
-    .await?;
+    save(&txn, workspace_id, config).await?;
     crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
         .await
         .internal()?;
@@ -75,18 +87,22 @@ pub(crate) async fn configure(
 
 /// Builds the workspace's assigned provider without loading the deployment default.
 pub(crate) async fn resolve(
-    conn: &sea_orm::DatabaseConnection,
+    ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
 ) -> Result<Option<Arc<dyn EmbeddingProvider>>, YorishiroError> {
-    let Some(config) = get(conn, workspace_id).await? else {
+    let Some(config) = get(&ctx.db, workspace_id).await? else {
         return Ok(None);
     };
-    Ok(Some(Arc::new(OpenAiCompatibleProvider::new(config))))
+    let settings = crate::data::settings::configured(ctx).internal()?;
+    Ok(Some(Arc::new(OpenAiCompatibleProvider::with_timeouts(
+        config,
+        settings.http_timeouts,
+    ))))
 }
 
 /// What a workspace has configured, without the key itself.
 ///
-/// `api_key` is deliberately absent rather than masked, matching `workspace_llm_keys::LlmKeyDescription`: a masked value still travels through logs and proxies, and nothing a caller does needs it back.
+/// `api_key` is absent rather than masked, as in `workspace_llm_keys::LlmKeyDescription`.
 #[derive(Clone, Serialize, sea_orm::FromQueryResult, schemars::JsonSchema)]
 #[schemars(rename = "EmbeddingKeyResponse")]
 pub(crate) struct EmbeddingKeyDescription {
@@ -100,51 +116,7 @@ pub(crate) struct EmbeddingKeyDescription {
     pub(crate) configured: bool,
 }
 
-/// Stores a provider assignment and invalidates the workspace embedding generation.
-/// Callers enqueue a full reindex in the same transaction.
-///
-/// # Errors
-/// Returns an error when credentials, dimensions, or persistence are invalid.
-pub async fn set(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    base_url: &str,
-    model: &str,
-    api_key: &str,
-    dimensions: i32,
-    send_dimensions_param: bool,
-) -> Result<(), YorishiroError> {
-    set_with_instructions(
-        conn,
-        workspace_id,
-        base_url,
-        model,
-        api_key,
-        dimensions,
-        send_dimensions_param,
-        "",
-        "",
-    )
-    .await
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors the table columns written in one statement"
-)]
-async fn set_with_instructions(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    base_url: &str,
-    model: &str,
-    api_key: &str,
-    dimensions: i32,
-    send_dimensions_param: bool,
-    query_instruction: &str,
-    document_prefix: &str,
-) -> Result<(), YorishiroError> {
-    let base_url = crate::edition::ee::data::provider::validate_credentials(base_url, api_key)?;
-
+fn dimension_count(dimensions: i32) -> Result<usize, YorishiroError> {
     if !(1..=4096).contains(&dimensions) {
         return Err(YorishiroError::ValidationFailed {
             message: "dimensions must be between 1 and 4096".into(),
@@ -152,18 +124,29 @@ async fn set_with_instructions(
             hint: "set it to the embedding model's own output width".into(),
         });
     }
+    usize::try_from(dimensions).internal()
+}
+
+async fn save(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+    config: OpenAiCompatibleConfig,
+) -> Result<(), YorishiroError> {
     let active = ActiveModel {
         workspace_id: ActiveValue::Set(workspace_id),
-        base_url: ActiveValue::Set(base_url.to_string()),
-        model: ActiveValue::Set(model.to_string()),
-        api_key: ActiveValue::Set(api_key.to_string()),
-        dimensions: ActiveValue::Set(dimensions),
-        send_dimensions_param: ActiveValue::Set(send_dimensions_param),
-        query_instruction: ActiveValue::Set(query_instruction.to_owned()),
-        document_prefix: ActiveValue::Set(document_prefix.to_owned()),
+        base_url: ActiveValue::Set(config.base_url),
+        model: ActiveValue::Set(config.model),
+        api_key: ActiveValue::Set(config.api_key),
+        dimensions: ActiveValue::Set(i32::try_from(config.dimensions).internal()?),
+        send_dimensions_param: ActiveValue::Set(config.send_dimensions_param),
+        query_instruction: ActiveValue::Set(config.query_instruction),
+        document_prefix: ActiveValue::Set(config.document_prefix),
         updated_at: ActiveValue::Set(crate::data::time::now().into()),
         ..Default::default()
     };
+    let active = sea_orm::ActiveModelBehavior::before_save(active, conn, true)
+        .await
+        .internal()?;
     Entity::insert(active)
         .on_conflict(
             OnConflict::column(Column::WorkspaceId)
@@ -182,6 +165,32 @@ async fn set_with_instructions(
         .exec(conn)
         .await
         .internal()?;
+    touch_provider_revision(conn, workspace_id).await?;
+    Ok(())
+}
+
+/// Marks the workspace's embedding provider as changed, which stales in-flight publication and requires a reindex.
+async fn touch_provider_revision(
+    conn: &impl ConnectionTrait,
+    workspace_id: Uuid,
+) -> Result<(), YorishiroError> {
+    use crate::models::_entities::workspace_workspaces::{
+        Column as Workspace, Entity as Workspaces,
+    };
+    use sea_orm::ExprTrait;
+    Workspaces::update_many()
+        .col_expr(
+            Workspace::EmbeddingRevision,
+            sea_orm::sea_query::Expr::col(Workspace::EmbeddingRevision).add(1),
+        )
+        .col_expr(
+            Workspace::EmbeddingReindexing,
+            sea_orm::sea_query::Expr::value(true),
+        )
+        .filter(Workspace::Id.eq(workspace_id))
+        .exec(conn)
+        .await
+        .internal()?;
     Ok(())
 }
 
@@ -191,11 +200,14 @@ pub(crate) async fn clear(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
 ) -> Result<(), YorishiroError> {
-    Entity::delete_many()
+    let result = Entity::delete_many()
         .filter(Column::WorkspaceId.eq(workspace_id))
         .exec(conn)
         .await
         .internal()?;
+    if result.rows_affected > 0 {
+        touch_provider_revision(conn, workspace_id).await?;
+    }
     Ok(())
 }
 
@@ -204,9 +216,12 @@ pub(crate) async fn remove(
     actor: &AuthContext,
 ) -> Result<(), YorishiroError> {
     let workspace_id = actor.require_workspace()?;
-    let txn =
-        super::iam::access::workspace_transaction(&ctx.db, actor, Action::EmbeddingProviderDelete)
-            .await?;
+    let txn = super::iam::access::workspace_transaction(
+        &ctx.db,
+        actor,
+        Action::DeleteWorkspaceEmbeddingProvider,
+    )
+    .await?;
     clear(&txn, workspace_id).await?;
     crate::workers::reindex::enqueue_reindex(ctx, workspace_id, Some(&txn))
         .await
@@ -222,7 +237,8 @@ pub(crate) async fn describe_as(
     actor: &AuthContext,
 ) -> Result<Option<EmbeddingKeyDescription>, YorishiroError> {
     let txn =
-        super::iam::access::workspace_transaction(db, actor, Action::EmbeddingProviderGet).await?;
+        super::iam::access::workspace_transaction(db, actor, Action::GetWorkspaceEmbeddingProvider)
+            .await?;
     describe(&txn, actor.require_workspace()?).await
 }
 

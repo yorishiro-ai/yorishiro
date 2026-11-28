@@ -12,8 +12,10 @@ use crate::models::_entities::entity_entities::Column;
 use crate::models::entity_entities::{Entity, EntityRecord};
 
 /// Updates an entity only when it still has the timestamp read by the caller.
-/// PostgreSQL callers also lock the row before reading it, while SQLite's transaction-level
-/// single-writer rule protects this transaction-scoped confirmation path.
+/// PostgreSQL callers lock the row before reading it, and the timestamp filter guards the write.
+/// SQLite's single writer protects the confirmation transaction instead.
+///
+/// `update_many` skips model hooks, so this sets the timestamp, sync token, content revision and full-text row itself.
 pub(crate) async fn update_if_unchanged(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
@@ -29,11 +31,20 @@ pub(crate) async fn update_if_unchanged(
         .col_expr(Column::SchemaVersion, Expr::value(schema_version))
         .col_expr(Column::UpdatedBy, Expr::value(updated_by))
         .col_expr(Column::UpdatedAt, Expr::value(crate::data::time::now()))
+        .col_expr(
+            Column::EmbeddingSyncToken,
+            Expr::value(crate::models::entity_entities::new_sync_token()),
+        )
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::Id.eq(existing.id));
     if crate::db::is_postgres(conn) {
         update = update.filter(Column::UpdatedAt.eq(existing.updated_at));
     }
     let result = update.exec(conn).await.internal()?;
+    if result.rows_affected == 1 {
+        crate::models::entity_entities::touch_content_revision(conn, workspace_id)
+            .await
+            .internal()?;
+    }
     Ok(result.rows_affected == 1)
 }

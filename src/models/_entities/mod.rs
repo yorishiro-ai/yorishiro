@@ -2,23 +2,25 @@
 
 pub mod prelude;
 
-pub mod api_key_audit_log;
-pub mod api_keys;
+pub mod access_keys;
+pub mod api_events;
 pub mod compute_credit_ledger;
 pub mod entity_column_preferences;
 pub mod entity_embeddings;
 pub mod entity_entities;
 pub mod entity_relations;
 pub mod entity_snapshots;
-pub mod iam_audit_events;
 pub mod iam_group_memberships;
 pub mod iam_group_policy_attachments;
 pub mod iam_groups;
 pub mod iam_policies;
+pub mod iam_policy_versions;
 pub mod iam_tenant_roots;
 pub mod iam_user_policy_attachments;
+pub mod import_staging;
 pub mod inference_jobs;
 pub mod inference_proposals;
+pub mod job_results;
 pub mod query_embedding_requests;
 pub mod queue_job_dispatch_outbox;
 pub mod queue_job_lifecycles;
@@ -30,7 +32,6 @@ pub mod template_templates;
 pub mod template_versions;
 pub mod tenant_billing;
 pub mod tenant_memberships;
-pub mod tenant_reindex_schedules;
 pub mod tenant_retirement_events;
 pub mod tenant_tenants;
 pub mod user_users;

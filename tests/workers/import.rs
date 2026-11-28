@@ -21,7 +21,7 @@ async fn queued_import_rechecks_expired_credentials_before_writing() {
 async fn queued_import_rechecks_inactive_credentials(expired: bool) {
     use axum::http::StatusCode;
     use serde_json::json;
-    use yorishiro::models::{api_keys, schema_schemas};
+    use yorishiro::models::{access_keys, schema_schemas};
 
     boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let tenant = crate::requests::fixtures::TestTenant::create(
@@ -30,11 +30,10 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
             crate::requests::fixtures::TenantArgs::default(),
         )
         .await;
-        let key = api_keys::Entity::create_api_key(
+        let key = crate::requests::fixtures::create_key(
             &ctx.db,
             tenant.workspace_id,
             Some(tenant.owner_id),
-            false,
         )
         .await
         .unwrap();
@@ -47,7 +46,7 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
         }})
         .to_string();
         let response = request
-            .post("/api/import.jsonl")
+            .post("/api/import-jobs")
             .add_header("Authorization", format!("Bearer {}", key.plaintext))
             .text(jsonl)
             .await;
@@ -57,7 +56,7 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
             "{}",
             response.text()
         );
-        let id = response.json::<serde_json::Value>()["job_id"]
+        let id = response.json::<serde_json::Value>()["import_job_id"]
             .as_str()
             .unwrap()
             .parse()
@@ -65,7 +64,7 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
         if expired {
             use sea_orm::{ActiveModelTrait, ActiveValue::Set};
             // Direct write (c): the key must expire between the request and the job finishing, which issuance cannot produce.
-            api_keys::ActiveModel {
+            access_keys::ActiveModel {
                 id: Set(key.id),
                 expires_at: Set(Some(
                     (chrono::Utc::now() - chrono::Duration::seconds(1)).fixed_offset(),
@@ -76,7 +75,7 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
             .await
             .unwrap();
         } else {
-            api_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
+            access_keys::Entity::revoke(&ctx.db, key.id).await.unwrap();
         }
         finish_job(
             &ctx,
@@ -98,7 +97,7 @@ async fn queued_import_rechecks_inactive_credentials(expired: bool) {
 async fn queued_import_rechecks_iam_policies_before_writing() {
     use axum::http::StatusCode;
     use serde_json::json;
-    use yorishiro::models::{api_keys, schema_schemas, tenancy};
+    use yorishiro::models::{schema_schemas, tenancy};
 
     boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
         let tenant = crate::requests::fixtures::TestTenant::create(
@@ -118,11 +117,10 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
         .await
         .unwrap();
         txn.commit().await.unwrap();
-        let key = api_keys::Entity::create_api_key(
+        let key = crate::requests::fixtures::create_key(
             &ctx.db,
             tenant.workspace_id,
             Some(member.id),
-            false,
         )
         .await
         .unwrap();
@@ -135,37 +133,35 @@ async fn queued_import_rechecks_iam_policies_before_writing() {
         }})
         .to_string();
         let iam_key = crate::requests::fixtures::issue_tenant_key(&ctx, tenant.tenant_id, tenant.owner_id).await;
-        let document = json!({"statements":[{"effect":"allow","actions":["import_create"],
-            "resources":[{"type":"workspace","tenant_id":tenant.tenant_id,"workspace_id":tenant.workspace_id}]}]});
-        let policy = request.post("/api/iam/policies")
+        let document = json!({"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["workspace:CreateImportJob"],
+            "Resource":[format!("yrn:workspace:{}:{}", tenant.tenant_id, tenant.workspace_id)]}]});
+        let policy = request.post("/api/policies")
             .add_header("Authorization", format!("Bearer {iam_key}"))
             .json(&json!({"name":"queued-import","document":document})).await;
         policy.assert_status(StatusCode::CREATED);
-        let policy_id = policy.json::<serde_json::Value>()["id"].as_str().unwrap().to_owned();
-        let attachment = format!("/api/iam/users/{}/policies/{policy_id}", member.id);
+        let policy_id = policy.json::<serde_json::Value>()["policy_id"].as_str().unwrap().to_owned();
+        let attachment = format!("/api/users/{}/policies/{policy_id}", member.id);
         let session = crate::controllers::mcp::initialize(&request).await;
         for explicit_deny in [false, true] {
             request.put(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);
             let id: Uuid = if explicit_deny {
                 let queued = crate::controllers::mcp::call_tool(&request, &session, &key.plaintext,
-                    "import_jsonl", json!({"jsonl":jsonl})).await;
+                    "create_import_job", json!({"jsonl":jsonl})).await;
                 assert_ne!(queued["result"]["isError"], true, "{queued}");
                 let queued: serde_json::Value = serde_json::from_str(queued["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-                queued["job_id"].as_str().unwrap().parse().unwrap()
+                queued["import_job_id"].as_str().unwrap().parse().unwrap()
             } else {
-                let queued = request.post("/api/import.jsonl")
+                let queued = request.post("/api/import-jobs")
                     .add_header("Authorization", format!("Bearer {}", key.plaintext))
                     .text(jsonl.clone()).await;
                 queued.assert_status(StatusCode::ACCEPTED);
-                queued.json::<serde_json::Value>()["job_id"].as_str().unwrap().parse().unwrap()
+                queued.json::<serde_json::Value>()["import_job_id"].as_str().unwrap().parse().unwrap()
             };
             if explicit_deny {
                 let mut deny = document.clone();
-                deny["statements"][0]["effect"] = json!("deny");
-                request.put(&format!("/api/iam/policies/{policy_id}"))
-                    .add_header("Authorization", format!("Bearer {iam_key}"))
-                    .json(&json!({"name":"queued-import","document":deny})).await.assert_status_ok();
+                deny["Statement"][0]["Effect"] = json!("Deny");
+                crate::requests::fixtures::replace_policy_document(&request, &format!("Bearer {iam_key}"), &policy_id, &deny).await;
             }
             request.delete(&attachment).add_header("Authorization", format!("Bearer {iam_key}"))
                 .await.assert_status(StatusCode::NO_CONTENT);

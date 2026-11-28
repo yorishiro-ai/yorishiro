@@ -1,3 +1,4 @@
+use crate::error::OptionExt;
 use serde::Serialize;
 
 use crate::error::YorishiroError;
@@ -46,6 +47,7 @@ pub const TEMPLATES: &[BuiltinTemplate] = &[
 /// Summary of a built-in schema template, returned by `list_templates` so a caller can pick a `template_id` without first fetching every template's full definition.
 #[derive(Clone, Serialize, schemars::JsonSchema)]
 pub struct TemplateSummary {
+    #[serde(rename = "template_id")]
     pub id: String,
     pub name: String,
     pub description: Option<String>,
@@ -83,5 +85,5 @@ pub fn get_template(id: &str) -> Result<MetaSchemaDefinition, YorishiroError> {
         .iter()
         .find(|template| template.id == id)
         .map(parse)
-        .ok_or_else(|| YorishiroError::not_found(format!("no template named '{id}'")))
+        .or_not_found(format!("no template named '{id}'"))
 }

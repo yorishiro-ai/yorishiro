@@ -102,6 +102,12 @@ async fn recover_pending_on_while(
             && row.worker_name
                 != crate::workers::query_embedding::QueryEmbeddingWorker::class_name()
         {
+            tracing::warn!(
+                dispatch_id = %row.id,
+                worker = %row.worker_name,
+                job_name = %row.job_name,
+                "dispatch outbox: skipped a row that names no lifecycle"
+            );
             return;
         }
         if let Some(deadline) = row.deadline_at

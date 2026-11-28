@@ -1,14 +1,15 @@
 //! The community MCP server: tool router composition, result rendering and the `/mcp` transport mount.
 //! Each submodule defines the tools of one feature, and the overlay adds its own through `McpToolSet`.
 
-mod api_keys;
-mod audit_log;
+mod access_keys;
 pub(crate) mod authorize;
+mod caller_identity;
 pub mod entities;
 mod export;
+mod groups;
 mod iam;
 mod import;
-mod members;
+mod policies;
 pub(crate) mod policy;
 mod recall;
 pub mod relations;
@@ -18,7 +19,6 @@ mod server;
 mod template_library;
 mod tenants;
 mod users;
-mod whoami;
 mod workspaces;
 
 use std::collections::HashSet;
@@ -41,10 +41,9 @@ use rmcp::{ServerHandler, tool_handler};
 
 use crate::controllers::middleware::auth;
 use crate::error::YorishiroError;
-use crate::models::api_keys::AuthContext;
+use crate::models::access_keys::AuthContext;
 
 pub(crate) use authorize::{VerifyOutcome, verify};
-use authorize::{extract_bearer_key, header_error};
 pub use policy::{McpToolPolicy, McpToolSet};
 pub use server::YorishiroMcpServer;
 
@@ -55,7 +54,8 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_entities(),
         YorishiroMcpServer::tool_router_export(),
         YorishiroMcpServer::tool_router_import(),
-        YorishiroMcpServer::tool_router_members(),
+        YorishiroMcpServer::tool_router_groups(),
+        YorishiroMcpServer::tool_router_policies(),
         YorishiroMcpServer::tool_router_recall(),
         YorishiroMcpServer::tool_router_relations(),
         YorishiroMcpServer::tool_router_schemas(),
@@ -63,10 +63,9 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_template_library(),
         YorishiroMcpServer::tool_router_tenants(),
         YorishiroMcpServer::tool_router_iam(),
-        YorishiroMcpServer::tool_router_whoami(),
+        YorishiroMcpServer::tool_router_caller_identity(),
         YorishiroMcpServer::tool_router_workspaces(),
-        YorishiroMcpServer::tool_router_api_keys(),
-        YorishiroMcpServer::tool_router_audit_log(),
+        YorishiroMcpServer::tool_router_access_keys(),
         YorishiroMcpServer::tool_router_users(),
     ])
 }
@@ -94,7 +93,11 @@ pub fn compose_tool_routers(
 /// Converts a business-logic error into a tool call result (`is_error: true`).
 /// `Internal` errors are logged with detail but only a generic message reaches the client, matching the REST adapter's `ApiError` policy.
 pub(crate) fn err_to_tool_result(err: YorishiroError) -> CallToolResult {
-    let (_, body) = err.into_http_parts();
+    crate::controllers::middleware::access_log::failed(&err);
+    let (status, body) = err.into_http_parts();
+    if crate::controllers::middleware::access_log::is_denial(status) {
+        crate::controllers::middleware::access_log::denied();
+    }
     let mut message = body["error"]["message"]
         .as_str()
         .unwrap_or("request failed")
@@ -152,7 +155,13 @@ pub(crate) fn render<T: serde::Serialize>(
     result.map_or_else(|error| Ok(err_to_tool_result(error)), ok_json)
 }
 
+/// An object result also travels as `structuredContent`, so a client reads fields without parsing text.
+/// Any other value (a list, a scalar) stays a text block, as MCP requires `structuredContent` to be an object.
 pub(crate) fn ok_json(value: impl serde::Serialize) -> Result<CallToolResult, ErrorData> {
+    let value = serde_json::to_value(&value).map_err(crate::error::mcp_internal)?;
+    if value.is_object() {
+        return Ok(CallToolResult::structured(value));
+    }
     let text = serde_json::to_string(&value).map_err(crate::error::mcp_internal)?;
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }

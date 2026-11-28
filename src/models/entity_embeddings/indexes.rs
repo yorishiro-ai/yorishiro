@@ -1,14 +1,12 @@
 //! Per-workspace partial HNSW indexes on the `entity_embeddings` partitions.
 //!
-//! Every workspace at or above the promotion threshold gets one partial HNSW index on the
-//! partition that holds its vectors, rebuilt when the workspace's stamped width changes.
-//! Up to pgvector's full-precision limit the index expression is the original vector;
-//! above it a normalized `halfvec`; above the half-precision limit the first 4,000 dimensions.
-//! The index selects candidates; every search reranks them in original full-precision coordinates.
+//! Every workspace at or above the promotion threshold gets one partial HNSW index on the partition that holds its vectors, rebuilt when the workspace's stamped width changes.
+//! Up to pgvector's full-precision limit the index expression is the original vector.
+//! Above it the expression is a normalized `halfvec`, and above the half-precision limit the first 4,000 dimensions.
+//! The index selects candidates, and every search reranks them in original full-precision coordinates.
 //!
-//! Maintenance is opportunistic and idempotent: a second concurrent invocation skips on the
-//! session advisory lock, and workspaces mid-reindex keep their current valid indexes until
-//! atomic vector publication finishes.
+//! Maintenance is idempotent: a concurrent invocation skips on the session advisory lock.
+//! Workspaces mid-reindex keep their valid indexes until vector publication finishes.
 
 use std::collections::HashSet;
 
@@ -49,26 +47,18 @@ struct CandidateRow {
 /// Returns an error on catalog, connection, or concurrent index DDL failure.
 pub async fn maintain_workspace_indexes(db: &DatabaseConnection) -> Result<(), YorishiroError> {
     use sea_orm::sqlx::AssertSqlSafe;
-    if !crate::db::is_postgres(db) {
+    let Some(pool) = crate::db::postgres_pool(db) else {
         return Ok(());
-    }
+    };
     // Concurrent index DDL cannot run in a transaction; close the detached session on every exit.
-    let mut conn = db
-        .get_postgres_connection_pool()
-        .acquire()
-        .await
-        .internal()?
-        .detach();
+    let Some(mut conn) =
+        crate::db::postgres_session_lock(pool, "embedding-index-maintenance", false)
+            .await
+            .internal()?
+    else {
+        return Ok(());
+    };
     let outcome: Result<(), YorishiroError> = async {
-        let locked: bool = sea_orm::sqlx::query_scalar(
-            "SELECT pg_try_advisory_lock(hashtextextended('embedding-index-maintenance', 0))",
-        )
-        .fetch_one(&mut conn)
-        .await
-        .internal()?;
-        if !locked {
-            return Ok(());
-        }
         // One aggregate over workspaces, stored vectors, and the index catalog: only workspaces
         // above the threshold or already indexed come back, so a busy database does not pay a
         // per-workspace count for the workspaces that need nothing.
