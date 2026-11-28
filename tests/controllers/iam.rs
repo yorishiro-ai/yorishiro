@@ -260,12 +260,6 @@ async fn root_sessions_have_full_access_but_issued_keys_retain_their_limits() {
             .json(&serde_json::json!({"template_id":"general-notes"}))
             .await
             .assert_status(StatusCode::CREATED);
-        request
-            .get("/api/audit-log")
-            .add_header("Authorization", format!("Bearer {root}"))
-            .add_header("x-workspace-id", &workspace)
-            .await
-            .assert_status_ok();
         let session = crate::controllers::mcp::initialize(&request).await;
         let result = crate::controllers::mcp::call_tool(
             &request,

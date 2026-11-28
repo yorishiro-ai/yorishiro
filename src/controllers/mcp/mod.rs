@@ -2,7 +2,6 @@
 //! Each submodule defines the tools of one feature, and the overlay adds its own through `McpToolSet`.
 
 mod access_keys;
-mod audit_log;
 pub(crate) mod authorize;
 mod caller_identity;
 pub mod entities;
@@ -67,7 +66,6 @@ pub fn community_tool_router() -> ToolRouter<YorishiroMcpServer> {
         YorishiroMcpServer::tool_router_caller_identity(),
         YorishiroMcpServer::tool_router_workspaces(),
         YorishiroMcpServer::tool_router_access_keys(),
-        YorishiroMcpServer::tool_router_audit_log(),
         YorishiroMcpServer::tool_router_users(),
     ])
 }

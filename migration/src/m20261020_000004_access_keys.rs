@@ -12,12 +12,12 @@ impl MigrationTrait for Migration {
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         Box::pin(up_access_keys(manager)).await?;
-        Box::pin(up_access_key_audit_log(manager)).await?;
+        Box::pin(up_job_results(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        Box::pin(down_access_key_audit_log(manager)).await?;
+        Box::pin(down_job_results(manager)).await?;
         Box::pin(down_access_keys(manager)).await?;
         Ok(())
     }
@@ -122,9 +122,9 @@ async fn down_access_keys(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     Ok(())
 }
 
-async fn up_access_key_audit_log(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+async fn up_job_results(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let table = Table::create()
-        .table(Alias::new("access_key_audit_log"))
+        .table(Alias::new("job_results"))
         .col(helpers::uuidv7_pk(manager))
         .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
         .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
@@ -135,25 +135,22 @@ async fn up_access_key_audit_log(manager: &SchemaManager<'_>) -> Result<(), DbEr
         .col(helpers::created_at(manager))
         .foreign_key(
             ForeignKey::create()
-                .name("fk_access_key_audit_log_workspace_id")
-                .from(
-                    Alias::new("access_key_audit_log"),
-                    Alias::new("workspace_id"),
-                )
+                .name("fk_job_results_workspace_id")
+                .from(Alias::new("job_results"), Alias::new("workspace_id"))
                 .to(Alias::new("workspace_workspaces"), Alias::new("id"))
                 .on_delete(ForeignKeyAction::Cascade),
         )
         .foreign_key(
             ForeignKey::create()
-                .name("fk_access_key_audit_log_tenant_id")
-                .from(Alias::new("access_key_audit_log"), Alias::new("tenant_id"))
+                .name("fk_job_results_tenant_id")
+                .from(Alias::new("job_results"), Alias::new("tenant_id"))
                 .to(Alias::new("tenant_tenants"), Alias::new("id"))
                 .on_delete(ForeignKeyAction::Cascade),
         )
         .foreign_key(
             ForeignKey::create()
-                .name("fk_access_key_audit_log_user_id")
-                .from(Alias::new("access_key_audit_log"), Alias::new("user_id"))
+                .name("fk_job_results_user_id")
+                .from(Alias::new("job_results"), Alias::new("user_id"))
                 .to(Alias::new("user_users"), Alias::new("id"))
                 .on_delete(ForeignKeyAction::SetNull),
         )
@@ -161,11 +158,11 @@ async fn up_access_key_audit_log(manager: &SchemaManager<'_>) -> Result<(), DbEr
 
     helpers::create_table_with_checks(
         manager,
-        "access_key_audit_log",
+        "job_results",
         table,
         &[(
-            "access_key_audit_log_action_check",
-            "action IN ('undo_migration_job', 'reindex_embeddings', 'fill_defaults', 'background_job_completed')",
+            "job_results_action_check",
+            "action IN ('undo_migration_job', 'fill_defaults', 'background_job_completed')",
         )],
     )
     .await?;
@@ -173,8 +170,8 @@ async fn up_access_key_audit_log(manager: &SchemaManager<'_>) -> Result<(), DbEr
     manager
         .create_index(
             Index::create()
-                .name("access_key_audit_log_workspace_id_created_at_idx")
-                .table(Alias::new("access_key_audit_log"))
+                .name("job_results_workspace_id_created_at_idx")
+                .table(Alias::new("job_results"))
                 .col(Alias::new("workspace_id"))
                 .col(Alias::new("created_at"))
                 .to_owned(),
@@ -183,7 +180,7 @@ async fn up_access_key_audit_log(manager: &SchemaManager<'_>) -> Result<(), DbEr
 
     helpers::enable_rls_with_policy(
         manager,
-        "access_key_audit_log",
+        "job_results",
         "workspace_isolation",
         "workspace_id",
         "app.current_workspace",
@@ -191,18 +188,14 @@ async fn up_access_key_audit_log(manager: &SchemaManager<'_>) -> Result<(), DbEr
     )
     .await?;
 
-    helpers::grant(manager, "SELECT, INSERT", "access_key_audit_log").await?;
+    helpers::grant(manager, "SELECT, INSERT", "job_results").await?;
 
     Ok(())
 }
 
-async fn down_access_key_audit_log(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+async fn down_job_results(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     manager
-        .drop_table(
-            Table::drop()
-                .table(Alias::new("access_key_audit_log"))
-                .to_owned(),
-        )
+        .drop_table(Table::drop().table(Alias::new("job_results")).to_owned())
         .await?;
 
     Ok(())

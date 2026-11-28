@@ -3,7 +3,6 @@
 
 // REST resources: one module per resource, matching `dtos/`.
 pub(crate) mod access_keys;
-pub mod audit_log;
 pub mod auth;
 pub(crate) mod caller_identity;
 pub mod entities;

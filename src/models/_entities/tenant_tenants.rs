@@ -18,8 +18,6 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::access_key_audit_log::Entity")]
-    AccessKeyAuditLog,
     #[sea_orm(has_many = "super::access_keys::Entity")]
     AccessKeys,
     #[sea_orm(has_many = "super::iam_groups::Entity")]
@@ -28,6 +26,8 @@ pub enum Relation {
     IamPolicies,
     #[sea_orm(has_many = "super::import_staging::Entity")]
     ImportStaging,
+    #[sea_orm(has_many = "super::job_results::Entity")]
+    JobResults,
     #[sea_orm(has_many = "super::schema_schemas::Entity")]
     SchemaSchemas,
     #[sea_orm(has_many = "super::template_reviews::Entity")]
@@ -44,12 +44,6 @@ pub enum Relation {
     WorkspaceSchemaForks,
     #[sea_orm(has_many = "super::workspace_workspaces::Entity")]
     WorkspaceWorkspaces,
-}
-
-impl Related<super::access_key_audit_log::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::AccessKeyAuditLog.def()
-    }
 }
 
 impl Related<super::access_keys::Entity> for Entity {
@@ -73,6 +67,12 @@ impl Related<super::iam_policies::Entity> for Entity {
 impl Related<super::import_staging::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ImportStaging.def()
+    }
+}
+
+impl Related<super::job_results::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::JobResults.def()
     }
 }
 

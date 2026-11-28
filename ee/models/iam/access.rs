@@ -28,7 +28,7 @@ pub(crate) async fn workspace_transaction(
 pub(crate) async fn authorize_job_actor(
     txn: &DatabaseTransaction,
     identity: &DatabaseConnection,
-    actor: &crate::models::access_key_audit_log::AuditActor,
+    actor: &crate::models::job_results::JobActor,
     action: crate::models::iam::policy::Action,
 ) -> Result<Option<DatabaseTransaction>, YorishiroError> {
     let presented = AuthContext {

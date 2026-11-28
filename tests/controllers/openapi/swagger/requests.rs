@@ -55,10 +55,7 @@ async fn openapi_document_is_mounted_with_enterprise_routes() {
             ["x-yorishiro-licence-required"].is_null());
         assert!(document["paths"]["/api/stripe/webhook"]["post"]["responses"]["500"]["content"]
             .is_null());
-        assert_eq!(
-            document["paths"]["/api/audit-log"]["get"]["operationId"],
-            "ListWorkspaceAuditEvents"
-        );
+        assert!(document["paths"]["/api/audit-log"].is_null());
         assert_eq!(
             document["paths"]["/api/users"]["get"]["operationId"],
             "ListUsers"

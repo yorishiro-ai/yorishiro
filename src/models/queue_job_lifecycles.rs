@@ -61,7 +61,7 @@ pub(crate) async fn bulk_job_status(
     allowed_jobs: &[&str],
 ) -> Result<BulkJobStatus, crate::YorishiroError> {
     use crate::error::ResultExt;
-    use crate::models::access_key_audit_log::{self, AuditAction};
+    use crate::models::job_results::{self, JobKind};
     let row = Entity::find_by_id(id)
         .filter(Column::WorkspaceId.eq(workspace_id))
         .filter(Column::JobName.is_in(allowed_jobs.iter().copied()))
@@ -70,17 +70,17 @@ pub(crate) async fn bulk_job_status(
         .internal()?
         .or_not_found("migration job not found")?;
     let action = if row.job_name == "undo" {
-        AuditAction::UndoMigrationJob
+        JobKind::UndoMigrationJob
     } else if row.job_name == "fill_defaults" {
-        AuditAction::FillDefaults
+        JobKind::FillDefaults
     } else {
-        AuditAction::BackgroundJobCompleted
+        JobKind::BackgroundJobCompleted
     };
     let status = LifecycleStatus::from_row(&row.status).internal()?;
     Ok(BulkJobStatus {
         job_name: row.job_name,
         status,
-        result: access_key_audit_log::job_result(db, workspace_id, id, action).await?,
+        result: job_results::job_result(db, workspace_id, id, action).await?,
         error: (status == LifecycleStatus::Failed).then(|| public_job_error(row.error.as_deref())),
     })
 }

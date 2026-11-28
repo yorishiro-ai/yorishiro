@@ -1,15 +1,16 @@
-//! Records of workspace operations an operator needs an after-the-fact record of: who did it, when, against which workspace, and what.
+//! The durable result of a bulk job: what it did, committed with its effects.
 //!
-//! A new audited operation extends [`AuditAction`], whose values the `action` CHECK constraint must also allow.
+//! A committed row makes redelivery of the job a no-op and carries the report a client reads back.
+//! The API trail, not this table, records who did what; a new job kind extends [`JobKind`], whose values the `action` CHECK constraint must also allow.
 //!
 //! The table is append-only: `yorishiro_app` holds `SELECT, INSERT` on it and nothing else.
 
+use sea_orm::ActiveValue;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, QueryOrder, QuerySelect};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-pub use crate::models::_entities::access_key_audit_log::{ActiveModel, Entity, Model};
+pub use crate::models::_entities::job_results::{ActiveModel, Entity, Model};
 use crate::models::db_enum::db_enum;
 
 #[loco_rs::prelude::async_trait]
@@ -30,7 +31,7 @@ pub(crate) async fn job_completed(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     job_id: Uuid,
-    action: AuditAction,
+    action: JobKind,
 ) -> Result<bool, YorishiroError> {
     Ok(job_result(conn, workspace_id, job_id, action)
         .await?
@@ -41,9 +42,9 @@ pub(crate) async fn job_result(
     conn: &impl ConnectionTrait,
     workspace_id: Uuid,
     job_id: Uuid,
-    action: AuditAction,
+    action: JobKind,
 ) -> Result<Option<serde_json::Value>, YorishiroError> {
-    use crate::models::_entities::access_key_audit_log::Column;
+    use crate::models::_entities::job_results::Column;
     use sea_orm::QuerySelect;
     use sea_orm::{
         ExprTrait,
@@ -71,11 +72,9 @@ db_enum! {
     /// The closed set of operations this table records.
     /// It matches the `action` CHECK constraint string for string.
     #[derive(Clone, Copy, PartialEq, Eq)]
-    pub enum AuditAction {
+    pub enum JobKind {
         /// `entity_entities::undo_job`: a batch undo, restoring every entity a job's snapshots cover.
         UndoMigrationJob = "undo_migration_job",
-        /// `embedding::reindex_workspace`: an embedding reindex, replacing all vectors in a workspace with those from a new model.
-        ReindexEmbeddings = "reindex_embeddings",
         /// `entity_entities::fill_defaults`: a batch fill of absent required fields.
         FillDefaults = "fill_defaults",
         /// A bulk worker's durable result, committed with its effects.
@@ -89,7 +88,7 @@ db_enum! {
     clippy::struct_field_names,
     reason = "serialized audit identifiers must remain distinct from the records they identify"
 )]
-pub(crate) struct AuditActor {
+pub(crate) struct JobActor {
     pub workspace_id: Uuid,
     pub tenant_id: Uuid,
     pub access_key_id: Uuid,
@@ -104,8 +103,8 @@ pub(crate) struct AuditActor {
 /// A `conn` must therefore have set `app.current_workspace` to `actor.workspace_id`, unless it is the migration role.
 pub(crate) async fn record(
     conn: &impl ConnectionTrait,
-    actor: AuditActor,
-    action: AuditAction,
+    actor: JobActor,
+    action: JobKind,
     detail: serde_json::Value,
 ) -> Result<(), YorishiroError> {
     tracing::info!(
@@ -129,62 +128,4 @@ pub(crate) async fn record(
     };
     active.insert(conn).await.internal()?;
     Ok(())
-}
-
-/// The workspace's audit trail, most recent first, capped by the page limit.
-///
-/// # Errors
-/// Returns an error if the query fails.
-pub async fn list_for_workspace(
-    conn: &impl ConnectionTrait,
-    workspace_id: Uuid,
-    page: crate::models::pagination::ListParams,
-) -> Result<Vec<Model>, YorishiroError> {
-    use crate::models::_entities::access_key_audit_log::Column;
-
-    Entity::find()
-        .filter(Column::WorkspaceId.eq(workspace_id))
-        .order_by_desc(Column::CreatedAt)
-        .order_by_desc(Column::Id)
-        .limit(page.limit())
-        .offset(page.offset())
-        .all(conn)
-        .await
-        .internal()
-}
-
-pub(crate) async fn list_for_actor(
-    ctx: &loco_rs::app::AppContext,
-    actor: &crate::models::access_keys::AuthContext,
-    page: crate::models::pagination::ListParams,
-) -> Result<Vec<Model>, YorishiroError> {
-    use crate::models::_entities::access_key_audit_log::Column;
-    use crate::models::iam::{access::read_workspaces, policy::Action};
-    let workspaces = read_workspaces(&ctx.db, actor, Action::ListWorkspaceAuditEvents).await?;
-    if workspaces.is_empty() {
-        return Err(YorishiroError::AccessDenied {
-            message: format!(
-                "no workspace permits {}",
-                Action::ListWorkspaceAuditEvents.qualified()
-            ),
-            hint: "request an applicable IAM policy grant".into(),
-        });
-    }
-    let txn = crate::db::begin_workspace_list(ctx, actor.tenant_id, &workspaces).await?;
-    let records = if let [workspace] = workspaces.as_slice() {
-        list_for_workspace(&txn, *workspace, page).await?
-    } else {
-        Entity::find()
-            .filter(Column::WorkspaceId.is_in(workspaces))
-            .filter(Column::TenantId.eq(actor.tenant_id))
-            .order_by_desc(Column::CreatedAt)
-            .order_by_desc(Column::Id)
-            .limit(page.limit())
-            .offset(page.offset())
-            .all(&txn)
-            .await
-            .internal()?
-    };
-    txn.commit().await.internal()?;
-    Ok(records)
 }

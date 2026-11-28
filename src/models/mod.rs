@@ -27,8 +27,8 @@ pub mod workspace_worker_classes;
 pub mod workspace_workspaces;
 
 // Access keys.
-pub mod access_key_audit_log;
 pub mod access_keys;
+pub mod job_results;
 
 // The append-only trail of every call.
 pub mod api_events;

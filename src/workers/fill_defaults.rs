@@ -5,7 +5,7 @@ use loco_rs::{app::AppContext, bgworker::BackgroundWorker, prelude::async_trait}
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::models::{access_key_audit_log, entity_entities};
+use crate::models::{entity_entities, job_results};
 use crate::workers::{
     dispatch::{JobSpec, dispatch_job},
     embedding_sync::WorkerClass,
@@ -58,11 +58,11 @@ impl FillDefaultsWorker {
         crate::db::lock_for_update(&txn, &format!("fill-defaults:{job_id}"))
             .await
             .map_err(loco_rs::Error::wrap)?;
-        if access_key_audit_log::job_completed(
+        if job_results::job_completed(
             &txn,
             args.workspace_id,
             job_id,
-            access_key_audit_log::AuditAction::FillDefaults,
+            job_results::JobKind::FillDefaults,
         )
         .await
         .map_err(loco_rs::Error::wrap)?
@@ -95,13 +95,13 @@ impl FillDefaultsWorker {
         )
         .await
         .map_err(loco_rs::Error::wrap)?;
-        access_key_audit_log::record(
+        job_results::record(
             &txn,
-            access_key_audit_log::AuditActor {
+            job_results::JobActor {
                 tenant_id: args.tenant_id, workspace_id: args.workspace_id,
                 access_key_id: args.access_key_id, user_id: args.user_id,
             },
-            access_key_audit_log::AuditAction::FillDefaults,
+            job_results::JobKind::FillDefaults,
             serde_json::json!({"schema_name": args.schema_name, "job_id": job_id,
                 "entities_updated": report.entities_updated, "fields_filled": report.fields_filled}),
         ).await.map_err(loco_rs::Error::wrap)?;

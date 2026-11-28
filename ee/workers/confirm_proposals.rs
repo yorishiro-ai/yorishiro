@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::{
-    access_key_audit_log::{self, AuditAction, AuditActor},
     access_keys::AuthContext,
+    job_results::{self, JobActor, JobKind},
 };
 use crate::workers::{
     dispatch::{JobSpec, dispatch_job},
@@ -60,18 +60,13 @@ impl ConfirmProposalsWorker {
             .await
             .internal()?;
         let mut authorization = None;
-        if !access_key_audit_log::job_completed(
-            &txn,
-            args.workspace_id,
-            id,
-            AuditAction::BackgroundJobCompleted,
-        )
-        .await?
+        if !job_results::job_completed(&txn, args.workspace_id, id, JobKind::BackgroundJobCompleted)
+            .await?
         {
             authorization = crate::ee::models::iam::access::authorize_job_actor(
                 &txn,
                 &self.ctx.db,
-                &AuditActor {
+                &JobActor {
                     tenant_id: args.tenant_id,
                     workspace_id: args.workspace_id,
                     access_key_id: args.access_key_id,
@@ -87,10 +82,10 @@ impl ConfirmProposalsWorker {
                 args.user_id,
             )
             .await?;
-            access_key_audit_log::record(&txn, AuditActor {
+            job_results::record(&txn, JobActor {
                 tenant_id: args.tenant_id, workspace_id: args.workspace_id,
                 access_key_id: args.access_key_id, user_id: args.user_id,
-            }, AuditAction::BackgroundJobCompleted, serde_json::json!({"job_id": id, "inference_job_id": args.inference_job_id, "confirmed": report.confirmed, "stale": report.stale, "invalid": report.invalid})).await?;
+            }, JobKind::BackgroundJobCompleted, serde_json::json!({"job_id": id, "inference_job_id": args.inference_job_id, "confirmed": report.confirmed, "stale": report.stale, "invalid": report.invalid})).await?;
         }
         txn.commit().await.internal()?;
         if let Some(authorization) = authorization {
@@ -110,7 +105,7 @@ pub(crate) async fn enqueue(
     let authorization = crate::ee::models::iam::access::authorize_job_actor(
         &txn,
         &ctx.db,
-        &AuditActor {
+        &JobActor {
             tenant_id: auth.tenant_id,
             workspace_id: auth.require_workspace()?,
             access_key_id: auth.access_key_id,

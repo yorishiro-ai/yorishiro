@@ -12,8 +12,8 @@ use super::{
 };
 use crate::error::{ResultExt, YorishiroError};
 use crate::models::{
-    access_key_audit_log::{self, AuditAction, AuditActor},
     access_keys::AuthContext,
+    job_results::{self, JobActor, JobKind},
 };
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -63,13 +63,8 @@ impl ImportWorker {
         crate::db::lock_for_update(&txn, &format!("import:{id}"))
             .await
             .internal()?;
-        if !access_key_audit_log::job_completed(
-            &txn,
-            args.workspace_id,
-            id,
-            AuditAction::BackgroundJobCompleted,
-        )
-        .await?
+        if !job_results::job_completed(&txn, args.workspace_id, id, JobKind::BackgroundJobCompleted)
+            .await?
         {
             crate::models::iam::access::require_iam_action(
                 authorization.as_ref().unwrap_or(&txn),
@@ -109,10 +104,10 @@ impl ImportWorker {
                 .await?;
             }
             crate::models::import_staging::remove(&txn, args.staging_id).await?;
-            access_key_audit_log::record(&txn, AuditActor {
+            job_results::record(&txn, JobActor {
                 tenant_id: args.tenant_id, workspace_id: args.workspace_id,
                 access_key_id: args.access_key_id, user_id: args.user_id,
-            }, AuditAction::BackgroundJobCompleted, serde_json::json!({"job_id": id, "schemas": result.schemas, "entities": result.entities, "relations": result.relations})).await?;
+            }, JobKind::BackgroundJobCompleted, serde_json::json!({"job_id": id, "schemas": result.schemas, "entities": result.entities, "relations": result.relations})).await?;
         }
         txn.commit().await.internal()?;
         if let Some(authorization) = authorization {

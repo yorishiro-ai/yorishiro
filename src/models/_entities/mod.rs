@@ -2,7 +2,6 @@
 
 pub mod prelude;
 
-pub mod access_key_audit_log;
 pub mod access_keys;
 pub mod api_events;
 pub mod compute_credit_ledger;
@@ -21,6 +20,7 @@ pub mod iam_user_policy_attachments;
 pub mod import_staging;
 pub mod inference_jobs;
 pub mod inference_proposals;
+pub mod job_results;
 pub mod query_embedding_requests;
 pub mod queue_job_dispatch_outbox;
 pub mod queue_job_lifecycles;

@@ -42,7 +42,6 @@ pub(crate) fn workspace_selection_tool(name: &str) -> bool {
             | "get_schema"
             | "get_import_job"
             | "create_import_job"
-            | "list_workspace_audit_events"
             | "list_attached_group_policies"
             | "list_attached_user_policies"
             | "list_entities"

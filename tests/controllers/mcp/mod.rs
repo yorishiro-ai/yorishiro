@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 mod access_keys;
-mod audit_log;
 mod authorize;
 mod caller_identity;
 mod entities;

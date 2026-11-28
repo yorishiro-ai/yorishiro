@@ -9,7 +9,7 @@ const TABLES: [&str; 6] = [
     "entity_entities",
     "entity_relations",
     "schema_schemas",
-    "access_key_audit_log",
+    "job_results",
     "entity_column_preferences",
     "workspace_schema_forks",
 ];

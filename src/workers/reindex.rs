@@ -250,7 +250,6 @@ pub(crate) async fn enqueue_requested(
     actor: &crate::models::access_keys::AuthContext,
 ) -> Result<String, YorishiroError> {
     use crate::error::ResultExt;
-    use crate::models::access_key_audit_log::{self, AuditAction, AuditActor};
     if ctx.queue_provider.is_none() {
         return Err(YorishiroError::BackendUnavailable {
             message: "reindex requires a queue provider (configure queue: in the server config)"
@@ -266,18 +265,6 @@ pub(crate) async fn enqueue_requested(
             tenant_id: actor.tenant_id,
             workspace_id: actor.require_workspace()?,
         },
-    )
-    .await?;
-    access_key_audit_log::record(
-        txn,
-        AuditActor {
-            workspace_id: actor.require_workspace()?,
-            tenant_id: actor.tenant_id,
-            access_key_id: actor.access_key_id,
-            user_id: actor.user_id,
-        },
-        AuditAction::ReindexEmbeddings,
-        serde_json::json!({"workspace_id":actor.require_workspace()?}),
     )
     .await?;
     let worker_class =

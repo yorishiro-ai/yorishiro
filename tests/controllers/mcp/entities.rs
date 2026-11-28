@@ -1,4 +1,5 @@
 use axum::http::StatusCode;
+use sea_orm::{ColumnTrait, QueryFilter};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use yorishiro::App;
@@ -23,12 +24,11 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
         let TestTenant {
             tenant_id,
             workspace_id,
-            owner_id,
             api_key: migration_key,
+            ..
         } = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
         let administrator = crate::requests::fixtures::create_iam_reader(&ctx, tenant_id).await;
         let read_key = issue_access_key(&ctx, workspace_id, administrator).await;
-        let audit_key = issue_access_key(&ctx, workspace_id, owner_id).await;
 
         let v1 = serde_json::from_value(serde_json::json!({
             "name": "note",
@@ -268,26 +268,13 @@ async fn fill_defaults_mcp_executes_and_enforces_migration_scope() {
             status["migration_job_id"]
         );
 
-        let audit = request
-            .get("/api/audit-log")
-            .add_header("Authorization", format!("Bearer {audit_key}"))
-            .await;
-        assert_eq!(
-            audit.status_code(),
-            StatusCode::OK,
-            "response: {}",
-            audit.text()
-        );
-        let entries: Vec<Value> = audit.json();
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry["action"] == "reindex_embeddings")
-        );
-        let fill_entry = entries
-            .iter()
-            .find(|entry| entry["action"] == "fill_defaults")
-            .expect("fill_defaults audit record");
+        let fill_entry = yorishiro::models::job_results::Entity::find()
+            .filter(yorishiro::models::_entities::job_results::Column::Action.eq("fill_defaults"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("fill_defaults job result");
+        let fill_entry = serde_json::json!({"detail": fill_entry.detail});
         assert_eq!(fill_entry["detail"]["schema_name"], "note");
         assert_eq!(fill_entry["detail"]["job_id"], job_id.to_string());
         assert_eq!(fill_entry["detail"]["entities_updated"], 1);

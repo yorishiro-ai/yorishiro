@@ -24,7 +24,7 @@ use crate::models::schema_schemas;
 /// Arguments for an infer-fill worker job.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InferFillArgs {
-    actor: crate::models::access_key_audit_log::AuditActor,
+    actor: crate::models::job_results::JobActor,
     #[serde(default)]
     pub lifecycle_id: Option<Uuid>,
     pub job_id: Uuid,
@@ -517,7 +517,7 @@ pub async fn enqueue_infer_fill(
     let authorization = crate::ee::models::iam::access::authorize_job_actor(
         &txn,
         &ctx.db,
-        &crate::models::access_key_audit_log::AuditActor {
+        &crate::models::job_results::JobActor {
             tenant_id: auth.tenant_id,
             workspace_id,
             access_key_id: auth.access_key_id,
@@ -544,7 +544,7 @@ pub async fn enqueue_infer_fill(
     crate::edition::ee::workers::dispatch::dispatch_infer_fill(
         ctx,
         InferFillArgs {
-            actor: crate::models::access_key_audit_log::AuditActor {
+            actor: crate::models::job_results::JobActor {
                 tenant_id: auth.tenant_id,
                 workspace_id,
                 access_key_id: auth.access_key_id,

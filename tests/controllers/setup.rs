@@ -159,13 +159,6 @@ async fn setup_bootstraps_once_and_refuses_a_second_call() {
         let identity: serde_json::Value = caller_identity.json();
         assert_eq!(identity["workspace_id"], workspace_id);
         assert_eq!(identity["identity_kind"], "user");
-        let audit_log = request
-            .get("/api/audit-log")
-            .add_header("Authorization", &auth)
-            .add_header("x-workspace-id", workspace_id)
-            .await;
-        audit_log.assert_status_ok();
-
         let status = request.get("/setup/status").await;
         let body: serde_json::Value = status.json();
         assert_eq!(

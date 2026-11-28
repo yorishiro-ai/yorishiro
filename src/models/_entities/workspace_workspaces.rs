@@ -32,8 +32,6 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::access_key_audit_log::Entity")]
-    AccessKeyAuditLog,
     #[sea_orm(has_many = "super::compute_credit_ledger::Entity")]
     ComputeCreditLedger,
     #[sea_orm(has_many = "super::entity_column_preferences::Entity")]
@@ -50,6 +48,8 @@ pub enum Relation {
     InferenceJobs,
     #[sea_orm(has_many = "super::inference_proposals::Entity")]
     InferenceProposals,
+    #[sea_orm(has_many = "super::job_results::Entity")]
+    JobResults,
     #[sea_orm(has_many = "super::query_embedding_requests::Entity")]
     QueryEmbeddingRequests,
     #[sea_orm(
@@ -74,12 +74,6 @@ pub enum Relation {
     WorkspaceLlmKeys,
     #[sea_orm(has_one = "super::workspace_worker_classes::Entity")]
     WorkspaceWorkerClasses,
-}
-
-impl Related<super::access_key_audit_log::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::AccessKeyAuditLog.def()
-    }
 }
 
 impl Related<super::compute_credit_ledger::Entity> for Entity {
@@ -127,6 +121,12 @@ impl Related<super::inference_jobs::Entity> for Entity {
 impl Related<super::inference_proposals::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::InferenceProposals.def()
+    }
+}
+
+impl Related<super::job_results::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::JobResults.def()
     }
 }
 

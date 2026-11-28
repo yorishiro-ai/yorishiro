@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ResultExt, YorishiroError};
-use crate::models::{access_key_audit_log, access_keys::AuthContext, entity_entities};
+use crate::models::{access_keys::AuthContext, entity_entities, job_results};
 use crate::workers::{
     dispatch::{JobSpec, dispatch_job},
     embedding_sync::WorkerClass,
@@ -60,11 +60,11 @@ impl UndoWorker {
         crate::db::lock_for_update(&txn, &format!("undo:{id}"))
             .await
             .internal()?;
-        if access_key_audit_log::job_completed(
+        if job_results::job_completed(
             &txn,
             args.workspace_id,
             id,
-            access_key_audit_log::AuditAction::UndoMigrationJob,
+            job_results::JobKind::UndoMigrationJob,
         )
         .await?
         {
@@ -88,15 +88,15 @@ impl UndoWorker {
         .await?;
         let report =
             entity_entities::undo_job(&txn, args.workspace_id, args.snapshot_job_id).await?;
-        access_key_audit_log::record(
+        job_results::record(
             &txn,
-            access_key_audit_log::AuditActor {
+            job_results::JobActor {
                 tenant_id: args.tenant_id,
                 workspace_id: args.workspace_id,
                 access_key_id: args.access_key_id,
                 user_id: args.user_id,
             },
-            access_key_audit_log::AuditAction::UndoMigrationJob,
+            job_results::JobKind::UndoMigrationJob,
             serde_json::json!({"job_id": id, "snapshot_job_id": args.snapshot_job_id,
                 "restored": report.restored, "missing": report.missing}),
         )

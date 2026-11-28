@@ -112,7 +112,6 @@ impl RouteMounts {
             .guard_credentials("/auth/root/login")
             .guard_credentials("/auth/tenant/login");
 
-        mounts.mount(controllers::audit_log::routes());
         mounts.mount(controllers::access_keys::routes());
         mounts.mount(controllers::auth::routes());
         mounts.mount(controllers::entities::routes());

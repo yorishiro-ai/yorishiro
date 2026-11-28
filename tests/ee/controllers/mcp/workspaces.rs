@@ -69,7 +69,7 @@ async fn workspace_tools_share_rest_details_updates_and_binding_limits() {
                 .add_header(header, invalid.clone()).await
                 .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 
-            for (id, tool) in [(2, "get_caller_identity"), (3, "list_schemas"), (4, "list_workspace_audit_events")] {
+            for (id, tool) in [(2, "get_caller_identity"), (3, "list_schemas"), (4, "list_entities")] {
                 let response = request.post("/mcp")
                     .add_header("Accept", "application/json, text/event-stream")
                     .add_header("MCP-Session-Id", session.clone())
