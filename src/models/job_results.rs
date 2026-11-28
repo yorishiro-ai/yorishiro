@@ -48,13 +48,16 @@ pub(crate) async fn job_result(
     use sea_orm::QuerySelect;
     use sea_orm::{
         ExprTrait,
-        sea_query::{Alias, Expr, Func, extension::postgres::PgExpr},
+        sea_query::{
+            Expr,
+            extension::{postgres::PgExpr, sqlite::SqliteExpr},
+        },
     };
     let job = match conn.get_database_backend() {
-        sea_orm::DatabaseBackend::Postgres => Expr::col(Column::Detail).cast_json_field("job_id"),
-        _ => Func::cust(Alias::new("json_extract"))
-            .args([Expr::col(Column::Detail), Expr::val("$.job_id")])
-            .into(),
+        sea_orm::DatabaseBackend::Postgres => {
+            PgExpr::cast_json_field(Expr::col(Column::Detail), "job_id")
+        }
+        _ => SqliteExpr::cast_json_field(Expr::col(Column::Detail), "job_id"),
     };
     Entity::find()
         .filter(Column::WorkspaceId.eq(workspace_id))
