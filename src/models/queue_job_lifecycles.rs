@@ -5,7 +5,6 @@ pub use crate::models::_entities::queue_job_lifecycles::{ActiveModel, Column, En
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DatabaseTransaction, ExprTrait, PaginatorTrait, QuerySelect};
-use tokio::task::JoinHandle;
 
 use crate::models::db_enum::db_enum;
 
@@ -360,7 +359,7 @@ impl Entity {
     }
 
     pub(crate) fn heartbeat(db: DatabaseConnection, id: Uuid, attempt: i32) -> Heartbeat {
-        Heartbeat(tokio::spawn(async move {
+        Heartbeat::new(tokio::spawn(async move {
             let mut ticker =
                 tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS));
             ticker.tick().await;
@@ -724,19 +723,7 @@ async fn claim(
 /// Keeps one running attempt's lease alive until it is dropped.
 ///
 /// Dropping it stops the renewal task, so a cancelled or panicking worker cannot keep extending the lease of a job nobody runs.
-pub(crate) struct Heartbeat(JoinHandle<()>);
-
-impl Heartbeat {
-    pub(crate) fn abort(self) {
-        drop(self);
-    }
-}
-
-impl Drop for Heartbeat {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
+pub(crate) type Heartbeat = tokio_util::task::AbortOnDropHandle<()>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Admission {
