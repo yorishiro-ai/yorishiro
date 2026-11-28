@@ -36,6 +36,11 @@ For installation without Docker, see [packages](https://yorishiro-ai.github.io/w
 The `PowerUserAccess` managed policy excludes IAM and tenant administration and includes read access to the API activity trail, where IAM changes appear as the resources of the request that made them.
 Use `WorkspaceViewerAccess` or `WorkspaceContributorAccess` for workspace data access without tenant audit access.
 
+Every REST request, MCP call, job attempt, scheduler task and CLI command leaves a row in the API trail: when, from where, by whom, on what and with what outcome.
+A row holds identifiers and paging numbers only, never entry data, query text, definitions or keys.
+`settings.limits.audit_retention_days` (365 by default) sets how long rows are kept.
+Read a tenant's rows with `GET /api/api-events` (filter by `request_id`, `correlation_id` or `resource`); read the rows of a retired tenant, or of no tenant, with `cargo loco task read_audit_events tenant_id=<uuid|none>`.
+
 Yorishiro sends the embedded text of each entity to the provider whole and does not truncate it.
 An input above the provider's token limit fails that entity, and a reindex publishes only when every entity succeeds.
 
