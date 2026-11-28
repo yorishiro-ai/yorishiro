@@ -23,7 +23,8 @@ pub(crate) struct ImportArgs {
     workspace_id: Uuid,
     access_key_id: Uuid,
     user_id: Option<Uuid>,
-    jsonl: String,
+    /// The `import_staging` row that holds the body.
+    staging_id: Uuid,
     worker_class: WorkerClass,
 }
 
@@ -85,13 +86,16 @@ impl ImportWorker {
                 },
             )
             .await?;
+            let body = crate::models::import_staging::body(&txn, args.staging_id)
+                .await?
+                .or_internal("the import body is missing")?;
             let quotas = crate::data::quotas::for_tenant(&self.ctx, args.tenant_id).await?;
             let result = crate::models::transfer::import::import_with_quota(
                 &txn,
                 args.tenant_id,
                 args.workspace_id,
                 args.user_id,
-                args.jsonl.as_bytes(),
+                body.as_bytes(),
                 quotas.entities,
             )
             .await?;
@@ -104,6 +108,7 @@ impl ImportWorker {
                 )
                 .await?;
             }
+            crate::models::import_staging::remove(&txn, args.staging_id).await?;
             access_key_audit_log::record(&txn, AuditActor {
                 tenant_id: args.tenant_id, workspace_id: args.workspace_id,
                 access_key_id: args.access_key_id, user_id: args.user_id,
@@ -157,13 +162,16 @@ pub(crate) async fn enqueue(
     .await?;
     let worker_class =
         crate::workers::target::resolve_worker_class(ctx, auth.require_workspace()?).await?;
+    let workspace_id = auth.require_workspace()?;
+    let staging_id =
+        crate::models::import_staging::stage(txn, auth.tenant_id, workspace_id, jsonl).await?;
     let args = ImportArgs {
         lifecycle_id: None,
         tenant_id: auth.tenant_id,
         workspace_id: auth.require_workspace()?,
         access_key_id: auth.access_key_id,
         user_id: auth.user_id,
-        jsonl,
+        staging_id,
         worker_class,
     };
     let id = dispatch_job(

@@ -358,3 +358,47 @@ async fn embedding_jobs_of_an_import_keep_the_request_that_started_it() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn the_queue_payload_names_the_import_body_and_never_carries_it() {
+    use sea_orm::EntityTrait;
+    boot_request::<App, _, _>(|request, ctx| async move {
+        let tenant = TestTenant::create(&request, &ctx, TenantArgs::default()).await;
+        let body = "{\"kind\":\"relation\",\"record\":{\"marker\":\"payload-secret-text\"}}\n";
+        let accepted = request
+            .post("/api/import-jobs")
+            .add_header("Authorization", format!("Bearer {}", tenant.api_key))
+            .text(body)
+            .await;
+        accepted.assert_status(StatusCode::ACCEPTED);
+        let id: uuid::Uuid = accepted.json::<serde_json::Value>()["import_job_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let outbox =
+            yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap();
+        let payload = outbox.payload.to_string();
+        assert!(!payload.contains("payload-secret-text"), "{payload}");
+        assert!(outbox.payload["staging_id"].is_string(), "{payload}");
+        let staged = yorishiro::models::import_staging::Entity::find()
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(staged.len(), 1);
+        assert_eq!(staged[0].body, body);
+        // The malformed line fails the job; the body then waits for the purge instead of staying in the queue.
+        crate::requests::jobs::finish_job(
+            &ctx,
+            id,
+            "failed",
+            Some((&request, &tenant.api_key, &format!("/api/import-jobs/{id}"))),
+        )
+        .await;
+    })
+    .await;
+}

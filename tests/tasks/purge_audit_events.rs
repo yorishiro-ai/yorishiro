@@ -128,3 +128,52 @@ async fn the_operator_reads_rows_no_tenant_owns() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn the_task_removes_import_bodies_whose_job_never_completed() {
+    use yorishiro::models::import_staging;
+    crate::requests::boot_request::<yorishiro::App, _, _>(|request, ctx| async move {
+        let tenant = crate::requests::fixtures::TestTenant::create(
+            &request,
+            &ctx,
+            crate::requests::fixtures::TenantArgs::default(),
+        )
+        .await;
+        let mut ids = Vec::new();
+        for age_days in [8, 6] {
+            // Direct write (a): a body of a chosen age cannot be staged through a request.
+            let row = import_staging::ActiveModel {
+                tenant_id: Set(tenant.tenant_id),
+                workspace_id: Set(tenant.workspace_id),
+                body: Set("body".into()),
+                created_at: Set(
+                    (chrono::Utc::now() - chrono::Duration::days(age_days)).fixed_offset()
+                ),
+                ..Default::default()
+            }
+            .insert(&ctx.db)
+            .await
+            .unwrap();
+            ids.push(row.id);
+        }
+        yorishiro::tasks::purge_audit_events::PurgeAuditEvents
+            .run(&ctx, &Vars::default())
+            .await
+            .unwrap();
+        assert!(
+            import_staging::Entity::find_by_id(ids[0])
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            import_staging::Entity::find_by_id(ids[1])
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    })
+    .await;
+}

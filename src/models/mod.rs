@@ -67,6 +67,7 @@ pub mod search;
 pub mod transfer;
 
 // Queue bookkeeping and system state.
+pub mod import_staging;
 pub mod queue_job_dispatch_outbox;
 pub mod queue_job_lifecycles;
 pub mod system_maintenance;

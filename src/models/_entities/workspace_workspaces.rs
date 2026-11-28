@@ -44,6 +44,8 @@ pub enum Relation {
     EntityRelations,
     #[sea_orm(has_many = "super::entity_snapshots::Entity")]
     EntitySnapshots,
+    #[sea_orm(has_many = "super::import_staging::Entity")]
+    ImportStaging,
     #[sea_orm(has_many = "super::inference_jobs::Entity")]
     InferenceJobs,
     #[sea_orm(has_many = "super::inference_proposals::Entity")]
@@ -107,6 +109,12 @@ impl Related<super::entity_relations::Entity> for Entity {
 impl Related<super::entity_snapshots::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::EntitySnapshots.def()
+    }
+}
+
+impl Related<super::import_staging::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ImportStaging.def()
     }
 }
 

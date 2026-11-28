@@ -16,6 +16,7 @@ pub use super::iam_policies::Entity as IamPolicies;
 pub use super::iam_policy_versions::Entity as IamPolicyVersions;
 pub use super::iam_tenant_roots::Entity as IamTenantRoots;
 pub use super::iam_user_policy_attachments::Entity as IamUserPolicyAttachments;
+pub use super::import_staging::Entity as ImportStaging;
 pub use super::inference_jobs::Entity as InferenceJobs;
 pub use super::inference_proposals::Entity as InferenceProposals;
 pub use super::query_embedding_requests::Entity as QueryEmbeddingRequests;

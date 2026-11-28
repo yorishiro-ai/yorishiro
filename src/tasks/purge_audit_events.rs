@@ -19,7 +19,16 @@ impl Task for PurgeAuditEvents {
         let cutoff =
             (crate::data::time::now() - chrono::Duration::days(i64::from(days))).fixed_offset();
         let deleted = crate::models::api_events::purge_before(&ctx.db, cutoff).await?;
-        println!("{}", serde_json::json!({"deleted": deleted}));
+        // A body whose import never completed is kept for a week, then removed.
+        let abandoned = crate::models::import_staging::purge_before(
+            &ctx.db,
+            (crate::data::time::now() - chrono::Duration::days(7)).fixed_offset(),
+        )
+        .await?;
+        println!(
+            "{}",
+            serde_json::json!({"deleted": deleted, "abandoned_imports": abandoned})
+        );
         Ok(())
     }
 }

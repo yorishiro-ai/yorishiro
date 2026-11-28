@@ -18,6 +18,7 @@ pub mod iam_policies;
 pub mod iam_policy_versions;
 pub mod iam_tenant_roots;
 pub mod iam_user_policy_attachments;
+pub mod import_staging;
 pub mod inference_jobs;
 pub mod inference_proposals;
 pub mod query_embedding_requests;

@@ -14,10 +14,12 @@ impl MigrationTrait for Migration {
         Box::pin(up_queue_job_lifecycles(manager)).await?;
         Box::pin(up_queue_job_dispatch_outbox(manager)).await?;
         Box::pin(up_query_embedding_requests(manager)).await?;
+        Box::pin(up_import_staging(manager)).await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        Box::pin(down_import_staging(manager)).await?;
         Box::pin(down_query_embedding_requests(manager)).await?;
         Box::pin(down_queue_job_dispatch_outbox(manager)).await?;
         Box::pin(down_queue_job_lifecycles(manager)).await?;
@@ -262,3 +264,49 @@ async fn down_query_embedding_requests(manager: &SchemaManager<'_>) -> Result<()
 const ACTIVE_REINDEX_INDEX: &str = "queue_startup_reindex_active_workspace_idx";
 
 const REQUESTS: &str = "query_embedding_requests";
+
+/// The body of an import waits here until its worker has applied it, so the queue payload names it and never carries it.
+async fn up_import_staging(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_table(
+            Table::create()
+                .table(Alias::new("import_staging"))
+                .col(helpers::uuidv7_pk(manager))
+                .col(helpers::uuid_col(manager, Alias::new("tenant_id")).not_null())
+                .col(helpers::uuid_col(manager, Alias::new("workspace_id")).not_null())
+                .col(ColumnDef::new(Alias::new("body")).text().not_null())
+                .col(helpers::created_at(manager))
+                .foreign_key(
+                    ForeignKey::create()
+                        .name("fk_import_staging_workspace_id")
+                        .from(Alias::new("import_staging"), Alias::new("workspace_id"))
+                        .to(Alias::new("workspace_workspaces"), Alias::new("id"))
+                        .on_delete(ForeignKeyAction::Cascade),
+                )
+                .foreign_key(
+                    ForeignKey::create()
+                        .name("fk_import_staging_tenant_id")
+                        .from(Alias::new("import_staging"), Alias::new("tenant_id"))
+                        .to(Alias::new("tenant_tenants"), Alias::new("id"))
+                        .on_delete(ForeignKeyAction::Cascade),
+                )
+                .to_owned(),
+        )
+        .await?;
+    helpers::enable_rls_with_policy(
+        manager,
+        "import_staging",
+        "workspace_isolation",
+        "workspace_id",
+        "app.current_workspace",
+        false,
+    )
+    .await?;
+    helpers::grant(manager, "SELECT, INSERT, DELETE", "import_staging").await
+}
+
+async fn down_import_staging(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .drop_table(Table::drop().table(Alias::new("import_staging")).to_owned())
+        .await
+}
