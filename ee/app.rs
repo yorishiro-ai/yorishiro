@@ -38,13 +38,13 @@ pub(crate) async fn workspace_worker_class(
 }
 
 pub(crate) async fn workspace_embedding_provider(
-    conn: &sea_orm::DatabaseConnection,
+    ctx: &AppContext,
     workspace_id: uuid::Uuid,
 ) -> std::result::Result<
     Option<Arc<dyn crate::services::embedding::EmbeddingProvider>>,
     crate::YorishiroError,
 > {
-    crate::edition::ee::models::workspace_embedding_keys::resolve(conn, workspace_id).await
+    crate::edition::ee::models::workspace_embedding_keys::resolve(ctx, workspace_id).await
 }
 
 pub(crate) async fn workspace_embedding_metadata(

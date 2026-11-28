@@ -87,13 +87,17 @@ pub(crate) async fn configure(
 
 /// Builds the workspace's assigned provider without loading the deployment default.
 pub(crate) async fn resolve(
-    conn: &sea_orm::DatabaseConnection,
+    ctx: &loco_rs::app::AppContext,
     workspace_id: Uuid,
 ) -> Result<Option<Arc<dyn EmbeddingProvider>>, YorishiroError> {
-    let Some(config) = get(conn, workspace_id).await? else {
+    let Some(config) = get(&ctx.db, workspace_id).await? else {
         return Ok(None);
     };
-    Ok(Some(Arc::new(OpenAiCompatibleProvider::new(config))))
+    let settings = crate::data::settings::configured(ctx).internal()?;
+    Ok(Some(Arc::new(OpenAiCompatibleProvider::with_timeouts(
+        config,
+        settings.http_timeouts,
+    ))))
 }
 
 /// What a workspace has configured, without the key itself.

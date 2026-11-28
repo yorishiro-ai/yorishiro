@@ -146,7 +146,7 @@ pub(crate) async fn embedding_provider(
 ) -> Result<Option<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>, YorishiroError>
 {
     let revision = embedding_revision(&ctx.db, workspace_id).await?;
-    let provider = crate::workspace_embedding_provider(&ctx.db, workspace_id)
+    let provider = crate::workspace_embedding_provider(ctx, workspace_id)
         .await?
         .or_else(|| {
             ctx.shared_store

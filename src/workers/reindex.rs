@@ -128,6 +128,15 @@ async fn reindex_current_assignment(
     )
     .await?;
     if !outcome.failures.is_empty() {
+        for failure in &outcome.failures {
+            tracing::warn!(
+                workspace_id = %args.workspace_id,
+                entity_id = %failure.entity_id,
+                lifecycle_id = ?args.lifecycle_id,
+                error_code = failure.error.code().map_or("internal", |code| code.as_str()),
+                "reindex could not prepare an entity embedding"
+            );
+        }
         tracing::warn!(
             workspace_id = %args.workspace_id,
             total = outcome.total,

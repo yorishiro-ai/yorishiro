@@ -64,13 +64,13 @@ pub mod edition {
     }
 
     pub(crate) async fn workspace_embedding_provider(
-        conn: &sea_orm::DatabaseConnection,
+        ctx: &AppContext,
         workspace_id: uuid::Uuid,
     ) -> std::result::Result<
         Option<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>,
         crate::YorishiroError,
     > {
-        active::workspace_embedding_provider(conn, workspace_id).await
+        active::workspace_embedding_provider(ctx, workspace_id).await
     }
 
     pub(crate) async fn workspace_embedding_metadata(
@@ -203,7 +203,7 @@ pub mod edition {
             reason = "edition contributions share an async provider lookup contract"
         )]
         pub(super) async fn workspace_embedding_provider(
-            _conn: &sea_orm::DatabaseConnection,
+            _ctx: &AppContext,
             _workspace_id: uuid::Uuid,
         ) -> std::result::Result<
             Option<std::sync::Arc<dyn crate::services::embedding::EmbeddingProvider>>,

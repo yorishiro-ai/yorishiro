@@ -261,3 +261,52 @@ async fn disabled_provider_is_a_terminal_worker_error() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn workspace_provider_honors_the_configured_embedding_timeout() {
+    use axum::{Json, Router, routing::post};
+    use loco_rs::bgworker::BackgroundWorker;
+    use serde_json::{Value, json};
+    use yorishiro::workers::reindex::{ReindexArgs, ReindexWorker};
+
+    crate::requests::boot_request_with::<yorishiro::App, _, _>(
+        &[("settings.http_timeouts.embedding_request_seconds", 1.into())],
+        |request, ctx| async move {
+            let setup = crate::requests::fixtures::TestTenant::create(
+                &request,
+                &ctx,
+                crate::requests::fixtures::TenantArgs::default(),
+            ).await;
+            let auth = format!("Bearer {}", setup.api_key);
+            request.post("/api/schemas").add_header("Authorization", &auth)
+                .json(&json!({"name":"timeout-test","entity_types":{"note":{"fields":{
+                    "title":{"type":"string","x-embed":true}
+                }}}})).await.assert_status(axum::http::StatusCode::CREATED);
+            request.post("/api/entities").add_header("Authorization", &auth)
+                .json(&json!({"schema_name":"timeout-test","entity_type":"note","data":{"title":"slow"}}))
+                .await.assert_status(axum::http::StatusCode::CREATED);
+            // The provider check answers; every document request stalls past the one-second deadline.
+            let endpoint = crate::http_stub::HttpStub::start(Router::new().route("/embeddings", post(
+                |Json(body): Json<Value>| async move {
+                    if body["input"][0] != "Provider check" {
+                        std::future::pending::<()>().await;
+                    }
+                    Json(json!({"data":[{"index":0,"embedding":[1.0,0.0,0.0,0.0]}]}))
+                },
+            ))).await;
+            request.put("/api/workspace/embedding-provider").add_header("Authorization", &auth)
+                .json(&json!({"base_url":endpoint.url,"model":"slow","api_key":"test-key","dimensions":4}))
+                .await.assert_status(axum::http::StatusCode::NO_CONTENT);
+            let job = request.post("/api/migration-jobs/reindex").add_header("Authorization", &auth).await;
+            let id = job.json::<Value>()["migration_job_id"].as_str().unwrap().parse::<Uuid>().unwrap();
+            let dispatch = yorishiro::models::_entities::queue_job_dispatch_outbox::Entity::find_by_id(id)
+                .one(&ctx.db).await.unwrap().unwrap();
+            let args: ReindexArgs = serde_json::from_value(dispatch.payload).unwrap();
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                ReindexWorker::build(&ctx).perform(args),
+            ).await.expect("the workspace provider stops waiting at the configured deadline");
+            assert!(result.is_err());
+        },
+    ).await;
+}
