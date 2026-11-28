@@ -329,6 +329,12 @@ async fn the_scan_waits_after_a_failed_scheduled_reindex() {
             .await
             .unwrap()
             .unwrap();
+        let status = request
+            .get(&format!("/api/migration-jobs/{}", job.id))
+            .add_header("Authorization", format!("Bearer {}", fixture.api_key))
+            .await;
+        status.assert_status_ok();
+        assert_eq!(status.json::<serde_json::Value>()["status"], "queued");
         // Direct write (c): the failure a worker records after its attempts, at a chosen time.
         let fail_at = |at: chrono::DateTime<chrono::Utc>| {
             let id = job.id;

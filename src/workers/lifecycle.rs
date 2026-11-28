@@ -62,7 +62,15 @@ where
         }
     };
     let heartbeat = Entity::heartbeat(ctx.db.clone(), id, attempt);
-    let result = work().await;
+    // Every log line of the attempt carries the job's identifiers.
+    let span = tracing::info_span!(
+        "job",
+        lifecycle_id = %id,
+        attempt,
+        workspace_id = %workspace_id,
+        worker_class = class.as_db_str(),
+    );
+    let result = tracing::Instrument::instrument(work(), span).await;
     heartbeat.abort();
     match result {
         Ok(()) => {
@@ -81,7 +89,7 @@ where
             )
             .await
             .map_err(|error| message(&error))?;
-            tracing::error!(lifecycle_id = %id, worker_class = class.as_db_str(), error = %error, "terminal worker failure");
+            tracing::error!(lifecycle_id = %id, attempt, workspace_id = %workspace_id, worker_class = class.as_db_str(), error = %error, "terminal worker failure");
             Err(error)
         }
     }
