@@ -375,6 +375,16 @@ async fn the_trail_keeps_identifiers_and_paging_but_never_content() {
             json!({"limit": 5, "entity_id": uuid::Uuid::nil().to_string(), "path": [tenant.workspace_id.to_string()]})
         );
 
+        request
+            .get("/api/entities?page=2&page_size=5&entity_type=sec%72et&name=a%26b")
+            .add_header("Authorization", &bearer)
+            .add_header("x-request-id", "trail-paging")
+            .await;
+        assert_eq!(
+            events_of(&ctx, "trail-paging").await[0].request_parameters,
+            json!({"page": 2, "page_size": 5})
+        );
+
         let session = crate::controllers::mcp::initialize(&request).await;
         crate::controllers::mcp::call_tool(
             &request,

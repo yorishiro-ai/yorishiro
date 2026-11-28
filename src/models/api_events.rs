@@ -381,7 +381,7 @@ pub(crate) fn identifiers<'a>(
     let kept = pairs
         .into_iter()
         .filter(|(key, value)| match *key {
-            "limit" | "offset" => value.is_u64(),
+            "limit" | "offset" | "page" | "page_size" => value.is_u64(),
             key if key.ends_with("_id") => value
                 .as_str()
                 .is_some_and(|text| Uuid::parse_str(text).is_ok()),

@@ -325,18 +325,16 @@ fn rest_parameters(uri: &axum::http::Uri) -> serde_json::Value {
         .filter(|segment| uuid::Uuid::parse_str(segment).is_ok())
         .map(serde_json::Value::from)
         .collect();
-    let query: Vec<(String, serde_json::Value)> = uri
-        .query()
-        .into_iter()
-        .flat_map(|query| query.split('&'))
-        .filter_map(|pair| pair.split_once('='))
-        .map(|(key, value)| {
-            let value = value
-                .parse::<u64>()
-                .map_or_else(|_| serde_json::Value::from(value), serde_json::Value::from);
-            (key.to_owned(), value)
-        })
-        .collect();
+    let query: Vec<(String, serde_json::Value)> =
+        form_urlencoded::parse(uri.query().unwrap_or("").as_bytes())
+            .map(|(key, value)| {
+                let value = value.parse::<u64>().map_or_else(
+                    |_| serde_json::Value::from(value.as_ref()),
+                    serde_json::Value::from,
+                );
+                (key.into_owned(), value)
+            })
+            .collect();
     let mut parameters =
         api_events::identifiers(query.iter().map(|(key, value)| (key.as_str(), value)));
     if !path.is_empty() {
